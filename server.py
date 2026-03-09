@@ -8,10 +8,15 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from datetime import datetime, timedelta
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File
+import bcrypt
+from jose import jwt, JWTError
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Depends
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
 
@@ -49,6 +54,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 DB_PATH = "turni.db"
 UPLOAD_DIR = Path(__file__).parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -61,6 +75,149 @@ if STATIC_DIR.exists():
 
 def get_db() -> Database:
     return Database(db_path=DB_PATH)
+
+
+# ---------------------------------------------------------------
+# AUTH (JWT)
+# ---------------------------------------------------------------
+SECRET_KEY = os.environ.get("JWT_SECRET", "dev-secret-turni-pdm-change-in-production")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_HOURS = 72
+security = HTTPBearer(auto_error=False)
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed.encode())
+
+
+def create_token(user_id: int, username: str, is_admin: bool) -> str:
+    payload = {
+        "sub": str(user_id),
+        "username": username,
+        "is_admin": is_admin,
+        "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRE_HOURS),
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> dict:
+    if not credentials:
+        raise HTTPException(401, "Token mancante")
+    try:
+        payload = jwt.decode(
+            credentials.credentials, SECRET_KEY, algorithms=[JWT_ALGORITHM]
+        )
+        return {
+            "id": int(payload["sub"]),
+            "username": payload["username"],
+            "is_admin": payload.get("is_admin", False),
+        }
+    except JWTError:
+        raise HTTPException(401, "Token non valido o scaduto")
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/register")
+def register(req: RegisterRequest):
+    if len(req.username.strip()) < 3:
+        raise HTTPException(400, "Username deve avere almeno 3 caratteri")
+    if len(req.password) < 6:
+        raise HTTPException(400, "Password deve avere almeno 6 caratteri")
+    db = get_db()
+    try:
+        if db.get_user_by_username(req.username.strip()):
+            raise HTTPException(400, "Username gia' in uso")
+        pw_hash = hash_password(req.password)
+        user_id = db.create_user(req.username.strip(), pw_hash, is_admin=False)
+        token = create_token(user_id, req.username.strip(), False)
+        return {
+            "token": token,
+            "user": {"id": user_id, "username": req.username.strip(), "is_admin": False},
+        }
+    finally:
+        db.close()
+
+
+@app.post("/api/login")
+def login(req: LoginRequest):
+    db = get_db()
+    try:
+        user = db.get_user_by_username(req.username.strip())
+        if not user or not verify_password(req.password, user["password_hash"]):
+            raise HTTPException(401, "Credenziali non valide")
+        db.update_last_login(user["id"])
+        token = create_token(user["id"], user["username"], bool(user["is_admin"]))
+        return {
+            "token": token,
+            "user": {
+                "id": user["id"],
+                "username": user["username"],
+                "is_admin": bool(user["is_admin"]),
+            },
+        }
+    finally:
+        db.close()
+
+
+@app.get("/api/me")
+def get_me(user: dict = Depends(get_current_user)):
+    return user
+
+
+@app.get("/api/admin/users")
+def admin_list_users(user: dict = Depends(get_current_user)):
+    if not user["is_admin"]:
+        raise HTTPException(403, "Solo admin")
+    db = get_db()
+    try:
+        return {"users": db.get_all_users()}
+    finally:
+        db.close()
+
+
+@app.get("/api/admin/saved-shifts")
+def admin_all_saved_shifts(user: dict = Depends(get_current_user)):
+    if not user["is_admin"]:
+        raise HTTPException(403, "Solo admin")
+    db = get_db()
+    try:
+        shifts = db.get_saved_shifts(user_id=None)
+        users = {u["id"]: u["username"] for u in db.get_all_users()}
+        for s in shifts:
+            s["owner"] = users.get(s.get("user_id"), "—")
+        return {"shifts": shifts, "count": len(shifts)}
+    finally:
+        db.close()
+
+
+@app.get("/api/admin/weekly-shifts")
+def admin_all_weekly_shifts(user: dict = Depends(get_current_user)):
+    if not user["is_admin"]:
+        raise HTTPException(403, "Solo admin")
+    db = get_db()
+    try:
+        shifts = db.get_weekly_shifts(user_id=None)
+        users = {u["id"]: u["username"] for u in db.get_all_users()}
+        for s in shifts:
+            s["owner"] = users.get(s.get("user_id"), "—")
+        return {"shifts": shifts}
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------
@@ -1360,7 +1517,7 @@ class SaveShiftRequest(BaseModel):
 
 
 @app.post("/save-shift")
-def save_shift(req: SaveShiftRequest):
+def save_shift(req: SaveShiftRequest, user: dict = Depends(get_current_user)):
     db = get_db()
     try:
         shift_id = db.save_shift(
@@ -1380,6 +1537,7 @@ def save_shift(req: SaveShiftRequest):
             deadhead_ids=req.deadhead_ids,
             presentation_time=req.presentation_time,
             end_time=req.end_time,
+            user_id=user["id"],
         )
         return {"id": shift_id, "status": "saved"}
     finally:
@@ -1387,31 +1545,37 @@ def save_shift(req: SaveShiftRequest):
 
 
 @app.get("/saved-shifts")
-def list_saved_shifts(day_type: str = None):
+def list_saved_shifts(day_type: str = None, user: dict = Depends(get_current_user)):
     db = get_db()
     try:
-        shifts = db.get_saved_shifts(day_type=day_type)
+        uid = None if user["is_admin"] else user["id"]
+        shifts = db.get_saved_shifts(day_type=day_type, user_id=uid)
         return {"shifts": shifts, "count": len(shifts)}
     finally:
         db.close()
 
 
 @app.delete("/saved-shift/{shift_id}")
-def delete_saved_shift(shift_id: int):
+def delete_saved_shift(shift_id: int, user: dict = Depends(get_current_user)):
     db = get_db()
     try:
-        db.delete_saved_shift(shift_id)
+        uid = None if user["is_admin"] else user["id"]
+        db.delete_saved_shift(shift_id, user_id=uid)
         return {"status": "deleted"}
     finally:
         db.close()
 
 
 @app.delete("/saved-shifts")
-def delete_all_saved_shifts():
+def delete_all_saved_shifts(user: dict = Depends(get_current_user)):
     db = get_db()
     try:
-        cur = db.conn.cursor()
-        cur.execute("DELETE FROM saved_shift")
+        uid = None if user["is_admin"] else user["id"]
+        cur = db._cursor()
+        if uid is not None:
+            cur.execute(db._q("DELETE FROM saved_shift WHERE user_id = ?"), (uid,))
+        else:
+            cur.execute("DELETE FROM saved_shift")
         db.conn.commit()
         return {"status": "deleted", "count": cur.rowcount}
     finally:
@@ -1419,11 +1583,12 @@ def delete_all_saved_shifts():
 
 
 @app.get("/saved-shift/{shift_id}/timeline")
-def saved_shift_timeline(shift_id: int):
+def saved_shift_timeline(shift_id: int, user: dict = Depends(get_current_user)):
     """Ricalcola timeline completa per un turno salvato."""
     db = get_db()
     try:
-        shifts = db.get_saved_shifts()
+        uid = None if user["is_admin"] else user["id"]
+        shifts = db.get_saved_shifts(user_id=uid)
         shift = None
         for s in shifts:
             if s.get("id") == shift_id:
@@ -1504,10 +1669,11 @@ def saved_shift_timeline(shift_id: int):
 
 
 @app.get("/used-trains")
-def get_used_trains(day_type: str = None):
+def get_used_trains(day_type: str = None, user: dict = Depends(get_current_user)):
     db = get_db()
     try:
-        used = db.get_used_train_ids(day_type=day_type)
+        uid = None if user["is_admin"] else user["id"]
+        used = db.get_used_train_ids(day_type=day_type, user_id=uid)
         return {"train_ids": used, "count": len(used)}
     finally:
         db.close()
@@ -1635,9 +1801,9 @@ class SaveWeeklyRequest(BaseModel):
 
 
 @app.post("/save-weekly-shift")
-def save_weekly_shift(req: SaveWeeklyRequest):
+def save_weekly_shift(req: SaveWeeklyRequest, user: dict = Depends(get_current_user)):
     """Salva un turno settimanale nel database."""
-    db = Database()
+    db = get_db()
     try:
         weekly_id = db.save_weekly_shift(
             name=req.name,
@@ -1645,6 +1811,7 @@ def save_weekly_shift(req: SaveWeeklyRequest):
             days=req.days,
             accessory_type=req.accessory_type,
             notes=req.notes,
+            user_id=user["id"],
         )
         return {"id": weekly_id, "message": "Turno settimanale salvato"}
     except Exception as e:
@@ -1654,11 +1821,12 @@ def save_weekly_shift(req: SaveWeeklyRequest):
 
 
 @app.get("/weekly-shifts")
-def get_weekly_shifts():
-    """Restituisce tutti i turni settimanali salvati."""
-    db = Database()
+def get_weekly_shifts_endpoint(user: dict = Depends(get_current_user)):
+    """Restituisce i turni settimanali dell'utente (admin vede tutti)."""
+    db = get_db()
     try:
-        shifts = db.get_weekly_shifts()
+        uid = None if user["is_admin"] else user["id"]
+        shifts = db.get_weekly_shifts(user_id=uid)
         return {"shifts": shifts}
     except Exception as e:
         raise HTTPException(500, detail=str(e))
@@ -1667,11 +1835,12 @@ def get_weekly_shifts():
 
 
 @app.delete("/weekly-shift/{weekly_id}")
-def delete_weekly_shift(weekly_id: int):
+def delete_weekly_shift(weekly_id: int, user: dict = Depends(get_current_user)):
     """Elimina un turno settimanale."""
-    db = Database()
+    db = get_db()
     try:
-        db.delete_weekly_shift(weekly_id)
+        uid = None if user["is_admin"] else user["id"]
+        db.delete_weekly_shift(weekly_id, user_id=uid)
         return {"message": "Turno settimanale eliminato"}
     except Exception as e:
         raise HTTPException(500, detail=str(e))

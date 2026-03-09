@@ -314,9 +314,62 @@ select{cursor:pointer;appearance:none;background-color:var(--bg);background-imag
   .sidebar.open{transform:translateX(0)}
   .content{padding:16px}
 }
+/* LOGIN */
+.login-overlay{position:fixed;inset:0;z-index:9999;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;flex-direction:column}
+.login-card{width:400px;padding:40px;background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.login-card h2{text-align:center;margin-bottom:8px;font-size:28px;font-weight:700;color:var(--text)}
+.login-card .login-subtitle{text-align:center;color:var(--text-secondary);font-size:14px;margin-bottom:28px}
+.login-tabs{display:flex;gap:0;margin-bottom:24px;border-bottom:2px solid var(--border-light)}
+.login-tab{flex:1;padding:10px;border:none;background:none;font:inherit;font-size:14px;font-weight:600;color:var(--text-secondary);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .2s}
+.login-tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+.login-card input{width:100%;padding:12px 16px;border:1.5px solid var(--border);border-radius:10px;font:inherit;font-size:15px;margin-bottom:14px;background:var(--bg-secondary);transition:border .2s}
+.login-card input:focus{outline:none;border-color:var(--blue);background:#fff}
+.login-card .btn-login{width:100%;padding:13px;border:none;border-radius:10px;font:inherit;font-size:15px;font-weight:600;color:#fff;background:var(--blue);cursor:pointer;transition:opacity .2s}
+.login-card .btn-login:hover{opacity:.9}
+.login-error{color:#FF3B30;font-size:13px;margin-top:8px;text-align:center;min-height:20px}
+/* MOBILE RESPONSIVE */
+@media(max-width:768px){
+  :root{--sidebar:0px}
+  .sidebar{width:260px;transform:translateX(-100%);transition:transform .3s ease;position:fixed;z-index:100}
+  .sidebar.mobile-open{transform:translateX(0)}
+  .main{margin-left:0}
+  .topbar{padding:14px 16px}
+  .content{padding:16px 16px 60px}
+  .mobile-menu-btn{display:flex!important}
+  .mobile-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:99}
+  .mobile-overlay.active{display:block}
+  .login-card{width:90vw;padding:28px 20px}
+}
 </style>
 </head>
 <body>
+
+<!-- MOBILE OVERLAY (chiude sidebar) -->
+<div class="mobile-overlay" id="mobileOverlay" onclick="closeMobileSidebar()"></div>
+
+<!-- LOGIN OVERLAY -->
+<div id="loginOverlay" class="login-overlay">
+  <div class="login-card">
+    <h2>🚂 Turni PDM</h2>
+    <p class="login-subtitle">Gestione Turni Personale di Macchina</p>
+    <div class="login-tabs">
+      <button id="tabLogin" class="login-tab active" onclick="showLoginTab('login')">Accedi</button>
+      <button id="tabRegister" class="login-tab" onclick="showLoginTab('register')">Crea Account</button>
+    </div>
+    <form id="loginForm" onsubmit="doLogin(event)">
+      <input type="text" id="loginUser" placeholder="Username" required autocomplete="username">
+      <input type="password" id="loginPass" placeholder="Password" required autocomplete="current-password">
+      <button type="submit" class="btn-login">Accedi</button>
+    </form>
+    <form id="registerForm" style="display:none" onsubmit="doRegister(event)">
+      <input type="text" id="regUser" placeholder="Username (min 3 caratteri)" required minlength="3">
+      <input type="password" id="regPass" placeholder="Password (min 6 caratteri)" required minlength="6">
+      <input type="password" id="regPass2" placeholder="Conferma password" required minlength="6">
+      <button type="submit" class="btn-login">Crea Account</button>
+    </form>
+    <div id="loginError" class="login-error"></div>
+  </div>
+</div>
 
 <!-- SIDEBAR -->
 <aside class="sidebar">
@@ -370,15 +423,23 @@ select{cursor:pointer;appearance:none;background-color:var(--bg);background-imag
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
         Costanti
       </button>
+      <button class="nav-btn" id="adminNavBtn" style="display:none" onclick="switchView('v-admin')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Admin
+      </button>
     </div>
   </nav>
-  <div class="sidebar-footer">Turni PDM v1.0</div>
+  <div class="sidebar-footer" style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px">
+    <span id="userLabel" style="font-size:13px;font-weight:600"></span>
+    <button onclick="logout()" style="border:none;background:none;color:var(--text-secondary);font:inherit;font-size:12px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:background .2s" onmouseover="this.style.background='var(--surface-hover)'" onmouseout="this.style.background='none'">Esci ↗</button>
+  </div>
 </aside>
 
 <!-- MAIN -->
 <div class="main">
   <header class="topbar">
-    <div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="openMobileSidebar()" style="display:none;align-items:center;justify-content:center;width:36px;height:36px;border:none;background:var(--bg-secondary);border-radius:var(--radius-sm);cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
       <div class="breadcrumb">Turni PDM <span>/</span> <span id="topTitle">Dashboard</span></div>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
@@ -738,6 +799,20 @@ select{cursor:pointer;appearance:none;background-color:var(--bg);background-imag
   </div>
 </div>
 
+    <!-- ADMIN -->
+    <div class="view" id="v-admin">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+        <h3>Pannello Admin</h3>
+        <span class="badge badge-blue">Solo Admin</span>
+      </div>
+      <h4 style="margin-bottom:12px">Utenti Registrati</h4>
+      <div id="adminUsers" style="margin-bottom:24px"></div>
+      <h4 style="margin-bottom:12px">Tutti i Turni Salvati</h4>
+      <div id="adminShifts" style="margin-bottom:24px"></div>
+      <h4 style="margin-bottom:12px">Tutti i Turni Settimanali</h4>
+      <div id="adminWeekly"></div>
+    </div>
+
 <!-- TOAST CONTAINER -->
 <div class="toast-container" id="toastContainer"></div>
 
@@ -763,14 +838,183 @@ let provisionalDayType = 'LV';
 // ── Treni gia salvati definitivamente (dal server) ──
 let savedTrainIds = new Set();
 
+// ── AUTH STATE ──
+let currentUser = null;
+function getToken() { return localStorage.getItem('jwt_token'); }
+function setToken(t) { localStorage.setItem('jwt_token', t); }
+function clearToken() { localStorage.removeItem('jwt_token'); currentUser = null; }
+
+function showLoginTab(tab) {
+  document.getElementById('loginForm').style.display = tab === 'login' ? '' : 'none';
+  document.getElementById('registerForm').style.display = tab === 'register' ? '' : 'none';
+  document.getElementById('tabLogin').classList.toggle('active', tab === 'login');
+  document.getElementById('tabRegister').classList.toggle('active', tab === 'register');
+  document.getElementById('loginError').textContent = '';
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
+  try {
+    const res = await fetch(API_BASE + '/api/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        username: document.getElementById('loginUser').value.trim(),
+        password: document.getElementById('loginPass').value,
+      }),
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Errore login'); }
+    const data = await res.json();
+    setToken(data.token);
+    currentUser = data.user;
+    hideLogin();
+    init();
+  } catch (err) { errEl.textContent = err.message; }
+}
+
+async function doRegister(e) {
+  e.preventDefault();
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
+  const pass = document.getElementById('regPass').value;
+  if (pass !== document.getElementById('regPass2').value) {
+    errEl.textContent = 'Le password non coincidono';
+    return;
+  }
+  try {
+    const res = await fetch(API_BASE + '/api/register', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        username: document.getElementById('regUser').value.trim(),
+        password: pass,
+      }),
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Errore registrazione'); }
+    const data = await res.json();
+    setToken(data.token);
+    currentUser = data.user;
+    hideLogin();
+    init();
+  } catch (err) { errEl.textContent = err.message; }
+}
+
+function showLogin() {
+  document.getElementById('loginOverlay').style.display = 'flex';
+  document.querySelector('.sidebar').style.display = 'none';
+  document.querySelector('.main').style.display = 'none';
+}
+
+function hideLogin() {
+  document.getElementById('loginOverlay').style.display = 'none';
+  document.querySelector('.sidebar').style.display = '';
+  document.querySelector('.main').style.display = '';
+  // Set user label
+  const lbl = document.getElementById('userLabel');
+  if (lbl && currentUser) lbl.textContent = currentUser.username + (currentUser.is_admin ? ' ⭐' : '');
+  // Apply role restrictions
+  applyRoleRestrictions();
+}
+
+function applyRoleRestrictions() {
+  if (!currentUser) return;
+  const isAdmin = currentUser.is_admin;
+  // Admin-only sidebar buttons: dashboard, upload, realtime, builder auto, constants
+  const adminViews = ['v-dashboard', 'v-upload', 'v-realtime', 'v-builder', 'v-constants'];
+  document.querySelectorAll('.nav-btn').forEach(btn => {
+    const onc = btn.getAttribute('onclick') || '';
+    const match = onc.match(/switchView\('([^']+)'\)/);
+    if (match && adminViews.includes(match[1])) {
+      btn.style.display = isAdmin ? '' : 'none';
+    }
+  });
+  // Admin panel button
+  const adminBtn = document.getElementById('adminNavBtn');
+  if (adminBtn) adminBtn.style.display = isAdmin ? '' : 'none';
+  // Default view: admin -> dashboard, user -> manual builder
+  if (isAdmin) {
+    switchView('v-dashboard');
+  } else {
+    switchView('v-manual');
+  }
+}
+
+function logout() {
+  clearToken();
+  showLogin();
+}
+
+/* Mobile sidebar */
+function openMobileSidebar() {
+  document.querySelector('.sidebar').classList.add('mobile-open');
+  document.getElementById('mobileOverlay').classList.add('active');
+}
+function closeMobileSidebar() {
+  document.querySelector('.sidebar').classList.remove('mobile-open');
+  document.getElementById('mobileOverlay').classList.remove('active');
+}
+
+async function loadAdmin() {
+  if (!currentUser || !currentUser.is_admin) return;
+  try {
+    const [usersRes, shiftsRes, weeklyRes] = await Promise.all([
+      api('/api/admin/users'),
+      api('/api/admin/saved-shifts'),
+      api('/api/admin/weekly-shifts'),
+    ]);
+    // Render users
+    const usersEl = document.getElementById('adminUsers');
+    if (usersEl) {
+      const users = usersRes.users || [];
+      usersEl.innerHTML = '<table class="data-table" style="width:100%"><thead><tr><th>ID</th><th>Username</th><th>Ruolo</th><th>Registrato</th><th>Ultimo accesso</th></tr></thead><tbody>' +
+        users.map(u => '<tr><td>' + u.id + '</td><td><strong>' + esc(u.username) + '</strong></td><td>' +
+          (u.is_admin ? '<span class="badge badge-amber">Admin</span>' : '<span class="badge badge-blue">Utente</span>') +
+          '</td><td>' + (u.created_at || '—').slice(0,16) + '</td><td>' + (u.last_login || '—').slice(0,16) + '</td></tr>').join('') +
+        '</tbody></table>';
+    }
+    // Render shifts
+    const shiftsEl = document.getElementById('adminShifts');
+    if (shiftsEl) {
+      const shifts = shiftsRes.shifts || [];
+      if (!shifts.length) { shiftsEl.innerHTML = '<p style="color:var(--text-secondary)">Nessun turno salvato</p>'; }
+      else {
+        shiftsEl.innerHTML = '<table class="data-table" style="width:100%"><thead><tr><th>Utente</th><th>Nome</th><th>Deposito</th><th>Tipo</th><th>Treni</th><th>Data</th></tr></thead><tbody>' +
+          shifts.map(s => '<tr><td><strong>' + esc(s.owner || '—') + '</strong></td><td>' + esc(s.name) + '</td><td>' + esc(s.deposito) +
+            '</td><td>' + s.day_type + '</td><td>' + (s.train_ids||[]).length + '</td><td>' + (s.created_at||'').slice(0,16) + '</td></tr>').join('') +
+          '</tbody></table>';
+      }
+    }
+    // Render weekly
+    const weeklyEl = document.getElementById('adminWeekly');
+    if (weeklyEl) {
+      const weekly = weeklyRes.shifts || [];
+      if (!weekly.length) { weeklyEl.innerHTML = '<p style="color:var(--text-secondary)">Nessun turno settimanale</p>'; }
+      else {
+        weeklyEl.innerHTML = '<table class="data-table" style="width:100%"><thead><tr><th>Utente</th><th>Nome</th><th>Deposito</th><th>Giorni</th><th>Data</th></tr></thead><tbody>' +
+          weekly.map(s => '<tr><td><strong>' + esc(s.owner || '—') + '</strong></td><td>' + esc(s.name) + '</td><td>' + esc(s.deposito) +
+            '</td><td>' + (s.num_days||0) + '</td><td>' + (s.created_at||'').slice(0,16) + '</td></tr>').join('') +
+          '</tbody></table>';
+      }
+    }
+  } catch (e) { console.error('Admin load error:', e); }
+}
+
 /* ============ API HELPER ============ */
 async function api(path, opts = {}) {
   const url = API_BASE + path;
+  const token = getToken();
   try {
     const res = await fetch(url, {
-      headers: { 'Content-Type': 'application/json', ...opts.headers },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? {'Authorization': 'Bearer ' + token} : {}),
+        ...opts.headers,
+      },
       ...opts,
     });
+    if (res.status === 401) { clearToken(); showLogin(); throw new Error('Sessione scaduta'); }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
       throw new Error(err.detail || err.message || `Errore ${res.status}`);
@@ -843,9 +1087,13 @@ const viewTitles = {
   'v-saved': 'Turni Salvati',
   'v-constants': 'Costanti',
   'v-realtime': 'Orari Reali Trenitalia',
+  'v-admin': 'Pannello Admin',
 };
 
 function switchView(id) {
+  closeMobileSidebar();
+  // Load admin panel data if switching to admin view
+  if (id === 'v-admin') loadAdmin();
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   const view = document.getElementById(id);
@@ -971,7 +1219,8 @@ async function uploadPdf(file) {
   try {
     const fd = new FormData();
     fd.append('file', file);
-    const res = await fetch(API_BASE + '/upload', { method: 'POST', body: fd });
+    const tk = getToken();
+    const res = await fetch(API_BASE + '/upload', { method: 'POST', body: fd, headers: tk ? {'Authorization':'Bearer '+tk} : {} });
     if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || 'Errore upload'); }
     const data = await res.json();
     let reimportNotice = '';
@@ -1017,7 +1266,8 @@ async function uploadPdcPdf(file) {
   try {
     const fd = new FormData();
     fd.append('file', file);
-    const resp = await fetch(API_BASE + '/upload-turno-pdc', { method: 'POST', body: fd });
+    const tk2 = getToken();
+    const resp = await fetch(API_BASE + '/upload-turno-pdc', { method: 'POST', body: fd, headers: tk2 ? {'Authorization':'Bearer '+tk2} : {} });
     if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || 'Errore upload PdC'); }
     const data = await resp.json();
     const stats = data.stats || {};
@@ -3640,9 +3890,11 @@ async function uploadTurnoPersonale() {
   formData.append('file', file);
 
   try {
+    const tk3 = getToken();
     const res = await fetch(API_BASE + '/upload-turno-personale', {
       method: 'POST',
       body: formData,
+      headers: tk3 ? {'Authorization':'Bearer '+tk3} : {},
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -3785,9 +4037,11 @@ async function uploadTurnoPersonaleManual() {
   formData.append('file', file);
 
   try {
+    const tk4 = getToken();
     const res = await fetch(API_BASE + '/upload-turno-personale', {
       method: 'POST',
       body: formData,
+      headers: tk4 ? {'Authorization':'Bearer '+tk4} : {},
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -4960,7 +5214,20 @@ function saveConstantOverrides() {
 }
 
 /* ============ INIT ============ */
-init();
+// ── BOOT: check auth ──
+(async function boot() {
+  const token = getToken();
+  if (!token) { showLogin(); return; }
+  try {
+    const res = await fetch(API_BASE + '/api/me', {
+      headers: {'Authorization': 'Bearer ' + token},
+    });
+    if (!res.ok) throw new Error();
+    currentUser = await res.json();
+    hideLogin();
+    init();
+  } catch { clearToken(); showLogin(); }
+})();
 </script>
 </body>
 </html>
