@@ -2398,10 +2398,14 @@ async function inizioInVettura() {
     const [hh, mm] = (firstDepTime || '06:00').split(':').map(Number);
     const targetArr = hh * 60 + mm - marginMin;
 
-    // Cerca treni SOLO da Orario Treni (ViaggiaTreno)
-    const vtResult = await api('/vt/find-return?from_station=' + encodeURIComponent(dep) + '&to_station=' + encodeURIComponent(firstStation) + '&after_time=00:00').catch(e => ({ return_trains: [], error: e.message }));
+    // Cerca treni da Orario Treni (VT) + DB come fallback
+    const [vtResult, dbResult] = await Promise.all([
+      api('/vt/find-return?from_station=' + encodeURIComponent(dep) + '&to_station=' + encodeURIComponent(firstStation) + '&after_time=00:00&max_check=40').catch(e => ({ return_trains: [], error: e.message })),
+      api('/fr-return-trains?from_station=' + encodeURIComponent(dep) + '&to_station=' + encodeURIComponent(firstStation) + '&current_day_type=' + (document.getElementById('manDayType')?.value || 'LV')).catch(e => ({ direct_to_depot: [], all_departures: [] }))
+    ]);
 
     const vtTrains = vtResult.return_trains || [];
+    const dbDirect = dbResult.direct_to_depot || [];
     const vtError = vtResult.error || null;
 
     // Filtra e ordina treni per vicinanza all'orario target
@@ -2413,11 +2417,27 @@ async function inizioInVettura() {
     };
 
     const allTrains = [];
+    const seenVt = new Set();
+
+    // 1) VT trains (piu' affidabili, hanno orari reali)
     vtTrains.forEach(t => {
+      if (t.arr_time) {
+        const tid = String(t.train_number);
+        seenVt.add(tid);
+        const s = scoreTrain(t.arr_time);
+        if (s.arrMin <= targetArr + 30) {
+          allTrains.push({ train_id: tid, from_station: t.from_station, to_station: t.to_station, dep_time: t.dep_time, arr_time: t.arr_time, delay: t.delay || 0, delay_arr: t.delay_arr || 0, meta: { from_station: t.from_station, to_station: t.to_station, dep_time: t.dep_time, arr_time: t.arr_time }, source: 'VT', ...s });
+        }
+      }
+    });
+
+    // 2) DB fallback (treni non trovati da VT, inclusi passing-through)
+    dbDirect.forEach(t => {
+      if (seenVt.has(t.train_id)) return;
       if (t.arr_time) {
         const s = scoreTrain(t.arr_time);
         if (s.arrMin <= targetArr + 30) {
-          allTrains.push({ train_id: String(t.train_number), from_station: t.from_station, to_station: t.to_station, dep_time: t.dep_time, arr_time: t.arr_time, delay: t.delay || 0, delay_arr: t.delay_arr || 0, meta: { from_station: t.from_station, to_station: t.to_station, dep_time: t.dep_time, arr_time: t.arr_time }, ...s });
+          allTrains.push({ train_id: t.train_id, from_station: t.from_station, to_station: t.to_station, dep_time: t.dep_time, arr_time: t.arr_time, delay: 0, delay_arr: 0, meta: { from_station: t.from_station, to_station: t.to_station, dep_time: t.dep_time, arr_time: t.arr_time }, source: 'DB', ...s });
         }
       }
     });
@@ -2458,7 +2478,7 @@ async function inizioInVettura() {
         html += '</tr>';
       });
       html += '</tbody></table></div>';
-      html += '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">Controllati ' + (vtResult.checked || 0) + ' treni Trenord.</div>';
+      html += '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">VT: ' + (vtResult.checked || 0) + ' treni | DB: ' + dbDirect.length + ' treni</div>';
     }
     html += '</div>';
     out.innerHTML = html;
@@ -2644,20 +2664,22 @@ async function addDormita() {
     const earliestStr = fmtMinToTime(earliestG2trainDep >= 1440 ? earliestG2trainDep - 1440 : earliestG2trainDep);
     const isNextDay = earliestG2trainDep >= 1440;
 
-    // ── Cerca treni: DB (tutti da stazione) + VT in parallelo ──
+    // ── Cerca treni: DB (tutti da stazione) + VT (deposito) + VT (tutte partenze) ──
     out.innerHTML = '<span class="spinner"></span> Ricerca treni da ' + esc(lastStation) + ' (DB + Orario Treni)...';
-    const [frReturn, vtResult] = await Promise.all([
+    const [frReturn, vtResult, vtAllDeps] = await Promise.all([
       api('/fr-return-trains?from_station=' + encodeURIComponent(lastStation) + '&to_station=' + encodeURIComponent(dep) + '&current_day_type=' + encodeURIComponent(currentDayType)),
-      api('/vt/find-return?from_station=' + encodeURIComponent(lastStation) + '&to_station=' + encodeURIComponent(dep) + '&after_time=' + encodeURIComponent(earliestStr)).catch(e => ({ return_trains: [], error: e.message }))
+      api('/vt/find-return?from_station=' + encodeURIComponent(lastStation) + '&to_station=' + encodeURIComponent(dep) + '&after_time=' + encodeURIComponent(earliestStr)).catch(e => ({ return_trains: [], error: e.message })),
+      api('/vt/all-departures?station=' + encodeURIComponent(lastStation) + '&after_time=' + encodeURIComponent(earliestStr)).catch(e => ({ departures: [], error: null }))
     ]);
 
     const directDB = frReturn.direct_to_depot || [];
     const allDepDB = frReturn.all_departures || [];
     const vtTrains = vtResult.return_trains || [];
+    const vtAllTrains = vtAllDeps.departures || [];
     const vtError = vtResult.error || null;
 
-    // Unisci DB + VT, evita duplicati, filtra per riposo minimo
-    const vtSet = new Set(vtTrains.map(t => String(t.train_number)));
+    // Set di tutti i treni VT (deposito-bound + tutte le partenze)
+    const vtSet = new Set([...vtTrains.map(t => String(t.train_number)), ...vtAllTrains.map(t => String(t.train_number))]);
     const allCandidates = [];
     const seen = new Set();
 
@@ -2682,7 +2704,7 @@ async function addDormita() {
       allCandidates.push({ ...t, source: 'DB', vtOK: vtSet.has(t.train_id), goesDepot });
     });
 
-    // 3) VT treni non ancora in lista
+    // 3) VT treni deposito-bound non ancora in lista
     vtTrains.forEach(t => {
       const tid = String(t.train_number);
       if (seen.has(tid)) return;
@@ -2694,6 +2716,20 @@ async function addDormita() {
         dep_time: t.dep_time, arr_time: t.arr_time, source: 'VT', vtOK: true,
         goesDepot: t.to_station && t.to_station.toUpperCase() === dep.toUpperCase(),
         delay: t.delay || 0, delay_arr: t.delay_arr || 0 });
+    });
+
+    // 4) VT TUTTE le partenze dalla stazione (treni che PASSANO, non solo deposito)
+    vtAllTrains.forEach(t => {
+      const tid = String(t.train_number);
+      if (seen.has(tid)) return;
+      seen.add(tid);
+      const depMin = timeToMin(t.dep_time || '00:00');
+      const effDep = isNextDay ? depMin + 1440 : depMin;
+      if (effDep < earliestG2trainDep && depMin < endG1min) return;
+      const goesDepot = t.to_station && t.to_station.toUpperCase() === dep.toUpperCase();
+      allCandidates.push({ train_id: tid, from_station: t.from_station, to_station: t.to_station,
+        dep_time: t.dep_time, arr_time: '', source: 'VT', vtOK: true,
+        goesDepot, delay: t.delay || 0 });
     });
 
     // Ordina: prima quelli che vanno al deposito, poi per orario
@@ -2746,7 +2782,11 @@ async function addDormita() {
         if (t.next_day_type) html += ' ' + t.next_day_type;
         html += '</td>';
         // Button
-        html += '<td><button class="btn btn-xs btn-outline" onclick="showGiroMaterielePopup(\'' + esc(t.train_id) + '\', this)">Giro</button></td>';
+        const alreadyAdded = manualTrains.some(m => m.train_id === t.train_id);
+        html += '<td style="white-space:nowrap">';
+        html += '<button class="btn btn-xs btn-success" ' + (alreadyAdded ? 'disabled style="opacity:.5"' : '') + ' onclick="addTrainFromDormita(\'' + esc(t.train_id) + '\', {from_station:\'' + esc(t.from_station || lastStation) + '\',to_station:\'' + esc(t.to_station || '') + '\',dep_time:\'' + esc(t.dep_time || '') + '\',arr_time:\'' + esc(t.arr_time || '') + '\'});this.disabled=true;this.textContent=\'OK\'">' + (alreadyAdded ? 'OK' : '+') + '</button> ';
+        html += '<button class="btn btn-xs btn-outline" onclick="showGiroMaterielePopup(\'' + esc(t.train_id) + '\', this)">Giro</button>';
+        html += '</td>';
         html += '</tr>';
       });
       html += '</tbody></table></div>';
@@ -2768,6 +2808,17 @@ async function addDormita() {
 
 /* Alias per retrocompatibilita */
 function addDormitaFR() { addDormita(); }
+
+async function addTrainFromDormita(trainId, meta) {
+  // Save FR state before adding (addTrainToManual clears it)
+  const wasFR = manualIsFR;
+  const frStation = window._frStation;
+  await addTrainToManual(trainId, false, meta);
+  // Restore FR state
+  manualIsFR = wasFR;
+  window._frStation = frStation;
+  renderManualList();
+}
 
 function confirmDormitaFR(station) {
   manualIsFR = true;

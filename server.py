@@ -1384,17 +1384,35 @@ def fr_return_trains(
 
         all_results.sort(key=lambda x: x.get("dep_time", "99:99"))
 
-        # Also get all departures from the FR station (not just to depot)
         # Cerchiamo TUTTI i treni che passano dalla stazione (taglio treno)
-        all_departures = db.find_connecting_trains(
-            from_station=from_station,
+        # Usa find_trains_passing_through per includere anche treni che
+        # arrivano alla stazione e poi ripartono (non solo from_station)
+        all_departures = db.find_trains_passing_through(
+            station=from_station,
             after_time="04:00",
             limit=80,
         )
 
+        # Anche i diretti al deposito con passing through
+        passing_to_depot = db.find_trains_passing_through(
+            station=from_station,
+            after_time="04:00",
+            target_station=to_station,
+            limit=30,
+        )
+        # Merge passing_to_depot in all_results
+        seen_direct = set(t["train_id"] for t in all_results)
+        for t in passing_to_depot:
+            if t["train_id"] not in seen_direct:
+                t["next_day_type"] = "GG"
+                t["passes_through"] = True
+                all_results.append(t)
+                seen_direct.add(t["train_id"])
+        all_results.sort(key=lambda x: x.get("dep_time", "99:99"))
+
         return {
             "direct_to_depot": all_results[:50],
-            "all_departures": all_departures[:60],
+            "all_departures": all_departures[:80],
             "from_station": from_station,
             "to_station": to_station,
             "current_day_type": current_day_type,
@@ -2623,6 +2641,59 @@ def vt_find_return(
         "to_code": to_code,
         "checked": total_checked,
     }
+
+
+# ---------------------------------------------------------------
+# VT ALL DEPARTURES (tutte le partenze da una stazione, senza filtro dest)
+# ---------------------------------------------------------------
+@app.get("/vt/all-departures")
+def vt_all_departures(station: str, after_time: str = "00:00"):
+    """Restituisce TUTTE le partenze Trenord da una stazione (ViaggiaTreno).
+
+    Utile per la dormita: trova treni che PASSANO da una stazione,
+    anche quelli non nel DB locale. Non filtra per destinazione.
+    """
+    code = _resolve_station_code(station)
+    if not code:
+        return {"departures": [], "error": f"Stazione '{station}' non trovata su ViaggiaTreno"}
+
+    dt_param = _vt_datetime_param(None, after_time)
+    after_min = _time_to_min(after_time)
+    results = []
+
+    try:
+        r = httpx.get(f"{_VT_BASE}/partenze/{code}/{dt_param}", timeout=_VT_TIMEOUT)
+        if r.status_code == 200:
+            deps = r.json()
+            # Solo Trenord (codiceCliente 63)
+            trenord = [t for t in deps if t.get("codiceCliente") == 63]
+            for t in trenord:
+                train_num = t.get("numeroTreno")
+                if not train_num:
+                    continue
+                dep_time = t.get("compOrarioPartenza") or ""
+                dep_ms = t.get("orarioPartenza")
+                if not dep_time and dep_ms:
+                    dep_time = _dt.fromtimestamp(dep_ms / 1000).strftime("%H:%M")
+                # Filtra per after_time
+                if dep_time:
+                    dep_min = _time_to_min(dep_time)
+                    if dep_min < after_min:
+                        continue
+
+                results.append({
+                    "train_number": train_num,
+                    "from_station": station.strip().upper(),
+                    "to_station": (t.get("destinazione") or "").upper(),
+                    "dep_time": dep_time,
+                    "delay": t.get("ritardo", 0),
+                    "running": t.get("circolante", False),
+                })
+    except Exception as e:
+        return {"departures": [], "error": str(e)}
+
+    results.sort(key=lambda x: x.get("dep_time", "99:99"))
+    return {"departures": results, "station_code": code}
 
 
 if __name__ == "__main__":

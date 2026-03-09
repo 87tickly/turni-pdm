@@ -1448,11 +1448,190 @@ class Database:
             cur.execute(query, params)
             return [self._dict(row) for row in cur.fetchall()]
 
+    def find_trains_passing_through(self, station: str, after_time: str,
+                                     target_station: str = None,
+                                     day_indices: list[int] = None,
+                                     exclude_trains: list[str] = None,
+                                     limit: int = 20) -> list[dict]:
+        """Trova treni che PASSANO per una stazione (non solo from_station).
+
+        Usa self-join: cerca treni dove un segmento arriva alla stazione
+        (to_station = station) e un segmento successivo parte dalla stazione
+        (from_station = station). Restituisce il segmento di partenza.
+
+        Se target_station e' specificato, filtra anche per treni che raggiungono
+        quella destinazione (tramite un segmento con to_station = target).
+        """
+        p = "%s" if self.is_pg else "?"
+
+        # Cerca treni dove esiste un segmento con to_station=station
+        # e un altro segmento (stesso treno, seq successivo) con from_station=station
+        # UNION con la ricerca diretta from_station=station (per completezza)
+        if target_station:
+            # Treni che passano per station E raggiungono target_station
+            if self.is_pg:
+                query = f"""
+                    SELECT DISTINCT ON (sub.train_id) sub.train_id, sub.dep_time, sub.arr_time,
+                           sub.from_station, sub.to_station, sub.day_index, sub.confidence, sub.id as _rid
+                    FROM (
+                        -- Treni con segmento from_station=station che hanno anche un segmento to_station=target
+                        SELECT s1.train_id, s1.dep_time, s1.arr_time, s1.from_station, s1.to_station,
+                               s1.day_index, s1.confidence, s1.id
+                        FROM train_segment s1
+                        WHERE UPPER(s1.from_station) = UPPER({p})
+                        AND s1.dep_time >= {p}
+                        AND s1.confidence > 0.3
+                        AND s1.from_station != s1.to_station
+                        AND EXISTS (
+                            SELECT 1 FROM train_segment s2
+                            WHERE s2.train_id = s1.train_id
+                            AND UPPER(s2.to_station) = UPPER({p})
+                            AND s2.seq >= s1.seq
+                        )
+                        UNION
+                        -- Treni che arrivano a station e poi ripartono, con destinazione target
+                        SELECT s2.train_id, s2.dep_time, s2.arr_time, s2.from_station, s2.to_station,
+                               s2.day_index, s2.confidence, s2.id
+                        FROM train_segment s1
+                        JOIN train_segment s2 ON s1.train_id = s2.train_id AND s2.seq > s1.seq
+                        WHERE UPPER(s1.to_station) = UPPER({p})
+                        AND UPPER(s2.from_station) = UPPER({p})
+                        AND s2.dep_time >= {p}
+                        AND s2.confidence > 0.3
+                        AND EXISTS (
+                            SELECT 1 FROM train_segment s3
+                            WHERE s3.train_id = s2.train_id
+                            AND UPPER(s3.to_station) = UPPER({p})
+                            AND s3.seq >= s2.seq
+                        )
+                    ) sub
+                    ORDER BY sub.train_id, sub.dep_time
+                """
+                params = [station, after_time, target_station,
+                          station, station, after_time, target_station]
+            else:
+                query = f"""
+                    SELECT train_id, dep_time, arr_time, from_station, to_station,
+                           day_index, confidence, MIN(rowid) as _rid
+                    FROM (
+                        SELECT s1.train_id, s1.dep_time, s1.arr_time, s1.from_station, s1.to_station,
+                               s1.day_index, s1.confidence, s1.rowid
+                        FROM train_segment s1
+                        WHERE UPPER(s1.from_station) = UPPER({p})
+                        AND s1.dep_time >= {p}
+                        AND s1.confidence > 0.3
+                        AND s1.from_station != s1.to_station
+                        AND EXISTS (
+                            SELECT 1 FROM train_segment s2
+                            WHERE s2.train_id = s1.train_id
+                            AND UPPER(s2.to_station) = UPPER({p})
+                            AND s2.seq >= s1.seq
+                        )
+                        UNION
+                        SELECT s2.train_id, s2.dep_time, s2.arr_time, s2.from_station, s2.to_station,
+                               s2.day_index, s2.confidence, s2.rowid
+                        FROM train_segment s1
+                        JOIN train_segment s2 ON s1.train_id = s2.train_id AND s2.seq > s1.seq
+                        WHERE UPPER(s1.to_station) = UPPER({p})
+                        AND UPPER(s2.from_station) = UPPER({p})
+                        AND s2.dep_time >= {p}
+                        AND s2.confidence > 0.3
+                        AND EXISTS (
+                            SELECT 1 FROM train_segment s3
+                            WHERE s3.train_id = s2.train_id
+                            AND UPPER(s3.to_station) = UPPER({p})
+                            AND s3.seq >= s2.seq
+                        )
+                    )
+                    GROUP BY train_id ORDER BY dep_time LIMIT {p}
+                """
+                params = [station, after_time, target_station,
+                          station, station, after_time, target_station, limit]
+        else:
+            # Solo treni che passano per station (qualsiasi destinazione)
+            if self.is_pg:
+                query = f"""
+                    SELECT DISTINCT ON (sub.train_id) sub.train_id, sub.dep_time, sub.arr_time,
+                           sub.from_station, sub.to_station, sub.day_index, sub.confidence, sub.id as _rid
+                    FROM (
+                        SELECT s1.train_id, s1.dep_time, s1.arr_time, s1.from_station, s1.to_station,
+                               s1.day_index, s1.confidence, s1.id
+                        FROM train_segment s1
+                        WHERE UPPER(s1.from_station) = UPPER({p})
+                        AND s1.dep_time >= {p}
+                        AND s1.confidence > 0.3
+                        AND s1.from_station != s1.to_station
+                        UNION
+                        SELECT s2.train_id, s2.dep_time, s2.arr_time, s2.from_station, s2.to_station,
+                               s2.day_index, s2.confidence, s2.id
+                        FROM train_segment s1
+                        JOIN train_segment s2 ON s1.train_id = s2.train_id AND s2.seq > s1.seq
+                        WHERE UPPER(s1.to_station) = UPPER({p})
+                        AND UPPER(s2.from_station) = UPPER({p})
+                        AND s2.dep_time >= {p}
+                        AND s2.confidence > 0.3
+                    ) sub
+                    ORDER BY sub.train_id, sub.dep_time
+                """
+                params = [station, after_time, station, station, after_time]
+            else:
+                query = f"""
+                    SELECT train_id, dep_time, arr_time, from_station, to_station,
+                           day_index, confidence, MIN(rowid) as _rid
+                    FROM (
+                        SELECT s1.train_id, s1.dep_time, s1.arr_time, s1.from_station, s1.to_station,
+                               s1.day_index, s1.confidence, s1.rowid
+                        FROM train_segment s1
+                        WHERE UPPER(s1.from_station) = UPPER({p})
+                        AND s1.dep_time >= {p}
+                        AND s1.confidence > 0.3
+                        AND s1.from_station != s1.to_station
+                        UNION
+                        SELECT s2.train_id, s2.dep_time, s2.arr_time, s2.from_station, s2.to_station,
+                               s2.day_index, s2.confidence, s2.rowid
+                        FROM train_segment s1
+                        JOIN train_segment s2 ON s1.train_id = s2.train_id AND s2.seq > s1.seq
+                        WHERE UPPER(s1.to_station) = UPPER({p})
+                        AND UPPER(s2.from_station) = UPPER({p})
+                        AND s2.dep_time >= {p}
+                        AND s2.confidence > 0.3
+                    )
+                    GROUP BY train_id ORDER BY dep_time LIMIT {p}
+                """
+                params = [station, after_time, station, station, after_time, limit]
+
+        if day_indices:
+            # Per day_indices, aggiungi filtro nella subquery
+            # Questo e' complesso con UNION, quindi filtriamo dopo
+            pass
+
+        if exclude_trains:
+            # Filtriamo dopo per semplicita'
+            pass
+
+        cur = self._cursor()
+        cur.execute(query, params)
+        rows = [self._dict(row) for row in cur.fetchall()]
+
+        # Filtra post-query per day_indices e exclude_trains
+        if day_indices:
+            rows = [r for r in rows if r.get("day_index") in day_indices]
+        if exclude_trains:
+            ex_set = set(exclude_trains)
+            rows = [r for r in rows if r["train_id"] not in ex_set]
+
+        rows.sort(key=lambda r: r.get("dep_time", ""))
+        if not self.is_pg:
+            return rows  # limit gia' applicato nella query
+        return rows[:limit]
+
     def find_return_trains(self, from_station: str, to_station: str,
                            after_time: str, limit: int = 5) -> list[dict]:
-        """Find trains from from_station to to_station (for depot return).
+        """Find trains from from_station to to_station (direct + passing through).
         Searches across ALL day_indices. Deduplicates by train_id."""
         cur = self._cursor()
+
+        # 1) Ricerca diretta (segmento from→to)
         if self.is_pg:
             cur.execute("""
                 SELECT DISTINCT ON (train_id) train_id, dep_time, arr_time,
@@ -1465,9 +1644,7 @@ class Database:
                 AND from_station != to_station
                 ORDER BY train_id, dep_time
             """, (from_station, to_station, after_time))
-            rows = [self._dict(row) for row in cur.fetchall()]
-            rows.sort(key=lambda r: r.get("dep_time", ""))
-            return rows[:limit]
+            direct = [self._dict(row) for row in cur.fetchall()]
         else:
             cur.execute("""
                 SELECT train_id, dep_time, arr_time, from_station, to_station,
@@ -1481,8 +1658,25 @@ class Database:
                 GROUP BY train_id
                 ORDER BY dep_time
                 LIMIT ?
-            """, (from_station, to_station, after_time, limit))
-            return [self._dict(row) for row in cur.fetchall()]
+            """, (from_station, to_station, after_time, limit * 2))
+            direct = [self._dict(row) for row in cur.fetchall()]
+
+        # 2) Ricerca treni che passano attraverso (self-join)
+        passing = self.find_trains_passing_through(
+            station=from_station, after_time=after_time,
+            target_station=to_station, limit=limit * 2
+        )
+
+        # Merge e deduplica
+        seen = set(t["train_id"] for t in direct)
+        for t in passing:
+            if t["train_id"] not in seen:
+                t["passes_through"] = True  # marca come treno di passaggio
+                direct.append(t)
+                seen.add(t["train_id"])
+
+        direct.sort(key=lambda r: r.get("dep_time", ""))
+        return direct[:limit]
 
     def get_day_index_groups(self) -> dict:
         """Analyze day_indices to infer day type groups (LV/SAB/DOM).
