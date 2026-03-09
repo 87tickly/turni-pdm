@@ -1023,14 +1023,112 @@ class Database:
                     dv_d = self._dict(dv_row)
                     validity = dv_d["validity_text"]
 
-            # Raggruppa per train_id
-            trains: dict[str, list] = OrderedDict()
-            segments.sort(key=lambda s: (s["dep_time"], s["seq"]))
+            # Costruisce il giro materiale per CONTINUITA' GEOGRAFICA:
+            # il treno successivo parte dalla stazione di arrivo del precedente,
+            # entro un tempo ragionevole (< MAX_GAP minuti).
+            # Questo esclude automaticamente i treni dopo una dormita materiale.
+
+            def _hhmm_to_min(t: str) -> int:
+                try:
+                    parts = t.split(":")
+                    return int(parts[0]) * 60 + int(parts[1])
+                except Exception:
+                    return -1
+
+            def _station_match(a: str, b: str) -> bool:
+                """Controlla se due nomi stazione si riferiscono allo stesso luogo."""
+                if not a or not b:
+                    return False
+                a, b = a.strip().upper(), b.strip().upper()
+                if a == b:
+                    return True
+                # Abbreviazioni comuni
+                abbrevs = {
+                    "MI.ROG.": "MILANO ROGOREDO", "MI ROG": "MILANO ROGOREDO",
+                    "MI.CERTOSA": "MILANO CERTOSA", "MI.LAMBRATE": "MILANO LAMBRATE",
+                    "MI.P.GARIBALDI": "MILANO PORTA GARIBALDI",
+                    "MI.S.CRISTOFORO": "MILANO SAN CRISTOFORO",
+                    "ALESSAN.": "ALESSANDRIA",
+                }
+                na = abbrevs.get(a, a)
+                nb = abbrevs.get(b, b)
+                return na == nb
+
+            MAX_GAP = 180  # minuti
+
+            # Raggruppa segmenti per train_id
+            train_map: dict[str, list] = {}
             for seg in segments:
                 tid = seg["train_id"]
-                if tid not in trains:
-                    trains[tid] = []
-                trains[tid].append(seg)
+                if tid not in train_map:
+                    train_map[tid] = []
+                train_map[tid].append(seg)
+
+            # Info per ogni treno: prima partenza, ultimo arrivo, stazioni
+            train_info: dict[str, dict] = {}
+            for tid, segs in train_map.items():
+                sorted_segs = sorted(segs, key=lambda s: s.get("dep_time", ""))
+                first = sorted_segs[0]
+                last = sorted(segs, key=lambda s: s.get("arr_time", ""))[-1]
+                train_info[tid] = {
+                    "dep_station": first.get("from_station", ""),
+                    "dep_time": first.get("dep_time", ""),
+                    "dep_min": _hhmm_to_min(first.get("dep_time", "")),
+                    "arr_station": last.get("to_station", ""),
+                    "arr_time": last.get("arr_time", ""),
+                    "arr_min": _hhmm_to_min(last.get("arr_time", "")),
+                }
+
+            # Costruisci catena all'indietro dal treno cercato
+            chain = [train_id] if train_id in train_info else []
+            if chain:
+                # Indietro: trova chi arriva dove parte il treno corrente
+                current = train_id
+                while True:
+                    ci = train_info[current]
+                    best_tid, best_gap = None, MAX_GAP + 1
+                    for tid, ti in train_info.items():
+                        if tid in chain:
+                            continue
+                        if _station_match(ti["arr_station"], ci["dep_station"]):
+                            gap = ci["dep_min"] - ti["arr_min"]
+                            if gap < 0:
+                                gap += 24 * 60
+                            # Gap ragionevole e il treno arriva PRIMA della partenza
+                            if 0 <= gap <= MAX_GAP and gap < best_gap:
+                                best_tid = tid
+                                best_gap = gap
+                    if best_tid:
+                        chain.insert(0, best_tid)
+                        current = best_tid
+                    else:
+                        break
+
+                # Avanti: trova chi parte da dove arriva il treno corrente
+                current = train_id
+                while True:
+                    ci = train_info[current]
+                    best_tid, best_gap = None, MAX_GAP + 1
+                    for tid, ti in train_info.items():
+                        if tid in chain:
+                            continue
+                        if _station_match(ti["dep_station"], ci["arr_station"]):
+                            gap = ti["dep_min"] - ci["arr_min"]
+                            if gap < 0:
+                                gap += 24 * 60
+                            if 0 <= gap <= MAX_GAP and gap < best_gap:
+                                best_tid = tid
+                                best_gap = gap
+                    if best_tid:
+                        chain.append(best_tid)
+                        current = best_tid
+                    else:
+                        break
+
+            trains: dict[str, list] = OrderedDict()
+            for tid in chain:
+                trains[tid] = sorted(train_map[tid],
+                                     key=lambda s: (s["dep_time"], s["seq"]))
 
             variants_data.append({
                 "day_index": day_idx,
