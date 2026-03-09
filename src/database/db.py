@@ -1405,55 +1405,84 @@ class Database:
                                limit: int = 10) -> list[dict]:
         """Trova treni in partenza da from_station dopo after_time.
         Deduplica per train_id (tiene il primo per dep_time)."""
-        query = self._q(
-            "SELECT train_id, dep_time, arr_time, from_station, to_station, "
-            "day_index, confidence, MIN(id) as _rid "
-            "FROM train_segment "
-            "WHERE UPPER(from_station) = UPPER(?) AND dep_time >= ? "
-            "AND confidence > 0.3 AND from_station != to_station"
-        )
+        # Costruisce WHERE dinamico
+        where = "UPPER(from_station) = UPPER({p}) AND dep_time >= {p} AND confidence > 0.3 AND from_station != to_station"
+        where = where.replace("{p}", "%s" if self.is_pg else "?")
         params: list = [from_station, after_time]
 
         if to_station:
-            query += self._q(" AND UPPER(to_station) = UPPER(?)")
+            where += " AND UPPER(to_station) = UPPER(%s)" if self.is_pg else " AND UPPER(to_station) = UPPER(?)"
             params.append(to_station)
 
         if day_indices:
-            placeholders = ",".join([self._q("?")] * len(day_indices))
-            query += f" AND day_index IN ({placeholders})"
+            ph = ",".join(["%s" if self.is_pg else "?"] * len(day_indices))
+            where += f" AND day_index IN ({ph})"
             params.extend(day_indices)
 
         if exclude_trains:
-            placeholders = ",".join([self._q("?")] * len(exclude_trains))
-            query += f" AND train_id NOT IN ({placeholders})"
+            ph = ",".join(["%s" if self.is_pg else "?"] * len(exclude_trains))
+            where += f" AND train_id NOT IN ({ph})"
             params.extend(exclude_trains)
 
-        query += self._q(" GROUP BY train_id ORDER BY dep_time LIMIT ?")
-        params.append(limit)
-
-        cur = self._cursor()
-        cur.execute(query, params)
-        return [self._dict(row) for row in cur.fetchall()]
+        if self.is_pg:
+            query = (
+                f"SELECT DISTINCT ON (train_id) train_id, dep_time, arr_time, "
+                f"from_station, to_station, day_index, confidence, id as _rid "
+                f"FROM train_segment WHERE {where} "
+                f"ORDER BY train_id, dep_time"
+            )
+            cur = self._cursor()
+            cur.execute(query, params)
+            rows = [self._dict(row) for row in cur.fetchall()]
+            rows.sort(key=lambda r: r.get("dep_time", ""))
+            return rows[:limit]
+        else:
+            query = (
+                f"SELECT train_id, dep_time, arr_time, from_station, to_station, "
+                f"day_index, confidence, MIN(rowid) as _rid "
+                f"FROM train_segment WHERE {where} "
+                f"GROUP BY train_id ORDER BY dep_time LIMIT ?"
+            )
+            params.append(limit)
+            cur = self._cursor()
+            cur.execute(query, params)
+            return [self._dict(row) for row in cur.fetchall()]
 
     def find_return_trains(self, from_station: str, to_station: str,
                            after_time: str, limit: int = 5) -> list[dict]:
         """Find trains from from_station to to_station (for depot return).
         Searches across ALL day_indices. Deduplicates by train_id."""
         cur = self._cursor()
-        cur.execute(self._q("""
-            SELECT train_id, dep_time, arr_time, from_station, to_station,
-                   day_index, confidence, MIN(id) as _rid
-            FROM train_segment
-            WHERE UPPER(from_station) = UPPER(?)
-            AND UPPER(to_station) = UPPER(?)
-            AND dep_time >= ?
-            AND confidence > 0.3
-            AND from_station != to_station
-            GROUP BY train_id
-            ORDER BY dep_time
-            LIMIT ?
-        """), (from_station, to_station, after_time, limit))
-        return [self._dict(row) for row in cur.fetchall()]
+        if self.is_pg:
+            cur.execute("""
+                SELECT DISTINCT ON (train_id) train_id, dep_time, arr_time,
+                       from_station, to_station, day_index, confidence, id as _rid
+                FROM train_segment
+                WHERE UPPER(from_station) = UPPER(%s)
+                AND UPPER(to_station) = UPPER(%s)
+                AND dep_time >= %s
+                AND confidence > 0.3
+                AND from_station != to_station
+                ORDER BY train_id, dep_time
+            """, (from_station, to_station, after_time))
+            rows = [self._dict(row) for row in cur.fetchall()]
+            rows.sort(key=lambda r: r.get("dep_time", ""))
+            return rows[:limit]
+        else:
+            cur.execute("""
+                SELECT train_id, dep_time, arr_time, from_station, to_station,
+                       day_index, confidence, MIN(rowid) as _rid
+                FROM train_segment
+                WHERE UPPER(from_station) = UPPER(?)
+                AND UPPER(to_station) = UPPER(?)
+                AND dep_time >= ?
+                AND confidence > 0.3
+                AND from_station != to_station
+                GROUP BY train_id
+                ORDER BY dep_time
+                LIMIT ?
+            """, (from_station, to_station, after_time, limit))
+            return [self._dict(row) for row in cur.fetchall()]
 
     def get_day_index_groups(self) -> dict:
         """Analyze day_indices to infer day type groups (LV/SAB/DOM).
