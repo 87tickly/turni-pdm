@@ -2124,21 +2124,31 @@ function renderManualList() {
     return;
   }
   let html = '';
+  let dormitaRendered = false;
+  const hasG2 = manualTrains.some(t => t.is_g2);
+
   manualTrains.forEach((t, i) => {
+    // Inserisci dormita marker PRIMA del primo treno G2
+    if (t.is_g2 && !dormitaRendered && manualIsFR) {
+      html += '<div class="train-chip" style="border-color:var(--indigo);background:var(--indigo-soft);min-width:auto"><span class="chip-id" style="color:var(--indigo)">DORMITA ' + esc(window._frStation || 'FR') + '</span><button class="chip-remove" onclick="cancelDormitaFR()" title="Annulla dormita">&times;</button></div>';
+      dormitaRendered = true;
+      // Label G2
+      html += '<span style="font-size:9px;font-weight:700;color:var(--indigo);padding:0 4px;vertical-align:middle">G2 ▸</span>';
+    }
+
     const dh = t.is_deadhead;
     const labels = getGiroLabels(t, i);
 
     // Label PRIMA del chip (ACC o CVL)
     if (!dh && labels.before) html += renderGiroLabel(labels.before, 'before');
 
-    html += `<div class="train-chip${dh ? ' deadhead' : ''}">
+    html += `<div class="train-chip${dh ? ' deadhead' : ''}${t.is_g2 ? ' g2' : ''}">
       <span class="chip-id">${esc(t.train_id)}</span>${dh ? '<span style="font-size:9px;color:var(--violet);font-weight:700">[V]</span>' : ''}${t.note ? '<span style="font-size:9px;color:var(--indigo)">' + esc(t.note) + '</span>' : ''}${t.split_part ? '<span style="font-size:9px;color:var(--orange);font-weight:600">P' + t.split_part + '</span>' : ''}${!dh && !t.split_part ? '<button class="chip-split" onclick="showSplitDialog(\'' + esc(t.train_id) + '\',' + i + ')" title="Spezza a fermata intermedia" style="background:none;border:none;cursor:pointer;font-size:12px;padding:0 2px;color:var(--text-muted)">&#9986;</button>' : ''}
       <button class="chip-remove" onclick="removeManualTrain(${i})" title="Rimuovi">&times;</button>
     </div>`;
 
-    // Label DOPO il chip (ACCa o CVL) – solo per l'ultimo treno condotta o se dopo non c'è un altro treno condotta consecutivo nello stesso giro
+    // Label DOPO il chip (ACCa o CVL)
     if (!dh && labels.after) {
-      // Controlla se il prossimo treno nella lista è il successore del giro
       const nextInList = manualTrains[i + 1];
       const isNextLinked = nextInList && !nextInList.is_deadhead && t.giro_context && t.giro_context.next && nextInList.train_id === t.giro_context.next.train_id;
       if (!isNextLinked) {
@@ -2146,7 +2156,8 @@ function renderManualList() {
       }
     }
   });
-  if (manualIsFR) {
+  // Se FR confermata ma nessun G2 ancora aggiunto, mostra dormita alla fine
+  if (manualIsFR && !dormitaRendered) {
     html += '<div class="train-chip" style="border-color:var(--indigo);background:var(--indigo-soft);min-width:auto"><span class="chip-id" style="color:var(--indigo)">DORMITA ' + esc(window._frStation || 'FR') + '</span><button class="chip-remove" onclick="cancelDormitaFR()" title="Annulla dormita">&times;</button></div>';
   }
   out.innerHTML = html;
@@ -2230,22 +2241,77 @@ async function validateManual() {
     vc.innerHTML = html;
     document.getElementById('manValidation').style.display = '';
 
-    // Timeline PdC style
+    // Timeline PdC style - G1/G2 separation per dormita
     if (data.timeline && data.timeline.length) {
       document.getElementById('manTimelineCard').style.display = '';
-      lastTimelineBlocks = JSON.parse(JSON.stringify(data.timeline)); // deep copy for editing
 
-      // PdC header: day type, times, metrics
-      const dt = document.getElementById('manDayType').value;
-      document.getElementById('manTLDayType').textContent = dt;
-      document.getElementById('manTLTimes').textContent = '[' + (data.presentation_time || '--') + ']  [' + (data.end_time || '--') + ']';
-      let metricsHtml = '<span>Lav <strong>' + fmtMin(data.prestazione_min) + '</strong></span>';
-      metricsHtml += '<span>Cct <strong>' + fmtMin(data.condotta_min) + '</strong></span>';
-      metricsHtml += '<span>Not <strong>' + (data.night_minutes || 0) + '\'</strong></span>';
-      metricsHtml += '<span>Rip <strong>' + (data.end_time || '--') + '</strong></span>';
-      document.getElementById('manTLMetrics').innerHTML = metricsHtml;
+      const hasG2Trains = manualTrains.some(t => t.is_g2);
+      const g2TrainIds = new Set(manualTrains.filter(t => t.is_g2).map(t => t.train_id));
 
-      renderTimeline(data.timeline, document.getElementById('manTimeline'));
+      if (hasG2Trains && manualIsFR) {
+        // ── DORMITA: due timeline separate G1 e G2 ──
+        const g1Blocks = data.timeline.filter(b => {
+          if (b.train_id && g2TrainIds.has(b.train_id)) return false;
+          // Accessori/CVL associati a treni G2 (per posizione temporale)
+          if (!b.train_id && b.start !== undefined) {
+            const bStart = b.start;
+            // Se il blocco e' dopo l'ultimo treno G1, e' G2
+            const g1TrainBlocks = data.timeline.filter(tb => tb.train_id && !g2TrainIds.has(tb.train_id) && (tb.type === 'train' || tb.type === 'deadhead'));
+            const g2TrainBlocks = data.timeline.filter(tb => tb.train_id && g2TrainIds.has(tb.train_id));
+            if (g1TrainBlocks.length && g2TrainBlocks.length) {
+              const maxG1End = Math.max(...g1TrainBlocks.map(tb => tb.end || timeToMin(tb.end_time)));
+              const minG2Start = Math.min(...g2TrainBlocks.map(tb => tb.start || timeToMin(tb.start_time)));
+              // Se il blocco accessorio e' piu' vicino a G2 che a G1
+              if (Math.abs(bStart - minG2Start) < Math.abs(bStart - maxG1End)) return false;
+            }
+          }
+          return true;
+        });
+        const g2Blocks = data.timeline.filter(b => !g1Blocks.includes(b));
+
+        lastTimelineBlocks = JSON.parse(JSON.stringify(data.timeline));
+
+        const dt = document.getElementById('manDayType').value;
+        document.getElementById('manTLDayType').textContent = dt;
+        document.getElementById('manTLTimes').textContent = '[' + (data.presentation_time || '--') + ']  [' + (data.end_time || '--') + ']';
+        let metricsHtml = '<span>Lav <strong>' + fmtMin(data.prestazione_min) + '</strong></span>';
+        metricsHtml += '<span>Cct <strong>' + fmtMin(data.condotta_min) + '</strong></span>';
+        metricsHtml += '<span>Not <strong>' + (data.night_minutes || 0) + '\'</strong></span>';
+        metricsHtml += '<span>Rip <strong>' + (data.end_time || '--') + '</strong></span>';
+        document.getElementById('manTLMetrics').innerHTML = metricsHtml;
+
+        // Render G1 + dormita separator + G2
+        const tlContainer = document.getElementById('manTimeline');
+        let tlHtml = '';
+        tlHtml += '<div style="margin-bottom:4px;font-size:11px;font-weight:700;color:var(--text)">G1</div>';
+        tlHtml += '<div id="manTimelineG1"></div>';
+        tlHtml += '<div style="margin:10px 0;padding:8px 12px;background:linear-gradient(135deg,rgba(88,86,214,0.12),rgba(88,86,214,0.04));border:2px dashed var(--indigo);border-radius:8px;text-align:center">';
+        tlHtml += '<span style="font-size:12px;font-weight:700;color:var(--indigo)">🌙 DORMITA ' + esc(window._frStation || '') + '</span>';
+        tlHtml += '</div>';
+        tlHtml += '<div style="margin-bottom:4px;font-size:11px;font-weight:700;color:var(--indigo)">G2 (giorno dopo)</div>';
+        tlHtml += '<div id="manTimelineG2"></div>';
+        tlContainer.innerHTML = tlHtml;
+
+        if (g1Blocks.length) renderTimeline(g1Blocks, document.getElementById('manTimelineG1'));
+        else document.getElementById('manTimelineG1').innerHTML = '<p class="text-muted text-sm">Nessun blocco G1</p>';
+        if (g2Blocks.length) renderTimeline(g2Blocks, document.getElementById('manTimelineG2'));
+        else document.getElementById('manTimelineG2').innerHTML = '<p class="text-muted text-sm">Nessun blocco G2</p>';
+
+      } else {
+        // ── Timeline singola (normale, no dormita G2) ──
+        lastTimelineBlocks = JSON.parse(JSON.stringify(data.timeline));
+
+        const dt = document.getElementById('manDayType').value;
+        document.getElementById('manTLDayType').textContent = dt;
+        document.getElementById('manTLTimes').textContent = '[' + (data.presentation_time || '--') + ']  [' + (data.end_time || '--') + ']';
+        let metricsHtml = '<span>Lav <strong>' + fmtMin(data.prestazione_min) + '</strong></span>';
+        metricsHtml += '<span>Cct <strong>' + fmtMin(data.condotta_min) + '</strong></span>';
+        metricsHtml += '<span>Not <strong>' + (data.night_minutes || 0) + '\'</strong></span>';
+        metricsHtml += '<span>Rip <strong>' + (data.end_time || '--') + '</strong></span>';
+        document.getElementById('manTLMetrics').innerHTML = metricsHtml;
+
+        renderTimeline(data.timeline, document.getElementById('manTimeline'));
+      }
     }
   } catch (e) {
     document.getElementById('manValContent').innerHTML = `<div class="violation"><span class="v-icon">!</span>${esc(e.message)}</div>`;
@@ -2814,6 +2880,11 @@ async function addTrainFromDormita(trainId, meta) {
   const wasFR = manualIsFR;
   const frStation = window._frStation;
   await addTrainToManual(trainId, false, meta);
+  // Mark as G2 (dormita continuation) - deve apparire DOPO la dormita
+  const justAdded = manualTrains[manualTrains.length - 1];
+  if (justAdded && justAdded.train_id === trainId) {
+    justAdded.is_g2 = true;
+  }
   // Restore FR state
   manualIsFR = wasFR;
   window._frStation = frStation;
@@ -3620,6 +3691,21 @@ function renderTimeline(blocks, container) {
     if (e <= s) e += 1440;
     const mid = xPos(s + (e - s) / 2);
     html += '<span class="pdc-lbl meal" style="left:' + mid + 'px">REFEZ</span>';
+  });
+  accBlocks.forEach(b => {
+    let s = b.start !== undefined ? b.start : timeToMin(b.start_time);
+    let e = b.end !== undefined ? b.end : timeToMin(b.end_time);
+    if (e <= s) e += 1440;
+    const mid = xPos(s + (e - s) / 2);
+    const lbl = (b.label || '').indexOf('CVL') >= 0 ? 'CVL' : ('ACC ' + (b.duration || (e - s)) + "'");
+    html += '<span class="pdc-lbl acc" style="left:' + mid + 'px">' + esc(lbl) + '</span>';
+  });
+  extraBlocks.forEach(b => {
+    let s = b.start !== undefined ? b.start : timeToMin(b.start_time);
+    let e = b.end !== undefined ? b.end : timeToMin(b.end_time);
+    if (e <= s) e += 1440;
+    const mid = xPos(s + (e - s) / 2);
+    html += '<span class="pdc-lbl acc" style="left:' + mid + 'px;opacity:.6">EXT</span>';
   });
   html += '</div>';
 

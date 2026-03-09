@@ -747,6 +747,7 @@ def _build_timeline_blocks(summary, deposito: str = "", db: Database = None,
             "type": "deadhead" if is_dh else "train",
             "label": str(train_id) + (" [V]" if is_dh else ""),
             "detail": from_st + " \u2192 " + to_st,
+            "train_id": str(train_id),
             "start": dep_m, "end": arr_m,
             "start_time": _seg_get(seg, "dep_time"),
             "end_time": _seg_get(seg, "arr_time"),
@@ -2035,17 +2036,8 @@ async def train_check(train_id: str):
                                         fermate = data.get("fermate", [])
                                         first_stop = fermate[0] if fermate else {}
                                         last_stop = fermate[-1] if fermate else {}
-                                        # Formatta timestamp ms → HH:MM
-                                        def _ts_hhmm(ts_ms):
-                                            if not ts_ms:
-                                                return ""
-                                            try:
-                                                t = _dt.fromtimestamp(ts_ms / 1000)
-                                                return t.strftime("%H:%M")
-                                            except Exception:
-                                                return ""
-                                        dep_t = _ts_hhmm(first_stop.get("partenza_teorica"))
-                                        arr_t = _ts_hhmm(last_stop.get("arrivo_teorico"))
+                                        dep_t = _vt_ts_to_str(first_stop.get("partenza_teorica"))
+                                        arr_t = _vt_ts_to_str(last_stop.get("arrivo_teorico"))
                                         # Operatore
                                         operator = (data.get("compTipologiaTreno")
                                                     or data.get("compRifwordsLingua")
@@ -2079,21 +2071,37 @@ async def train_check(train_id: str):
 # VIAGGIATRENO API PROXY  (no auth, no CORS issues)
 # ---------------------------------------------------------------
 import httpx
-from datetime import datetime as _dt
+from datetime import datetime as _dt, timedelta as _td
+from zoneinfo import ZoneInfo
 import time as _time
+from urllib.parse import quote as _url_quote
 
 _VT_BASE = "http://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno"
 _VT_TIMEOUT = 12.0  # seconds
+_ROME_TZ = ZoneInfo("Europe/Rome")
+
+# Locale-independent day/month names (VT expects English)
+_DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _now_rome() -> _dt:
+    """Current datetime in Europe/Rome (handles CET/CEST automatically)."""
+    return _dt.now(_ROME_TZ)
 
 
 def _vt_datetime_param(date_str: str | None = None, time_str: str | None = None) -> str:
     """Build JS‑style datetime string accepted by ViaggiaTreno.
-    e.g. 'Sun Mar 08 2026 14:30:00 GMT+0100'
+    e.g. 'Sun Mar 08 2026 14:30:00 GMT+0100' (URL-encoded).
+
+    If the requested time is more than 1h in the past (today), automatically
+    uses tomorrow's date so VT returns data instead of an empty list.
     """
-    now = _dt.now()
+    now = _now_rome()
     if date_str:
         try:
-            d = _dt.strptime(date_str, "%Y-%m-%d")
+            d = _dt.strptime(date_str, "%Y-%m-%d").replace(tzinfo=_ROME_TZ)
         except ValueError:
             d = now
     else:
@@ -2105,21 +2113,48 @@ def _vt_datetime_param(date_str: str | None = None, time_str: str | None = None)
     else:
         h, m = now.hour, now.minute
     target = d.replace(hour=h, minute=m, second=0, microsecond=0)
-    # Format: 'Sun Mar 08 2026 14:30:00 GMT+0100'
-    return target.strftime("%a %b %d %Y %H:%M:%S GMT+0100")
+
+    # If no explicit date was provided and the target time is >1h in the past,
+    # use tomorrow instead (VT only returns data for a ~2h window around now)
+    if not date_str and (now - target).total_seconds() > 3600:
+        target += _td(days=1)
+
+    # Compute the UTC offset for the target date (handles CET/CEST)
+    utc_off = target.strftime("%z")  # e.g. '+0100' or '+0200'
+    if not utc_off:
+        utc_off = "+0100"
+    gmt_str = f"GMT{utc_off}"
+
+    # Use locale-independent day/month names
+    day_name = _DAY_NAMES[target.weekday()]
+    month_name = _MONTH_NAMES[target.month - 1]
+    formatted = f"{day_name} {month_name} {target.day:02d} {target.year} {target.hour:02d}:{target.minute:02d}:{target.second:02d} {gmt_str}"
+
+    # URL-encode for safe use in URL path segments
+    return _url_quote(formatted, safe="")
 
 
 def _vt_midnight_ms(date_str: str | None = None) -> int:
-    """Return midnight timestamp in ms for ViaggiaTreno."""
+    """Return midnight timestamp in ms for ViaggiaTreno (Rome timezone)."""
     if date_str:
         try:
             d = _dt.strptime(date_str, "%Y-%m-%d")
+            d = d.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=_ROME_TZ)
         except ValueError:
-            d = _dt.now()
+            d = _now_rome().replace(hour=0, minute=0, second=0, microsecond=0)
     else:
-        d = _dt.now()
-    midnight = d.replace(hour=0, minute=0, second=0, microsecond=0)
-    return int(_time.mktime(midnight.timetuple())) * 1000
+        d = _now_rome().replace(hour=0, minute=0, second=0, microsecond=0)
+    return int(d.timestamp()) * 1000
+
+
+def _vt_ts_to_str(ms) -> str:
+    """Convert VT millisecond timestamp to HH:MM string in Rome timezone."""
+    if not ms:
+        return ""
+    try:
+        return _dt.fromtimestamp(ms / 1000, tz=_ROME_TZ).strftime("%H:%M")
+    except Exception:
+        return ""
 
 
 @app.get("/vt/autocomplete-station")
@@ -2163,7 +2198,7 @@ def vt_departures(
         dep_ms = t.get("orarioPartenza")
         dep_time = ""
         if dep_ms:
-            dep_time = _dt.fromtimestamp(dep_ms / 1000).strftime("%H:%M")
+            dep_time = _vt_ts_to_str(dep_ms)
         results.append({
             "train_number": t.get("numeroTreno"),
             "category": (t.get("categoriaDescrizione") or "").strip(),
@@ -2203,7 +2238,7 @@ def vt_arrivals(
         arr_ms = t.get("orarioArrivo")
         arr_time = ""
         if arr_ms:
-            arr_time = _dt.fromtimestamp(arr_ms / 1000).strftime("%H:%M")
+            arr_time = _vt_ts_to_str(arr_ms)
         results.append({
             "train_number": t.get("numeroTreno"),
             "category": (t.get("categoriaDescrizione") or "").strip(),
@@ -2267,10 +2302,10 @@ def vt_train_info(train_number: int, date: str | None = None):
         eff_dep = f.get("partenzaReale")
         eff_arr = f.get("arrivoReale")
 
-        dep_str = _dt.fromtimestamp(prog_dep / 1000).strftime("%H:%M") if prog_dep else None
-        arr_str = _dt.fromtimestamp(prog_arr / 1000).strftime("%H:%M") if prog_arr else None
-        eff_dep_str = _dt.fromtimestamp(eff_dep / 1000).strftime("%H:%M") if eff_dep else None
-        eff_arr_str = _dt.fromtimestamp(eff_arr / 1000).strftime("%H:%M") if eff_arr else None
+        dep_str = _vt_ts_to_str(prog_dep) or None
+        arr_str = _vt_ts_to_str(prog_arr) or None
+        eff_dep_str = _vt_ts_to_str(eff_dep) or None
+        eff_arr_str = _vt_ts_to_str(eff_arr) or None
 
         stops.append({
             "station": f.get("stazione"),
@@ -2334,7 +2369,7 @@ def vt_solutions(
         dep_ms = t.get("orarioPartenza")
         dep_time = ""
         if dep_ms:
-            dep_time = _dt.fromtimestamp(dep_ms / 1000).strftime("%H:%M")
+            dep_time = _vt_ts_to_str(dep_ms)
         results.append({
             "train_number": t.get("numeroTreno"),
             "category": (t.get("categoriaDescrizione") or "").strip(),
@@ -2426,15 +2461,7 @@ def _vt_fermata_to_times(fermata):
     arr_prog = fermata.get("arrivo_teorico") or fermata.get("programmata")
     arr_real = fermata.get("arrivoReale")
 
-    def _ts(ms):
-        if not ms:
-            return ""
-        try:
-            return _dt.fromtimestamp(ms / 1000).strftime("%H:%M")
-        except Exception:
-            return ""
-
-    return _ts(dep_prog), _ts(dep_real), _ts(arr_prog), _ts(arr_real)
+    return _vt_ts_to_str(dep_prog), _vt_ts_to_str(dep_real), _vt_ts_to_str(arr_prog), _vt_ts_to_str(arr_real)
 
 
 @app.get("/vt/find-return")
@@ -2488,7 +2515,7 @@ def vt_find_return(
                 arr_ms = t.get("orarioArrivo")
                 arr_time_str = t.get("compOrarioArrivo") or ""
                 if not arr_time_str and arr_ms:
-                    arr_time_str = _dt.fromtimestamp(arr_ms / 1000).strftime("%H:%M")
+                    arr_time_str = _vt_ts_to_str(arr_ms)
 
                 # Verifica che il treno passi dalla nostra stazione corrente
                 # Serve andamentoTreno per controllare le fermate
@@ -2575,7 +2602,7 @@ def vt_find_return(
                 dep_ms = t.get("orarioPartenza")
                 dep_time_str = t.get("compOrarioPartenza") or ""
                 if not dep_time_str and dep_ms:
-                    dep_time_str = _dt.fromtimestamp(dep_ms / 1000).strftime("%H:%M")
+                    dep_time_str = _vt_ts_to_str(dep_ms)
                 dest_upper = (t.get("destinazione") or "").upper()
 
                 try:
@@ -2601,12 +2628,8 @@ def vt_find_return(
                     if found_dep_stop:
                         arr_prog = found_dep_stop.get("arrivo_teorico") or found_dep_stop.get("programmata")
                         arr_real = found_dep_stop.get("arrivoReale")
-                        arr_time_str = ""
-                        arr_real_str = ""
-                        if arr_prog:
-                            arr_time_str = _dt.fromtimestamp(arr_prog / 1000).strftime("%H:%M")
-                        if arr_real:
-                            arr_real_str = _dt.fromtimestamp(arr_real / 1000).strftime("%H:%M")
+                        arr_time_str = _vt_ts_to_str(arr_prog)
+                        arr_real_str = _vt_ts_to_str(arr_real)
 
                         seen_trains.add(train_num)
                         return_trains.append({
@@ -2662,11 +2685,16 @@ def vt_all_departures(station: str, after_time: str = "00:00"):
     results = []
 
     try:
-        r = httpx.get(f"{_VT_BASE}/partenze/{code}/{dt_param}", timeout=_VT_TIMEOUT)
+        vt_url = f"{_VT_BASE}/partenze/{code}/{dt_param}"
+        print(f"[VT all-deps] GET {vt_url}")
+        r = httpx.get(vt_url, timeout=_VT_TIMEOUT)
+        print(f"[VT all-deps] status={r.status_code}, len={len(r.text)}")
         if r.status_code == 200:
             deps = r.json()
+            print(f"[VT all-deps] total trains: {len(deps)}")
             # Solo Trenord (codiceCliente 63)
             trenord = [t for t in deps if t.get("codiceCliente") == 63]
+            print(f"[VT all-deps] Trenord trains: {len(trenord)}")
             for t in trenord:
                 train_num = t.get("numeroTreno")
                 if not train_num:
@@ -2674,7 +2702,7 @@ def vt_all_departures(station: str, after_time: str = "00:00"):
                 dep_time = t.get("compOrarioPartenza") or ""
                 dep_ms = t.get("orarioPartenza")
                 if not dep_time and dep_ms:
-                    dep_time = _dt.fromtimestamp(dep_ms / 1000).strftime("%H:%M")
+                    dep_time = _vt_ts_to_str(dep_ms)
                 # Filtra per after_time
                 if dep_time:
                     dep_min = _time_to_min(dep_time)
