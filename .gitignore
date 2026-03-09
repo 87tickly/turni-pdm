@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Database backups (il DB principale turni.db va committato)
+turni_backup_*.db
+
+# Logs
+*.log
+server.log
+
+# Uploads (PDF caricati dall'utente)
+uploads/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Test / Cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Claude
+.claude/
