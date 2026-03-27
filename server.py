@@ -2388,9 +2388,22 @@ def vt_solutions(
 _station_code_cache: dict[str, str] = {}
 
 
+_DEPOSITO_TO_STATION = {
+    "GARIBALDI_ALE": "MILANO PORTA GARIBALDI",
+    "GARIBALDI_CADETTI": "MILANO PORTA GARIBALDI",
+    "GARIBALDI_TE": "MILANO PORTA GARIBALDI",
+    "GRECO_TE": "MILANO GRECO PIRELLI",
+    "GRECO_S9": "MILANO GRECO PIRELLI",
+    "FIORENZA": "MILANO CADORNA",
+    "COMO": "COMO SAN GIOVANNI",
+}
+
+
 def _resolve_station_code(station_name: str) -> str | None:
     """Risolvi nome stazione -> codice ViaggiaTreno (es. 'MILANO ROGOREDO' -> 'S01820')."""
     name_upper = station_name.strip().upper()
+    # Mappa depositi interni a stazioni reali ViaggiaTreno
+    name_upper = _DEPOSITO_TO_STATION.get(name_upper, name_upper)
     if name_upper in _station_code_cache:
         return _station_code_cache[name_upper]
     try:

@@ -162,6 +162,7 @@ DEPOSITI = [
     "BERGAMO",
     "BRESCIA",
     "COLICO",
+    "COMO",
     "CREMONA",
     "DOMODOSSOLA",
     "FIORENZA",
