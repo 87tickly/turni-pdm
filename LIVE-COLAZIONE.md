@@ -85,4 +85,52 @@ Struttura creata:
 
 ## 2026-04-14 — Sessione D: Setup frontend React + TypeScript
 
-*(in corso)*
+### Scaffold progetto
+- `frontend/` creato con Vite + React + TypeScript
+- Tailwind CSS 4 configurato via `@tailwindcss/vite` plugin
+- Path alias `@/` → `src/` configurato in vite.config.ts + tsconfig
+- Proxy API configurato in Vite dev server (tutte le route backend proxied a :8002)
+
+### Dipendenze installate
+- `tailwindcss`, `@tailwindcss/vite` — CSS utility framework
+- `react-router-dom` — routing client-side
+- `lucide-react` — icone (stile minimale)
+- `clsx`, `tailwind-merge` — utility per classi CSS condizionali
+
+### Design system
+- Palette colori custom in `index.css` via `@theme` (background, foreground, primary blu ARTURO, sidebar scura)
+- Font: SF Pro Display/Text con fallback a Segoe UI/Roboto
+- Sidebar scura (171717) con navigazione attiva evidenziata
+
+### Struttura frontend
+```
+frontend/src/
+├── main.tsx              — entry point
+├── App.tsx               — routing (BrowserRouter + Routes)
+├── index.css             — Tailwind + design tokens
+├── lib/
+│   ├── api.ts            — client API con JWT auth (get/post/delete + login/register/getMe/getHealth/getDbInfo)
+│   └── utils.ts          — cn(), fmtMin(), timeToMin()
+├── hooks/
+│   └── useAuth.ts        — hook autenticazione (user state, loading, logout)
+├── components/
+│   ├── Layout.tsx         — layout con sidebar + Outlet (redirect a /login se non autenticato)
+│   └── Sidebar.tsx        — sidebar navigazione (Dashboard, Treni, Turni, Calendario, Import, Impostazioni)
+└── pages/
+    ├── LoginPage.tsx      — login/register con form
+    ├── DashboardPage.tsx  — stats DB (segmenti, treni, turni materiale, day indices)
+    └── PlaceholderPage.tsx — placeholder per sezioni in costruzione
+```
+
+### Route
+- `/login` — pagina login/registrazione (pubblica)
+- `/` — Dashboard (protetta)
+- `/treni` — Ricerca Treni (placeholder)
+- `/turni` — Gestione Turni (placeholder)
+- `/calendario` — Calendario (placeholder)
+- `/import` — Import PDF (placeholder)
+- `/impostazioni` — Impostazioni (placeholder)
+
+### Build verificata
+- `tsc --noEmit` → 0 errori
+- `npm run build` → 272KB JS + 15KB CSS

@@ -1,0 +1,23 @@
+import { BrowserRouter, Routes, Route } from "react-router-dom"
+import { Layout } from "@/components/Layout"
+import { LoginPage } from "@/pages/LoginPage"
+import { DashboardPage } from "@/pages/DashboardPage"
+import { PlaceholderPage } from "@/pages/PlaceholderPage"
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route element={<Layout />}>
+          <Route index element={<DashboardPage />} />
+          <Route path="treni" element={<PlaceholderPage title="Ricerca Treni" />} />
+          <Route path="turni" element={<PlaceholderPage title="Gestione Turni" />} />
+          <Route path="calendario" element={<PlaceholderPage title="Calendario" />} />
+          <Route path="import" element={<PlaceholderPage title="Import PDF" />} />
+          <Route path="impostazioni" element={<PlaceholderPage title="Impostazioni" />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  )
+}
