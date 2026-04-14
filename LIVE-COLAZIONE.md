@@ -197,3 +197,29 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 - `frontend/src/pages/ShiftsPage.tsx` — ~400 righe
 - `frontend/src/lib/api.ts` — aggiunte API: getSavedShifts, deleteSavedShift, getShiftTimeline, getWeeklyShifts, deleteWeeklyShift + tutti i types
 - `frontend/src/App.tsx` — route /turni punta a ShiftsPage
+
+---
+
+## 2026-04-14 — Pagina Builder Turno manuale (cuore del software)
+
+### Funzionalità implementate
+- **Configurazione**: selezione deposito (25 depositi), tipo giorno (LV/SAB/DOM), tipo accessori (Standard/Maggiorato/CVL), toggle FR
+- **Ricerca treni**: per numero (DB locale) con risultati cliccabili per aggiunta
+- **Connessioni intelligenti**: tab "Connessioni da [ultima stazione]" appare automaticamente dopo il primo treno
+- **Lista treni nel turno**: con orari, stazioni, bottone VET (vettura/deadhead), bottone rimuovi
+- **Validazione real-time**: si aggiorna automaticamente (300ms debounce) ad ogni modifica
+  - Prestazione con limite max (8h30)
+  - Condotta con limite max (5h30)
+  - Refezione, Accessori
+  - Violazioni con messaggi dettagliati
+  - Badge "Valido" verde o "N violazioni" rosso
+- **Timeline visiva**: barra colorata + lista blocchi dettagliata (Extra, Accessori, Treno, Refezione, Spostamento, Giro materiale) con orari e durate
+- **Rientro deposito**: segnala automaticamente se manca il treno di rientro
+- **Salvataggio**: campo nome + bottone "Salva turno" con feedback (spinner, "Salvato" verde)
+- **Layout**: due colonne — builder a sinistra, pannello validazione sticky a destra
+
+### File
+- `frontend/src/pages/BuilderPage.tsx` — ~500 righe, pagina completa
+- `frontend/src/lib/api.ts` — aggiunte: validateDayWithTimeline, getConnections, saveShift, AppConstants type
+- `frontend/src/App.tsx` — route /builder
+- `frontend/src/components/Sidebar.tsx` — aggiunta voce "Nuovo turno" con icona PlusCircle

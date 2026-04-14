@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Search,
   ClipboardList,
+  PlusCircle,
   Calendar,
   Upload,
   Settings,
@@ -21,6 +22,7 @@ const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard", shortcut: "D" },
   { to: "/treni", icon: Search, label: "Cerca treni", shortcut: "S" },
   { to: "/turni", icon: ClipboardList, label: "Turni", shortcut: "T" },
+  { to: "/builder", icon: PlusCircle, label: "Nuovo turno", shortcut: "N" },
   { to: "/calendario", icon: Calendar, label: "Calendario", shortcut: "C" },
   { to: "/import", icon: Upload, label: "Import", shortcut: "I" },
 ]

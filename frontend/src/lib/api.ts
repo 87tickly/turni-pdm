@@ -101,8 +101,118 @@ export async function getDbInfo() {
 
 // ── Constants ─────────────────────────────────────────────────────
 
+export interface AppConstants {
+  MAX_PRESTAZIONE_MIN: number
+  MAX_CONDOTTA_MIN: number
+  TARGET_CONDOTTA_MIN: number
+  MEAL_MIN: number
+  EXTRA_START_MIN: number
+  EXTRA_END_MIN: number
+  ACCESSORY_OPTIONS: Record<string, { label: string; start: number; end: number }>
+  DEPOSITI: string[]
+  FR_STATIONS: string[]
+  [key: string]: unknown
+}
+
 export async function getConstants() {
-  return api.get<Record<string, unknown>>("/constants")
+  return api.get<AppConstants>("/constants")
+}
+
+// ── Validazione giornata ─────────────────────────────────────────
+
+export interface Violation {
+  rule: string
+  message: string
+  severity: string
+}
+
+export interface ValidateDayResult {
+  prestazione_min: number
+  prestazione: string
+  limite_prestazione: string
+  condotta_min: number
+  condotta: string
+  limite_condotta: string
+  meal_min: number
+  accessori_min: number
+  tempi_medi_min: number
+  extra_min: number
+  night_minutes: number
+  day_type: string
+  presentation_time: string
+  end_time: string
+  is_fr: boolean
+  last_station: string
+  meal_start: string | null
+  meal_end: string | null
+  segments: TrainSegment[]
+  timeline: TimelineBlock[]
+  violations: Violation[]
+  valid: boolean
+}
+
+export async function validateDayWithTimeline(params: {
+  train_ids: string[]
+  deposito: string
+  accessory_type?: string
+  deadhead_ids?: string[]
+  is_fr?: boolean
+}) {
+  return api.post<ValidateDayResult>("/validate-day-with-timeline", {
+    ...params,
+    include_timeline: true,
+  })
+}
+
+// ── Connections (treni in partenza da stazione) ──────────────────
+
+export interface Connection {
+  train_id: string
+  from_station: string
+  to_station: string
+  dep_time: string
+  arr_time: string
+  giro_next: string | null
+  giro_turn: string | null
+}
+
+export async function getConnections(params: {
+  from_station: string
+  after_time?: string
+  to_station?: string
+  day_type?: string
+  exclude?: string
+}) {
+  const qs = new URLSearchParams()
+  qs.set("from_station", params.from_station)
+  if (params.after_time) qs.set("after_time", params.after_time)
+  if (params.to_station) qs.set("to_station", params.to_station)
+  if (params.day_type) qs.set("day_type", params.day_type)
+  if (params.exclude) qs.set("exclude", params.exclude)
+  return api.get<{ connections: Connection[]; count: number }>(`/connections?${qs}`)
+}
+
+// ── Salvataggio turno ────────────────────────────────────────────
+
+export async function saveShift(params: {
+  name: string
+  deposito: string
+  day_type: string
+  train_ids: string[]
+  deadhead_ids?: string[]
+  prestazione_min: number
+  condotta_min: number
+  meal_min: number
+  accessori_min: number
+  extra_min: number
+  is_fr: boolean
+  last_station: string
+  violations: Violation[]
+  accessory_type: string
+  presentation_time: string
+  end_time: string
+}) {
+  return api.post<{ id: number; status: string }>("/save-shift", params)
 }
 
 // ── Treni (DB locale) ────────────────────────────────────────────
