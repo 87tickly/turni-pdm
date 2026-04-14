@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom"
 import { Layout } from "@/components/Layout"
 import { LoginPage } from "@/pages/LoginPage"
 import { DashboardPage } from "@/pages/DashboardPage"
+import { TrainSearchPage } from "@/pages/TrainSearchPage"
 import { PlaceholderPage } from "@/pages/PlaceholderPage"
 
 export default function App() {
@@ -11,7 +12,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route element={<Layout />}>
           <Route index element={<DashboardPage />} />
-          <Route path="treni" element={<PlaceholderPage title="Ricerca Treni" />} />
+          <Route path="treni" element={<TrainSearchPage />} />
           <Route path="turni" element={<PlaceholderPage title="Gestione Turni" />} />
           <Route path="calendario" element={<PlaceholderPage title="Calendario" />} />
           <Route path="import" element={<PlaceholderPage title="Import PDF" />} />

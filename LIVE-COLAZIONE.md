@@ -156,3 +156,24 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 - **Dashboard**: stat cards con accent colorati (blu/verde/giallo), badge "Operativo" pill, turni materiale con hover effect
 - **Login**: sfondo scuro con glow blu diffuso, icona treno in contenitore con bordo primary, input scuri con focus ring blu, spinner nel bottone durante loading
 - **Placeholder**: icona in contenitore muted, testo minimale
+
+---
+
+## 2026-04-14 — Pagina Cerca Treni (prima pagina operativa)
+
+### Funzionalità implementate
+- **Ricerca per numero treno**: cerca nel DB locale, mostra segmenti (stazione A → B, orari)
+- **Dettaglio real-time espandibile**: pannello "Dati real-time (ARTURO Live)" con stato treno, operatore, ritardo, 14 fermate con orari arr/dep/binario/ritardo
+- **Giro materiale**: se il treno ha un giro materiale nel DB, mostra la catena con posizione evidenziata
+- **Ricerca per stazione**: autocomplete via ARTURO Live (nome stazione → suggerimenti con codice)
+- **Partenze/Arrivi**: tabellone con numero treno, categoria, destinazione, operatore, orario, ritardo
+
+### File
+- `frontend/src/pages/TrainSearchPage.tsx` — ~450 righe, pagina completa
+- `frontend/src/lib/api.ts` — aggiunte API: queryTrain, queryStation, listStations, getGiroChain, vtAutocompleteStation, vtDepartures, vtArrivals, vtTrainInfo
+- `frontend/src/App.tsx` — route /treni punta a TrainSearchPage
+
+### Note tecniche
+- Due fonti dati separate: DB locale (dati PDF statici) e ARTURO Live (real-time)
+- Nessuna "allucinazione": mostra solo dati dalle API, non inventa nulla
+- Autocomplete stazione supporta nodi aggregati (node:milano = tutte le stazioni di Milano)
