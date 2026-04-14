@@ -336,6 +336,34 @@ class Database:
             "ALTER TABLE weekly_shift ADD COLUMN user_id INTEGER DEFAULT NULL"
         )
 
+        # ── Tabella depot (multi-deposito) ──
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS depot (
+                id {pk},
+                code TEXT NOT NULL UNIQUE,
+                display_name TEXT DEFAULT '',
+                company TEXT DEFAULT 'trenord',
+                active INTEGER DEFAULT 1
+            )
+        """)
+
+        # Migrazioni: aggiunta depot_id alle tabelle esistenti
+        self._run_migration(
+            "SELECT depot_id FROM material_turn LIMIT 1",
+            "ALTER TABLE material_turn ADD COLUMN depot_id INTEGER REFERENCES depot(id)"
+        )
+        self._run_migration(
+            "SELECT depot_id FROM saved_shift LIMIT 1",
+            "ALTER TABLE saved_shift ADD COLUMN depot_id INTEGER REFERENCES depot(id)"
+        )
+        self._run_migration(
+            "SELECT depot_id FROM weekly_shift LIMIT 1",
+            "ALTER TABLE weekly_shift ADD COLUMN depot_id INTEGER REFERENCES depot(id)"
+        )
+
+        # Auto-seed depot dalla configurazione attiva
+        self._seed_depots()
+
         # ── Admin seed ──
         self._seed_admin()
 
@@ -358,23 +386,52 @@ class Database:
                 self.conn.execute(self._q(sql))
             self.conn.commit()
 
+    def _seed_depots(self):
+        """Popola la tabella depot dalla configurazione aziendale attiva.
+        Aggiunge solo i depositi mancanti, non rimuove quelli esistenti."""
+        from config.loader import get_active_config
+        cfg = get_active_config()
+        cur = self._cursor()
+        for code in cfg.depots:
+            try:
+                cur.execute(
+                    self._q(
+                        "INSERT INTO depot (code, display_name, company) "
+                        "VALUES (?, ?, ?)"
+                    ),
+                    (code, code, cfg.company_code or cfg.company_name),
+                )
+            except Exception:
+                pass  # UNIQUE constraint — deposito già presente
+        self.conn.commit()
+
     def _seed_admin(self):
-        """Se la tabella users e' vuota, inserisce l'utente admin di default."""
+        """Se la tabella users e' vuota, inserisce l'utente admin di default.
+        La password viene letta da ADMIN_DEFAULT_PASSWORD env var.
+        Se non impostata, genera una password random e la stampa in console."""
         cur = self._cursor()
         cur.execute("SELECT COUNT(*) as cnt FROM users")
         row = cur.fetchone()
         count = row["cnt"] if isinstance(row, dict) else row[0]
         if count == 0:
             import bcrypt
-            password_hash = bcrypt.hashpw("Manu1982!".encode(), bcrypt.gensalt()).decode()
+            import secrets
+            admin_password = os.environ.get("ADMIN_DEFAULT_PASSWORD")
+            if not admin_password:
+                admin_password = secrets.token_urlsafe(16)
+                print(f"[ADMIN] Password admin generata: {admin_password}")
+                print("[ADMIN] Imposta ADMIN_DEFAULT_PASSWORD env var per fissarla.")
+            admin_username = os.environ.get("ADMIN_USERNAME", "admin")
+            password_hash = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt()).decode()
             cur.execute(
                 self._q(
                     "INSERT INTO users (username, password_hash, is_admin, created_at) "
                     "VALUES (?, ?, ?, ?)"
                 ),
-                ("anto", password_hash, 1, datetime.now().isoformat()),
+                (admin_username, password_hash, 1, datetime.now().isoformat()),
             )
             self.conn.commit()
+            print(f"[ADMIN] Utente admin '{admin_username}' creato.")
 
     # ------------------------------------------------------------------
     # USER METHODS
