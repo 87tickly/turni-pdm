@@ -7,8 +7,11 @@ export function Layout() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-muted-foreground text-sm">Caricamento...</div>
+      <div className="flex items-center justify-center h-screen bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-[13px] text-muted-foreground">Caricamento...</p>
+        </div>
       </div>
     )
   }
@@ -18,14 +21,16 @@ export function Layout() {
   }
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen bg-background">
       <Sidebar
         username={user.username}
         isAdmin={user.is_admin}
         onLogout={logout}
       />
-      <main className="flex-1 ml-60 p-8">
-        <Outlet />
+      <main className="flex-1 ml-56">
+        <div className="max-w-6xl mx-auto px-8 py-6">
+          <Outlet />
+        </div>
       </main>
     </div>
   )

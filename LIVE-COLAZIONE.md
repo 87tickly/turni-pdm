@@ -134,3 +134,25 @@ frontend/src/
 ### Build verificata
 - `tsc --noEmit` → 0 errori
 - `npm run build` → 272KB JS + 15KB CSS
+
+---
+
+## 2026-04-14 — Redesign frontend: dark theme professionale
+
+### Problema
+Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/template. Bocciato dall'utente.
+
+### Nuovo design system
+- **Palette scura** ispirata a Linear/Raycast: background #0a0a0b, card #131316, border #27272a
+- **Accent blu elettrico** ARTURO (#3b82f6) con varianti hover/muted
+- **Colori semantici** con varianti muted (success, warning, info, destructive)
+- **Font**: Inter con font-features cv02/cv03/cv04/cv11
+- **Scrollbar minimale** custom
+- **Glow effect** su login page
+
+### Componenti rifatti
+- **Sidebar**: più compatta (w-56), icona brand con badge blu, sezioni Menu/Sistema, shortcut keyboard visibili on hover, avatar utente con iniziale
+- **Layout**: spinner di caricamento animato, max-w-6xl centrato
+- **Dashboard**: stat cards con accent colorati (blu/verde/giallo), badge "Operativo" pill, turni materiale con hover effect
+- **Login**: sfondo scuro con glow blu diffuso, icona treno in contenitore con bordo primary, input scuri con focus ring blu, spinner nel bottone durante loading
+- **Placeholder**: icona in contenitore muted, testo minimale
