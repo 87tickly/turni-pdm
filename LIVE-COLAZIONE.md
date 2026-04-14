@@ -177,3 +177,23 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 - Due fonti dati separate: DB locale (dati PDF statici) e ARTURO Live (real-time)
 - Nessuna "allucinazione": mostra solo dati dalle API, non inventa nulla
 - Autocomplete stazione supporta nodi aggregati (node:milano = tutte le stazioni di Milano)
+
+---
+
+## 2026-04-14 — Pagina Turni salvati con timeline visiva
+
+### Funzionalità implementate
+- **Lista turni salvati** con filtro per tipo giorno (Tutti/LV/SAB/DOM)
+- **Card turno espandibile**: nome, deposito, tipo giorno, numero treni, badge FR, conteggio violazioni
+- **Stats in card**: prestazione (ore:min), condotta, orario inizio/fine
+- **Timeline visiva**: barra colorata proporzionale con blocchi (treno, vettura, refezione, accessori, extra, spostamento, giro materiale)
+- **Dettaglio timeline**: lista blocchi con tipo, label, orari, durata
+- **Legenda colori**: 7 tipi blocco con colori distinti
+- **Violazioni**: lista con icona e messaggio
+- **Eliminazione**: conferma prima di cancellare
+- **Stato vuoto**: placeholder quando non ci sono turni
+
+### File
+- `frontend/src/pages/ShiftsPage.tsx` — ~400 righe
+- `frontend/src/lib/api.ts` — aggiunte API: getSavedShifts, deleteSavedShift, getShiftTimeline, getWeeklyShifts, deleteWeeklyShift + tutti i types
+- `frontend/src/App.tsx` — route /turni punta a ShiftsPage

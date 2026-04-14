@@ -229,3 +229,98 @@ export interface VtTrainInfo {
 export async function vtTrainInfo(trainNumber: number) {
   return api.get<VtTrainInfo>(`/vt/train-info?train_number=${trainNumber}`)
 }
+
+// ── Turni salvati ────────────────────────────────────────────────
+
+export interface SavedShift {
+  id: number
+  name: string
+  deposito: string
+  day_type: string
+  created_at: string
+  train_ids: string[] | string
+  deadhead_ids: string[] | string
+  prestazione_min: number
+  condotta_min: number
+  meal_min: number
+  accessori_min: number
+  extra_min: number
+  is_fr: number | boolean
+  last_station: string
+  violations: string | Array<{ rule: string; message: string; severity: string }>
+  accessory_type: string
+  presentation_time: string
+  end_time: string
+  user_id: number
+}
+
+export async function getSavedShifts(dayType?: string) {
+  const params = dayType ? `?day_type=${dayType}` : ""
+  return api.get<{ shifts: SavedShift[]; count: number }>(`/saved-shifts${params}`)
+}
+
+export async function deleteSavedShift(shiftId: number) {
+  return api.delete<{ status: string }>(`/saved-shift/${shiftId}`)
+}
+
+export interface TimelineBlock {
+  type: string
+  label: string
+  detail?: string
+  train_id?: string
+  start: number
+  end: number
+  start_time: string
+  end_time: string
+  duration: number
+  from_station: string
+  to_station: string
+  is_deadhead?: boolean
+}
+
+export interface ShiftTimeline {
+  shift_id: number
+  name: string
+  deposito: string
+  prestazione_min: number
+  condotta_min: number
+  meal_min: number
+  accessori_min: number
+  extra_min: number
+  presentation_time: string
+  end_time: string
+  is_fr: boolean
+  last_station: string
+  timeline: TimelineBlock[]
+  segments: TrainSegment[]
+  violations: Array<{ rule: string; message: string; severity: string }>
+}
+
+export async function getShiftTimeline(shiftId: number) {
+  return api.get<ShiftTimeline>(`/saved-shift/${shiftId}/timeline`)
+}
+
+// ── Turni settimanali ────────────────────────────────────────────
+
+export interface WeeklyShift {
+  id: number
+  name: string
+  deposito: string
+  created_at: string
+  num_days: number
+  weekly_prestazione_min: number
+  weekly_condotta_min: number
+  weighted_hours_per_day: number
+  accessory_type: string
+  notes: string
+  user_id: number
+  days?: Array<Record<string, unknown>>
+}
+
+export async function getWeeklyShifts() {
+  return api.get<{ shifts: WeeklyShift[] }>("/weekly-shifts")
+}
+
+export async function deleteWeeklyShift(weeklyId: number) {
+  return api.delete<{ message: string }>(`/weekly-shift/${weeklyId}`)
+}
