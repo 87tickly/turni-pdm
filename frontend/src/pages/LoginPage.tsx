@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react"
 import { useNavigate } from "react-router-dom"
 import { login, register } from "@/lib/api"
-import { Train } from "lucide-react"
+import { Logo } from "@/components/Logo"
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -37,12 +37,9 @@ export function LoginPage() {
 
       <div className="relative w-full max-w-sm">
         {/* Brand */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 mb-4">
-            <Train size={22} className="text-primary" />
-          </div>
-          <h1 className="text-xl font-semibold tracking-tight">COLAZIONE</h1>
-          <p className="text-[13px] text-muted-foreground mt-1">
+        <div className="flex flex-col items-center mb-8">
+          <Logo size="lg" />
+          <p className="text-[13px] text-muted-foreground mt-2">
             Gestionale Turni PDM
           </p>
         </div>

@@ -223,3 +223,33 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 - `frontend/src/lib/api.ts` — aggiunte: validateDayWithTimeline, getConnections, saveShift, AppConstants type
 - `frontend/src/App.tsx` — route /builder
 - `frontend/src/components/Sidebar.tsx` — aggiunta voce "Nuovo turno" con icona PlusCircle
+
+---
+
+## 2026-04-15 — Rebrand ARTURO + Timeline Gantt
+
+### Brand ARTURO applicato
+- **Font Exo 2** (variable, weight 100-900) — self-hosted da /public/fonts/
+- **Colori brand**: #0062CC (primario), #0070B5 (secondario), #30D158 (dot verde), #38BDF8 (accent)
+- **Palette dark**: background #0A0F1A, card #111827, text #F1F5F9, muted #94A3B8
+- **Logo COLAZIONE**: componente React con font Exo 2 black + dot verde pulsante (stile ARTURO Live/Business)
+- Animazione `pulse-dot` per il pallino verde
+
+### Timeline Gantt orizzontale (stile PDF Trenord)
+- Componente SVG `GanttTimeline` con griglia oraria 3→24→3
+- Barre proporzionali per durata blocchi
+- Testo verticale sopra le barre (numero treno + stazione)
+- Linee tratteggiate per attese/spostamenti/refezione
+- Colonne totali a destra: Lav, Cct, Km, Not, Rip
+- Label giornata a sinistra (LV, SAB, DOM) con orari [inizio][fine]
+- Deposito mostrato come label
+- Wrapper `GanttFromValidation` per conversione dati validazione → Gantt
+
+### File creati/modificati
+- `frontend/public/fonts/Exo2-Variable.ttf`, `Exo2-Italic-Variable.ttf` — font self-hosted
+- `frontend/src/index.css` — palette brand ARTURO + @font-face Exo 2
+- `frontend/src/components/Logo.tsx` — NUOVO: logo COLAZIONE stile ARTURO
+- `frontend/src/components/GanttTimeline.tsx` — NUOVO: timeline Gantt SVG
+- `frontend/src/components/Sidebar.tsx` — usa Logo component
+- `frontend/src/pages/LoginPage.tsx` — usa Logo component
+- `frontend/src/pages/BuilderPage.tsx` — usa GanttFromValidation al posto delle barre colorate

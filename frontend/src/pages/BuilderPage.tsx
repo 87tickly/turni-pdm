@@ -9,12 +9,12 @@ import {
   CheckCircle,
   Train,
   MapPin,
-  Clock,
   ArrowRight,
   Moon,
   ChevronDown,
 } from "lucide-react"
 import { cn, fmtMin } from "@/lib/utils"
+import { GanttFromValidation } from "@/components/GanttTimeline"
 import {
   getConstants,
   queryTrain,
@@ -27,51 +27,6 @@ import {
   type TimelineBlock,
   type Violation,
 } from "@/lib/api"
-
-// ── Timeline bar (reused from ShiftsPage pattern) ────────────────
-
-const BLOCK_COLORS: Record<string, string> = {
-  extra: "bg-zinc-700",
-  accessori: "bg-zinc-600",
-  train: "bg-primary",
-  deadhead: "bg-amber-600",
-  attesa: "bg-zinc-800",
-  meal: "bg-emerald-600",
-  spostamento: "bg-cyan-600",
-  giro_return: "bg-violet-600",
-}
-
-function MiniTimeline({ blocks }: { blocks: TimelineBlock[] }) {
-  if (!blocks.length) return null
-  const minStart = Math.min(...blocks.map((b) => b.start))
-  const maxEnd = Math.max(...blocks.map((b) => b.end))
-  const span = maxEnd - minStart
-  if (span <= 0) return null
-
-  return (
-    <div className="space-y-1.5">
-      <div className="relative h-6 bg-muted rounded overflow-hidden">
-        {blocks.map((b, i) => {
-          const left = ((b.start - minStart) / span) * 100
-          const w = ((b.end - b.start) / span) * 100
-          if (w < 0.3) return null
-          return (
-            <div
-              key={i}
-              className={cn("absolute top-0 h-full", BLOCK_COLORS[b.type] || "bg-zinc-500")}
-              style={{ left: `${left}%`, width: `${Math.max(w, 0.5)}%` }}
-              title={`${b.label} ${b.start_time}–${b.end_time}`}
-            />
-          )
-        })}
-      </div>
-      <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
-        <span>{blocks[0]?.start_time}</span>
-        <span>{blocks[blocks.length - 1]?.end_time}</span>
-      </div>
-    </div>
-  )
-}
 
 // ── Stat pill ────────────────────────────────────────────────────
 
@@ -528,52 +483,19 @@ export function BuilderPage() {
           </div>
         )}
 
-        {/* Timeline */}
+        {/* Gantt Timeline */}
         {validation && validation.timeline.length > 0 && (
-          <div className="bg-card rounded-lg border border-border-subtle p-3 space-y-3">
-            <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">
-              Timeline giornata
-            </p>
-            <MiniTimeline blocks={validation.timeline} />
-
-            {/* Block list */}
-            <div className="space-y-0.5">
-              {validation.timeline.map((b, i) => (
-                <div
-                  key={i}
-                  className="grid grid-cols-[8px_1fr_48px_48px_40px] items-center gap-2 py-1 px-1 text-[11px]"
-                >
-                  <div className={cn("w-2 h-2 rounded-full", BLOCK_COLORS[b.type] || "bg-zinc-500")} />
-                  <span className="truncate">
-                    {b.label}
-                    {b.detail && <span className="text-muted-foreground ml-1">{b.detail}</span>}
-                  </span>
-                  <span className="font-mono text-muted-foreground text-right text-[10px]">
-                    {b.start_time}
-                  </span>
-                  <span className="font-mono text-right text-[10px]">{b.end_time}</span>
-                  <span className="text-right text-[10px] text-muted-foreground">
-                    {b.duration}m
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {/* Legend */}
-            <div className="flex flex-wrap gap-2.5 pt-1 border-t border-border-subtle text-[9px] text-muted-foreground">
-              {[
-                { c: "bg-primary", l: "Treno" },
-                { c: "bg-amber-600", l: "Vettura" },
-                { c: "bg-emerald-600", l: "Refez." },
-                { c: "bg-zinc-600", l: "Acc." },
-                { c: "bg-cyan-600", l: "Spost." },
-              ].map(({ c, l }) => (
-                <span key={l} className="flex items-center gap-1">
-                  <span className={cn("w-2 h-2 rounded-sm", c)} />
-                  {l}
-                </span>
-              ))}
-            </div>
+          <div className="bg-card rounded-lg border border-border-subtle p-3">
+            <GanttFromValidation
+              blocks={validation.timeline}
+              dayLabel={dayType}
+              presentationTime={validation.presentation_time}
+              endTime={validation.end_time}
+              prestazioneMin={validation.prestazione_min}
+              condottaMin={validation.condotta_min}
+              isNotturno={validation.night_minutes > 0}
+              deposito={deposito}
+            />
           </div>
         )}
       </div>

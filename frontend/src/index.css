@@ -1,50 +1,74 @@
 @import "tailwindcss";
 
-@theme {
-  /* ── Palette scura — ispirata a Linear/Raycast ── */
-  --color-background: #0a0a0b;
-  --color-foreground: #e4e4e7;
-  --color-card: #131316;
-  --color-card-foreground: #e4e4e7;
-  --color-card-hover: #1a1a1f;
-  --color-muted: #1c1c21;
-  --color-muted-foreground: #71717a;
-  --color-border: #27272a;
-  --color-border-subtle: #1e1e23;
-  --color-input: #27272a;
-  --color-ring: #3b82f6;
+/* ── Font Exo 2 Variable ── */
+@font-face {
+  font-family: "Exo 2";
+  src: url("/fonts/Exo2-Variable.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Exo 2";
+  src: url("/fonts/Exo2-Italic-Variable.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
 
-  /* Accent — blu elettrico ARTURO */
-  --color-primary: #3b82f6;
-  --color-primary-foreground: #ffffff;
-  --color-primary-hover: #2563eb;
-  --color-secondary: #1c1c21;
-  --color-secondary-foreground: #a1a1aa;
-  --color-accent: #1c1c21;
-  --color-accent-foreground: #e4e4e7;
+@theme {
+  /* ── Brand ARTURO ── */
+  --color-brand: #0062CC;
+  --color-brand-secondary: #0070B5;
+  --color-dot: #22C55E;
+
+  /* ── Dark palette ── */
+  --color-background: #0A0F1A;
+  --color-foreground: #F1F5F9;
+  --color-card: #111827;
+  --color-card-foreground: #F1F5F9;
+  --color-card-hover: #1a2332;
+  --color-muted: #1e293b;
+  --color-muted-foreground: #94A3B8;
+  --color-border: #1e293b;
+  --color-border-subtle: #172033;
+  --color-input: #1e293b;
+  --color-ring: #38BDF8;
+
+  /* Accent */
+  --color-primary: #38BDF8;
+  --color-primary-foreground: #0A0F1A;
+  --color-primary-hover: #0ea5e9;
+  --color-secondary: #1e293b;
+  --color-secondary-foreground: #94A3B8;
+  --color-accent: #0070B5;
+  --color-accent-foreground: #F1F5F9;
 
   /* Semantic */
-  --color-destructive: #ef4444;
+  --color-destructive: #EF4444;
   --color-destructive-foreground: #ffffff;
-  --color-success: #22c55e;
-  --color-success-muted: #22c55e33;
-  --color-warning: #f59e0b;
-  --color-warning-muted: #f59e0b33;
-  --color-info: #3b82f6;
-  --color-info-muted: #3b82f633;
+  --color-success: #22C55E;
+  --color-success-muted: #22c55e22;
+  --color-warning: #F59E0B;
+  --color-warning-muted: #f59e0b22;
+  --color-info: #38BDF8;
+  --color-info-muted: #38bdf822;
+  --color-cta: #2DD464;
 
   /* Sidebar */
-  --color-sidebar: #0d0d0f;
-  --color-sidebar-foreground: #e4e4e7;
-  --color-sidebar-accent: #1a1a1f;
-  --color-sidebar-muted: #52525b;
-  --color-sidebar-border: #1e1e23;
+  --color-sidebar: #070b14;
+  --color-sidebar-foreground: #F1F5F9;
+  --color-sidebar-accent: #111827;
+  --color-sidebar-muted: #64748b;
+  --color-sidebar-border: #172033;
 
   /* Radii */
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
   --radius-xl: 1rem;
+
+  --font-sans: "Exo 2", ui-sans-serif, system-ui, sans-serif;
 }
 
 @layer base {
@@ -55,21 +79,18 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
-    font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
-      "Segoe UI", system-ui, sans-serif;
+    font-family: var(--font-sans);
     font-size: 14px;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
   ::selection {
-    background-color: var(--color-primary);
+    background-color: var(--color-brand);
     color: white;
   }
 
-  /* Scrollbar minimale */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -78,20 +99,19 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: #27272a;
+    background: #1e293b;
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #3f3f46;
+    background: #334155;
   }
 }
 
-/* ── Utility classes ── */
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
-  .glow-sm {
-    box-shadow: 0 0 15px -3px var(--color-primary);
-  }
+/* ── Logo dot animation ── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
 }
