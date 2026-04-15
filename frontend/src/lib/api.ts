@@ -1,7 +1,14 @@
 /**
  * Client API per il backend COLAZIONE.
  * Gestisce autenticazione JWT e chiamate HTTP.
+ *
+ * In Tauri (desktop): le fetch vanno a http://localhost:8002
+ * In browser (dev/prod): le fetch vanno a path relativi (proxy Vite o stesso server)
  */
+
+// Rileva se siamo in Tauri (desktop app)
+const IS_TAURI = typeof window !== "undefined" && "__TAURI__" in window
+const API_BASE = IS_TAURI ? "http://localhost:8002" : ""
 
 const TOKEN_KEY = "colazione_token"
 
@@ -30,7 +37,8 @@ async function request<T>(
     headers["Authorization"] = `Bearer ${token}`
   }
 
-  const res = await fetch(url, { ...options, headers })
+  const fullUrl = url.startsWith("http") ? url : `${API_BASE}${url}`
+  const res = await fetch(fullUrl, { ...options, headers })
 
   if (res.status === 401) {
     clearToken()
