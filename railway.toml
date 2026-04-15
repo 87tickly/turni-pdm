@@ -1,6 +1,5 @@
 [build]
 builder = "nixpacks"
-buildCommand = "cd frontend && npm install && npm run build && cd .."
 nixpacksConfigPath = "nixpacks.toml"
 
 [deploy]
