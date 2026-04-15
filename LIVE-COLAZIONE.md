@@ -413,3 +413,32 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 - **Testo più grande e grassetto**: fontSize 11, fontWeight 900 per label treni
 - **Durata** mostrata solo per blocchi treno (non accessori/extra)
 - **Rimossi orari duplicati** sotto l'asse per evitare sovrapposizioni con numeri griglia
+
+---
+
+## 2026-04-15 — Deploy Railway risolto
+
+### Problemi risolti
+1. **`pip: command not found`**: `nixPkgs` custom sovrascriveva i default di nixpacks, rimuovendo Python
+2. **`No module named pip`**: `python312Full` non bastava, il problema era nelle `cmds` custom
+3. **Upload timeout CLI**: repo troppo grande (1.2GB per `src-tauri/target/`)
+4. **`self.conn.execute()` su psycopg2**: PostgreSQL richiede `cursor().execute()`, fix in `db.py`
+
+### Soluzione finale
+- **Rimosso `nixpacks.toml`** completamente — nixpacks auto-rileva Python da `requirements.txt`
+- **`railway.toml`** minimale: solo `startCommand` per uvicorn
+- **`frontend/dist/`** committato nel repo (rimosso da `.gitignore` e `frontend/.gitignore`)
+- **`.dockerignore`** creato: esclude `src-tauri/target/` (863MB), `node_modules/`, `frontend/src/`
+- **Fix `db.py`**: `self.conn.cursor().execute()` in `_run_migration()` per compatibilità psycopg2
+
+### Stato deploy
+- Servizio: **Arturo-Turni** su Railway (progetto `affectionate-embrace` era sbagliato)
+- URL: **web-production-0e9b9b.up.railway.app**
+- Auto-deploy da GitHub attivo
+- DB: PostgreSQL su Railway (separato da SQLite locale)
+
+### Workflow aggiornato
+1. Modifica codice frontend
+2. `cd frontend && npm run build` per aggiornare `frontend/dist/`
+3. `git add frontend/dist/ ...` + commit + push
+4. Railway auto-deploya da GitHub
