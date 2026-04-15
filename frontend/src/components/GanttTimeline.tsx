@@ -75,7 +75,6 @@ export function GanttTimeline({
 
   // ── Scala FISSA 0-24 ──
   const startHour = 0
-  const endHour = 24
   const spanHours = 24
 
   // Layout
