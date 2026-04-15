@@ -383,7 +383,7 @@ class Database:
                 self.conn.cursor().execute("ROLLBACK TO SAVEPOINT migration_check")
                 self.conn.cursor().execute("RELEASE SAVEPOINT migration_check")
             for sql in alter_sqls:
-                self.conn.execute(self._q(sql))
+                self.conn.cursor().execute(self._q(sql))
             self.conn.commit()
 
     def _seed_depots(self):
