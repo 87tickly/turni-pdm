@@ -1,70 +1,56 @@
-import { cn } from "@/lib/utils"
 import type { TimelineBlock } from "@/lib/api"
 
 /**
  * Timeline Gantt orizzontale stile PDF Trenord.
- * - Asse orario 3→4→...→24→1→2→3 in basso
- * - Barre proporzionali per durata
- * - Testo verticale sopra le barre (numero treno + stazione)
- * - Linee tratteggiate per attese/spostamenti
- * - Totali a destra
+ * Scala DINAMICA: mostra solo le ore rilevanti al turno.
+ * Barre grandi con testo verticale (treno + stazione).
+ * Deposito a inizio e fine. Totali a destra.
  */
 
 interface GanttTimelineProps {
   blocks: TimelineBlock[]
-  dayLabel?: string          // es. "LMXGVSD", "D", "SD"
-  dayNumber?: number         // es. 1, 2, 3
-  presentationTime?: string  // es. "18:20"
-  endTime?: string           // es. "00:25"
-  prestazione?: string       // es. "06:05"
-  condotta?: string          // es. "03:22"
+  dayLabel?: string
+  dayNumber?: number
+  presentationTime?: string
+  endTime?: string
+  prestazione?: string
+  condotta?: string
   km?: number
   notturno?: boolean
-  riposo?: string            // es. "15:45"
+  riposo?: string
   deposito?: string
 }
 
-// Orario → posizione X sulla griglia (3:00 = inizio)
-const GRID_START_HOUR = 3 // la griglia parte dalle 3:00
-const TOTAL_HOURS = 24
-const GRID_LEFT = 80   // px margine sinistro (per label giornata)
-const GRID_RIGHT = 180 // px margine destro (per totali)
-const GRID_WIDTH = 900 // px area griglia
-const ROW_HEIGHT = 100  // px altezza riga
-const BAR_Y = 55       // y posizione barre
-const BAR_HEIGHT = 14   // altezza barre
-const HOUR_WIDTH = GRID_WIDTH / TOTAL_HOURS // ~37.5 px/ora
-
-function minToGridX(minutes: number): number {
-  // Converti minuti dall'inizio giornata (0:00=0) in posizione sulla griglia
-  let hours = minutes / 60
-  // La griglia parte da 3:00, quindi shifta
-  hours = hours - GRID_START_HOUR
-  if (hours < 0) hours += 24
-  return GRID_LEFT + hours * HOUR_WIDTH
+const FONT = "'Exo 2', sans-serif"
+const COL = {
+  text: "#F1F5F9",
+  muted: "#94A3B8",
+  dim: "#64748b",
+  grid: "#334155",
+  gridFaint: "#1e293b",
+  bg: "transparent",
 }
 
-// Tipo blocco → stile
-function blockStyle(type: string): { fill: string; stroke: string; dash: boolean; label: boolean } {
+function blockStyle(type: string) {
   switch (type) {
     case "train":
-      return { fill: "#F1F5F9", stroke: "#F1F5F9", dash: false, label: true }
+      return { fill: COL.text, dash: false, showLabel: true }
     case "deadhead":
-      return { fill: "#64748b", stroke: "#94A3B8", dash: false, label: true }
+      return { fill: "#64748b", dash: false, showLabel: true }
     case "meal":
-      return { fill: "none", stroke: "#94A3B8", dash: true, label: true }
+      return { fill: "none", dash: true, showLabel: true }
     case "attesa":
-      return { fill: "none", stroke: "#334155", dash: true, label: false }
+      return { fill: "none", dash: true, showLabel: false }
     case "accessori":
-      return { fill: "#334155", stroke: "#334155", dash: false, label: false }
+      return { fill: "#334155", dash: false, showLabel: false }
     case "extra":
-      return { fill: "#1e293b", stroke: "#1e293b", dash: false, label: false }
+      return { fill: "#1e293b", dash: false, showLabel: false }
     case "spostamento":
-      return { fill: "#0070B5", stroke: "#0070B5", dash: false, label: true }
+      return { fill: "#0070B5", dash: false, showLabel: true }
     case "giro_return":
-      return { fill: "#64748b", stroke: "#94A3B8", dash: false, label: true }
+      return { fill: "#64748b", dash: false, showLabel: true }
     default:
-      return { fill: "#334155", stroke: "#334155", dash: false, label: false }
+      return { fill: "#334155", dash: false, showLabel: false }
   }
 }
 
@@ -83,166 +69,203 @@ export function GanttTimeline({
 }: GanttTimelineProps) {
   if (!blocks.length) return null
 
-  const totalW = GRID_LEFT + GRID_WIDTH + GRID_RIGHT
-  const totalH = ROW_HEIGHT + 25 // extra for hour labels
+  // ── Calcola range ore DINAMICO ──
+  const minStart = Math.min(...blocks.map((b) => b.start))
+  const maxEnd = Math.max(...blocks.map((b) => b.end))
+
+  // Arrotonda: inizia 1h prima, finisce 1h dopo
+  const startHour = Math.floor(minStart / 60) - 1
+  const endHour = Math.ceil(maxEnd / 60) + 1
+  const spanHours = endHour - startHour
+
+  // Layout
+  const LEFT_MARGIN = 80
+  const RIGHT_MARGIN = 180
+  const GRID_WIDTH = Math.max(spanHours * 55, 400) // min 55px/ora
+  const TOTAL_W = LEFT_MARGIN + GRID_WIDTH + RIGHT_MARGIN
+  const BAR_Y = 60
+  const BAR_H = 18
+  const ROW_H = 110
+  const TOTAL_H = ROW_H + 28
+  const hourWidth = GRID_WIDTH / spanHours
+
+  function minToX(minutes: number): number {
+    const hoursFromStart = minutes / 60 - startHour
+    return LEFT_MARGIN + hoursFromStart * hourWidth
+  }
+
+  // Primo e ultimo blocco con stazione (per deposito labels)
+  const firstTrainBlock = blocks.find((b) => b.type === "train" || b.type === "deadhead")
+  const lastTrainBlock = [...blocks].reverse().find((b) => b.type === "train" || b.type === "deadhead")
 
   return (
     <div className="overflow-x-auto">
       <svg
-        viewBox={`0 0 ${totalW} ${totalH}`}
-        width={totalW}
-        height={totalH}
-        className="font-sans"
-        style={{ minWidth: totalW }}
+        viewBox={`0 0 ${TOTAL_W} ${TOTAL_H}`}
+        width="100%"
+        height={TOTAL_H}
+        style={{ minWidth: Math.min(TOTAL_W, 800) }}
+        className="select-none"
       >
-        {/* ── Background ── */}
-        <rect width={totalW} height={totalH} fill="transparent" />
-
-        {/* ── Left label: day type + number ── */}
-        <text x="8" y="20" fontSize="13" fontWeight="800" fill="#F1F5F9" fontFamily="'Exo 2', sans-serif">
+        {/* ── Left: tipo giornata + numero ── */}
+        <text x="8" y="22" fontSize="14" fontWeight="800" fill={COL.text} fontFamily={FONT}>
           {dayLabel || ""}
         </text>
         {dayNumber !== undefined && (
-          <text x="8" y="50" fontSize="22" fontWeight="900" fill="#F1F5F9" fontFamily="'Exo 2', sans-serif">
+          <text x="8" y="55" fontSize="28" fontWeight="900" fill={COL.text} fontFamily={FONT}>
             {dayNumber}
           </text>
         )}
         {presentationTime && endTime && (
-          <text x="8" y="70" fontSize="10" fill="#94A3B8" fontFamily="'Exo 2', sans-serif">
+          <text x="8" y="78" fontSize="11" fill={COL.muted} fontFamily={FONT} fontWeight="600">
             [{presentationTime}] [{endTime}]
           </text>
         )}
 
-        {/* ── Deposito labels ── */}
+        {/* ── Deposito labels (inizio + fine riga) ── */}
         {deposito && (
           <>
+            {/* A sinistra, prima del primo blocco */}
             <text
-              x={GRID_LEFT - 5}
-              y={BAR_Y + BAR_HEIGHT / 2 + 4}
-              fontSize="10"
-              fontWeight="700"
-              fill="#94A3B8"
+              x={LEFT_MARGIN - 5}
+              y={BAR_Y + BAR_H / 2 + 4}
+              fontSize="11"
+              fontWeight="800"
+              fill={COL.muted}
               textAnchor="end"
-              fontFamily="'Exo 2', sans-serif"
+              fontFamily={FONT}
             >
-              {deposito.length > 8 ? deposito.slice(0, 8) : deposito}
+              {deposito.length > 10 ? deposito.slice(0, 10) : deposito}
+            </text>
+            {/* A destra, dopo l'ultimo blocco */}
+            <text
+              x={LEFT_MARGIN + GRID_WIDTH + 5}
+              y={BAR_Y + BAR_H / 2 + 4}
+              fontSize="11"
+              fontWeight="800"
+              fill={COL.muted}
+              textAnchor="start"
+              fontFamily={FONT}
+            >
+              {deposito.length > 10 ? deposito.slice(0, 10) : deposito}
             </text>
           </>
         )}
 
-        {/* ── Hour grid ── */}
-        {Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => {
-          const hour = (GRID_START_HOUR + i) % 24
-          const x = GRID_LEFT + i * HOUR_WIDTH
+        {/* ── Griglia ore ── */}
+        {Array.from({ length: spanHours + 1 }, (_, i) => {
+          const hour = ((startHour + i) % 24 + 24) % 24
+          const x = LEFT_MARGIN + i * hourWidth
           return (
             <g key={i}>
-              <line x1={x} y1={ROW_HEIGHT - 5} x2={x} y2={ROW_HEIGHT + 5} stroke="#334155" strokeWidth="1" />
-              <line x1={x} y1={20} x2={x} y2={ROW_HEIGHT - 5} stroke="#1e293b" strokeWidth="0.5" strokeDasharray="2,4" />
-              <text
-                x={x}
-                y={ROW_HEIGHT + 18}
-                fontSize="9"
-                fill="#64748b"
-                textAnchor="middle"
-                fontFamily="'Exo 2', sans-serif"
-              >
+              {/* Tick mark */}
+              <line x1={x} y1={ROW_H - 4} x2={x} y2={ROW_H + 4} stroke={COL.grid} strokeWidth="1" />
+              {/* Vertical guide */}
+              <line x1={x} y1={22} x2={x} y2={ROW_H - 4} stroke={COL.gridFaint} strokeWidth="0.5" strokeDasharray="2,4" />
+              {/* Hour label */}
+              <text x={x} y={ROW_H + 20} fontSize="10" fill={COL.dim} textAnchor="middle" fontFamily={FONT} fontWeight="600">
                 {hour}
               </text>
             </g>
           )
         })}
 
-        {/* ── Hour axis line ── */}
-        <line
-          x1={GRID_LEFT}
-          y1={ROW_HEIGHT}
-          x2={GRID_LEFT + GRID_WIDTH}
-          y2={ROW_HEIGHT}
-          stroke="#334155"
-          strokeWidth="1"
-        />
+        {/* Asse orizzontale */}
+        <line x1={LEFT_MARGIN} y1={ROW_H} x2={LEFT_MARGIN + GRID_WIDTH} y2={ROW_H} stroke={COL.grid} strokeWidth="1.5" />
 
-        {/* ── Timeline blocks ── */}
+        {/* ── Blocchi timeline ── */}
         {blocks.map((block, i) => {
-          const x1 = minToGridX(block.start)
-          const x2 = minToGridX(block.end)
+          const x1 = minToX(block.start)
+          const x2 = minToX(block.end)
           const w = x2 - x1
           const style = blockStyle(block.type)
 
-          if (w < 1 && !style.label) return null
+          if (w < 1 && !style.showLabel) return null
 
           return (
             <g key={i}>
-              {/* Bar */}
+              {/* Barra o linea tratteggiata */}
               {style.dash ? (
                 <line
-                  x1={x1}
-                  y1={BAR_Y + BAR_HEIGHT / 2}
-                  x2={x2}
-                  y2={BAR_Y + BAR_HEIGHT / 2}
-                  stroke={style.stroke}
-                  strokeWidth="2"
-                  strokeDasharray="4,3"
+                  x1={x1} y1={BAR_Y + BAR_H / 2}
+                  x2={x2} y2={BAR_Y + BAR_H / 2}
+                  stroke={COL.muted} strokeWidth="2" strokeDasharray="6,4"
                 />
               ) : (
                 <rect
-                  x={x1}
-                  y={BAR_Y}
-                  width={Math.max(w, 2)}
-                  height={BAR_HEIGHT}
+                  x={x1} y={BAR_Y}
+                  width={Math.max(w, 3)}
+                  height={BAR_H}
                   fill={style.fill}
                   rx="1"
                 />
               )}
 
-              {/* Vertical label above bar (train name + station) */}
-              {style.label && w > 8 && (
-                <g transform={`translate(${x1 + w / 2}, ${BAR_Y - 4}) rotate(-90)`}>
+              {/* Testo verticale sopra la barra */}
+              {style.showLabel && w > 10 && (
+                <g transform={`translate(${x1 + w / 2}, ${BAR_Y - 5}) rotate(-90)`}>
+                  {/* Nome treno / label */}
                   <text
-                    fontSize="9"
-                    fontWeight="700"
-                    fill={block.type === "meal" ? "#94A3B8" : "#F1F5F9"}
+                    fontSize="10"
+                    fontWeight="800"
+                    fill={block.type === "meal" ? COL.muted : COL.text}
                     textAnchor="start"
-                    fontFamily="'Exo 2', sans-serif"
+                    fontFamily={FONT}
                   >
                     {block.type === "meal" ? "REFEZ" : block.label}
                   </text>
-                  {block.to_station && block.type === "train" && (
+                  {/* Stazione destinazione */}
+                  {block.to_station && (block.type === "train" || block.type === "deadhead") && (
                     <text
-                      y="10"
-                      fontSize="8"
-                      fill="#94A3B8"
+                      y="11"
+                      fontSize="9"
+                      fill={COL.muted}
                       textAnchor="start"
-                      fontFamily="'Exo 2', sans-serif"
+                      fontFamily={FONT}
+                      fontWeight="600"
                     >
-                      {block.to_station.length > 6
-                        ? block.to_station.slice(0, 6)
-                        : block.to_station}
+                      {block.to_station.length > 8 ? block.to_station.slice(0, 8) : block.to_station}
                     </text>
                   )}
                 </g>
               )}
 
-              {/* Duration below bar */}
-              {block.duration > 0 && w > 15 && (
+              {/* Durata sotto la barra */}
+              {block.duration > 0 && w > 18 && (
                 <text
                   x={x1 + w / 2}
-                  y={BAR_Y + BAR_HEIGHT + 12}
-                  fontSize="8"
-                  fill="#64748b"
+                  y={BAR_Y + BAR_H + 14}
+                  fontSize="9"
+                  fill={COL.dim}
                   textAnchor="middle"
-                  fontFamily="'Exo 2', sans-serif"
+                  fontFamily={FONT}
+                  fontWeight="600"
                 >
                   {block.duration}
                 </text>
+              )}
+
+              {/* Orario sopra barre treno (se c'è spazio) */}
+              {(block.type === "train" || block.type === "deadhead") && w > 40 && (
+                <>
+                  <text
+                    x={x1 + 2}
+                    y={ROW_H + 14}
+                    fontSize="8"
+                    fill={COL.dim}
+                    fontFamily={FONT}
+                  >
+                    {block.start_time}
+                  </text>
+                </>
               )}
             </g>
           )
         })}
 
-        {/* ── Right totals ── */}
+        {/* ── Totali a destra ── */}
         {(() => {
-          const rx = GRID_LEFT + GRID_WIDTH + 15
+          const rx = LEFT_MARGIN + GRID_WIDTH + 60
           const items = [
             { label: "Lav", value: prestazione || "" },
             { label: "Cct", value: condotta || "" },
@@ -250,32 +273,26 @@ export function GanttTimeline({
             { label: "Not", value: notturno ? "si" : "no" },
             { label: "Rip", value: riposo || "" },
           ]
-          return items.map((item, i) => (
-            <g key={item.label}>
-              <text
-                x={rx + i * 32}
-                y={30}
-                fontSize="9"
-                fontWeight="600"
-                fill="#64748b"
-                textAnchor="middle"
-                fontFamily="'Exo 2', sans-serif"
-              >
-                {item.label}
-              </text>
-              <text
-                x={rx + i * 32}
-                y={50}
-                fontSize="10"
-                fontWeight="700"
-                fill={item.label === "Not" && notturno ? "#F59E0B" : "#F1F5F9"}
-                textAnchor="middle"
-                fontFamily="'Exo 2', sans-serif"
-              >
-                {item.value || "—"}
-              </text>
-            </g>
-          ))
+          return items.map((item, idx) => {
+            const y = 22 + idx * 18
+            return (
+              <g key={item.label}>
+                <text x={rx} y={y} fontSize="10" fontWeight="600" fill={COL.dim} fontFamily={FONT}>
+                  {item.label}
+                </text>
+                <text
+                  x={rx + 30}
+                  y={y}
+                  fontSize="11"
+                  fontWeight="700"
+                  fill={item.label === "Not" && notturno ? "#F59E0B" : COL.text}
+                  fontFamily={FONT}
+                >
+                  {item.value || "—"}
+                </text>
+              </g>
+            )
+          })
         })()}
       </svg>
     </div>
@@ -283,7 +300,7 @@ export function GanttTimeline({
 }
 
 /**
- * Wrapper che converte i dati di validazione nel formato Gantt.
+ * Wrapper per dati di validazione.
  */
 export function GanttFromValidation({
   blocks,

@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import {
   ClipboardList,
-  Clock,
   MapPin,
   Train,
   AlertTriangle,
@@ -13,6 +12,7 @@ import {
   Calendar,
 } from "lucide-react"
 import { cn, fmtMin } from "@/lib/utils"
+import { GanttFromValidation } from "@/components/GanttTimeline"
 import {
   getSavedShifts,
   deleteSavedShift,
@@ -21,126 +21,6 @@ import {
   type ShiftTimeline,
   type TimelineBlock,
 } from "@/lib/api"
-
-// ── Timeline bar component ───────────────────────────────────────
-
-const BLOCK_COLORS: Record<string, string> = {
-  extra: "bg-zinc-700",
-  accessori: "bg-zinc-600",
-  train: "bg-primary",
-  deadhead: "bg-amber-600",
-  attesa: "bg-zinc-800 border border-border-subtle",
-  meal: "bg-emerald-600",
-  spostamento: "bg-cyan-600",
-  giro_return: "bg-violet-600",
-}
-
-function TimelineBar({ blocks }: { blocks: TimelineBlock[] }) {
-  if (!blocks.length) return null
-
-  const minStart = Math.min(...blocks.map((b) => b.start))
-  const maxEnd = Math.max(...blocks.map((b) => b.end))
-  const totalSpan = maxEnd - minStart
-  if (totalSpan <= 0) return null
-
-  return (
-    <div className="space-y-2">
-      {/* Visual bar */}
-      <div className="relative h-8 bg-muted rounded-md overflow-hidden">
-        {blocks.map((block, i) => {
-          const left = ((block.start - minStart) / totalSpan) * 100
-          const width = ((block.end - block.start) / totalSpan) * 100
-          if (width < 0.3) return null
-          return (
-            <div
-              key={i}
-              className={cn(
-                "absolute top-0 h-full transition-opacity hover:opacity-80",
-                BLOCK_COLORS[block.type] || "bg-zinc-500"
-              )}
-              style={{ left: `${left}%`, width: `${Math.max(width, 0.5)}%` }}
-              title={`${block.label} ${block.start_time}–${block.end_time} (${block.duration}min)`}
-            />
-          )
-        })}
-      </div>
-
-      {/* Time markers */}
-      <div className="flex justify-between text-[10px] text-muted-foreground font-mono px-0.5">
-        <span>{blocks[0]?.start_time}</span>
-        <span>{blocks[blocks.length - 1]?.end_time}</span>
-      </div>
-    </div>
-  )
-}
-
-// ── Timeline detail list ─────────────────────────────────────────
-
-function TimelineDetail({ blocks }: { blocks: TimelineBlock[] }) {
-  return (
-    <div className="space-y-0.5">
-      {blocks.map((block, i) => (
-        <div
-          key={i}
-          className="grid grid-cols-[8px_1fr_60px_60px_50px] items-center gap-2 py-1 px-2 text-[12px] hover:bg-muted/30 rounded"
-        >
-          {/* Color dot */}
-          <div
-            className={cn(
-              "w-2 h-2 rounded-full",
-              BLOCK_COLORS[block.type]?.replace("bg-", "bg-") || "bg-zinc-500"
-            )}
-          />
-
-          {/* Label */}
-          <div className="truncate">
-            <span className="font-medium">{block.label}</span>
-            {block.detail && (
-              <span className="text-muted-foreground ml-1.5">{block.detail}</span>
-            )}
-          </div>
-
-          {/* Times */}
-          <span className="font-mono text-right text-muted-foreground text-[11px]">
-            {block.start_time}
-          </span>
-          <span className="font-mono text-right text-[11px]">
-            {block.end_time}
-          </span>
-
-          {/* Duration */}
-          <span className="text-right text-[11px] text-muted-foreground">
-            {block.duration}m
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ── Legend ────────────────────────────────────────────────────────
-
-function TimelineLegend() {
-  const items = [
-    { color: "bg-primary", label: "Treno" },
-    { color: "bg-amber-600", label: "Vettura" },
-    { color: "bg-emerald-600", label: "Refezione" },
-    { color: "bg-zinc-600", label: "Accessori" },
-    { color: "bg-zinc-700", label: "Extra" },
-    { color: "bg-cyan-600", label: "Spostamento" },
-    { color: "bg-violet-600", label: "Giro mat." },
-  ]
-  return (
-    <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground">
-      {items.map(({ color, label }) => (
-        <div key={label} className="flex items-center gap-1">
-          <div className={cn("w-2.5 h-2.5 rounded-sm", color)} />
-          {label}
-        </div>
-      ))}
-    </div>
-  )
-}
 
 // ── Shift card ───────────────────────────────────────────────────
 
@@ -275,9 +155,15 @@ function ShiftCard({
             </div>
           ) : timeline ? (
             <>
-              <TimelineBar blocks={timeline.timeline} />
-              <TimelineDetail blocks={timeline.timeline} />
-              <TimelineLegend />
+              <GanttFromValidation
+                blocks={timeline.timeline}
+                dayLabel={shift.day_type}
+                presentationTime={timeline.presentation_time}
+                endTime={timeline.end_time}
+                prestazioneMin={timeline.prestazione_min}
+                condottaMin={timeline.condotta_min}
+                deposito={timeline.deposito}
+              />
 
               {/* Violations */}
               {timeline.violations.length > 0 && (

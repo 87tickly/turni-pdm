@@ -253,3 +253,24 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 - `frontend/src/components/Sidebar.tsx` — usa Logo component
 - `frontend/src/pages/LoginPage.tsx` — usa Logo component
 - `frontend/src/pages/BuilderPage.tsx` — usa GanttFromValidation al posto delle barre colorate
+
+---
+
+## 2026-04-15 — Gantt dinamico v2 + unificazione Gantt in ShiftsPage
+
+### Miglioramenti Gantt
+- **Scala DINAMICA**: mostra solo le ore rilevanti (1h prima e 1h dopo il turno), non più 24h fisse
+- **Barre più grandi**: BAR_H=18px (era 14), min 55px/ora (era ~37.5)
+- **Testo più leggibile**: font size aumentati, stazione fino a 8 char (era 6)
+- **Deposito duplice**: label deposito sia a inizio che a fine riga (come PDF)
+- **Totali verticali**: Lav/Cct/Km/Not/Rip in colonna verticale a destra (era orizzontale)
+- **Orari treno**: orario partenza sotto le barre dei treni se c'è spazio
+- **SVG responsive**: width="100%" con viewBox, scrollabile orizzontalmente
+
+### ShiftsPage unificata
+- Rimossi componenti vecchi (TimelineBar, TimelineDetail, TimelineLegend)
+- Usa GanttFromValidation come il BuilderPage — stesso stile ovunque
+
+### Nota FR
+- L'utente richiede Gantt a doppia riga per dormite FR (giorno 1 sera + giorno 2 mattina)
+- Richiede supporto backend per blocchi multi-giorno — segnato per prossima iterazione
