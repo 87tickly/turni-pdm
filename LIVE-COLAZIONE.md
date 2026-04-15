@@ -442,3 +442,40 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 2. `cd frontend && npm run build` per aggiornare `frontend/dist/`
 3. `git add frontend/dist/ ...` + commit + push
 4. Railway auto-deploya da GitHub
+
+---
+
+## 2026-04-15 — Pagina Calendario + Import PDF
+
+### CalendarPage (`/calendario`)
+- **Lista turni settimanali** con card espandibili (pattern ShiftsPage)
+- Card header: nome, deposito, numero giorni, ore settimanali medie, note
+- Card expanded: griglia giorni con varianti (LMXGV/SAB/DOM)
+- Ogni variante mostra: treni, prestazione, condotta, badge FR/SCOMP, violazioni
+- Eliminazione con conferma
+- Empty state quando non ci sono turni settimanali
+
+### ImportPage (`/import`)
+- **3 sezioni upload** (una per tipo import):
+  - **Turno Materiale** (primario): drag & drop PDF, mostra segmenti/treni/confidenza/warnings
+  - **Turno Personale**: upload PDF, solo visualizzazione (non salva nel DB)
+  - **Turno PdC (RFI)**: upload PDF, mostra turni importati
+- Stato upload: idle → uploading (spinner) → success/error
+- Stats correnti del DB in fondo (segmenti, treni, turni materiale, varianti giorno)
+- Drop zone con drag & drop support
+
+### Modifiche collaterali
+- `api.ts`: tipi `DayVariant`, `WeeklyDay` tipizzati (era `Record<string, unknown>[]`)
+- `api.ts`: funzioni `uploadTurnoMateriale()`, `uploadTurnoPersonale()`, `uploadTurnoPdc()`, `getPdcStats()` + helper `uploadFile()` per multipart FormData
+- `api.ts`: tipi `UploadResult`, `TurnoPersonaleResult`, `TurnoPdcResult`, `PdcStats`
+- `App.tsx`: route aggiornate, rimosso import `PlaceholderPage` (non più usato)
+
+### File
+- `frontend/src/pages/CalendarPage.tsx` — NUOVO (~300 righe)
+- `frontend/src/pages/ImportPage.tsx` — NUOVO (~310 righe)
+- `frontend/src/App.tsx` — modificato
+- `frontend/src/lib/api.ts` — modificato
+
+### Build
+- `tsc --noEmit` → 0 errori
+- `npm run build` → 335KB JS + 48KB CSS

@@ -420,6 +420,28 @@ export async function getShiftTimeline(shiftId: number) {
 
 // ── Turni settimanali ────────────────────────────────────────────
 
+export interface DayVariant {
+  id: number
+  weekly_shift_id: number
+  day_number: number
+  variant_type: string
+  day_type: string
+  train_ids: string[]
+  prestazione_min: number
+  condotta_min: number
+  meal_min: number
+  is_fr: boolean
+  is_scomp: boolean
+  scomp_duration_min: number
+  last_station: string
+  violations: Array<{ rule: string; message: string }>
+}
+
+export interface WeeklyDay {
+  day_number: number
+  variants: DayVariant[]
+}
+
 export interface WeeklyShift {
   id: number
   name: string
@@ -432,7 +454,7 @@ export interface WeeklyShift {
   accessory_type: string
   notes: string
   user_id: number
-  days?: Array<Record<string, unknown>>
+  days?: WeeklyDay[]
 }
 
 export async function getWeeklyShifts() {
@@ -441,4 +463,88 @@ export async function getWeeklyShifts() {
 
 export async function deleteWeeklyShift(weeklyId: number) {
   return api.delete<{ message: string }>(`/weekly-shift/${weeklyId}`)
+}
+
+// ── Import / Upload PDF ─────────────────────────────────────────
+
+export interface UploadResult {
+  filename: string
+  segments_imported: number
+  total_segments_db: number
+  unique_trains: string[]
+  unique_trains_count: number
+  turn_numbers: string[]
+  confidence: { high: number; medium: number; low: number }
+  warnings: string[]
+  previous_data_cleared: boolean
+  previous_segments_cleared: number
+  saved_shift_warnings: string[]
+}
+
+export interface TurnoPersonaleResult {
+  source_file: string
+  pages_parsed: number
+  days: Array<Record<string, unknown>>
+  parse_warning?: string
+}
+
+export interface TurnoPdcResult {
+  status: string
+  turni_imported: number
+  stats: Record<string, unknown>
+}
+
+export interface PdcStats {
+  total_turni: number
+  total_progs: number
+  depots: string[]
+  [key: string]: unknown
+}
+
+async function uploadFile<T>(url: string, file: File): Promise<T> {
+  const token = getToken()
+  const formData = new FormData()
+  formData.append("file", file)
+
+  const fullUrl = url.startsWith("http") ? url : `${API_BASE}${url}`
+  const headers: Record<string, string> = {}
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`
+  }
+  // Non impostare Content-Type — il browser lo imposta con il boundary
+
+  const res = await fetch(fullUrl, {
+    method: "POST",
+    headers,
+    body: formData,
+  })
+
+  if (res.status === 401) {
+    clearToken()
+    window.location.href = "/login"
+    throw new Error("Non autenticato")
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.detail || `Errore ${res.status}`)
+  }
+
+  return res.json()
+}
+
+export async function uploadTurnoMateriale(file: File) {
+  return uploadFile<UploadResult>("/upload", file)
+}
+
+export async function uploadTurnoPersonale(file: File) {
+  return uploadFile<TurnoPersonaleResult>("/upload-turno-personale", file)
+}
+
+export async function uploadTurnoPdc(file: File) {
+  return uploadFile<TurnoPdcResult>("/upload-turno-pdc", file)
+}
+
+export async function getPdcStats() {
+  return api.get<PdcStats>("/pdc-stats")
 }
