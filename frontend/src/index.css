@@ -22,22 +22,22 @@
   --color-brand-secondary: #0070B5;
   --color-dot: #22C55E;
 
-  /* ── Palette navy/slate (più chiara, meno cupa) ── */
-  --color-background: #0F172A;
+  /* ── Palette slate (chiara, professionale) ── */
+  --color-background: #1E293B;
   --color-foreground: #F1F5F9;
-  --color-card: #1E293B;
+  --color-card: #273549;
   --color-card-foreground: #F1F5F9;
-  --color-card-hover: #263347;
-  --color-muted: #263347;
+  --color-card-hover: #304259;
+  --color-muted: #334B68;
   --color-muted-foreground: #94A3B8;
-  --color-border: #334155;
-  --color-border-subtle: #293548;
-  --color-input: #293548;
+  --color-border: #3D5472;
+  --color-border-subtle: #334B68;
+  --color-input: #334B68;
   --color-ring: #38BDF8;
 
   /* Accent */
   --color-primary: #38BDF8;
-  --color-primary-foreground: #0A0F1A;
+  --color-primary-foreground: #1E293B;
   --color-primary-hover: #0ea5e9;
   --color-secondary: #1e293b;
   --color-secondary-foreground: #94A3B8;
@@ -56,11 +56,11 @@
   --color-cta: #2DD464;
 
   /* Sidebar */
-  --color-sidebar: #0F172A;
+  --color-sidebar: #182336;
   --color-sidebar-foreground: #F1F5F9;
-  --color-sidebar-accent: #1E293B;
-  --color-sidebar-muted: #64748b;
-  --color-sidebar-border: #334155;
+  --color-sidebar-accent: #273549;
+  --color-sidebar-muted: #7B8FA8;
+  --color-sidebar-border: #3D5472;
 
   /* Radii */
   --radius-sm: 0.25rem;
