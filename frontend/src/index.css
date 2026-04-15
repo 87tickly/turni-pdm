@@ -22,17 +22,17 @@
   --color-brand-secondary: #0070B5;
   --color-dot: #22C55E;
 
-  /* ── Dark palette ── */
-  --color-background: #0A0F1A;
+  /* ── Palette navy/slate (più chiara, meno cupa) ── */
+  --color-background: #0F172A;
   --color-foreground: #F1F5F9;
-  --color-card: #111827;
+  --color-card: #1E293B;
   --color-card-foreground: #F1F5F9;
-  --color-card-hover: #1a2332;
-  --color-muted: #1e293b;
+  --color-card-hover: #263347;
+  --color-muted: #263347;
   --color-muted-foreground: #94A3B8;
-  --color-border: #1e293b;
-  --color-border-subtle: #172033;
-  --color-input: #1e293b;
+  --color-border: #334155;
+  --color-border-subtle: #293548;
+  --color-input: #293548;
   --color-ring: #38BDF8;
 
   /* Accent */
@@ -56,11 +56,11 @@
   --color-cta: #2DD464;
 
   /* Sidebar */
-  --color-sidebar: #070b14;
+  --color-sidebar: #0F172A;
   --color-sidebar-foreground: #F1F5F9;
-  --color-sidebar-accent: #111827;
+  --color-sidebar-accent: #1E293B;
   --color-sidebar-muted: #64748b;
-  --color-sidebar-border: #172033;
+  --color-sidebar-border: #334155;
 
   /* Radii */
   --radius-sm: 0.25rem;
@@ -99,11 +99,11 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: #1e293b;
+    background: #334155;
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #334155;
+    background: #475569;
   }
 }
 

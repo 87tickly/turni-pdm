@@ -26,8 +26,8 @@ const COL = {
   text: "#F1F5F9",
   muted: "#94A3B8",
   dim: "#64748b",
-  grid: "#334155",
-  gridFaint: "#1e293b",
+  grid: "#475569",
+  gridFaint: "#334155",
   bg: "transparent",
 }
 
