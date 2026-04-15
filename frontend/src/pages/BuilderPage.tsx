@@ -24,8 +24,6 @@ import {
   type AppConstants,
   type TrainSegment,
   type ValidateDayResult,
-  type TimelineBlock,
-  type Violation,
 } from "@/lib/api"
 
 // ── Stat pill ────────────────────────────────────────────────────

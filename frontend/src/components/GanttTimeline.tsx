@@ -94,10 +94,6 @@ export function GanttTimeline({
     return LEFT_MARGIN + hoursFromStart * hourWidth
   }
 
-  // Primo e ultimo blocco con stazione (per deposito labels)
-  const firstTrainBlock = blocks.find((b) => b.type === "train" || b.type === "deadhead")
-  const lastTrainBlock = [...blocks].reverse().find((b) => b.type === "train" || b.type === "deadhead")
-
   return (
     <div className="overflow-x-auto">
       <svg

@@ -274,3 +274,26 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 ### Nota FR
 - L'utente richiede Gantt a doppia riga per dormite FR (giorno 1 sera + giorno 2 mattina)
 - Richiede supporto backend per blocchi multi-giorno — segnato per prossima iterazione
+
+---
+
+## 2026-04-15 — Tauri desktop app (macOS)
+
+### Setup completato
+- Rust 1.94.1 installato via rustup
+- Tauri v2 configurato in `frontend/src-tauri/`
+- Build produce `COLAZIONE.app` + `COLAZIONE_0.1.0_aarch64.dmg`
+- Finestra 1280x800, min 900x600, resizable
+- Identifier: `com.arturo.colazione`
+
+### File creati
+- `frontend/src-tauri/Cargo.toml` — dipendenze Rust (tauri v2, serde)
+- `frontend/src-tauri/tauri.conf.json` — config app (titolo, dimensioni, bundle)
+- `frontend/src-tauri/src/main.rs` — entry point Rust
+- `frontend/src-tauri/build.rs` — build script
+- `frontend/src-tauri/icons/` — icone placeholder (PNG blu #0062CC)
+
+### Nota
+- L'app desktop wrappa il frontend React — al momento richiede backend Python avviato separatamente
+- Per Windows serve cross-compile o build su macchina Windows
+- Le icone sono placeholder — da sostituire con logo COLAZIONE vero

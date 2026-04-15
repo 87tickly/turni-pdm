@@ -19,7 +19,6 @@ import {
   getShiftTimeline,
   type SavedShift,
   type ShiftTimeline,
-  type TimelineBlock,
 } from "@/lib/api"
 
 // ── Shift card ───────────────────────────────────────────────────

@@ -3,7 +3,6 @@ import {
   Search,
   Train,
   MapPin,
-  Clock,
   ArrowRight,
   ChevronDown,
   ChevronUp,
@@ -15,7 +14,6 @@ import {
 import { cn } from "@/lib/utils"
 import {
   queryTrain,
-  queryStation,
   vtAutocompleteStation,
   vtDepartures,
   vtArrivals,
@@ -535,7 +533,7 @@ export function TrainSearchPage() {
 
           <div className="p-1">
             {(stationTab === "partenze" ? departures : arrivals).map((t, i) => (
-              <DepartureRow key={i} train={t} type={stationTab} />
+              <DepartureRow key={i} train={t} />
             ))}
             {(stationTab === "partenze" ? departures : arrivals).length === 0 && (
               <p className="text-[12px] text-muted-foreground py-4 text-center">
@@ -553,10 +551,8 @@ export function TrainSearchPage() {
 
 function DepartureRow({
   train,
-  type,
 }: {
   train: VtDeparture
-  type: "partenze" | "arrivi"
 }) {
   return (
     <div className="flex items-center gap-3 py-2 px-3 hover:bg-muted/30 rounded transition-colors">
