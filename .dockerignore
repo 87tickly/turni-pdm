@@ -1,0 +1,12 @@
+frontend/src-tauri/target/
+frontend/node_modules/
+frontend/src-tauri/gen/
+frontend/src/
+.git/
+__pycache__/
+*.pyc
+uploads/
+tests/
+.claude/
+venv/
+.venv/
