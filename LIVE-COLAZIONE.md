@@ -319,3 +319,25 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 - `/api/health` → JSON ok
 - `/` → serve index.html del frontend React
 - Le due cose funzionano insieme senza conflitti
+
+---
+
+## 2026-04-15 — Palette slate più chiara + fix Tauri
+
+### Palette v3 (slate chiaro)
+- Background: `#1E293B` (era #0A0F1A — molto più chiaro)
+- Card: `#273549` (era #111827)
+- Sidebar: `#182336`
+- Border: `#3D5472` (visibili)
+- Muted: `#334B68`
+- Card e sfondo ora distinguibili, bordi visibili, non più "buco nero"
+
+### Fix Tauri
+- API client rileva Tauri via `__TAURI__` window property → punta a `http://localhost:8002`
+- CSP aggiornato per permettere `connect-src localhost:*`
+- Il DMG funziona ma richiede backend avviato separatamente (sidecar non ancora integrato)
+
+### Nota operativa
+- Ogni modifica frontend richiede: `npm run build` per aggiornare `frontend/dist/`
+- Per aggiornare il DMG: `npx tauri build`
+- Per uso quotidiano: `uvicorn server:app --port 8002` + browser su `localhost:8002`
