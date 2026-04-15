@@ -40,12 +40,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static files (frontend legacy)
-STATIC_DIR = Path(__file__).parent / "static"
-if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
-
-# Include all routers
+# Include all routers PRIMA del mount static (priorità alle API)
 app.include_router(auth_router)
 app.include_router(health_router)
 app.include_router(upload_router)
@@ -55,6 +50,16 @@ app.include_router(builder_router)
 app.include_router(shifts_router)
 app.include_router(importers_router)
 app.include_router(vt_router)
+
+# Serve frontend: React build (frontend/dist/) in produzione, static/ come fallback
+# DOPO i router — così le API hanno priorità
+FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
+STATIC_DIR = Path(__file__).parent / "static"
+
+if FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
+elif STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn

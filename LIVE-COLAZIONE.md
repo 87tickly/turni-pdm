@@ -297,3 +297,25 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 - L'app desktop wrappa il frontend React — al momento richiede backend Python avviato separatamente
 - Per Windows serve cross-compile o build su macchina Windows
 - Le icone sono placeholder — da sostituire con logo COLAZIONE vero
+
+---
+
+## 2026-04-15 — Deploy Railway configurato per nuovo frontend
+
+### Configurazione
+- `railway.toml`: buildCommand aggiunto per buildare frontend React prima del deploy
+- `nixpacks.toml`: NUOVO — configura nodejs_22 + python312 + gcc per build ibrida
+- `server.py`: serve `frontend/dist/` (React build) in produzione, `static/` come fallback
+- `api/health.py`: rimossa route `/` redirect (il frontend è servito dal mount statico)
+
+### Come funziona in produzione
+1. Railway esegue `cd frontend && npm install && npm run build`
+2. Output in `frontend/dist/` (HTML + JS + CSS + assets)
+3. FastAPI monta `frontend/dist/` su `/` come StaticFiles con `html=True`
+4. Le API hanno priorità (router inclusi PRIMA del mount statico)
+5. `railway up` per deployare
+
+### Testato localmente
+- `/api/health` → JSON ok
+- `/` → serve index.html del frontend React
+- Le due cose funzionano insieme senza conflitti

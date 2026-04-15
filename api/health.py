@@ -1,18 +1,12 @@
 """
-Router health, info e redirect root.
+Router health e info database.
 """
 
 from fastapi import APIRouter
-from fastapi.responses import RedirectResponse
 
 from api.deps import get_db
 
 router = APIRouter()
-
-
-@router.get("/")
-def root():
-    return RedirectResponse(url="/static/index.html")
 
 
 @router.get("/api/health")
