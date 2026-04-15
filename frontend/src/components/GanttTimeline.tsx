@@ -23,34 +23,34 @@ interface GanttTimelineProps {
 
 const FONT = "'Exo 2', sans-serif"
 const COL = {
-  text: "#F1F5F9",
+  text: "#0F172A",
   muted: "#94A3B8",
-  dim: "#64748b",
-  grid: "#475569",
-  gridFaint: "#334155",
+  dim: "#94A3B8",
+  grid: "#CBD5E1",
+  gridFaint: "#E2E8F0",
   bg: "transparent",
 }
 
 function blockStyle(type: string) {
   switch (type) {
     case "train":
-      return { fill: COL.text, dash: false, showLabel: true }
+      return { fill: "#0062CC", dash: false, showLabel: true }
     case "deadhead":
-      return { fill: "#64748b", dash: false, showLabel: true }
+      return { fill: "#94A3B8", dash: false, showLabel: true }
     case "meal":
       return { fill: "none", dash: true, showLabel: true }
     case "attesa":
       return { fill: "none", dash: true, showLabel: false }
     case "accessori":
-      return { fill: "#334155", dash: false, showLabel: false }
+      return { fill: "#CBD5E1", dash: false, showLabel: false }
     case "extra":
-      return { fill: "#1e293b", dash: false, showLabel: false }
+      return { fill: "#E2E8F0", dash: false, showLabel: false }
     case "spostamento":
       return { fill: "#0070B5", dash: false, showLabel: true }
     case "giro_return":
-      return { fill: "#64748b", dash: false, showLabel: true }
+      return { fill: "#94A3B8", dash: false, showLabel: true }
     default:
-      return { fill: "#334155", dash: false, showLabel: false }
+      return { fill: "#CBD5E1", dash: false, showLabel: false }
   }
 }
 

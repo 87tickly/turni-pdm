@@ -341,3 +341,52 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 - Ogni modifica frontend richiede: `npm run build` per aggiornare `frontend/dist/`
 - Per aggiornare il DMG: `npx tauri build`
 - Per uso quotidiano: `uvicorn server:app --port 8002` + browser su `localhost:8002`
+
+---
+
+## 2026-04-15 — Redesign tema bianco + nuova Dashboard
+
+### Palette light (bianca, pulita)
+- Background: `#F7F8FA` (quasi bianco)
+- Card: `#FFFFFF` (bianco puro)
+- Foreground: `#0F172A` (testo scuro)
+- Muted: `#F1F5F9` (grigio chiarissimo)
+- Border: `#E2E8F0` (bordi leggeri)
+- Sidebar: `#FFFFFF` (bianco con bordo destro)
+- Primary: `#0062CC` (brand ARTURO blu) — era `#38BDF8` (cyan)
+- Active sidebar: `bg-brand/8 text-brand` (sfumatura blu leggera)
+- Scrollbar: grigio chiaro (#CBD5E1)
+
+### Dashboard ridisegnata
+- **Rimossi** i 4 stat cards tecnici (Segmenti, Treni unici, Turni materiale, Varianti giorno)
+- **Saluto** personalizzato: "Buongiorno/Buon pomeriggio/Buonasera, [username]"
+- **Quick actions**: 4 card con icone gradient colorate (Nuovo turno, Cerca treni, Turni salvati, Importa dati)
+- **Turni recenti**: lista ultimi 5 turni salvati con deposito, tipo giorno, numero treni
+- **Empty state**: messaggio + CTA "Crea turno" quando non ci sono turni
+
+### SettingsPage creata (Impostazioni)
+- Stats DB spostati qui (Segmenti, Treni unici, Turni materiale, Varianti giorno)
+- Lista turni materiale importati
+- Badge "Operativo" per stato sistema
+- Route `/impostazioni` punta a `SettingsPage` (era `PlaceholderPage`)
+
+### GanttTimeline adattato a tema chiaro
+- Colori SVG hardcoded aggiornati per sfondo bianco
+- text: `#0F172A` (era #F1F5F9)
+- grid: `#CBD5E1` (era #475569)
+- Barre treno: `#0062CC` brand blu (era #F1F5F9 bianco)
+- Accessori/extra: grigi chiari (#CBD5E1, #E2E8F0)
+
+### LoginPage
+- Sfondo: gradiente bianco/azzurro sfumato (`from-slate-50 via-blue-50/30`)
+- Card: bianca con ombra leggera
+- Focus input: ring brand blu
+
+### File modificati
+- `frontend/src/index.css` — palette completa da dark a light
+- `frontend/src/pages/DashboardPage.tsx` — riscritto: welcome + quick actions + turni recenti
+- `frontend/src/pages/SettingsPage.tsx` — NUOVO: info sistema + stats DB
+- `frontend/src/pages/LoginPage.tsx` — adattato a tema chiaro
+- `frontend/src/components/Sidebar.tsx` — sidebar bianca, active state brand blu
+- `frontend/src/components/GanttTimeline.tsx` — colori SVG per sfondo chiaro
+- `frontend/src/App.tsx` — route impostazioni → SettingsPage

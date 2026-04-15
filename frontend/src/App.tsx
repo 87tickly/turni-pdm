@@ -6,6 +6,7 @@ import { TrainSearchPage } from "@/pages/TrainSearchPage"
 import { ShiftsPage } from "@/pages/ShiftsPage"
 import { BuilderPage } from "@/pages/BuilderPage"
 import { PlaceholderPage } from "@/pages/PlaceholderPage"
+import { SettingsPage } from "@/pages/SettingsPage"
 
 export default function App() {
   return (
@@ -19,7 +20,7 @@ export default function App() {
           <Route path="builder" element={<BuilderPage />} />
           <Route path="calendario" element={<PlaceholderPage title="Calendario" />} />
           <Route path="import" element={<PlaceholderPage title="Import PDF" />} />
-          <Route path="impostazioni" element={<PlaceholderPage title="Impostazioni" />} />
+          <Route path="impostazioni" element={<SettingsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

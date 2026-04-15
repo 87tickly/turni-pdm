@@ -46,8 +46,8 @@ export function Sidebar({ username, isAdmin, onLogout }: SidebarProps) {
               cn(
                 "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-all duration-150",
                 isActive
-                  ? "bg-sidebar-accent text-sidebar-foreground"
-                  : "text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent/60"
+                  ? "bg-brand/8 text-brand"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
               )
             }
           >
@@ -63,8 +63,8 @@ export function Sidebar({ username, isAdmin, onLogout }: SidebarProps) {
               cn(
                 "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-all duration-150",
                 isActive
-                  ? "bg-sidebar-accent text-sidebar-foreground"
-                  : "text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent/60"
+                  ? "bg-brand/8 text-brand"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
               )
             }
           >
@@ -77,11 +77,11 @@ export function Sidebar({ username, isAdmin, onLogout }: SidebarProps) {
       {/* User */}
       <div className="px-3 py-3 border-t border-sidebar-border">
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-full bg-brand/20 flex items-center justify-center text-[10px] font-bold text-brand uppercase">
+          <div className="w-6 h-6 rounded-full bg-brand/10 flex items-center justify-center text-[10px] font-bold text-brand uppercase">
             {username[0]}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[12px] font-semibold text-sidebar-foreground truncate">
+            <p className="text-[12px] font-semibold text-foreground truncate">
               {username}
             </p>
             {isAdmin && (
@@ -92,7 +92,7 @@ export function Sidebar({ username, isAdmin, onLogout }: SidebarProps) {
           </div>
           <button
             onClick={onLogout}
-            className="p-1 rounded hover:bg-sidebar-accent text-sidebar-muted hover:text-sidebar-foreground transition-colors"
+            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             title="Esci"
           >
             <LogOut size={14} strokeWidth={1.8} />

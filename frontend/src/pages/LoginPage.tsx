@@ -31,9 +31,9 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-background">
-      {/* Glow effect */}
-      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
+    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
+      {/* Subtle gradient orb */}
+      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-brand/5 rounded-full blur-3xl pointer-events-none" />
 
       <div className="relative w-full max-w-sm">
         {/* Brand */}
@@ -45,7 +45,7 @@ export function LoginPage() {
         </div>
 
         {/* Card */}
-        <div className="bg-card rounded-xl border border-border-subtle p-6">
+        <div className="bg-white rounded-xl border border-border shadow-sm p-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-[12px] font-medium text-muted-foreground mb-1.5">
@@ -55,7 +55,7 @@ export function LoginPage() {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-[13px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-colors"
+                className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-[13px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand transition-colors"
                 placeholder="Il tuo username"
                 required
                 autoFocus
@@ -70,14 +70,14 @@ export function LoginPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-[13px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-colors"
+                className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-[13px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand transition-colors"
                 placeholder="La tua password"
                 required
               />
             </div>
 
             {error && (
-              <div className="bg-destructive/10 text-destructive text-[12px] p-2.5 rounded-lg border border-destructive/20">
+              <div className="bg-destructive/8 text-destructive text-[12px] p-2.5 rounded-lg border border-destructive/15">
                 {error}
               </div>
             )}
@@ -85,7 +85,7 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2 px-4 bg-primary text-primary-foreground rounded-lg text-[13px] font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
+              className="w-full py-2 px-4 bg-brand text-white rounded-lg text-[13px] font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
             >
               {loading ? (
                 <span className="inline-flex items-center gap-2">
