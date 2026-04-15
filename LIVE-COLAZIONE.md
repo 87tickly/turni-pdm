@@ -390,3 +390,26 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 - `frontend/src/components/Sidebar.tsx` — sidebar bianca, active state brand blu
 - `frontend/src/components/GanttTimeline.tsx` — colori SVG per sfondo chiaro
 - `frontend/src/App.tsx` — route impostazioni → SettingsPage
+
+---
+
+## 2026-04-15 — GanttTimeline v3: colori saturi + scala fissa
+
+### Modifiche Gantt
+- **Scala fissa 0-24**: griglia completa dalle 0 alle 24 ore (era dinamica)
+- **Sfondo grigio chiaro**: wrapper `bg-[#F1F5F9]` con `rounded-lg p-3` per staccare dalla pagina bianca
+- **Altezze differenziate per tipo blocco**:
+  - Treno: 22px (barra grande, dominante)
+  - Deadhead/spostamento/giro_return: 14px (media)
+  - Accessori/extra: 10px (piccoli, secondari)
+  - Tutte centrate verticalmente sullo stesso asse
+- **Colori saturi e distinti**:
+  - Treno: `#0062CC` (blu brand)
+  - Deadhead/giro_return: `#7C3AED` (viola)
+  - Accessori: `#F59E0B` (ambra)
+  - Extra: `#FB923C` (arancione)
+  - Spostamento: `#0891B2` (ciano)
+- **Anti-sovrapposizione**: sistema di rilevamento collisioni tra label verticali, label shiftate verso l'alto se troppo vicine
+- **Testo più grande e grassetto**: fontSize 11, fontWeight 900 per label treni
+- **Durata** mostrata solo per blocchi treno (non accessori/extra)
+- **Rimossi orari duplicati** sotto l'asse per evitare sovrapposizioni con numeri griglia

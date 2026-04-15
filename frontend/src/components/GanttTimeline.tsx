@@ -2,9 +2,8 @@ import type { TimelineBlock } from "@/lib/api"
 
 /**
  * Timeline Gantt orizzontale stile PDF Trenord.
- * Scala DINAMICA: mostra solo le ore rilevanti al turno.
- * Barre grandi con testo verticale (treno + stazione).
- * Deposito a inizio e fine. Totali a destra.
+ * Scala FISSA 0-24h. Barre treno più alte, accessori/extra più basse.
+ * Sfondo grigio chiaro per staccare dalla pagina bianca.
  */
 
 interface GanttTimelineProps {
@@ -24,33 +23,38 @@ interface GanttTimelineProps {
 const FONT = "'Exo 2', sans-serif"
 const COL = {
   text: "#0F172A",
-  muted: "#94A3B8",
+  muted: "#64748B",
   dim: "#94A3B8",
   grid: "#CBD5E1",
   gridFaint: "#E2E8F0",
-  bg: "transparent",
+  ganttBg: "#F1F5F9",
 }
+
+// Altezze differenziate per tipo blocco
+const BAR_H_TRAIN = 22        // treni: barra grande
+const BAR_H_SECONDARY = 14    // deadhead, spostamento, giro_return
+const BAR_H_MINOR = 10        // accessori, extra
 
 function blockStyle(type: string) {
   switch (type) {
     case "train":
-      return { fill: "#0062CC", dash: false, showLabel: true }
+      return { fill: "#0062CC", h: BAR_H_TRAIN, dash: false, showLabel: true }
     case "deadhead":
-      return { fill: "#94A3B8", dash: false, showLabel: true }
+      return { fill: "#7C3AED", h: BAR_H_SECONDARY, dash: false, showLabel: true }
     case "meal":
-      return { fill: "none", dash: true, showLabel: true }
+      return { fill: "none", h: BAR_H_SECONDARY, dash: true, showLabel: true }
     case "attesa":
-      return { fill: "none", dash: true, showLabel: false }
+      return { fill: "none", h: BAR_H_MINOR, dash: true, showLabel: false }
     case "accessori":
-      return { fill: "#CBD5E1", dash: false, showLabel: false }
+      return { fill: "#F59E0B", h: BAR_H_MINOR, dash: false, showLabel: false }
     case "extra":
-      return { fill: "#E2E8F0", dash: false, showLabel: false }
+      return { fill: "#FB923C", h: BAR_H_MINOR, dash: false, showLabel: false }
     case "spostamento":
-      return { fill: "#0070B5", dash: false, showLabel: true }
+      return { fill: "#0891B2", h: BAR_H_SECONDARY, dash: false, showLabel: true }
     case "giro_return":
-      return { fill: "#94A3B8", dash: false, showLabel: true }
+      return { fill: "#7C3AED", h: BAR_H_SECONDARY, dash: false, showLabel: true }
     default:
-      return { fill: "#CBD5E1", dash: false, showLabel: false }
+      return { fill: "#94A3B8", h: BAR_H_MINOR, dash: false, showLabel: false }
   }
 }
 
@@ -69,22 +73,17 @@ export function GanttTimeline({
 }: GanttTimelineProps) {
   if (!blocks.length) return null
 
-  // ── Calcola range ore DINAMICO ──
-  const minStart = Math.min(...blocks.map((b) => b.start))
-  const maxEnd = Math.max(...blocks.map((b) => b.end))
-
-  // Arrotonda: inizia 1h prima, finisce 1h dopo
-  const startHour = Math.floor(minStart / 60) - 1
-  const endHour = Math.ceil(maxEnd / 60) + 1
-  const spanHours = endHour - startHour
+  // ── Scala FISSA 0-24 ──
+  const startHour = 0
+  const endHour = 24
+  const spanHours = 24
 
   // Layout
   const LEFT_MARGIN = 80
-  const RIGHT_MARGIN = 180
-  const GRID_WIDTH = Math.max(spanHours * 55, 400) // min 55px/ora
+  const RIGHT_MARGIN = 120
+  const GRID_WIDTH = spanHours * 42 // 42px per ora = 1008px totali
   const TOTAL_W = LEFT_MARGIN + GRID_WIDTH + RIGHT_MARGIN
-  const BAR_Y = 60
-  const BAR_H = 18
+  const BAR_CENTER_Y = 68 // centro verticale delle barre
   const ROW_H = 110
   const TOTAL_H = ROW_H + 28
   const hourWidth = GRID_WIDTH / spanHours
@@ -94,17 +93,43 @@ export function GanttTimeline({
     return LEFT_MARGIN + hoursFromStart * hourWidth
   }
 
+  // Pre-calcola posizioni label per evitare sovrapposizioni
+  const labelBlocks = blocks
+    .map((block, i) => {
+      const x1 = minToX(block.start)
+      const x2 = minToX(block.end)
+      const w = x2 - x1
+      const style = blockStyle(block.type)
+      return { block, i, x1, x2, w, style }
+    })
+    .filter((b) => b.style.showLabel && b.w > 6)
+
+  // Rileva sovrapposizioni tra label verticali
+  function labelsOverlap(a: typeof labelBlocks[0], b: typeof labelBlocks[0]): boolean {
+    const aCenter = a.x1 + a.w / 2
+    const bCenter = b.x1 + b.w / 2
+    return Math.abs(aCenter - bCenter) < 14 // 14px minimo tra centri
+  }
+
+  // Segna blocchi che devono shiftare la label
+  const labelShifted = new Set<number>()
+  for (let j = 1; j < labelBlocks.length; j++) {
+    if (labelsOverlap(labelBlocks[j - 1], labelBlocks[j])) {
+      labelShifted.add(labelBlocks[j].i)
+    }
+  }
+
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto rounded-lg bg-[#F1F5F9] p-3">
       <svg
         viewBox={`0 0 ${TOTAL_W} ${TOTAL_H}`}
         width="100%"
         height={TOTAL_H}
-        style={{ minWidth: Math.min(TOTAL_W, 800) }}
+        style={{ minWidth: Math.min(TOTAL_W, 900) }}
         className="select-none"
       >
         {/* ── Left: tipo giornata + numero ── */}
-        <text x="8" y="22" fontSize="14" fontWeight="800" fill={COL.text} fontFamily={FONT}>
+        <text x="8" y="22" fontSize="15" fontWeight="800" fill={COL.text} fontFamily={FONT}>
           {dayLabel || ""}
         </text>
         {dayNumber !== undefined && (
@@ -113,7 +138,7 @@ export function GanttTimeline({
           </text>
         )}
         {presentationTime && endTime && (
-          <text x="8" y="78" fontSize="11" fill={COL.muted} fontFamily={FONT} fontWeight="600">
+          <text x="8" y="78" fontSize="11" fill={COL.muted} fontFamily={FONT} fontWeight="700">
             [{presentationTime}] [{endTime}]
           </text>
         )}
@@ -121,11 +146,10 @@ export function GanttTimeline({
         {/* ── Deposito labels (inizio + fine riga) ── */}
         {deposito && (
           <>
-            {/* A sinistra, prima del primo blocco */}
             <text
               x={LEFT_MARGIN - 5}
-              y={BAR_Y + BAR_H / 2 + 4}
-              fontSize="11"
+              y={BAR_CENTER_Y + 4}
+              fontSize="10"
               fontWeight="800"
               fill={COL.muted}
               textAnchor="end"
@@ -133,11 +157,10 @@ export function GanttTimeline({
             >
               {deposito.length > 10 ? deposito.slice(0, 10) : deposito}
             </text>
-            {/* A destra, dopo l'ultimo blocco */}
             <text
               x={LEFT_MARGIN + GRID_WIDTH + 5}
-              y={BAR_Y + BAR_H / 2 + 4}
-              fontSize="11"
+              y={BAR_CENTER_Y + 4}
+              fontSize="10"
               fontWeight="800"
               fill={COL.muted}
               textAnchor="start"
@@ -150,16 +173,13 @@ export function GanttTimeline({
 
         {/* ── Griglia ore ── */}
         {Array.from({ length: spanHours + 1 }, (_, i) => {
-          const hour = ((startHour + i) % 24 + 24) % 24
+          const hour = (startHour + i) % 24
           const x = LEFT_MARGIN + i * hourWidth
           return (
             <g key={i}>
-              {/* Tick mark */}
               <line x1={x} y1={ROW_H - 4} x2={x} y2={ROW_H + 4} stroke={COL.grid} strokeWidth="1" />
-              {/* Vertical guide */}
               <line x1={x} y1={22} x2={x} y2={ROW_H - 4} stroke={COL.gridFaint} strokeWidth="0.5" strokeDasharray="2,4" />
-              {/* Hour label */}
-              <text x={x} y={ROW_H + 20} fontSize="10" fill={COL.dim} textAnchor="middle" fontFamily={FONT} fontWeight="600">
+              <text x={x} y={ROW_H + 20} fontSize="10" fill={COL.muted} textAnchor="middle" fontFamily={FONT} fontWeight="700">
                 {hour}
               </text>
             </g>
@@ -178,47 +198,48 @@ export function GanttTimeline({
 
           if (w < 1 && !style.showLabel) return null
 
+          // Centra verticalmente ogni barra rispetto a BAR_CENTER_Y
+          const barY = BAR_CENTER_Y - style.h / 2
+
           return (
             <g key={i}>
               {/* Barra o linea tratteggiata */}
               {style.dash ? (
                 <line
-                  x1={x1} y1={BAR_Y + BAR_H / 2}
-                  x2={x2} y2={BAR_Y + BAR_H / 2}
+                  x1={x1} y1={BAR_CENTER_Y}
+                  x2={x2} y2={BAR_CENTER_Y}
                   stroke={COL.muted} strokeWidth="2" strokeDasharray="6,4"
                 />
               ) : (
                 <rect
-                  x={x1} y={BAR_Y}
+                  x={x1} y={barY}
                   width={Math.max(w, 3)}
-                  height={BAR_H}
+                  height={style.h}
                   fill={style.fill}
-                  rx="1"
+                  rx="2"
                 />
               )}
 
               {/* Testo verticale sopra la barra */}
-              {style.showLabel && w > 10 && (
-                <g transform={`translate(${x1 + w / 2}, ${BAR_Y - 5}) rotate(-90)`}>
-                  {/* Nome treno / label */}
+              {style.showLabel && w > 6 && (
+                <g transform={`translate(${x1 + w / 2}, ${barY - (labelShifted.has(i) ? 18 : 4)}) rotate(-90)`}>
                   <text
-                    fontSize="10"
-                    fontWeight="800"
+                    fontSize="11"
+                    fontWeight="900"
                     fill={block.type === "meal" ? COL.muted : COL.text}
                     textAnchor="start"
                     fontFamily={FONT}
                   >
                     {block.type === "meal" ? "REFEZ" : block.label}
                   </text>
-                  {/* Stazione destinazione */}
                   {block.to_station && (block.type === "train" || block.type === "deadhead") && (
                     <text
-                      y="11"
+                      y="12"
                       fontSize="9"
                       fill={COL.muted}
                       textAnchor="start"
                       fontFamily={FONT}
-                      fontWeight="600"
+                      fontWeight="700"
                     >
                       {block.to_station.length > 8 ? block.to_station.slice(0, 8) : block.to_station}
                     </text>
@@ -226,34 +247,19 @@ export function GanttTimeline({
                 </g>
               )}
 
-              {/* Durata sotto la barra */}
-              {block.duration > 0 && w > 18 && (
+              {/* Durata sotto la barra (solo treni e blocchi larghi) */}
+              {block.type === "train" && block.duration > 0 && w > 20 && (
                 <text
                   x={x1 + w / 2}
-                  y={BAR_Y + BAR_H + 14}
+                  y={barY + style.h + 13}
                   fontSize="9"
-                  fill={COL.dim}
+                  fill={COL.muted}
                   textAnchor="middle"
                   fontFamily={FONT}
-                  fontWeight="600"
+                  fontWeight="700"
                 >
-                  {block.duration}
+                  {block.duration}&apos;
                 </text>
-              )}
-
-              {/* Orario sopra barre treno (se c'è spazio) */}
-              {(block.type === "train" || block.type === "deadhead") && w > 40 && (
-                <>
-                  <text
-                    x={x1 + 2}
-                    y={ROW_H + 14}
-                    fontSize="8"
-                    fill={COL.dim}
-                    fontFamily={FONT}
-                  >
-                    {block.start_time}
-                  </text>
-                </>
               )}
             </g>
           )
@@ -261,7 +267,7 @@ export function GanttTimeline({
 
         {/* ── Totali a destra ── */}
         {(() => {
-          const rx = LEFT_MARGIN + GRID_WIDTH + 60
+          const rx = LEFT_MARGIN + GRID_WIDTH + 50
           const items = [
             { label: "Lav", value: prestazione || "" },
             { label: "Cct", value: condotta || "" },
@@ -273,18 +279,18 @@ export function GanttTimeline({
             const y = 22 + idx * 18
             return (
               <g key={item.label}>
-                <text x={rx} y={y} fontSize="10" fontWeight="600" fill={COL.dim} fontFamily={FONT}>
+                <text x={rx} y={y} fontSize="10" fontWeight="700" fill={COL.muted} fontFamily={FONT}>
                   {item.label}
                 </text>
                 <text
                   x={rx + 30}
                   y={y}
                   fontSize="11"
-                  fontWeight="700"
-                  fill={item.label === "Not" && notturno ? "#F59E0B" : COL.text}
+                  fontWeight="800"
+                  fill={item.label === "Not" && notturno ? "#DC2626" : COL.text}
                   fontFamily={FONT}
                 >
-                  {item.value || "—"}
+                  {item.value || "\u2014"}
                 </text>
               </g>
             )
