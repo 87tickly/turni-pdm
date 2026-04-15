@@ -479,3 +479,30 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 ### Build
 - `tsc --noEmit` → 0 errori
 - `npm run build` → 335KB JS + 48KB CSS
+
+---
+
+## 2026-04-15 — Skill turno materiale reader
+
+### Contesto appreso (insegnato dall'utente con screenshot PDF)
+Il PDF turno materiale Trenord ha struttura Gantt orizzontale:
+- **Asse X**: ore 0-23
+- **Colonna sinistra**: periodicita (LV 1:5, 6, F, Effettuato 6F) + numero giro
+- **Segmenti**: stazione origine (verde) → numero treno (blu) → stazione arrivo (verde)
+- **Barra rossa**: durata viaggio, numeri sotto = minuti partenza/arrivo
+- **Suffisso "i"**: materiale vuoto (senza passeggeri), destinazione tipica Fiorenza
+- **DISPONIBILE**: materiale fermo, nessun servizio
+- **Colonna "Per"**: sequenza giornate + Km
+
+### Skill creata
+- `.claude/skills/turno-materiale-reader.md` — skill completa con:
+  - Struttura documento PDF
+  - Come leggere la griglia Gantt
+  - Codici periodicita (LV, 6, F, 6F)
+  - Tipologie segmenti (commerciale, vuoto, disponibile)
+  - Schema JSON per estrazione dati strutturati
+  - Relazione turno materiale → turno personale
+  - Note per implementazione parser
+
+### Memory aggiornata
+- `reference_turno_materiale.md` — puntatore rapido alla skill
