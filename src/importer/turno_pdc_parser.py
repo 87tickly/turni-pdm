@@ -1,14 +1,27 @@
 """
-Parser per il PDF "Turni PdC rete RFI" di Trenord.
+Parser turno PdC — schema v2.
 
-Estrae da ogni pagina:
-  - Deposito (IMPIANTO)
-  - Codice turno (es. ALOR_C)
-  - Per ogni PROG: giornata, tipo giorno, orari, treni assegnati
+Input:  PDF Trenord "Turni PdC rete RFI" (formato M 704 Rev.4)
+Output: lista di ParsedPdcTurn con giornate, blocchi Gantt e note periodicita'.
 
-NOTA: nel PDF i numeri treno e le stazioni nel grafico timeline
-sono scritti al contrario (testo ruotato). Es. "82001" = treno 10028.
+Regole documentate in `.claude/skills/turno-pdc-reader.md`.
+
+Geometria del PDF (verificata su pagine 2+ del turno AROR_C):
+- Header: parole orizzontali y~11 (IMPIANTO, TURNO, PROFILO, DAL, AL)
+- Numero giornata: orizzontale, size=12, x_0~10-17 (ancora di banda)
+- Periodicita': orizzontale, size=10, sopra il numero giornata
+- Orari prestazione: orizzontale, size=8.5, testo `[HH:MM]`
+- Asse orario: size=5.5, numeri 3..24..3
+- Stats: size=6.5, colonna destra x>720 (Lav/Cct/Km/Not/Rip)
+- Etichette blocchi Gantt: **testo ruotato** (upright=False).
+  Lettura: concateno i caratteri della stessa colonna X ordinati per Y
+  crescente, poi inverto la stringa risultante.
+- Stazioni: orizzontali ai bordi del Gantt (size=7, testo tipo ARON, DOMO)
+- Pagina finale turno: "Note sulla periodicita' dei treni" — testo libero
+  con date in formato dd/mm/yyyy.
 """
+
+from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
@@ -17,352 +30,634 @@ from typing import Optional
 import pdfplumber
 
 
+# ══════════════════════════════════════════════════════════════════
+# DATACLASS
+# ══════════════════════════════════════════════════════════════════
+
 @dataclass
-class PdcProg:
-    """Una singola giornata (PROG) nel turno PdC."""
-    prog_number: int
-    day_type: str                    # LMXGV, S, D, SD, LMXGVSD
-    start_time: str                  # HH:MM
-    end_time: str                    # HH:MM
-    lavoro_min: int = 0              # Durata lavoro in minuti
-    condotta_min: int = 0            # Durata condotta in minuti
+class ParsedPdcBlock:
+    seq: int
+    block_type: str  # train|coach_transfer|cv_partenza|cv_arrivo|meal|scomp|available
+    train_id: str = ""
+    vettura_id: str = ""
+    from_station: str = ""
+    to_station: str = ""
+    start_time: str = ""
+    end_time: str = ""
+    accessori_maggiorati: bool = False
+
+
+@dataclass
+class ParsedPdcDay:
+    day_number: int
+    periodicita: str                # LMXGVSD, D, SD, LMXGVS, LMXGV, S
+    start_time: str = ""
+    end_time: str = ""
+    lavoro_min: int = 0
+    condotta_min: int = 0
     km: int = 0
     notturno: bool = False
-    riposo_min: int = 0              # Riposo in minuti
-    train_ids: list[str] = field(default_factory=list)
-    note: str = ""
-    is_rest: bool = False            # S.COMP / Disponibile
-    raw_text: str = ""
+    riposo_min: int = 0
+    is_disponibile: bool = False
+    blocks: list[ParsedPdcBlock] = field(default_factory=list)
 
 
 @dataclass
-class PdcTurno:
-    """Un turno completo di un deposito."""
-    depot: str
-    turno_code: str
-    turno_id: str = ""
-    valid_from: str = ""
+class ParsedPdcNote:
+    train_id: str
+    periodicita_text: str = ""
+    non_circola_dates: list[str] = field(default_factory=list)  # YYYY-MM-DD
+    circola_extra_dates: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ParsedPdcTurn:
+    codice: str                     # AROR_C
+    planning: str = ""
+    impianto: str = ""
+    profilo: str = "Condotta"
+    valid_from: str = ""            # YYYY-MM-DD
     valid_to: str = ""
-    progs: list[PdcProg] = field(default_factory=list)
     source_pages: list[int] = field(default_factory=list)
+    days: list[ParsedPdcDay] = field(default_factory=list)
+    notes: list[ParsedPdcNote] = field(default_factory=list)
 
 
-# ---------- Pattern costanti ----------
-DAY_TYPES = {"LMXGVSD", "LMXGV", "SD", "S", "D", "LMX", "GV", "LMXG", "VSD",
-             "LM", "XG", "VS", "L", "M", "X", "G", "V"}
+# ══════════════════════════════════════════════════════════════════
+# COSTANTI / REGEX
+# ══════════════════════════════════════════════════════════════════
 
-# Stazioni abbreviate reversed -> nome reale (parziale, le piu' comuni)
-STATION_ABBREV_REV = {
-    "AL": "ALESSANDRIA",
-    "LA": "ALESSANDRIA",  # reversed
-    "orIM": "MILANO ROGOREDO",
-    "ecIM": "MILANO CENTRALE",
-    "gpIM": "MILANO P.GARIBALDI",
-    "abIM": "MILANO LAMBRATE",
-    "lcIM": "MILANO CADORNA",
-    "VP": "PAVIA",
-    "HGOV": "VOGHERA",
-    "NORA": "ARONA",
-    "OMOD": "DOMODOSSOLA",
-}
+# Codici periodicita' accettati (ordine: piu' specifico prima)
+PERIODICITA_CODES = (
+    "LMXGVSD", "LMXGVS", "LMXGV", "LMXG", "LMX",
+    "SD", "GV", "VSD",
+    "S", "D", "V", "G",
+)
+
+# Header pagina (apertura turno)
+HEADER_RE = re.compile(
+    r"IMPIANTO:\s*(?P<impianto>\S+).*?"
+    r"TURNO:\s*\[(?P<codice>[A-Z0-9_]+)\]\s*\[(?P<planning>\d+)\].*?"
+    r"PROFILO:\s*(?P<profilo>\S+).*?"
+    r"DAL:\s*(?P<dal>\d{2}/\d{2}/\d{4})\s+"
+    r"AL:\s*(?P<al>\d{2}/\d{2}/\d{4})",
+    re.DOTALL,
+)
+
+# Numero giornata + orari prestazione: "1 [18:20] [00:25]"
+DAY_RE = re.compile(r"^\s*(\d{1,2})\s*\[(\d{1,2}:\d{2})\]\s*\[(\d{1,2}:\d{2})\]")
+
+# Stats riga destra: "06:05 03:22 184 si 15:45" (accetta sì / si / no)
+STATS_RE = re.compile(
+    r"(\d{1,2}:\d{2})\s+(\d{1,2}:\d{2})\s+(\d+)\s+(s[iì]|SI|si|no|NO)\s+(\d{1,2}:\d{2})",
+    re.IGNORECASE,
+)
+
+# Page footer "Pagina N di M"
+FOOTER_PAGE_RE = re.compile(r"Pagina\s+(\d+)\s+di\s+(\d+)")
+
+# Italian date dd/mm/yyyy
+DATE_IT_RE = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
+
+# Note periodicita' treni (pagina finale turno)
+NOTE_TITLE_RE = re.compile(r"Note\s+sulla\s+periodicit[aà]'?\s+dei\s+treni", re.IGNORECASE)
+NOTE_TRAIN_LINE_RE = re.compile(r"Treno\s+(\d{3,6})\s*[-–]\s*(.+)", re.IGNORECASE)
 
 
-def _reverse_str(s: str) -> str:
-    """Inverti una stringa carattere per carattere."""
+# ══════════════════════════════════════════════════════════════════
+# UTILITY
+# ══════════════════════════════════════════════════════════════════
+
+def _hhmm_to_min(s: str) -> int:
+    try:
+        h, m = s.strip().split(":")
+        return int(h) * 60 + int(m)
+    except Exception:
+        return 0
+
+
+def _it_to_iso_date(d: str) -> str:
+    """'23/02/2026' -> '2026-02-23'. Lascia invariato se non parsabile."""
+    try:
+        day, month, year = d.split("/")
+        return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+    except Exception:
+        return d
+
+
+def _reverse(s: str) -> str:
     return s[::-1]
 
 
-def _parse_hhmm_to_min(s: str) -> int:
-    """Converte HH:MM in minuti."""
-    parts = s.strip().split(":")
-    if len(parts) == 2:
-        try:
-            return int(parts[0]) * 60 + int(parts[1])
-        except ValueError:
-            pass
-    return 0
+# ══════════════════════════════════════════════════════════════════
+# ESTRAZIONE ETICHETTE VERTICALI (blocchi Gantt)
+# ══════════════════════════════════════════════════════════════════
 
+def _cluster_vertical_labels(words: list[dict], x_tol: float = 2.0) -> list[dict]:
+    """Raggruppa le parole ruotate (upright=False) per colonna X.
 
-def _extract_train_ids_from_block(text: str) -> list[str]:
-    """Estrae numeri treno da un blocco di testo del turno PdC.
+    Una colonna = lettere verticali alla stessa X (entro x_tol).
+    Per ogni colonna, concatena i caratteri ordinati per Y crescente
+    (dall'alto verso il basso nella pagina) e **inverte** la stringa,
+    perche' il testo ruotato e' scritto bottom-to-top nel PDF.
 
-    Strategia:
-    1. Cerca note esplicite: "TR 10028", "Tr.10205"
-    2. Cerca numeri a 5 cifre e invertili
-    3. Filtra: il numero invertito deve essere un treno plausibile (10000-99999)
+    Ritorna una lista di dict: {label, x0, x1, y_top, y_bot}
     """
-    train_ids = set()
+    vwords = [w for w in words if not w.get("upright", True)]
+    if not vwords:
+        return []
 
-    # 1. Note esplicite (testo non invertito)
-    for m in re.finditer(r'(?:TR|Tr\.?)\s*(\d{4,6})', text):
-        train_ids.add(m.group(1))
+    # Ordina per x poi y
+    vwords.sort(key=lambda w: (w["x0"], w["top"]))
 
-    # 2. Numeri a 5 cifre invertiti
-    # Escludiamo numeri che sono chiaramente orari o codici
-    # (i numeri invertiti di treno iniziano tipicamente con 1,2,3,4,5,6,7,8,9)
-    for m in re.finditer(r'\b(\d{5})\b', text):
-        num = m.group(1)
-        reversed_num = _reverse_str(num)
+    columns: list[list[dict]] = []
+    for w in vwords:
+        # Cerca una colonna esistente con x simile
+        placed = False
+        for col in columns:
+            if abs(col[-1]["x0"] - w["x0"]) <= x_tol:
+                col.append(w)
+                placed = True
+                break
+        if not placed:
+            columns.append([w])
 
-        # Escludi il codice turno (es. 65046 -> 64056, non e' un treno)
-        # e numeri che sono chiaramente non-treni
-        rev_int = int(reversed_num)
-
-        # Treni Trenord: tipicamente 10000-99999
-        # Ma i numeri tipo 00000-09999 non sono treni
-        if 2000 <= rev_int <= 99999:
-            # Controlla che il numero originale non sia il risultato
-            # di un reverse di un numero gia' presente nelle note
-            if num not in train_ids:
-                train_ids.add(reversed_num)
-
-    # 3. Numeri a 4 cifre che potrebbero essere treni (es. "736(" -> 637?)
-    # Cerchiamo pattern tipo "NNN(" che sembra un numero treno con parentesi
-    for m in re.finditer(r'\b(\d{3,4})\(', text):
-        num = m.group(1)
-        reversed_num = _reverse_str(num)
-        rev_int = int(reversed_num)
-        if 100 <= rev_int <= 99999:
-            train_ids.add(reversed_num)
-
-    # Rimuovi duplicati e numeri che compaiono sia diretti che invertiti
-    # (es. "10028" in nota e "82001" nel grafico -> tieni solo "10028")
-    final = set()
-    for tid in train_ids:
-        rev = _reverse_str(tid)
-        # Se il numero e il suo reverse sono entrambi presenti, tieni l'originale
-        if rev in train_ids and int(tid) < int(rev):
-            continue
-        final.add(tid)
-
-    return sorted(final)
-
-
-def _split_into_prog_blocks(cell_text: str) -> list[dict]:
-    """Divide il testo della cella grande in blocchi PROG."""
-    # Pattern: numero PROG + [HH:MM] [HH:MM]
-    # Es: "3 [06:04] [14:34]"
-    prog_pattern = re.compile(
-        r'(\d+)\s*\[(\d{1,2}:\d{2})\]\s*\[(\d{1,2}:\d{2})\]'
-    )
-
-    # Pattern per Lav/Cct/Km: "08:30 03:33 171 no 14:45"
-    metrics_pattern = re.compile(
-        r'(\d{1,2}:\d{2})\s+(\d{1,2}:\d{2})\s+(\d+)\s+(s[iì]|no)\s+(\d{1,2}:\d{2})'
-    )
-
-    # Pattern per tipo giorno
-    day_type_pattern = re.compile(
-        r'\b(LMXGVSD|LMXGV|LMXG|LMX|GV|SD|VSD|S|D)\b'
-    )
-
-    # Trova tutte le occorrenze di PROG
-    prog_matches = list(prog_pattern.finditer(cell_text))
-
-    blocks = []
-    for idx, pm in enumerate(prog_matches):
-        prog_num = int(pm.group(1))
-        start_time = pm.group(2)
-        end_time = pm.group(3)
-
-        # Determina il range di testo per questo blocco
-        block_start = pm.start()
-        # Cerca indietro per il tipo giorno
-        # Il tipo giorno e' tipicamente qualche riga sopra il PROG
-        lookback_start = prog_matches[idx - 1].end() if idx > 0 else 0
-        preceding_text = cell_text[lookback_start:block_start]
-
-        # Fine del blocco: inizio del prossimo blocco o fine testo
-        block_end = prog_matches[idx + 1].start() if idx + 1 < len(prog_matches) else len(cell_text)
-
-        # Testo dopo il PROG match
-        after_text = cell_text[pm.end():block_end]
-        full_block = preceding_text + cell_text[block_start:block_end]
-
-        # Tipo giorno
-        day_matches = day_type_pattern.findall(preceding_text)
-        day_type = day_matches[-1] if day_matches else "?"
-
-        # Metriche
-        mm = metrics_pattern.search(after_text)
-        lavoro_min = 0
-        condotta_min = 0
-        km = 0
-        notturno = False
-        riposo_min = 0
-        if mm:
-            lavoro_min = _parse_hhmm_to_min(mm.group(1))
-            condotta_min = _parse_hhmm_to_min(mm.group(2))
-            km = int(mm.group(3))
-            notturno = mm.group(4).lower().startswith("s")
-            riposo_min = _parse_hhmm_to_min(mm.group(5))
-
-        # Check se e' un giorno di riposo (S.COMP, Disponibile)
-        # Solo nel testo DOPO il PROG match (non preceding), per evitare bleed
-        is_rest_text = ("PMOC.S" in after_text or "LAPMOC" in after_text
-                        or "Disponibile" in after_text
-                        or "NORAPMOC" in after_text)
-        # Se ha condotta e km, NON e' riposo anche se il testo lo suggerisce
-        if condotta_min > 0 and km > 0:
-            is_rest = False
-        else:
-            is_rest = is_rest_text or (condotta_min == 0 and km == 0)
-
-        # Note (testo non invertito, es. "TR 10028 tempi maggiorati...")
-        note_match = re.search(r'((?:TR|Tr\.?)\s*\d+[^\n]*)', full_block)
-        note = note_match.group(1) if note_match else ""
-
-        # Treni — estrai sempre, anche se is_rest (per completezza DB)
-        train_ids = _extract_train_ids_from_block(full_block)
-
-        blocks.append({
-            "prog_number": prog_num,
-            "day_type": day_type,
-            "start_time": start_time,
-            "end_time": end_time,
-            "lavoro_min": lavoro_min,
-            "condotta_min": condotta_min,
-            "km": km,
-            "notturno": notturno,
-            "riposo_min": riposo_min,
-            "is_rest": is_rest,
-            "train_ids": train_ids,
-            "note": note,
-            "raw_text": full_block[:300],
+    labels = []
+    for col in columns:
+        col.sort(key=lambda w: w["top"])
+        raw = "".join(w["text"] for w in col)
+        label = _reverse(raw)
+        labels.append({
+            "label": label,
+            "raw": raw,
+            "x0": min(w["x0"] for w in col),
+            "x1": max(w["x1"] for w in col),
+            "y_top": min(w["top"] for w in col),
+            "y_bot": max(w["bottom"] for w in col),
         })
+    # Ordine di lettura: x crescente
+    labels.sort(key=lambda l: l["x0"])
+    return labels
 
-    return blocks
+
+def _classify_vertical_label(label: str) -> tuple[str, dict]:
+    """Classifica un'etichetta verticale in tipo blocco + metadati.
+
+    Ritorna (block_type, extras) dove extras puo' contenere train_id,
+    vettura_id, stazione, accessori_maggiorati.
+
+    block_type ∈ {'train', 'coach_transfer', 'cv_partenza', 'cv_arrivo',
+                  'meal', 'scomp', 'available', 'unknown'}
+    """
+    s = label.strip()
+    if not s:
+        return "unknown", {}
+
+    # ● -> accessori maggiorati
+    accessori = False
+    if "●" in s or "\u25cf" in s:
+        accessori = True
+        s = s.replace("●", "").replace("\u25cf", "").strip()
+
+    # Vettura: inizia con '('
+    if s.startswith("("):
+        # "(2434 DOMO" -> vettura=2434, stazione=DOMO (se presente)
+        rest = s[1:].strip()
+        m = re.match(r"^(\d{3,5})\s*([A-Z]{2,6})?", rest)
+        if m:
+            return "coach_transfer", {
+                "vettura_id": m.group(1),
+                "to_station": (m.group(2) or "").strip(),
+                "accessori_maggiorati": accessori,
+            }
+
+    # CVp <num> <staz>
+    m = re.match(r"^CVp\s*(\d{3,5})\s*([A-Z]{2,6})?", s, re.IGNORECASE)
+    if m:
+        return "cv_partenza", {
+            "train_id": m.group(1),
+            "to_station": (m.group(2) or "").strip(),
+        }
+
+    # CVa <num> <staz>
+    m = re.match(r"^CVa\s*(\d{3,5})\s*([A-Z]{2,6})?", s, re.IGNORECASE)
+    if m:
+        return "cv_arrivo", {
+            "train_id": m.group(1),
+            "to_station": (m.group(2) or "").strip(),
+        }
+
+    # REFEZ <staz>
+    m = re.match(r"^REFEZ\s*([A-Z]{2,6})?", s, re.IGNORECASE)
+    if m:
+        return "meal", {"to_station": (m.group(1) or "").strip()}
+
+    # S.COMP <staz>
+    if s.upper().startswith("S.COMP") or s.upper().startswith("SCOMP"):
+        m = re.match(r"^S\.?COMP\s*([A-Z]{2,6})?", s, re.IGNORECASE)
+        st = (m.group(1) if m else "").strip()
+        return "scomp", {"to_station": st}
+
+    # Treno: inizia con cifre (4-5)
+    m = re.match(r"^(\d{4,5})\s*([A-Za-z]{2,6})?", s)
+    if m:
+        return "train", {
+            "train_id": m.group(1),
+            "to_station": (m.group(2) or "").strip(),
+            "accessori_maggiorati": accessori,
+        }
+
+    return "unknown", {"raw": s}
 
 
-def parse_pdc_pdf(pdf_path: str) -> list[PdcTurno]:
-    """Parse il PDF Turni PdC e restituisce lista di turni."""
-    turni = []
+# ══════════════════════════════════════════════════════════════════
+# CLUSTERIZZAZIONE BANDE Y PER GIORNATA
+# ══════════════════════════════════════════════════════════════════
 
-    with pdfplumber.open(pdf_path) as pdf:
-        current_turno: Optional[PdcTurno] = None
+def _find_day_markers(words: list[dict]) -> list[dict]:
+    """Identifica le parole che sono numeri di giornata (size>=10, x<20).
 
-        for page_idx, page in enumerate(pdf.pages):
-            text = page.extract_text() or ""
-            if not text.strip():
+    Nel PDF, il numero giornata e' in grassetto size=12, posizionato a
+    sinistra a x~10-17. E' il marker principale della banda Y della
+    giornata.
+    """
+    markers = []
+    for w in words:
+        if not w.get("upright", True):
+            continue
+        if w.get("size", 0) < 10:
+            continue
+        if w["x0"] > 20:
+            continue
+        if not re.fullmatch(r"\d{1,2}", w["text"].strip()):
+            continue
+        markers.append(w)
+    markers.sort(key=lambda w: w["top"])
+    return markers
+
+
+def _extract_day_from_band(words: list[dict], band_top: float,
+                           band_bot: float, page_width: float) -> Optional[ParsedPdcDay]:
+    """Estrae una ParsedPdcDay dalla banda Y [band_top, band_bot]."""
+    in_band = [w for w in words if band_top - 1 <= w["top"] <= band_bot + 1]
+    if not in_band:
+        return None
+
+    # 1. Numero giornata (size>=10, x<20)
+    day_num_word = next(
+        (w for w in in_band
+         if w.get("upright", True) and w.get("size", 0) >= 10
+         and w["x0"] < 20 and re.fullmatch(r"\d{1,2}", w["text"])),
+        None,
+    )
+    if not day_num_word:
+        return None
+    day_number = int(day_num_word["text"])
+    y_day = day_num_word["top"]
+
+    # 2. Periodicita': parola orizzontale size>=10 SOPRA il numero giornata
+    #    (y < y_day - qualche punto)
+    periodicita = ""
+    candidates = [w for w in in_band
+                  if w.get("upright", True) and w.get("size", 0) >= 10
+                  and w["x0"] < 80 and w["top"] < y_day - 3]
+    # Prendi quello piu' vicino al numero (max y < y_day)
+    candidates.sort(key=lambda w: -w["top"])
+    for w in candidates:
+        txt = w["text"].strip().upper()
+        if txt in PERIODICITA_CODES:
+            periodicita = txt
+            break
+    # Fallback: se non trovata, prova nella stessa riga
+    if not periodicita:
+        for w in in_band:
+            if w.get("upright", True) and w["text"].strip().upper() in PERIODICITA_CODES:
+                periodicita = w["text"].strip().upper()
+                break
+    if not periodicita:
+        periodicita = "LMXGVSD"  # default
+
+    # 3. Orari prestazione: due parole orizzontali size~8.5 tipo "[HH:MM]"
+    #    vicino al numero giornata
+    time_words = [w for w in in_band
+                  if w.get("upright", True)
+                  and re.fullmatch(r"\[\d{1,2}:\d{2}\]", w["text"])
+                  and abs(w["top"] - y_day) < 6]
+    time_words.sort(key=lambda w: w["x0"])
+    start_time = end_time = ""
+    if len(time_words) >= 2:
+        start_time = time_words[0]["text"].strip("[]")
+        end_time = time_words[1]["text"].strip("[]")
+
+    # 4. Stats destra (colonna x>720): Lav, Cct, Km, Not, Rip
+    stats_zone = [w for w in in_band if w["x0"] > 700 and w.get("upright", True)]
+    stats_zone.sort(key=lambda w: (w["top"], w["x0"]))
+    # Cerca la riga dei valori (sotto "Lav Cct Km Not Rip")
+    stats_vals = []
+    for w in stats_zone:
+        t = w["text"].strip()
+        if t in ("Lav", "Cct", "Km", "Not", "Rip"):
+            continue
+        stats_vals.append(t)
+    lavoro_min = condotta_min = km = riposo_min = 0
+    notturno = False
+    if len(stats_vals) >= 5:
+        try:
+            lavoro_min = _hhmm_to_min(stats_vals[0])
+            condotta_min = _hhmm_to_min(stats_vals[1])
+            km = int(stats_vals[2])
+            notturno = stats_vals[3].lower().startswith("s")
+            riposo_min = _hhmm_to_min(stats_vals[4])
+        except (ValueError, IndexError):
+            pass
+
+    # 5. Is disponibile? Cerca parola "Disponibile" (size grande) nella banda
+    is_disponibile = any(
+        w.get("upright", True)
+        and w["text"].strip().lower() == "disponibile"
+        and w.get("size", 0) >= 9
+        for w in in_band
+    )
+
+    # 6. Blocchi: etichette verticali nella banda
+    blocks: list[ParsedPdcBlock] = []
+    if not is_disponibile:
+        labels = _cluster_vertical_labels(in_band)
+        for i, lab in enumerate(labels):
+            btype, extras = _classify_vertical_label(lab["label"])
+            if btype == "unknown":
                 continue
+            blocks.append(ParsedPdcBlock(
+                seq=i,
+                block_type=btype,
+                train_id=extras.get("train_id", ""),
+                vettura_id=extras.get("vettura_id", ""),
+                from_station="",
+                to_station=extras.get("to_station", ""),
+                accessori_maggiorati=extras.get("accessori_maggiorati", False),
+            ))
+    else:
+        # Giornata disponibile: unico blocco 'available'
+        blocks.append(ParsedPdcBlock(seq=0, block_type="available"))
 
-            # Cerca header
-            header_match = re.search(
-                r'IMPIANTO:\s*(\S+)\s+TURNO:\s*\[(\w+)\]\s*\[(\d+)\]'
-                r'.*?DAL:\s*(\d{2}/\d{2}/\d{4})\s+AL:\s*(\d{2}/\d{2}/\d{4})',
-                text
+    return ParsedPdcDay(
+        day_number=day_number,
+        periodicita=periodicita,
+        start_time=start_time,
+        end_time=end_time,
+        lavoro_min=lavoro_min,
+        condotta_min=condotta_min,
+        km=km,
+        notturno=notturno,
+        riposo_min=riposo_min,
+        is_disponibile=is_disponibile,
+        blocks=blocks,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+# NOTE PERIODICITA' TRENI (pagina finale turno)
+# ══════════════════════════════════════════════════════════════════
+
+def _parse_train_notes(text: str) -> list[ParsedPdcNote]:
+    """Parse la pagina di note periodicita' treni del turno.
+
+    Esempio input:
+      Treno 10226 - Circola il sabato e la domenica. Non circola
+      27/12/2025, 03/01/2026. Circola 25/12/2025, 26/12/2025.
+
+    Output: ParsedPdcNote per ogni treno citato.
+    """
+    notes: dict[str, ParsedPdcNote] = {}
+
+    # Unisci multiline (tolgo newline tra virgole)
+    text_flat = re.sub(r"\n(?=\d{1,2}/\d{1,2}/\d{4})", " ", text)
+    text_flat = re.sub(r"\n(?=,)", " ", text_flat)
+
+    for m in re.finditer(
+        r"Treno\s+(\d{3,6})\s*[-–]\s*([^\n]*(?:\n(?!Treno\s+\d)[^\n]*)*)",
+        text_flat,
+        re.IGNORECASE,
+    ):
+        tid = m.group(1)
+        body = m.group(2).strip()
+
+        # Testo periodicita' (prima frase fino al primo '.')
+        period_txt = body.split(".")[0].strip() + "."
+
+        # Date "Non circola X, Y, Z"
+        non_circ_block = re.search(r"Non\s+circola\s+([^.]+)", body, re.IGNORECASE)
+        non_circ_dates = []
+        if non_circ_block:
+            for d in DATE_IT_RE.finditer(non_circ_block.group(1)):
+                non_circ_dates.append(
+                    f"{int(d.group(3)):04d}-{int(d.group(2)):02d}-{int(d.group(1)):02d}"
+                )
+
+        # Date "Circola X, Y, Z" (ma non dentro "Non circola")
+        circ_block_text = re.sub(r"Non\s+circola[^.]+\.?", " ", body, flags=re.IGNORECASE)
+        circ_block = re.search(
+            r"(?:^|\.)?\s*Circola\s+(\d{1,2}/\d{1,2}/\d{4}[^.]*)",
+            circ_block_text,
+            re.IGNORECASE,
+        )
+        circ_extra_dates = []
+        if circ_block:
+            for d in DATE_IT_RE.finditer(circ_block.group(1)):
+                circ_extra_dates.append(
+                    f"{int(d.group(3)):04d}-{int(d.group(2)):02d}-{int(d.group(1)):02d}"
+                )
+
+        if tid in notes:
+            # Mergiamo (lo stesso treno puo' apparire piu' volte)
+            notes[tid].non_circola_dates = sorted(
+                set(notes[tid].non_circola_dates) | set(non_circ_dates)
+            )
+            notes[tid].circola_extra_dates = sorted(
+                set(notes[tid].circola_extra_dates) | set(circ_extra_dates)
+            )
+        else:
+            notes[tid] = ParsedPdcNote(
+                train_id=tid,
+                periodicita_text=period_txt,
+                non_circola_dates=sorted(set(non_circ_dates)),
+                circola_extra_dates=sorted(set(circ_extra_dates)),
             )
 
-            if header_match:
-                depot = header_match.group(1)
-                turno_code = header_match.group(2)
-                turno_id = header_match.group(3)
-                valid_from = header_match.group(4)
-                valid_to = header_match.group(5)
+    return list(notes.values())
 
-                # Nuovo turno o continuazione?
-                if (current_turno is None
-                    or current_turno.depot != depot
-                    or current_turno.turno_code != turno_code):
-                    # Salva il turno precedente
-                    if current_turno and current_turno.progs:
-                        turni.append(current_turno)
 
-                    current_turno = PdcTurno(
-                        depot=depot,
-                        turno_code=turno_code,
-                        turno_id=turno_id,
-                        valid_from=valid_from,
-                        valid_to=valid_to,
-                        source_pages=[page_idx + 1],
-                    )
-                else:
-                    # Stessa pagina turno, aggiungi pagina
-                    current_turno.source_pages.append(page_idx + 1)
+# ══════════════════════════════════════════════════════════════════
+# DRIVER PRINCIPALE
+# ══════════════════════════════════════════════════════════════════
 
-            if not current_turno:
+def parse_pdc_pdf(pdf_path: str) -> list[ParsedPdcTurn]:
+    """Parse un PDF turno PdC e ritorna la lista di turni parsati."""
+    turns: list[ParsedPdcTurn] = []
+    current: Optional[ParsedPdcTurn] = None
+
+    with pdfplumber.open(pdf_path) as pdf:
+        for page_idx, page in enumerate(pdf.pages):
+            page_num = page_idx + 1
+            text = page.extract_text() or ""
+
+            # Identifica se e' pagina indice (prima pagina, senza IMPIANTO)
+            if page_num == 1 or "IMPIANTO:" not in text:
+                # Potenzialmente pagina di note/indice
+                if current and NOTE_TITLE_RE.search(text):
+                    current.notes.extend(_parse_train_notes(text))
                 continue
 
-            # Estrai PROG blocks dal testo della pagina
-            blocks = _split_into_prog_blocks(text)
+            # Header turno
+            hm = HEADER_RE.search(text)
+            if hm:
+                impianto = hm.group("impianto")
+                codice = hm.group("codice")
+                planning = hm.group("planning")
 
-            for b in blocks:
-                # Evita duplicati (lo stesso PROG+day_type)
-                existing = [p for p in current_turno.progs
-                           if p.prog_number == b["prog_number"]
-                           and p.day_type == b["day_type"]]
-                if existing:
-                    # Aggiorna treni se ne abbiamo trovati di piu'
-                    if len(b["train_ids"]) > len(existing[0].train_ids):
-                        existing[0].train_ids = b["train_ids"]
+                # Stesso turno se impianto+codice coincidono
+                if (current is None
+                        or current.impianto != impianto
+                        or current.codice != codice):
+                    if current is not None:
+                        turns.append(current)
+                    current = ParsedPdcTurn(
+                        codice=codice,
+                        planning=planning,
+                        impianto=impianto,
+                        profilo=hm.group("profilo"),
+                        valid_from=_it_to_iso_date(hm.group("dal")),
+                        valid_to=_it_to_iso_date(hm.group("al")),
+                        source_pages=[page_num],
+                    )
+                else:
+                    current.source_pages.append(page_num)
+            else:
+                # Pagina non-turno e non-note: skip
+                continue
+
+            # Se la pagina contiene "Note sulla periodicita'" oltre all'header,
+            # parse le note (pagina finale turno)
+            if NOTE_TITLE_RE.search(text):
+                current.notes.extend(_parse_train_notes(text))
+                continue
+
+            # Estrai le giornate dalla pagina via geometria
+            try:
+                words = page.extract_words(
+                    x_tolerance=2, y_tolerance=2,
+                    keep_blank_chars=False, use_text_flow=False,
+                    extra_attrs=["fontname", "size", "upright"],
+                )
+            except Exception:
+                continue
+
+            markers = _find_day_markers(words)
+            if not markers:
+                continue
+
+            for i, mk in enumerate(markers):
+                band_top = mk["top"] - 25  # include periodicita' sopra
+                band_bot = (markers[i + 1]["top"] - 1
+                            if i + 1 < len(markers)
+                            else 580)  # fino a fondo pagina
+                day = _extract_day_from_band(words, band_top, band_bot, page.width)
+                if day is None:
                     continue
+                # Evita duplicati (stesso giorno + periodicita')
+                if any(d.day_number == day.day_number and d.periodicita == day.periodicita
+                        for d in current.days):
+                    continue
+                current.days.append(day)
 
-                current_turno.progs.append(PdcProg(
-                    prog_number=b["prog_number"],
-                    day_type=b["day_type"],
-                    start_time=b["start_time"],
-                    end_time=b["end_time"],
-                    lavoro_min=b["lavoro_min"],
-                    condotta_min=b["condotta_min"],
-                    km=b["km"],
-                    notturno=b["notturno"],
-                    riposo_min=b["riposo_min"],
-                    train_ids=b["train_ids"],
-                    note=b["note"],
-                    is_rest=b["is_rest"],
-                    raw_text=b["raw_text"],
-                ))
+        if current is not None:
+            turns.append(current)
 
-        # Salva l'ultimo turno
-        if current_turno and current_turno.progs:
-            turni.append(current_turno)
-
-    return turni
+    return turns
 
 
-def pdc_turni_to_flat_records(turni: list[PdcTurno]) -> list[dict]:
-    """Converte la lista di turni in record piatti per il DB."""
-    records = []
-    for turno in turni:
-        for prog in turno.progs:
-            records.append({
-                "depot": turno.depot,
-                "turno_code": turno.turno_code,
-                "turno_id": turno.turno_id,
-                "valid_from": turno.valid_from,
-                "valid_to": turno.valid_to,
-                "prog_number": prog.prog_number,
-                "day_type": prog.day_type,
-                "start_time": prog.start_time,
-                "end_time": prog.end_time,
-                "lavoro_min": prog.lavoro_min,
-                "condotta_min": prog.condotta_min,
-                "km": prog.km,
-                "notturno": prog.notturno,
-                "riposo_min": prog.riposo_min,
-                "train_ids": prog.train_ids,
-                "is_rest": prog.is_rest,
-                "note": prog.note,
-            })
-    return records
+# ══════════════════════════════════════════════════════════════════
+# SALVATAGGIO IN DB (schema v2)
+# ══════════════════════════════════════════════════════════════════
 
+def save_parsed_turns_to_db(turns: list[ParsedPdcTurn],
+                             db, source_file: str = "") -> dict:
+    """Persiste i turni parsati usando i metodi CRUD schema v2.
+
+    Chiama `db.clear_pdc_data()` prima per avere uno stato pulito.
+    Ritorna le statistiche dell'import.
+    """
+    db.clear_pdc_data()
+
+    for t in turns:
+        turn_id = db.insert_pdc_turn(
+            codice=t.codice, planning=t.planning, impianto=t.impianto,
+            profilo=t.profilo, valid_from=t.valid_from, valid_to=t.valid_to,
+            source_file=source_file,
+        )
+        for day in t.days:
+            day_id = db.insert_pdc_turn_day(
+                pdc_turn_id=turn_id,
+                day_number=day.day_number,
+                periodicita=day.periodicita,
+                start_time=day.start_time, end_time=day.end_time,
+                lavoro_min=day.lavoro_min, condotta_min=day.condotta_min,
+                km=day.km, notturno=day.notturno,
+                riposo_min=day.riposo_min, is_disponibile=day.is_disponibile,
+            )
+            for b in day.blocks:
+                db.insert_pdc_block(
+                    pdc_turn_day_id=day_id, seq=b.seq,
+                    block_type=b.block_type,
+                    train_id=b.train_id, vettura_id=b.vettura_id,
+                    from_station=b.from_station, to_station=b.to_station,
+                    start_time=b.start_time, end_time=b.end_time,
+                    accessori_maggiorati=b.accessori_maggiorati,
+                )
+        for n in t.notes:
+            db.insert_pdc_train_periodicity(
+                pdc_turn_id=turn_id, train_id=n.train_id,
+                periodicita_text=n.periodicita_text,
+                non_circola_dates=n.non_circola_dates,
+                circola_extra_dates=n.circola_extra_dates,
+            )
+    db.conn.commit()
+    return db.get_pdc_stats()
+
+
+# ══════════════════════════════════════════════════════════════════
+# CLI DIAGNOSTICO
+# ══════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     import sys
     import json
+    from dataclasses import asdict
 
-    path = sys.argv[1] if len(sys.argv) > 1 else "test.pdf"
-    turni = parse_pdc_pdf(path)
+    if len(sys.argv) < 2:
+        print("Usage: python -m src.importer.turno_pdc_parser <file.pdf> [--full]")
+        sys.exit(1)
 
-    print(f"Turni trovati: {len(turni)}")
-    for t in turni:
-        print(f"\n{'='*60}")
-        print(f"Deposito: {t.depot} | Turno: {t.turno_code} [{t.turno_id}]")
-        print(f"Valido: {t.valid_from} - {t.valid_to}")
-        print(f"PROG: {len(t.progs)} giornate")
-        for p in t.progs:
-            trains_str = ", ".join(p.train_ids) if p.train_ids else "(nessun treno)"
-            rest_str = " [RIPOSO]" if p.is_rest else ""
-            print(f"  PROG {p.prog_number} [{p.day_type}] {p.start_time}-{p.end_time}"
-                  f" | Lav:{p.lavoro_min}m Cct:{p.condotta_min}m Km:{p.km}"
-                  f" | Treni: {trains_str}{rest_str}")
+    path = sys.argv[1]
+    full = "--full" in sys.argv
+
+    turns = parse_pdc_pdf(path)
+    print(f"Turni estratti: {len(turns)}")
+    for t in turns[: 3 if not full else None]:
+        print(f"\n{'=' * 60}")
+        print(f"  {t.codice} @ {t.impianto} [{t.planning}] {t.profilo}")
+        print(f"  Validita': {t.valid_from} -> {t.valid_to}")
+        print(f"  Giornate: {len(t.days)}")
+        for d in t.days:
+            disp = " [DISP]" if d.is_disponibile else ""
+            blocks_info = ""
+            if d.blocks:
+                btypes = [b.block_type for b in d.blocks]
+                blocks_info = f" blocks={btypes}"
+            print(f"    g{d.day_number} {d.periodicita:<8} "
+                  f"[{d.start_time}]-[{d.end_time}] "
+                  f"Lav={d.lavoro_min:>3}m Cct={d.condotta_min:>3}m "
+                  f"Km={d.km:>3} Rip={d.riposo_min:>4}m{disp}{blocks_info}")
+        print(f"  Note treni: {len(t.notes)}")
+        for n in t.notes[:3]:
+            print(f"    - {n.train_id}: {n.periodicita_text[:60]}")

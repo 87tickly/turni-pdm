@@ -4,6 +4,78 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-16 — Step 3/6 redesign turni PdC: parser PDF v2
+
+### Contesto
+Il parser esistente di `turno_pdc_parser.py` produceva solo `train_ids[]` flat per pagina — niente dettaglio Gantt (vetture, CVp/CVa, refezioni, scomp, accessori maggiorati) ne' note periodicita' treni. Riscritto da zero sul nuovo schema v2.
+
+### Analisi geometrica del PDF (pagine tipiche)
+- Pagina = 842×595 pt (A4 landscape)
+- Header pagina: parole orizzontali y~11 (`IMPIANTO:`, `[CODICE]`, `[PLANNING]`, `PROFILO:`, `DAL:`, `AL:`)
+- Numero giornata: orizzontale size=12, x<20 (ancora per banda Y)
+- Periodicita': orizzontale size=10, sopra il numero (`LMXGVSD`, `D`, `SD`, …)
+- Orari prestazione: orizzontale size=8.5, tipo `[HH:MM]`
+- Asse orario: size=5.5, tick 3..24..1..2..3
+- Stats: size=6.5, colonna destra x>720 (Lav/Cct/Km/Not/Rip)
+- Stazioni sul Gantt: orizzontali size=7 ai bordi
+- **Etichette blocchi**: testo ruotato (`upright=False`). Lettura:
+  concatenare i caratteri della stessa colonna X ordinati per Y crescente,
+  poi **invertire** la stringa risultante (il testo e' scritto bottom-to-top).
+
+### Modulo `src/importer/turno_pdc_parser.py` v2
+Riscritto completamente. Contiene:
+
+**Dataclass parse-time** (serializzabili):
+- `ParsedPdcBlock` (seq, block_type, train_id, vettura_id, from_station, to_station, start_time, end_time, accessori_maggiorati)
+- `ParsedPdcDay` (day_number, periodicita, orari, stats, is_disponibile, blocks[])
+- `ParsedPdcNote` (train_id, periodicita_text, non_circola_dates[], circola_extra_dates[])
+- `ParsedPdcTurn` (codice, planning, impianto, profilo, validita', days[], notes[], source_pages[])
+
+**Funzioni pure** (testate unitariamente):
+- `_hhmm_to_min`, `_it_to_iso_date`, `_reverse`
+- `_cluster_vertical_labels(words, x_tol=2)` — raggruppa caratteri verticali per colonna X e inverte
+- `_classify_vertical_label(label)` — classifica in `train`/`coach_transfer`/`cv_partenza`/`cv_arrivo`/`meal`/`scomp`/`unknown` + estrae train_id / vettura_id / to_station / accessori_maggiorati
+- `_find_day_markers(words)` — identifica i numeri giornata grandi a sinistra
+- `_extract_day_from_band(words, band_top, band_bot, page_width)` — estrae una giornata completa dalla banda Y
+- `_parse_train_notes(text)` — parse regex della pagina finale con `Treno NNN - Circola ... Non circola ...`
+
+**Driver principale**:
+- `parse_pdc_pdf(pdf_path) -> list[ParsedPdcTurn]` — scorre le pagine, aggrega per (impianto, codice), estrae giornate + blocchi + note.
+- `save_parsed_turns_to_db(turns, db, source_file)` — persiste via CRUD schema v2 (clear_pdc_data poi insert_*).
+
+### Esito sul PDF reale (Turni PdC rete RFI dal 23 Febbraio 2026, 446 pagine)
+- **26 turni** estratti (tutti gli impianti unici: ARONA, BERGAMO, BRESCIA, CREMONA, ecc.)
+- **1315 giornate** con periodicita', orari prestazione e stats corrette
+- **6054 blocchi** Gantt classificati: 3807 `train`, 738 `coach_transfer`, 532 `meal`, 370 `cv_arrivo`, altri `cv_partenza`/`scomp`/`available`
+- **1716 treni** distinti citati nei blocchi
+- **2901 note periodicita'** treni con date ISO (non circola + circola extra)
+
+### Test — `tests/test_turno_pdc_parser.py`
+21 test unitari su funzioni pure:
+- Utility (hhmm_to_min, it_to_iso_date, reverse)
+- Cluster verticali (DOMO da lettere separate, `2434` da numero intero, due colonne distinte, ignora parole orizzontali)
+- Classificazione etichette (train, train+accessori, coach_transfer, cv_partenza, cv_arrivo, meal, scomp con/senza punto, unknown)
+- Day markers (size>=10 su x<20)
+- Parse note treni (base, dedup, multiline, empty)
+
+Tutti 21/21 passano. Suite totale: 81/82 (1 fail pre-esistente non correlato su test_meal_slot_gap).
+
+### Limitazioni note (da affinare eventualmente)
+- La periodicita' della prima giornata di AROR_C risulta `LMXGVS` invece di `LMXGVSD` — piccolo mismatch del matching di banda Y. Da investigare con test fixture mirato.
+- Gli orari al minuto dei blocchi (numeri sotto l'asse) NON sono ancora popolati: i blocchi hanno `start_time`/`end_time` vuoti. Sufficiente per MVP — da aggiungere in una v2 se servira' per la visualizzazione Gantt dettagliata.
+- Le stazioni `from_station` di ogni blocco non sono popolate (serve logica aggiuntiva per associare le parole orizzontali ARON/DOMO ai blocchi).
+
+### Prossimi step
+4. Riattivare `POST /upload-turno-pdc` che chiami il nuovo parser + `save_parsed_turns_to_db`
+5. Pagina frontend per visualizzare i turni PdC (riusa `GanttTimeline`)
+6. Builder interno isomorfo
+
+### File modificati / creati
+- `src/importer/turno_pdc_parser.py` — riscritto (510 righe)
+- `tests/test_turno_pdc_parser.py` — NUOVO (21 test)
+
+---
+
 ## 2026-04-16 — Step 2/6 redesign turni PdC: calendario italiano
 
 ### Contesto
