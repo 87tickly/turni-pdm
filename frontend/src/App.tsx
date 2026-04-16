@@ -7,6 +7,7 @@ import { ShiftsPage } from "@/pages/ShiftsPage"
 import { BuilderPage } from "@/pages/BuilderPage"
 import { CalendarPage } from "@/pages/CalendarPage"
 import { ImportPage } from "@/pages/ImportPage"
+import { PdcPage } from "@/pages/PdcPage"
 import { SettingsPage } from "@/pages/SettingsPage"
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="turni" element={<ShiftsPage />} />
           <Route path="builder" element={<BuilderPage />} />
           <Route path="calendario" element={<CalendarPage />} />
+          <Route path="pdc" element={<PdcPage />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="impostazioni" element={<SettingsPage />} />
         </Route>

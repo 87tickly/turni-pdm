@@ -4,6 +4,58 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-16 — Step 5/6 redesign turni PdC: pagina frontend dedicata
+
+### Nuova pagina `/pdc`
+Route aggiunta a `App.tsx`, voce sidebar "Turni PdC" con icona Train.
+
+### Layout split
+**Colonna sinistra (280px)**: lista turni
+- Filtro per impianto (dropdown "Tutti gli impianti" + 26 impianti)
+- Card per turno: codice mono grassetto + impianto
+- Stato selezionato evidenziato con border sx primary
+
+**Colonna destra (fluid)**: dettaglio turno
+- Header: codice + planning + profilo badge + impianto + validita'
+- Sezione "Giornate": card espandibili per ogni giornata
+  - Collapsed: `g<N> <periodicita> <start>–<end>` + stats (Lav/Cct/Km/Not/Rip)
+  - Expanded: lista blocchi colorati per tipo
+- Sezione "Note periodicita' treni": `<details>` per treno con non_circola / circola_extra
+
+### Componente blocchi
+Ogni blocco ha:
+- Badge colorato per tipo (Treno blu, Vettura viola, CVp/CVa ambra, Refezione verde, S.COMP/Disp grigio)
+- Icona tematica (Train, Route, Clock, Coffee, Pause)
+- Identifier (train_id o vettura_id)
+- Stazioni from → to
+- Orari start – end
+- Pallino "●" ambra per accessori maggiorati
+
+### Stats header pagina
+5 stat pill: Turni / Giornate / Blocchi / Treni / Impianti (dai dati `/pdc-stats`).
+
+### Build
+- `tsc --noEmit` (incluso strict) → 0 errori
+- `npm run build` → 348 KB JS (102 KB gzip), 52 KB CSS
+
+### Ora l'utente puo' davvero:
+1. Caricare un PDF dalla pagina Import (endpoint Step 4)
+2. Navigare a `/pdc`, vedere 26 turni, filtrare per impianto
+3. Selezionare un turno, vedere 15+ giornate con periodicita' (D/LMXGV/SD...)
+4. Espandere giornate per vedere i blocchi con orari precisi
+5. Consultare le note periodicita' con date ISO non-circola / circola-extra
+
+### File creati / modificati
+- `frontend/src/pages/PdcPage.tsx` (NEW, ~330 righe)
+- `frontend/src/App.tsx` (route /pdc)
+- `frontend/src/components/Sidebar.tsx` (voce Turni PdC)
+- `frontend/dist/*` (build)
+
+### Prossimo step
+6. Builder interno isomorfo — il "Nuovo turno" produce turni nello stesso schema, validati contro calendario italiano.
+
+---
+
 ## 2026-04-16 — Step 4/6 redesign turni PdC: endpoint upload + lettura
 
 ### Endpoint riattivato e riscritto

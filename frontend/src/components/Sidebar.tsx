@@ -5,6 +5,7 @@ import {
   ClipboardList,
   PlusCircle,
   Calendar,
+  Train,
   Upload,
   Settings,
   LogOut,
@@ -24,6 +25,7 @@ const navItems = [
   { to: "/turni", icon: ClipboardList, label: "Turni" },
   { to: "/builder", icon: PlusCircle, label: "Nuovo turno" },
   { to: "/calendario", icon: Calendar, label: "Calendario" },
+  { to: "/pdc", icon: Train, label: "Turni PdC" },
   { to: "/import", icon: Upload, label: "Import" },
 ]
 
