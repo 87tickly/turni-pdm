@@ -40,6 +40,7 @@ from api.validation import router as validation_router
 from api.builder import router as builder_router
 from api.shifts import router as shifts_router
 from api.importers import router as importers_router
+from api.pdc_builder import router as pdc_builder_router
 from api.viaggiatreno import router as vt_router
 
 app = FastAPI(
@@ -66,6 +67,7 @@ app.include_router(validation_router)
 app.include_router(builder_router)
 app.include_router(shifts_router)
 app.include_router(importers_router)
+app.include_router(pdc_builder_router)
 app.include_router(vt_router)
 
 # Serve frontend: React build (frontend/dist/) in produzione, static/ come fallback

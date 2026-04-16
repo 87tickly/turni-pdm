@@ -4,6 +4,52 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-16 — Step 6a/6 redesign turni PdC: endpoint builder manuale + calendar
+
+### Nuovo router `api/pdc_builder.py`
+Gestisce creazione/modifica manuale di turni PdC via API: lo stesso
+schema v2 dei PdC importati da PDF, in modo che **il builder interno
+produca turni isomorfi** a quelli ufficiali.
+
+### Endpoint CRUD
+- **`POST /pdc-turn`** — crea un turno nuovo con tutto il grafo (turno + giornate + blocchi + note) in un singolo body. Validazione payload via Pydantic.
+- **`PUT /pdc-turn/{id}`** — sostituisce tutto il contenuto di un turno esistente (cancella + reinserisce).
+- **`DELETE /pdc-turn/{id}`** — elimina turno e tutti i figli (CASCADE).
+
+### Endpoint Calendario
+- **`GET /italian-calendar/periodicity?date_str=YYYY-MM-DD&local=milano`** — ritorna letter (L/M/X/G/V/S/D con festivi forzati a D), weekday italiano, is_holiday, holiday_name, eventuale patrono locale.
+- **`GET /pdc-turn/{id}/apply-to-date?date_str=...`** — dato un turno e una data, trova quale variante giornata si applica (periodicita' contiene la lettera della data).
+
+### Validazione Pydantic
+- Codice e impianto obbligatori
+- Profilo in {Condotta, Scorta}
+- Periodicita' in {LMXGVSD, LMXGVS, LMXGV, ..., D, SD, ...}
+- block_type in {train, coach_transfer, cv_partenza, cv_arrivo, meal, scomp, available}
+- No duplicati (day_number, periodicita)
+
+### Registrazione in server.py
+`app.include_router(pdc_builder_router)` dopo importers.
+
+### Test (`tests/test_pdc_builder.py`) — 18 test
+- `POST /pdc-turn`: minimal, con 2 giornate e 3 blocchi + 1 nota, reject profilo/periodicita/block_type invalidi, reject duplicate day, reject campi mancanti
+- `PUT`: sostituzione completa + 404 se non esiste
+- `DELETE`: cascade (verifica figli rimossi) + 404
+- `GET /italian-calendar/periodicity`: lunedi normale, Liberazione su sabato, Pasqua, patrono Milano opt-in, data invalida
+- `GET /pdc-turn/{id}/apply-to-date`: selezione variante corretta (LMXGV per lunedi, SD per domenica/festivo sabato)
+
+Tutti 18/18 passano. Suite totale: 108/109 (1 fail pre-esistente).
+
+### Prossimi sotto-step
+6b. Frontend: pagina PdcBuilderPage (form per creare turno)
+6c. Integrazione in PdcPage (bottoni Nuovo/Modifica/Elimina)
+
+### File creati
+- `api/pdc_builder.py` — router ~270 righe
+- `tests/test_pdc_builder.py` — 18 test
+- `server.py` — import + include_router
+
+---
+
 ## 2026-04-16 — Step 5/6 redesign turni PdC: pagina frontend dedicata
 
 ### Nuova pagina `/pdc`
