@@ -482,6 +482,53 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 
 ---
 
+## 2026-04-16 — Parser turno materiale: estrazione tipo locomotiva
+
+### Contesto
+Nell'intestazione di ogni turno materiale (prima pagina, prima del Gantt) c'e' una tabella "Impegno del materiale (n.pezzi)" che elenca i pezzi del convoglio:
+```
+Pezzo        Numero
+npBDL        2
+nBC-clim     10
+E464N        2
+```
+Le righe lowercase (`npBDL`, `nBC-clim`) sono carrozze, la riga UPPERCASE (`E464N`) e' la locomotiva. Il parser prima non estraeva questo dato.
+
+### Modifiche
+- **`src/database/db.py`**:
+  - Colonna `material_type TEXT DEFAULT ''` aggiunta a `material_turn`
+  - Migrazione idempotente: `ALTER TABLE material_turn ADD COLUMN material_type TEXT DEFAULT ''`
+  - `insert_material_turn()` accetta parametro opzionale `material_type`
+- **`src/importer/pdf_parser.py`**:
+  - Nuova regex `RE_LOCO` per codici locomotiva Trenord (E464, E464N, E484, ETR*, ALn*, ALe*, TAF, TSR)
+  - Nuova funzione `extract_material_type(words)` con 2 strategie:
+    1. Anchor su "Impegno" + scansione della zona sottostante (tabella)
+    2. Fallback: scansione di tutta l'header area (top < 110 pt)
+  - `parse_pdf()` costruisce `turno_material_types: dict[turn_number, str]` registrando il primo match per turno
+  - Il dict `material_turns` ritornato include `material_type`
+  - `PDFImporter.run_import()` passa `material_type` a `insert_material_turn()`
+- **`.claude/skills/turno-materiale-reader.md`**:
+  - Nuova sezione "Tabella Impegno del materiale" con convenzione lowercase/uppercase
+  - Elenco codici locomotiva riconosciuti dalla regex
+  - Schema JSON aggiornato con campo `material_type`
+
+### Test
+- Regex: verificata su E464/E464N/E484/ETR425/TAF/TSR/ALn668 (match) + npBDL/nBC-clim/10606 (no match)
+- extract_material_type: 5 casi di test (tabella standard, fallback header, nessuna loco, lista vuota, ETR)
+- `tests/test_database.py` e `tests/test_builder.py`: tutti passanti
+
+### Impatto
+- Import PDF futuri registreranno `material_type` nel DB
+- I turni gia' importati avranno `material_type=''` — si popoleranno al prossimo re-import del PDF
+- `GET /material-turns` (via SELECT *) ritorna automaticamente il nuovo campo senza modifiche API
+
+### File modificati
+- `src/database/db.py` — schema + migrazione + insert_material_turn
+- `src/importer/pdf_parser.py` — regex + extract_material_type + parse_pdf + run_import
+- `.claude/skills/turno-materiale-reader.md` — documentazione
+
+---
+
 ## 2026-04-16 — Fix import PDF su PostgreSQL (FK violation)
 
 ### Problema

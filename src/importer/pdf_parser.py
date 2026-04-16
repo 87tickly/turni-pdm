@@ -127,6 +127,14 @@ RE_VALIDITY = re.compile(
     re.IGNORECASE,
 )
 
+# Material type (locomotiva/automotrice): codice che appare nella tabella
+# "Impegno del materiale (n.pezzi)" sopra il Gantt. Le carrozze hanno codici
+# minuscoli (npBDL, nBC-clim) e non ci interessano: ci interessa il mezzo
+# di trazione (E464, E464N, E484, ETR425, ALn668, TAF, TSR, ecc.).
+RE_LOCO = re.compile(
+    r"^(E\d{3,4}[A-Z]?|ETR\d{2,4}|ALn?\d{2,4}|ALe\d{2,4}|TAF|TSR)$"
+)
+
 # ---------------------------------------------------------------------------
 # Station name normalization
 # ---------------------------------------------------------------------------
@@ -610,6 +618,52 @@ def extract_turno_number(words: list[dict]) -> str:
                 and len(w["text"]) == 4
                 and w["top"] < 90):
             return w["text"]
+
+    return ""
+
+
+def extract_material_type(words: list[dict]) -> str:
+    """
+    Extract the rolling-stock locomotive code from the header page.
+
+    The header of each turno materiale contains a table
+    "Impegno del materiale (n.pezzi)" with rows like:
+        Pezzo         Numero
+        npBDL         2
+        nBC-clim      10
+        E464N         2
+    Lowercase rows (npBDL, nBC-clim) are carriages; the uppercase row is the
+    locomotive/self-propelled unit that identifies the material type of the
+    giro. We return the first uppercase code matching RE_LOCO; if no anchor
+    is found we still fall back to searching the entire header region.
+
+    Returns the locomotive code (e.g. "E464N") or "" if not found.
+    """
+    if not words:
+        return ""
+
+    # Strategy 1: anchor on "Impegno", then scan the words below it.
+    anchor = None
+    for w in words:
+        if w["text"].strip().startswith("Impegno"):
+            anchor = w
+            break
+
+    if anchor is not None:
+        y_start = anchor["top"]
+        y_end = y_start + 200  # generous window to cover the 3-4 row table
+        for w in words:
+            if y_start <= w["top"] <= y_end:
+                m = RE_LOCO.match(w["text"].strip())
+                if m:
+                    return m.group(1)
+
+    # Strategy 2: fallback — scan the whole header area (above the Gantt grid).
+    for w in words:
+        if w["top"] < DATA_AREA_TOP_Y:
+            m = RE_LOCO.match(w["text"].strip())
+            if m:
+                return m.group(1)
 
     return ""
 
@@ -1554,6 +1608,8 @@ def parse_pdf(filepath: str) -> tuple[list[dict], list[dict]]:
 
     all_segments: list[ParsedSegment] = []
     turno_numbers_seen: set[str] = set()
+    # Mappa turn_number -> material_type (primo valore non vuoto incontrato)
+    turno_material_types: dict[str, str] = {}
     current_turno = ""
     data_page_count = 0
 
@@ -1572,6 +1628,14 @@ def parse_pdf(filepath: str) -> tuple[list[dict], list[dict]]:
             if page_turno:
                 current_turno = page_turno
                 turno_numbers_seen.add(page_turno)
+
+            # Material type: cerchiamo la tabella "Impegno del materiale"
+            # che appare nell'header page. Registriamo il primo valore trovato
+            # per ogni turno (le pagine successive non ce l'hanno).
+            if current_turno and current_turno not in turno_material_types:
+                mat_type = extract_material_type(words)
+                if mat_type:
+                    turno_material_types[current_turno] = mat_type
 
             # Only parse data pages (those with the hour grid)
             if not is_data_page(words):
@@ -1635,6 +1699,7 @@ def parse_pdf(filepath: str) -> tuple[list[dict], list[dict]]:
             "turn_number": tn,
             "source_file": pdf_path.name,
             "total_segments": count,
+            "material_type": turno_material_types.get(tn, ""),
         })
 
     return segment_dicts, material_turns
@@ -1780,6 +1845,7 @@ class PDFImporter:
                 turn_number=mt["turn_number"],
                 source_file=mt["source_file"],
                 total_segments=mt["total_segments"],
+                material_type=mt.get("material_type", ""),
             )
             turn_id_map[mt["turn_number"]] = mt_id
 

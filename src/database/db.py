@@ -134,7 +134,8 @@ class Database:
                 id {pk},
                 turn_number TEXT NOT NULL,
                 source_file TEXT NOT NULL,
-                total_segments INTEGER DEFAULT 0
+                total_segments INTEGER DEFAULT 0,
+                material_type TEXT DEFAULT ''
             )
         """)
 
@@ -352,6 +353,11 @@ class Database:
             "SELECT depot_id FROM material_turn LIMIT 1",
             "ALTER TABLE material_turn ADD COLUMN depot_id INTEGER REFERENCES depot(id)"
         )
+        # Migrazione: tipo materiale (codice locomotiva, es. E464N) per ogni giro
+        self._run_migration(
+            "SELECT material_type FROM material_turn LIMIT 1",
+            "ALTER TABLE material_turn ADD COLUMN material_type TEXT DEFAULT ''"
+        )
         self._run_migration(
             "SELECT depot_id FROM saved_shift LIMIT 1",
             "ALTER TABLE saved_shift ADD COLUMN depot_id INTEGER REFERENCES depot(id)"
@@ -489,13 +495,15 @@ class Database:
     # MATERIAL TURN
     # ------------------------------------------------------------------
     def insert_material_turn(self, turn_number: str, source_file: str,
-                             total_segments: int = 0) -> int:
+                             total_segments: int = 0,
+                             material_type: str = "") -> int:
         cur = self._cursor()
         new_id = self._lastrowid(
             cur,
-            "INSERT INTO material_turn (turn_number, source_file, total_segments) "
-            "VALUES (?, ?, ?)",
-            (turn_number, source_file, total_segments),
+            "INSERT INTO material_turn "
+            "(turn_number, source_file, total_segments, material_type) "
+            "VALUES (?, ?, ?, ?)",
+            (turn_number, source_file, total_segments, material_type),
         )
         self.conn.commit()
         return new_id
