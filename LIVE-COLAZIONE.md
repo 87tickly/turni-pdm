@@ -4,6 +4,67 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-16 — Step 2/6 redesign turni PdC: calendario italiano
+
+### Contesto
+Il turno PdC usa periodicita' `D` che significa "Domenica OPPURE festivo infrasettimanale". Per applicare correttamente una giornata di turno a una data del calendario reale serve un modulo che sappia:
+- calcolare la domenica di Pasqua (mobile)
+- conoscere tutte le festivita' fisse italiane
+- decidere se un sabato o un feriale cade su una festivita'
+
+### Modulo `src/italian_holidays.py`
+File singolo, isolato (nessun import dal resto del progetto), utility puro.
+
+**Festivita' fisse** (10): 1/1, 6/1, 25/4, 1/5, 2/6, 15/8, 1/11, 8/12, 25/12, 26/12
+
+**Festivita' mobili** (2): Pasqua (Computus / algoritmo di Gauss, forma anonima Meeus-Jones-Butcher), Pasquetta (Pasqua+1).
+
+**Patroni locali** (opt-in, 14 citta'): Milano (Sant'Ambrogio 7/12), Torino, Roma, Napoli, Venezia, Firenze, Bologna, Palermo, Bari, Genova, Verona, Trieste, Cagliari, Catania. NON inclusi di default — solo se `include_local=<citta>` e' passato.
+
+**API pubblica**:
+- `easter_sunday(year) -> date`
+- `easter_monday(year) -> date`
+- `italian_national_holidays(year) -> frozenset[date]` (cached)
+- `italian_holidays(year, include_local=None) -> frozenset[date]`
+- `is_italian_holiday(d, include_local=None) -> bool`
+- `weekday_for_periodicity(d, include_local=None) -> str` (L/M/X/G/V/S/D)
+- `matches_periodicity(d, periodicita, include_local=None) -> bool`
+- `upcoming_holidays(start, end, include_local=None) -> list[date]`
+
+**Regole**:
+- Domenica normale -> `'D'`
+- Festivo infrasettimanale (anche su sabato o feriale) -> `'D'`
+- Patrono locale, se richiesto, -> `'D'`
+- Festivo che cade di domenica resta `'D'` (nessun conflitto)
+
+### Test — `tests/test_italian_holidays.py`
+23 test unitari che coprono:
+- Date di Pasqua verificate per 2024-2030 contro calendario liturgico
+- Invariante Pasqua sempre domenica (2020-2050)
+- Pasquetta = Pasqua+1, sempre lunedi
+- Conteggio festivita' nazionali = 12/anno
+- Contenuto festivita' 2026 verificato una per una
+- `is_italian_holiday` casi true/false
+- Patrono Milano opt-in, case-insensitive
+- `weekday_for_periodicity` per giorni normali, festivi su sabato (25/04/26), Pasquetta su lunedi, Natale su venerdi
+- `matches_periodicity` per varianti `LMXGVSD`, `LMXGVS`, `LMXGV`, `SD`, `S`, `D`
+- `upcoming_holidays` single year + partial range + cross-year
+- Cache lru stabile
+
+Tutti 23/23 passano. Suite totale: 60 passed (1 fail pre-esistente su `test_meal_slot_gap`, non correlato).
+
+### Prossimi step
+3. Parser PDF turno PdC che usa sia lo schema DB v2 sia il calendario italiano
+4. Rimettere online `POST /upload-turno-pdc`
+5. Pagina frontend visualizzazione turni PdC
+6. Builder interno isomorfo (validazione date contro calendario italiano)
+
+### File creati
+- `src/italian_holidays.py` — 175 righe, isolato, zero dipendenze interne
+- `tests/test_italian_holidays.py` — 23 test
+
+---
+
 ## 2026-04-16 — Step 1/6 redesign turni PdC: schema DB v2
 
 ### Contesto
