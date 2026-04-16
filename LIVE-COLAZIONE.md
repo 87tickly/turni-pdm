@@ -482,6 +482,34 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 
 ---
 
+## 2026-04-16 — Fix import PDF su PostgreSQL (FK violation)
+
+### Problema
+In produzione (PostgreSQL su Railway) l'import di un PDF turno materiale falliva con:
+```
+update or delete on table "material_turn" violates foreign key constraint
+"day_variant_material_turn_id_fkey" on table "day_variant"
+DETAIL: Key (id)=(1) is still referenced from table "day_variant".
+```
+In locale (SQLite) il problema non si manifestava perché SQLite non applica le FK per default.
+
+### Causa
+In `src/database/db.py::clear_all()` l'ordine dei DELETE cancellava `material_turn` PRIMA di `day_variant`, che però ha una FK verso `material_turn`. PostgreSQL (che applica sempre le FK) rifiutava l'operazione.
+
+### Fix
+Riordinati i DELETE in modo che i figli (che hanno FK verso `material_turn`) vengano cancellati per primi, poi il padre:
+1. `non_train_event` (nessuna FK)
+2. `train_segment` (figlio)
+3. `day_variant` (figlio) ← spostato qui prima di material_turn
+4. `material_turn` (padre) ← ora per ultimo
+
+Nessuna migrazione DB necessaria: è solo un riordino di statement.
+
+### File modificato
+- `src/database/db.py::clear_all()` — ordine DELETE corretto
+
+---
+
 ## 2026-04-16 — Fix routing SPA su Railway (404 su /login)
 
 ### Problema

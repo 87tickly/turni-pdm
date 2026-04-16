@@ -1936,10 +1936,12 @@ class Database:
     # ------------------------------------------------------------------
     def clear_all(self):
         cur = self._cursor()
+        # Ordine: prima i figli (che hanno FK verso material_turn), poi il padre.
+        # Necessario per PostgreSQL che enforce le FK (SQLite no per default).
         cur.execute("DELETE FROM non_train_event")
         cur.execute("DELETE FROM train_segment")
-        cur.execute("DELETE FROM material_turn")
         cur.execute("DELETE FROM day_variant")
+        cur.execute("DELETE FROM material_turn")
         # Non cancellare saved_shift (i turni salvati sono persistenti)
         self.conn.commit()
 
