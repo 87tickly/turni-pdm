@@ -93,7 +93,11 @@ export async function getMe() {
 
 export interface DbInfo {
   total_segments: number
-  material_turns: Array<{ id: number; turn_number: string }>
+  material_turns: Array<{
+    id: number
+    turn_number: string
+    material_type?: string
+  }>
   day_indices: number[]
   unique_trains: string[]
   unique_trains_count: number
@@ -264,6 +268,7 @@ export async function listStations() {
 export interface GiroChainContext {
   train_id: string
   turn_number: string | null
+  material_type?: string
   position: number
   total: number
   chain: Array<{

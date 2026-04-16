@@ -127,8 +127,15 @@ function TrainDetail({ trainNumber }: { trainNumber: number }) {
       {/* Giro materiale */}
       {giro && giro.chain && giro.chain.length > 1 && (
         <div className="bg-muted rounded-lg p-3">
-          <p className="text-[11px] text-muted-foreground mb-2">
-            Giro materiale {giro.turn_number && `— turno ${giro.turn_number}`} ({giro.position + 1}/{giro.total})
+          <p className="text-[11px] text-muted-foreground mb-2 flex flex-wrap items-center gap-1.5">
+            <span>
+              Giro materiale {giro.turn_number && `— turno ${giro.turn_number}`} ({giro.position + 1}/{giro.total})
+            </span>
+            {giro.material_type && (
+              <span className="px-1.5 py-0.5 rounded bg-brand/10 text-brand text-[10px] font-semibold font-mono">
+                {giro.material_type}
+              </span>
+            )}
           </p>
           <div className="flex flex-wrap gap-1">
             {giro.chain.map((c, i) => (

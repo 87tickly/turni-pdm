@@ -17,7 +17,7 @@ from datetime import datetime
 @dataclass
 class TrainSegment:
     id: Optional[int]
-    train_id: str
+    train_id: str          # Puo' contenere piu' numeri separati da "/"
     from_station: str
     dep_time: str          # HH:MM
     to_station: str
@@ -29,6 +29,8 @@ class TrainSegment:
     raw_text: str
     source_page: int
     is_deadhead: bool = False
+    is_accessory: bool = False   # primo/ultimo segmento del giorno
+    segment_kind: str = "train"  # 'train' | 'cvl_cb'
 
     @property
     def duration_min(self) -> int:
@@ -140,6 +142,9 @@ class Database:
         """)
 
         # -- train_segment
+        # NB: train_id puo' contenere piu' numeri separati da "/"
+        #     (es. "3085/3086") quando uno stesso convoglio/barra rossa
+        #     cambia numero a meta' strada senza cambio materiale.
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS train_segment (
                 id {pk},
@@ -155,6 +160,8 @@ class Database:
                 raw_text TEXT DEFAULT '',
                 source_page INTEGER DEFAULT 0,
                 is_deadhead INTEGER DEFAULT 0,
+                is_accessory INTEGER DEFAULT 0,
+                segment_kind TEXT DEFAULT 'train',
                 FOREIGN KEY (material_turn_id) REFERENCES material_turn(id)
             )
         """)
@@ -358,6 +365,16 @@ class Database:
             "SELECT material_type FROM material_turn LIMIT 1",
             "ALTER TABLE material_turn ADD COLUMN material_type TEXT DEFAULT ''"
         )
+
+        # Migrazioni: marcatori segmento accessorio e tipologia (train/cvl_cb)
+        self._run_migration(
+            "SELECT is_accessory FROM train_segment LIMIT 1",
+            "ALTER TABLE train_segment ADD COLUMN is_accessory INTEGER DEFAULT 0"
+        )
+        self._run_migration(
+            "SELECT segment_kind FROM train_segment LIMIT 1",
+            "ALTER TABLE train_segment ADD COLUMN segment_kind TEXT DEFAULT 'train'"
+        )
         self._run_migration(
             "SELECT depot_id FROM saved_shift LIMIT 1",
             "ALTER TABLE saved_shift ADD COLUMN depot_id INTEGER REFERENCES depot(id)"
@@ -523,13 +540,14 @@ class Database:
             "INSERT INTO train_segment "
             "(train_id, from_station, dep_time, to_station, arr_time, "
             " material_turn_id, day_index, seq, confidence, raw_text, "
-            " source_page, is_deadhead) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " source_page, is_deadhead, is_accessory, segment_kind) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 seg.train_id, seg.from_station, seg.dep_time,
                 seg.to_station, seg.arr_time, seg.material_turn_id,
                 seg.day_index, seg.seq, seg.confidence, seg.raw_text,
                 seg.source_page, int(seg.is_deadhead),
+                int(seg.is_accessory), seg.segment_kind,
             ),
         )
         self.conn.commit()
@@ -541,8 +559,8 @@ class Database:
             "INSERT INTO train_segment "
             "(train_id, from_station, dep_time, to_station, arr_time, "
             " material_turn_id, day_index, seq, confidence, raw_text, "
-            " source_page, is_deadhead) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " source_page, is_deadhead, is_accessory, segment_kind) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         data = [
             (
@@ -550,6 +568,7 @@ class Database:
                 s.to_station, s.arr_time, s.material_turn_id,
                 s.day_index, s.seq, s.confidence, s.raw_text,
                 s.source_page, int(s.is_deadhead),
+                int(s.is_accessory), s.segment_kind,
             )
             for s in segments
         ]
@@ -557,13 +576,20 @@ class Database:
         self.conn.commit()
 
     def query_train(self, train_id: str) -> list[dict]:
+        """Find all segments for a train id.
+
+        Matches both the exact value and slash-joined multi-ids: searching
+        for '3086' finds rows stored as '3086' or '3085/3086' or '3086/3087'.
+        """
         cur = self._cursor()
         cur.execute(
             self._q(
-                "SELECT * FROM train_segment WHERE train_id = ? "
+                "SELECT * FROM train_segment "
+                "WHERE train_id = ? "
+                "   OR '/' || train_id || '/' LIKE '%/' || ? || '/%' "
                 "ORDER BY day_index, seq"
             ),
-            (train_id,),
+            (train_id, train_id),
         )
         return [self._dict(row) for row in cur.fetchall()]
 
@@ -1039,13 +1065,16 @@ class Database:
         from collections import OrderedDict
         cur = self._cursor()
 
-        # 1. Trova material_turn_id e day_index del treno cercato
+        # 1. Trova material_turn_id e day_index del treno cercato.
+        #    Match flessibile per train_id "slash-joined" (es. 3085/3086).
         cur.execute(
             self._q(
                 "SELECT DISTINCT day_index, material_turn_id "
-                "FROM train_segment WHERE train_id = ?"
+                "FROM train_segment "
+                "WHERE train_id = ? "
+                "   OR '/' || train_id || '/' LIKE '%/' || ? || '/%'"
             ),
-            (train_id,),
+            (train_id, train_id),
         )
         refs = [self._dict(row) for row in cur.fetchall()]
         if not refs:
@@ -1264,15 +1293,20 @@ class Database:
         }
 
     def get_material_turn_info(self, train_id: str) -> dict:
-        """Returns material_turn info (turn_number) for a train."""
+        """Returns material_turn info (turn_number) for a train.
+
+        Match flessibile per train_id slash-joined.
+        """
         cur = self._cursor()
         cur.execute(self._q("""
-            SELECT mt.id, mt.turn_number, mt.total_segments, mt.source_file
+            SELECT mt.id, mt.turn_number, mt.total_segments, mt.source_file,
+                   mt.material_type
             FROM train_segment ts
             JOIN material_turn mt ON ts.material_turn_id = mt.id
             WHERE ts.train_id = ?
+               OR '/' || ts.train_id || '/' LIKE '%/' || ? || '/%'
             LIMIT 1
-        """), (train_id,))
+        """), (train_id, train_id))
         row = cur.fetchone()
         if row:
             return self._dict(row)
@@ -1285,13 +1319,16 @@ class Database:
         cycle = self.get_material_cycle(train_id)
         if not cycle or not cycle.get("cycle"):
             return {"train_id": train_id, "prev": None, "next": None,
-                    "chain": [], "turn_number": None, "position": -1, "total": 0}
+                    "chain": [], "turn_number": None, "material_type": "",
+                    "position": -1, "total": 0}
 
         chain = cycle["cycle"]
         turn_number = None
+        material_type = ""
         mt = cycle.get("material_turn")
         if mt:
             turn_number = mt.get("turn_number")
+            material_type = mt.get("material_type") or ""
 
         # Find position of this train in the chain
         pos = -1
@@ -1350,6 +1387,7 @@ class Database:
         return {
             "train_id": train_id,
             "turn_number": turn_number,
+            "material_type": material_type,
             "prev": prev_train,
             "next": next_train,
             "chain": chain_summary,

@@ -414,7 +414,7 @@ def normalize_station_name(raw: str) -> str:
 @dataclass
 class ParsedSegment:
     """A single parsed train segment from the Gantt chart."""
-    train_id: str = ""
+    train_id: str = ""           # may contain multiple ids joined by "/"
     from_station: str = ""
     to_station: str = ""
     dep_time: str = ""          # HH:MM
@@ -427,7 +427,9 @@ class ParsedSegment:
     source_page: int = 0
     seq: int = 0
     raw_text: str = ""
-    is_deadhead: bool = False   # vuoto/deadhead movement (suffix "i")
+    is_deadhead: bool = False    # vuoto/deadhead movement (suffix "i")
+    is_accessory: bool = False   # first/last segment of the day
+    segment_kind: str = "train"  # 'train' | 'cvl_cb'
 
 
 @dataclass
@@ -1580,6 +1582,173 @@ def deduplicate_segments(segments: list[ParsedSegment]) -> list[ParsedSegment]:
     return result
 
 
+def _time_to_min(hhmm: str) -> int:
+    """Parse 'HH:MM' -> minutes from midnight, tolerant of empty input."""
+    if not hhmm or ":" not in hhmm:
+        return 0
+    try:
+        h, m = hhmm.split(":", 1)
+        return int(h) * 60 + int(m)
+    except ValueError:
+        return 0
+
+
+def mark_accessory_segments(
+    segments: list[ParsedSegment],
+) -> list[ParsedSegment]:
+    """
+    Flag the first and last segment of each (turno_id, day_index) as accessory.
+
+    The turno materiale PDF shows these segments as the red bars that open or
+    close the daily roster: they represent setup/wrap-up work that belongs
+    to the macchinista as an 'accessorio' and isn't a commercial train run
+    in the normal sense.
+    """
+    if not segments:
+        return segments
+
+    # Group indices by (turno_id, day_index) preserving the input order
+    groups: dict[tuple, list[int]] = defaultdict(list)
+    for i, seg in enumerate(segments):
+        groups[(seg.turno_id, seg.day_index)].append(i)
+
+    for indices in groups.values():
+        # Sort indices chronologically by dep_time (fallback to original order)
+        indices_sorted = sorted(
+            indices,
+            key=lambda idx: (_time_to_min(segments[idx].dep_time), idx),
+        )
+        if not indices_sorted:
+            continue
+        segments[indices_sorted[0]].is_accessory = True
+        segments[indices_sorted[-1]].is_accessory = True
+
+    return segments
+
+
+def mark_cvl_cb_segments(
+    segments: list[ParsedSegment],
+    max_span_min: int = 80,
+) -> list[ParsedSegment]:
+    """
+    Flag consecutive short red bars as CVL/CB.
+
+    Rule: within a single (turno_id, day_index), scan chronologically and
+    find the LONGEST contiguous sub-sequence of segments whose total span
+    (first dep_time .. last arr_time) is <= max_span_min. If the sub-sequence
+    has 2 or more segments, mark every one with segment_kind='cvl_cb'.
+
+    This is applied greedily: once a window is closed, scanning resumes
+    from the next segment. It correctly handles days with mixed CVL bursts
+    and normal long runs.
+
+    'CVL' (Cambio Veloce Locomotiva) and 'CB' (Cambio Banco) are both
+    short shunting activities; we tag them with a single generic label.
+    """
+    if not segments:
+        return segments
+
+    groups: dict[tuple, list[int]] = defaultdict(list)
+    for i, seg in enumerate(segments):
+        groups[(seg.turno_id, seg.day_index)].append(i)
+
+    for indices in groups.values():
+        if len(indices) < 2:
+            continue
+
+        indices_sorted = sorted(
+            indices,
+            key=lambda idx: (_time_to_min(segments[idx].dep_time), idx),
+        )
+
+        i = 0
+        n = len(indices_sorted)
+        while i < n:
+            start_dep = _time_to_min(segments[indices_sorted[i]].dep_time)
+            j = i
+            # Expand window while total span stays within max_span_min
+            while j + 1 < n:
+                next_arr = _time_to_min(
+                    segments[indices_sorted[j + 1]].arr_time,
+                )
+                if next_arr < start_dep:
+                    next_arr += 24 * 60  # wrap midnight
+                if next_arr - start_dep > max_span_min:
+                    break
+                j += 1
+            # Window [i..j] with >=2 segments -> tag as cvl_cb
+            if j > i:
+                for k in range(i, j + 1):
+                    segments[indices_sorted[k]].segment_kind = "cvl_cb"
+            i = j + 1
+
+    return segments
+
+
+def merge_multinumber_segments(
+    segments: list[ParsedSegment],
+) -> list[ParsedSegment]:
+    """
+    Merge segments that describe the same physical run with multiple train ids.
+
+    In Trenord material turns, a single red bar on the Gantt can carry two
+    consecutive train numbers (e.g. 3085 and 3086) when the same convoy
+    changes number mid-route without changing crew/material. The parser
+    creates one ParsedSegment per vertical number; this function collapses
+    those into a single segment with `train_id = "3085/3086"`.
+
+    Two segments are considered the same run when they share:
+        (turno_id, day_index, from_station, to_station, dep_time, arr_time)
+    The train_ids are concatenated with "/" in numeric order, and duplicates
+    inside the combined id are dropped.
+    """
+    if not segments:
+        return segments
+
+    groups: dict[tuple, list[ParsedSegment]] = defaultdict(list)
+    order: list[tuple] = []
+    for seg in segments:
+        key = (
+            seg.turno_id, seg.day_index,
+            seg.from_station, seg.to_station,
+            seg.dep_time, seg.arr_time,
+        )
+        if key not in groups:
+            order.append(key)
+        groups[key].append(seg)
+
+    merged: list[ParsedSegment] = []
+    for key in order:
+        group = groups[key]
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+
+        # Collect unique train_ids preserving order of first appearance
+        # but sorted numerically when all ids are numeric
+        ids_seen: list[str] = []
+        for s in group:
+            tid = s.train_id.strip()
+            if tid and tid not in ids_seen:
+                ids_seen.append(tid)
+
+        if all(t.isdigit() for t in ids_seen):
+            ids_seen.sort(key=int)
+
+        # Start from the highest-confidence segment to preserve best data
+        best = max(group, key=lambda s: s.confidence)
+        best.train_id = "/".join(ids_seen)
+        # Any id with deadhead suffix? keep deadhead true if any were
+        best.is_deadhead = any(s.is_deadhead for s in group)
+        merged.append(best)
+
+    # Re-assign sequential indices
+    for i, seg in enumerate(merged):
+        seg.seq = i
+
+    return merged
+
+
 # ---------------------------------------------------------------------------
 # Public API: parse_pdf()
 # ---------------------------------------------------------------------------
@@ -1668,6 +1837,26 @@ def parse_pdf(filepath: str) -> tuple[list[dict], list[dict]]:
     unique_segments = deduplicate_segments(all_segments)
     logger.info("After dedup: %d unique segments", len(unique_segments))
 
+    # Merge segments sharing the same red bar but different train numbers
+    # (e.g. 3085/3086). Collapses them into a single segment.
+    before_merge = len(unique_segments)
+    unique_segments = merge_multinumber_segments(unique_segments)
+    if before_merge != len(unique_segments):
+        logger.info(
+            "After multi-number merge: %d segments (-%d merged)",
+            len(unique_segments), before_merge - len(unique_segments),
+        )
+
+    # Flag first/last of each day as accessory, and short consecutive
+    # sequences (<=80 min total) as CVL/CB.
+    unique_segments = mark_accessory_segments(unique_segments)
+    unique_segments = mark_cvl_cb_segments(unique_segments)
+    acc = sum(1 for s in unique_segments if s.is_accessory)
+    cvl = sum(1 for s in unique_segments if s.segment_kind == "cvl_cb")
+    logger.info(
+        "Tagged: %d accessory segments, %d cvl_cb segments", acc, cvl,
+    )
+
     # Convert to dicts
     segment_dicts = []
     for seg in unique_segments:
@@ -1686,6 +1875,8 @@ def parse_pdf(filepath: str) -> tuple[list[dict], list[dict]]:
             "seq": seg.seq,
             "raw_text": seg.raw_text,
             "is_deadhead": seg.is_deadhead,
+            "is_accessory": seg.is_accessory,
+            "segment_kind": seg.segment_kind,
         })
 
     # Build material turn list
@@ -1802,6 +1993,8 @@ class PDFImporter:
                 seq=sd["seq"],
                 raw_text=sd.get("raw_text", ""),
                 is_deadhead=sd.get("is_deadhead", False),
+                is_accessory=sd.get("is_accessory", False),
+                segment_kind=sd.get("segment_kind", "train"),
             ))
 
         # Update turn numbers
@@ -1877,6 +2070,8 @@ class PDFImporter:
                 raw_text=seg.raw_text,
                 source_page=seg.source_page,
                 is_deadhead=seg.is_deadhead,
+                is_accessory=seg.is_accessory,
+                segment_kind=seg.segment_kind,
             )
             db_segments.append(db_seg)
 

@@ -482,6 +482,79 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 
 ---
 
+## 2026-04-16 — Parser v2: accessori, CVL/CB, multi-numero + badge frontend
+
+### Nuove regole di riconoscimento sul PDF
+L'utente ha definito 3 regole aggiuntive da applicare dopo l'estrazione dei segmenti grezzi:
+
+1. **Accessori inizio/fine giornata**: il PRIMO e l'ULTIMO segmento di ogni `(turno, day_index)` vengono marcati come `is_accessory=1`. Rappresentano setup/wrap-up gia' definiti per il macchinista, non servizi commerciali.
+
+2. **CVL / CB (Cambio Veloce Locomotiva / Cambio Banco)**: 2+ segmenti consecutivi con span totale ≤ 80 minuti (dal `dep_time` del primo all'`arr_time` dell'ultimo) vengono marcati con `segment_kind='cvl_cb'`. Algoritmo a finestra scorrevole che gestisce correttamente burst multipli in una stessa giornata.
+
+3. **Treni multi-numero sulla stessa barra rossa**: quando due numeri treno (es. 3085 e 3086) condividono identiche stazioni e orari, il parser li fonde in un unico segmento con `train_id="3085/3086"` (sort numerico, duplicati eliminati).
+
+### Modifiche DB (`src/database/db.py`)
+- Tabella `train_segment`:
+  - Nuova colonna `is_accessory INTEGER DEFAULT 0`
+  - Nuova colonna `segment_kind TEXT DEFAULT 'train'` (valori: `train`, `cvl_cb`)
+  - Commento chiarifica che `train_id` puo' contenere multipli ID separati da `/`
+- Migrazioni idempotenti aggiunte per entrambe le colonne
+- `TrainSegment` dataclass aggiornata con i 2 nuovi campi
+- `insert_segment` e `bulk_insert_segments` aggiornati per i nuovi campi
+
+### Query API flessibili per slash
+Aggiornate 3 query per matchare ID sia esatti sia "token in lista slash-separated":
+```sql
+WHERE train_id = ? OR '/' || train_id || '/' LIKE '%/' || ? || '/%'
+```
+- `query_train()` — ricerca principale treno
+- `get_material_cycle()` — primo SELECT del giro
+- `get_material_turn_info()` — anche include ora `material_type` nel SELECT
+
+Cercando `3086` trova sia righe `3086` che righe `3085/3086`; cercando `60` NON matcha `10606` (grazie ai separatori `/`).
+
+### Parser (`src/importer/pdf_parser.py`)
+- `ParsedSegment` dataclass: nuovi campi `is_accessory`, `segment_kind`
+- Nuove funzioni pure:
+  - `_time_to_min(hhmm)` helper
+  - `mark_accessory_segments(segments)` — flag primo/ultimo per `(turno, day)`
+  - `mark_cvl_cb_segments(segments, max_span_min=80)` — finestra scorrevole
+  - `merge_multinumber_segments(segments)` — fonde segmenti identici tranne train_id
+- `parse_pdf()` applica la pipeline dopo il dedup:
+  ```
+  dedup → merge_multinumber → mark_accessory → mark_cvl_cb
+  ```
+- Dict segmento e TrainSegment DB popolati con i nuovi campi
+
+### Frontend (badge material_type)
+- `lib/api.ts`:
+  - `DbInfo.material_turns[].material_type?: string`
+  - `GiroChainContext.material_type?: string`
+- `TrainSearchPage.tsx`: badge brand-blu `E464N` accanto a "Giro materiale — turno X"
+- `SettingsPage.tsx`: badge inline nella lista dei turni materiale
+- `get_giro_chain_context()` (backend): restituisce ora anche `material_type`
+- `frontend/dist/` rigenerato: 335KB JS + 48KB CSS, 0 errori TS
+
+### Test
+- 6 casi funzionali su merge/accessory/CVL con assert (tutti passano)
+- Test multi-numero DB: query('3086') trova '3085/3086', `60` non matcha `10606`, `material_type` persistito correttamente
+- `tests/test_database.py` e `tests/test_builder.py` tutti verdi
+
+### Impatto
+- PDF futuri importati avranno `is_accessory`, `segment_kind` e multi-numero mergiati automaticamente
+- Dati gia' importati restano invariati (default 0/'train'/single-id) finche' non reimportati
+- Nessuna breaking change API: i nuovi campi sono opzionali lato frontend
+
+### File modificati
+- `src/database/db.py` — schema + migrazioni + insert + 3 query + get_giro_chain_context
+- `src/importer/pdf_parser.py` — dataclass + 4 funzioni nuove + pipeline
+- `frontend/src/lib/api.ts` — tipi
+- `frontend/src/pages/TrainSearchPage.tsx` — badge
+- `frontend/src/pages/SettingsPage.tsx` — badge
+- `frontend/dist/*` — build aggiornata
+
+---
+
 ## 2026-04-16 — Parser turno materiale: estrazione tipo locomotiva
 
 ### Contesto

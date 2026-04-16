@@ -134,9 +134,14 @@ export function SettingsPage() {
                   {info.material_turns.map((t) => (
                     <span
                       key={t.id}
-                      className="px-2 py-0.5 bg-muted hover:bg-border rounded text-[11px] font-mono text-muted-foreground hover:text-foreground transition-colors cursor-default"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-muted hover:bg-border rounded text-[11px] font-mono text-muted-foreground hover:text-foreground transition-colors cursor-default"
                     >
                       {t.turn_number}
+                      {t.material_type && (
+                        <span className="px-1 py-px rounded bg-brand/10 text-brand text-[9px] font-semibold">
+                          {t.material_type}
+                        </span>
+                      )}
                     </span>
                   ))}
                 </div>
