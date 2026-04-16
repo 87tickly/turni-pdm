@@ -17,6 +17,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { PdcGantt } from "@/components/PdcGantt"
 import {
   getPdcStats,
   listPdcTurns,
@@ -170,6 +171,7 @@ function BlocksList({ blocks }: { blocks: PdcBlock[] }) {
 
 function DayCard({ day }: { day: PdcDay }) {
   const [open, setOpen] = useState(false)
+  const [viewMode, setViewMode] = useState<"gantt" | "list">("gantt")
   return (
     <div className="border border-border-subtle rounded-lg bg-card">
       <button
@@ -214,7 +216,49 @@ function DayCard({ day }: { day: PdcDay }) {
       </button>
       {open && (
         <div className="px-3 pb-3 border-t border-border-subtle pt-2">
-          <BlocksList blocks={day.blocks} />
+          {day.is_disponibile === 1 ? (
+            <p className="text-[11px] text-muted-foreground italic text-center py-2">
+              Giornata disponibile (riposo / disponibilità)
+            </p>
+          ) : (
+            <>
+              {/* Toggle vista */}
+              <div className="flex items-center justify-end gap-1 mb-2">
+                <button
+                  className={cn(
+                    "text-[10px] px-2 py-0.5 rounded",
+                    viewMode === "gantt"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                  onClick={() => setViewMode("gantt")}
+                >
+                  📊 Gantt
+                </button>
+                <button
+                  className={cn(
+                    "text-[10px] px-2 py-0.5 rounded",
+                    viewMode === "list"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                  onClick={() => setViewMode("list")}
+                >
+                  📋 Lista
+                </button>
+              </div>
+              {viewMode === "gantt" ? (
+                <PdcGantt
+                  blocks={day.blocks}
+                  startTime={day.start_time}
+                  endTime={day.end_time}
+                  label={`g${day.day_number} ${day.periodicita}`}
+                />
+              ) : (
+                <BlocksList blocks={day.blocks} />
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

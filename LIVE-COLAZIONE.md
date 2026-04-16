@@ -4,6 +4,71 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-16 — Step 7: Gantt SVG visuale + builder interattivo
+
+### Motivazione (feedback utente)
+Le tabelle testuali nel dettaglio turno e nel builder erano poco leggibili:
+"ok le tabelle come le hai create ma devi anche creare i grafici e agire
+direttamente interagendo". Serviva una visualizzazione Gantt stile PDF Trenord.
+
+### Nuovo componente `PdcGantt.tsx`
+Timeline SVG orizzontale, scala **3 → 24 → 1 → 2 → 3** (27 tick, giornata operativa attraversa mezzanotte).
+
+**Rendering per tipo blocco**:
+- `train` -> barra alta (22px) blu `#0062CC`
+- `coach_transfer` -> barra media (14px) viola tratteggiata
+- `meal` -> barra media verde tratteggiata (label "REFEZ")
+- `scomp` -> barra bassa (10px) grigia tratteggiata (label "S.COMP")
+- `cv_partenza`/`cv_arrivo` -> marker verticale ambra (label "CVp"/"CVa")
+- `available` -> box grigio chiaro (label "DISP.")
+- `accessori_maggiorati=1` -> pallino nero sul blocco
+
+**Rendering informazioni**:
+- Etichetta treno/vettura sopra il blocco
+- Stazione destinazione a destra
+- Orari start/end sotto la barra
+- Zona "prestazione" evidenziata (fascia azzurra tra start_time e end_time della giornata)
+- Griglia verticale, numeri ora sull'asse
+
+**Interattività** (props opzionali):
+- `onBlockClick(block, index)` -> cursor pointer, click evidenzia il blocco
+- `onTimelineClick(hour, minute)` -> cursor crosshair, click aggiunge blocco
+
+**Legenda** sotto il grafico con 6 tipologie.
+
+### Integrazione in `PdcPage.tsx`
+Ogni `DayCard` espansa ora mostra toggle **Gantt / Lista**:
+- 📊 Gantt (default): visualizzazione SVG
+- 📋 Lista: tabella compatta come prima
+Le giornate "Disponibile" mostrano solo testo (no Gantt).
+
+### Integrazione in `PdcBuilderPage.tsx`
+Ogni giornata in editing mostra:
+1. Gantt SVG **cliccabile** con tutti i blocchi inseriti
+2. Click su un blocco del Gantt -> scrolla e highlight (ring blu 1.5s) sull'editor del blocco
+3. Click su zona vuota della timeline -> aggiunge nuovo blocco `train` con `start_time` = orario cliccato
+4. Sotto il Gantt, la lista blocchi editabili classica
+
+Helper `inputToPdcBlock(input)` converte `PdcBlockInput` del builder in `PdcBlock` per il renderer.
+
+### Build
+- `tsc --noEmit` 0 errori
+- `npm run build` 374 KB JS (108 gzip), 54 KB CSS
+
+### Flusso utente visuale
+1. Apri un turno -> vedi **Gantt visivo** di ogni giornata (come il PDF originale)
+2. Nel builder, clicca sulla timeline alle 08:30 -> crea blocco treno alle 08:30
+3. Click su un blocco esistente nel Gantt -> scroll + highlight dell'editor
+4. Puoi comunque modificare tutti i dettagli via form tabellare sotto
+
+### File creati / modificati
+- `frontend/src/components/PdcGantt.tsx` (NEW, ~280 righe)
+- `frontend/src/pages/PdcPage.tsx` (toggle Gantt/Lista)
+- `frontend/src/pages/PdcBuilderPage.tsx` (Gantt interattivo + click-to-add)
+- `frontend/dist/*` (build)
+
+---
+
 ## 2026-04-16 — Step 6b+6c/6 redesign turni PdC: builder frontend + integrazione
 
 ### Step 6b — Pagina `PdcBuilderPage.tsx`

@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { PdcGantt } from "@/components/PdcGantt"
 import {
   createPdcTurn,
   updatePdcTurn,
@@ -20,6 +21,7 @@ import {
   type PdcTurnInput,
   type PdcDayInput,
   type PdcBlockInput,
+  type PdcBlock,
 } from "@/lib/api"
 
 // ── Constants ──────────────────────────────────────────────────
@@ -49,6 +51,23 @@ const PERIODICITA_OPTIONS = [
   "V",
   "G",
 ]
+
+/** Converte un PdcBlockInput (editor) in un PdcBlock (visualizzatore). */
+function inputToPdcBlock(b: PdcBlockInput): PdcBlock {
+  return {
+    id: 0,
+    pdc_turn_day_id: 0,
+    seq: b.seq ?? 0,
+    block_type: b.block_type,
+    train_id: b.train_id || "",
+    vettura_id: b.vettura_id || "",
+    from_station: b.from_station || "",
+    to_station: b.to_station || "",
+    start_time: b.start_time || "",
+    end_time: b.end_time || "",
+    accessori_maggiorati: b.accessori_maggiorati ? 1 : 0,
+  }
+}
 
 // ── Sottocomponente: Editor blocco ─────────────────────────────
 
@@ -301,7 +320,39 @@ function DayEditor({
 
           {!day.is_disponibile && (
             <>
-              <div className="flex items-center justify-between pt-2 border-t border-border-subtle">
+              {/* Gantt visuale cliccabile */}
+              <div className="pt-2 border-t border-border-subtle">
+                <p className="text-[10px] text-muted-foreground mb-1">
+                  Clicca sulla timeline per aggiungere un blocco all'orario indicato, o clicca un blocco esistente per modificarlo.
+                </p>
+                <PdcGantt
+                  blocks={(day.blocks || []).map(b => inputToPdcBlock(b))}
+                  startTime={day.start_time}
+                  endTime={day.end_time}
+                  label={`g${day.day_number} ${day.periodicita}`}
+                  onBlockClick={(_, idx) => {
+                    // scrolla a lista blocchi, espandendo l'editor del blocco
+                    const el = document.getElementById(`block-editor-${idx}`)
+                    if (el) {
+                      el.scrollIntoView({ behavior: "smooth", block: "center" })
+                      el.classList.add("ring-2", "ring-primary")
+                      setTimeout(() => el.classList.remove("ring-2", "ring-primary"), 1500)
+                    }
+                  }}
+                  onTimelineClick={(h, m) => {
+                    const blocks = [...(day.blocks || [])]
+                    const hhmm = `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
+                    blocks.push({
+                      block_type: "train",
+                      seq: blocks.length,
+                      start_time: hhmm,
+                    })
+                    onChange({ ...day, blocks })
+                  }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
                 <span className="text-[11px] font-semibold">Blocchi ({(day.blocks || []).length})</span>
                 <button
                   onClick={addBlock}
@@ -312,17 +363,18 @@ function DayEditor({
               </div>
               <div className="space-y-2">
                 {(day.blocks || []).map((b, i) => (
-                  <BlockEditor
-                    key={i}
-                    block={b}
-                    index={i}
-                    onChange={(nb) => updateBlock(i, nb)}
-                    onRemove={() => removeBlock(i)}
-                  />
+                  <div id={`block-editor-${i}`} key={i} className="rounded-lg transition-all">
+                    <BlockEditor
+                      block={b}
+                      index={i}
+                      onChange={(nb) => updateBlock(i, nb)}
+                      onRemove={() => removeBlock(i)}
+                    />
+                  </div>
                 ))}
                 {(day.blocks || []).length === 0 && (
                   <p className="text-[11px] text-muted-foreground italic text-center py-3">
-                    Nessun blocco. Aggiungi il primo blocco per la giornata.
+                    Nessun blocco. Clicca sulla timeline sopra per aggiungere il primo.
                   </p>
                 )}
               </div>
