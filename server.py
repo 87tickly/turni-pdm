@@ -14,6 +14,23 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+
+class SPAStaticFiles(StaticFiles):
+    """StaticFiles con fallback a index.html per route SPA (React Router lato client).
+
+    Le route che iniziano con `api/` o `vt/` mantengono il 404 originale, così
+    i client API ricevono errori coerenti invece di HTML.
+    """
+
+    async def get_response(self, path, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as ex:
+            if ex.status_code == 404 and not path.startswith(("api/", "vt/")):
+                return await super().get_response("index.html", scope)
+            raise
 
 from api.auth import router as auth_router
 from api.health import router as health_router
@@ -57,7 +74,7 @@ FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
 STATIC_DIR = Path(__file__).parent / "static"
 
 if FRONTEND_DIST.exists():
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
+    app.mount("/", SPAStaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
 elif STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
 

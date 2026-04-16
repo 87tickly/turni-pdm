@@ -482,6 +482,34 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 
 ---
 
+## 2026-04-16 — Fix routing SPA su Railway (404 su /login)
+
+### Problema
+Aprendo `web-production-0e9b9b.up.railway.app/login` (o qualsiasi altra route React Router come `/treni`, `/turni`, ecc.) il server rispondeva `{"detail":"Not Found"}` invece di servire il frontend.
+
+### Causa
+`StaticFiles(html=True)` di Starlette serve `index.html` solo per la root `/`. Per qualsiasi altro path che non corrisponde a un file statico esistente ritorna 404. Le route SPA gestite lato client da React Router non sono file fisici sotto `frontend/dist/`, quindi cadevano nel 404.
+
+### Fix
+- `server.py`: nuova classe `SPAStaticFiles(StaticFiles)` che cattura il 404 e fa fallback a `index.html`, così React Router può gestire la route lato client.
+- Eccezione: i path che iniziano con `api/` o `vt/` mantengono il 404 originale (i client API ricevono JSON 404 coerente, non HTML).
+- Mount `/` aggiornato per usare `SPAStaticFiles` al posto di `StaticFiles`.
+
+### Verifica locale
+| Route | Prima | Dopo |
+|---|---|---|
+| `/` | 200 (index.html) | 200 (index.html) |
+| `/login` | 404 JSON | 200 (index.html → React Router) |
+| `/treni` | 404 JSON | 200 (index.html → React Router) |
+| `/api/health` | 200 JSON | 200 JSON |
+| `/api/nonexistent` | 404 JSON | 404 JSON (immutato) |
+| `/favicon.svg` | 200 | 200 |
+
+### File modificato
+- `server.py` — aggiunta classe `SPAStaticFiles`, mount `/` aggiornato
+
+---
+
 ## 2026-04-15 — Skill turno materiale reader
 
 ### Contesto appreso (insegnato dall'utente con screenshot PDF)
