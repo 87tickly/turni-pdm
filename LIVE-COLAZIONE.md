@@ -4,6 +4,63 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-16 — Skill turno PdC reader (contesto lettura turno personale)
+
+### Contesto
+Nuova fase: dopo il parser turno materiale serve imparare a leggere il **turno PdC** (Posto di Condotta) — il PDF ufficiale Trenord con i turni del personale di macchina/scorta per ogni impianto. Le stesse regole varranno anche per il builder interno: un turno costruito in COLAZIONE deve essere "isomorfo" a un turno PdC ufficiale.
+
+### Regole consolidate con l'utente (via screenshot + spiegazione)
+
+**Header pagina turno**: `IMPIANTO: <deposito> | TURNO: [<codice>] [<planning>] | PROFILO: <Condotta|Scorta> | DAL/AL`
+- `Condotta` = macchinista; `Scorta` = capotreno.
+- Validita' `DAL/AL` e' informativa, non operativa.
+
+**Periodicita'** (label sopra il numero giornata):
+- `LMXGVSD` (tutti), `LMXGVS` (no domenica), `LMXGV` (feriali), `SD`, `S`, `D`
+- `D` significa **Domenica E festivo infrasettimanale** → serve calendario italiano (Capodanno, Epifania, Pasqua/Pasquetta, 25/4, 1/5, 2/6, 15/8, 1/11, 8/12, 25/12, 26/12). Patroni locali opzionali per impianto.
+
+**Chiave logica giornata**: `(numero_giornata, periodicita)` — la stessa giornata puo' avere piu' righe se la periodicita' e' spezzata (es. giornata 2 esiste sia in `LMXGVS` sia in `D`, con Gantt diversi).
+
+**Asse orario**: `3 → 24 → 1 → 2 → 3` (giornata operativa attraverso mezzanotte).
+
+**Blocchi sopra l'asse**:
+| Etichetta | Grafico | Tipo |
+|---|---|---|
+| `<num> <staz>` | linea continua | treno commerciale |
+| `(<num> <staz>` | linea tratteggiata | vettura (deadhead) — `(` = numero vettura |
+| `CVp <num>` | marker | Cambio Volante in **Partenza** |
+| `CVa <num>` | marker | Cambio Volante in **Arrivo** |
+| `REFEZ <staz>` | blocco | refezione (pausa pasto) |
+| `S.COMP <staz>` | blocco lungo | a disposizione |
+| `● <num>` | pallino nero | accessori maggiorati (preriscaldo invernale) |
+| `Disponibile` | testo grande | riposo / disponibilita' |
+
+**Numeri sotto l'asse**: minuti degli eventi (partenza/arrivo treno, partenza/arrivo vettura, inizio/fine refezione, cambi volante, inizio accessori). Ora completa = tick sopra + minuti sotto.
+
+**Stats riga destra**: `Lav | Cct | Km | Not(si/no) | Rip`.
+
+**Pagina finale turno**: `Note sulla periodicita' dei treni` — per ogni treno: periodicita' testuale + date di non-circolazione + date di circolazione extra. Sono autoritative.
+
+### Output
+- `.claude/skills/turno-pdc-reader.md` — NUOVA skill (solo locale, `.claude/` e' gitignorato) con:
+  - Struttura documento + mapping blocchi grafici
+  - Tabella festivita' italiane (fisse + mobili via Computus)
+  - Schema JSON estratto
+  - Proposta data model DB (`pdc_turn`, `pdc_turn_day`, `pdc_block`, `pdc_train_periodicity`)
+  - Modulo calendario italiano (`easter_sunday`, `italian_national_holidays`, `weekday_for_periodicity`)
+  - Use case: caricamento PDF + builder interno "isomorfo"
+  - Note implementative (parser, calendario, frontend, test)
+
+### Prossimi passi (dopo check utente)
+1. Implementare modulo calendario italiano in `src/calendar/italian_holidays.py`
+2. Rafforzare `src/importer/turno_pdc_parser.py` (esiste gia' a livello scheletro) usando le regole della skill
+3. Creare tabelle `pdc_*` in `src/database/db.py` con migrazioni idempotenti
+4. Endpoint di upload/query per turni PdC
+5. Pagina frontend per visualizzare il turno PdC (riusa `GanttTimeline`)
+6. Adattare il builder COLAZIONE per produrre turni nel medesimo schema
+
+---
+
 ## 2026-04-16 — Reset turni salvati pre 15/04 (clean slate per redesign)
 
 ### Contesto
