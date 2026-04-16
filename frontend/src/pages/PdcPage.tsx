@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
+import { useNavigate } from "react-router-dom"
 import {
   Train,
   Building2,
@@ -11,12 +12,16 @@ import {
   ChevronRight,
   ChevronDown,
   Info,
+  Plus,
+  Edit,
+  Trash2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   getPdcStats,
   listPdcTurns,
   getPdcTurn,
+  deletePdcTurn,
   type PdcStats,
   type PdcTurn,
   type PdcTurnDetail,
@@ -218,7 +223,15 @@ function DayCard({ day }: { day: PdcDay }) {
 
 // ── Sottocomponente: dettaglio turno ────────────────────────────
 
-function TurnDetail({ detail }: { detail: PdcTurnDetail }) {
+function TurnDetail({
+  detail,
+  onEdit,
+  onDelete,
+}: {
+  detail: PdcTurnDetail
+  onEdit: () => void
+  onDelete: () => void
+}) {
   const t = detail.turn
   return (
     <div>
@@ -232,6 +245,22 @@ function TurnDetail({ detail }: { detail: PdcTurnDetail }) {
           <span className="text-[11px] px-2 py-0.5 rounded bg-primary/10 text-primary">
             {t.profilo}
           </span>
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              onClick={onEdit}
+              className="text-[11px] px-2 py-1 rounded border border-border hover:bg-muted flex items-center gap-1"
+              title="Modifica turno"
+            >
+              <Edit size={11} /> Modifica
+            </button>
+            <button
+              onClick={onDelete}
+              className="text-[11px] px-2 py-1 rounded border border-destructive/30 text-destructive hover:bg-destructive/10 flex items-center gap-1"
+              title="Elimina turno"
+            >
+              <Trash2 size={11} /> Elimina
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-4 text-[12px] text-muted-foreground">
           <span className="flex items-center gap-1">
@@ -298,6 +327,7 @@ function TurnDetail({ detail }: { detail: PdcTurnDetail }) {
 // ── Pagina principale ────────────────────────────────────────────
 
 export function PdcPage() {
+  const navigate = useNavigate()
   const [stats, setStats] = useState<PdcStats | null>(null)
   const [turns, setTurns] = useState<PdcTurn[]>([])
   const [impianti, setImpianti] = useState<string[]>([])
@@ -354,14 +384,42 @@ export function PdcPage() {
       .finally(() => setLoadingDetail(false))
   }, [selectedId])
 
+  const handleEdit = useCallback(() => {
+    if (!selectedId) return
+    navigate(`/pdc/edit?edit=${selectedId}`)
+  }, [selectedId, navigate])
+
+  const handleDelete = useCallback(async () => {
+    if (!selectedId || !detail) return
+    if (!confirm(`Eliminare il turno ${detail.turn.codice}? L'operazione e' irreversibile.`)) {
+      return
+    }
+    try {
+      await deletePdcTurn(selectedId)
+      setSelectedId(null)
+      setDetail(null)
+      loadTurns(filter)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Errore eliminazione")
+    }
+  }, [selectedId, detail, filter, loadTurns])
+
   return (
     <div className="h-[calc(100vh-6rem)] flex flex-col">
       {/* Header */}
-      <div className="mb-4">
-        <h2 className="text-lg font-semibold tracking-tight">Turni PdC</h2>
-        <p className="text-[13px] text-muted-foreground mt-0.5">
-          Turni Posto di Condotta (Trenord / rete RFI)
-        </p>
+      <div className="mb-4 flex items-start justify-between">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">Turni PdC</h2>
+          <p className="text-[13px] text-muted-foreground mt-0.5">
+            Turni Posto di Condotta (Trenord / rete RFI)
+          </p>
+        </div>
+        <button
+          onClick={() => navigate("/pdc/new")}
+          className="text-[12px] px-3 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 flex items-center gap-1 font-semibold"
+        >
+          <Plus size={14} /> Nuovo turno
+        </button>
       </div>
 
       {/* Stats */}
@@ -413,7 +471,7 @@ export function PdcPage() {
           {loadingDetail ? (
             <p className="text-[12px] text-muted-foreground">Caricamento...</p>
           ) : detail ? (
-            <TurnDetail detail={detail} />
+            <TurnDetail detail={detail} onEdit={handleEdit} onDelete={handleDelete} />
           ) : (
             <div className="h-full flex items-center justify-center text-center">
               <div>

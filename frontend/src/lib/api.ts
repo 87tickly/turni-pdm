@@ -63,6 +63,12 @@ export const api = {
       body: body ? JSON.stringify(body) : undefined,
     }),
 
+  put: <T>(url: string, body?: unknown) =>
+    request<T>(url, {
+      method: "PUT",
+      body: body ? JSON.stringify(body) : undefined,
+    }),
+
   delete: <T>(url: string) => request<T>(url, { method: "DELETE" }),
 }
 
@@ -643,4 +649,89 @@ export async function listPdcTurns(params?: { impianto?: string; profilo?: strin
 
 export async function getPdcTurn(turnId: number) {
   return api.get<PdcTurnDetail>(`/pdc-turn/${turnId}`)
+}
+
+// ── PdC Builder: creazione / modifica / eliminazione turni manuali ──
+
+export interface PdcBlockInput {
+  seq?: number
+  block_type: "train" | "coach_transfer" | "cv_partenza" | "cv_arrivo" | "meal" | "scomp" | "available"
+  train_id?: string
+  vettura_id?: string
+  from_station?: string
+  to_station?: string
+  start_time?: string
+  end_time?: string
+  accessori_maggiorati?: boolean
+}
+
+export interface PdcDayInput {
+  day_number: number
+  periodicita: string
+  start_time?: string
+  end_time?: string
+  lavoro_min?: number
+  condotta_min?: number
+  km?: number
+  notturno?: boolean
+  riposo_min?: number
+  is_disponibile?: boolean
+  blocks?: PdcBlockInput[]
+}
+
+export interface PdcTurnInput {
+  codice: string
+  planning?: string
+  impianto: string
+  profilo?: "Condotta" | "Scorta"
+  valid_from?: string
+  valid_to?: string
+  days?: PdcDayInput[]
+  notes?: Array<{
+    train_id: string
+    periodicita_text?: string
+    non_circola_dates?: string[]
+    circola_extra_dates?: string[]
+  }>
+}
+
+export async function createPdcTurn(data: PdcTurnInput) {
+  return api.post<{
+    status: string
+    turn_id: number
+    codice: string
+    impianto: string
+  }>("/pdc-turn", data)
+}
+
+export async function updatePdcTurn(turnId: number, data: PdcTurnInput) {
+  return api.put<{
+    status: string
+    old_turn_id: number
+    new_turn_id: number
+    codice: string
+  }>(`/pdc-turn/${turnId}`, data)
+}
+
+export async function deletePdcTurn(turnId: number) {
+  return api.delete<{ status: string; turn_id: number }>(`/pdc-turn/${turnId}`)
+}
+
+// ── Calendario italiano ──
+
+export interface CalendarPeriodicity {
+  date: string
+  letter: string
+  weekday: string
+  is_holiday: boolean
+  holiday_name: string | null
+  local: string | null
+}
+
+export async function getCalendarPeriodicity(dateStr: string, local?: string) {
+  const qs = new URLSearchParams({ date_str: dateStr })
+  if (local) qs.append("local", local)
+  return api.get<CalendarPeriodicity>(
+    `/italian-calendar/periodicity?${qs.toString()}`
+  )
 }

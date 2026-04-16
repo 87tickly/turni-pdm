@@ -4,6 +4,77 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-16 — Step 6b+6c/6 redesign turni PdC: builder frontend + integrazione
+
+### Step 6b — Pagina `PdcBuilderPage.tsx`
+Form completo per creare / modificare turni PdC nel medesimo schema v2.
+
+**Route**:
+- `/pdc/new`  — creazione nuovo turno
+- `/pdc/edit?edit=<id>` — modifica turno esistente (carica dati)
+
+**Layout**:
+1. **CalendarPreview** — selettore data che mostra live weekday + festivita'
+2. **Dati turno** (6 campi): codice*, planning, impianto*, profilo (Condotta/Scorta), valido_dal, valido_al
+3. **Giornate** (lista espandibile):
+   - Numero + periodicita' (dropdown: LMXGVSD/LMXGVS/LMXGV/SD/S/D/V/G)
+   - Flag "Disponibile"
+   - Orari prestazione, stats (Lav/Cct/Km/Rip)
+   - Elenco blocchi editabili
+4. **Blocchi per giornata**:
+   - Tipo: train/coach_transfer/cv_partenza/cv_arrivo/meal/scomp/available
+   - Train_id / vettura_id (context-sensitive)
+   - Stazioni from/to
+   - Orari start/end
+   - Flag "accessori maggiorati"
+5. **Azioni sticky bottom**: Annulla / Salva (o Aggiorna)
+
+Gestisce editing caricando `getPdcTurn(id)` e pre-compilando tutti i campi.
+Success → redirect automatico a `/pdc` dopo 1s.
+
+### Step 6c — Integrazione in `PdcPage.tsx`
+- **Bottone "Nuovo turno"** in alto a destra -> `/pdc/new`
+- **Bottoni "Modifica" e "Elimina"** nell'header del dettaglio turno
+- Elimina chiede conferma con `confirm()` prima di chiamare DELETE
+
+### Frontend api.ts aggiornato
+Aggiunti:
+- `api.put<T>()` (mancava, necessario per PUT endpoint)
+- `createPdcTurn(data)`, `updatePdcTurn(id, data)`, `deletePdcTurn(id)`
+- `getCalendarPeriodicity(date, local?)` per il preview calendario
+- Tipi: `PdcTurnInput`, `PdcDayInput`, `PdcBlockInput`, `CalendarPeriodicity`
+
+### Build
+- `tsc --noEmit` → 0 errori
+- `npm run build` → 367 KB JS (106 KB gzip), 53 KB CSS
+
+### Flusso utente completo ora disponibile
+1. **Import** -> carica PDF turno PdC Trenord
+2. **Turni PdC** -> vede la lista dei 26 turni
+3. Click **"Nuovo turno"** -> apre builder, crea turno manuale
+4. Click su turno -> vede dettaglio, click **Modifica** -> riapre builder con dati
+5. **Elimina** turno con conferma
+6. Il builder mostra preview calendario: inserisci una data, vedi letter+festivita'
+
+**Il builder produce turni nello STESSO schema DB dei PdC importati**
+-> confrontabili, modificabili, eliminabili uniformemente.
+
+### File creati / modificati
+- `frontend/src/pages/PdcBuilderPage.tsx` (NEW, ~500 righe)
+- `frontend/src/pages/PdcPage.tsx` (bottoni azioni)
+- `frontend/src/App.tsx` (2 nuove route)
+- `frontend/src/lib/api.ts` (put + 4 funzioni nuove + tipi)
+- `frontend/dist/*` (build)
+
+### Tutti i 6 step completati!
+Il redesign dei turni PdC è terminato. Le prossime iterazioni potranno aggiungere:
+- Export PDF/Excel di un turno PdC
+- Confronto diff tra due turni (originale vs modificato)
+- Applicazione calendario: "mostrami tutti i giorni del 2026 con le loro varianti"
+- Gantt SVG interattivo per i blocchi
+
+---
+
 ## 2026-04-16 — Step 6a/6 redesign turni PdC: endpoint builder manuale + calendar
 
 ### Nuovo router `api/pdc_builder.py`

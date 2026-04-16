@@ -8,6 +8,7 @@ import { BuilderPage } from "@/pages/BuilderPage"
 import { CalendarPage } from "@/pages/CalendarPage"
 import { ImportPage } from "@/pages/ImportPage"
 import { PdcPage } from "@/pages/PdcPage"
+import { PdcBuilderPage } from "@/pages/PdcBuilderPage"
 import { SettingsPage } from "@/pages/SettingsPage"
 
 export default function App() {
@@ -22,6 +23,8 @@ export default function App() {
           <Route path="builder" element={<BuilderPage />} />
           <Route path="calendario" element={<CalendarPage />} />
           <Route path="pdc" element={<PdcPage />} />
+          <Route path="pdc/new" element={<PdcBuilderPage />} />
+          <Route path="pdc/edit" element={<PdcBuilderPage />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="impostazioni" element={<SettingsPage />} />
         </Route>
