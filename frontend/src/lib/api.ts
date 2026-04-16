@@ -493,17 +493,94 @@ export interface TurnoPersonaleResult {
   parse_warning?: string
 }
 
+export interface PdcTurnSummary {
+  codice: string
+  impianto: string
+  planning: string
+  days: number
+  notes: number
+  valid_from: string
+  valid_to: string
+}
+
 export interface TurnoPdcResult {
   status: string
+  filename: string
   turni_imported: number
-  stats: Record<string, unknown>
+  days_imported: number
+  blocks_imported: number
+  notes_imported: number
+  trains_cited: number
+  stats: PdcStats
+  summary: PdcTurnSummary[]
 }
 
 export interface PdcStats {
-  total_turni: number
-  total_progs: number
-  depots: string[]
-  [key: string]: unknown
+  loaded: boolean
+  turni: number
+  days: number
+  blocks: number
+  trains: number
+  impianti: string[]
+  valid_from?: string
+  valid_to?: string
+  imported_at?: string
+}
+
+export interface PdcTurn {
+  id: number
+  codice: string
+  planning: string
+  impianto: string
+  profilo: string
+  valid_from: string
+  valid_to: string
+  source_file: string
+  imported_at: string
+}
+
+export interface PdcBlock {
+  id: number
+  pdc_turn_day_id: number
+  seq: number
+  block_type: "train" | "coach_transfer" | "cv_partenza" | "cv_arrivo" | "meal" | "scomp" | "available"
+  train_id: string
+  vettura_id: string
+  from_station: string
+  to_station: string
+  start_time: string
+  end_time: string
+  accessori_maggiorati: number
+}
+
+export interface PdcDay {
+  id: number
+  pdc_turn_id: number
+  day_number: number
+  periodicita: string
+  start_time: string
+  end_time: string
+  lavoro_min: number
+  condotta_min: number
+  km: number
+  notturno: number
+  riposo_min: number
+  is_disponibile: number
+  blocks: PdcBlock[]
+}
+
+export interface PdcNote {
+  id: number
+  train_id: string
+  periodicita_text: string
+  non_circola_dates: string[]
+  circola_extra_dates: string[]
+}
+
+export interface PdcTurnDetail {
+  turn: PdcTurn
+  days: PdcDay[]
+  notes: PdcNote[]
 }
 
 async function uploadFile<T>(url: string, file: File): Promise<T> {
@@ -552,4 +629,18 @@ export async function uploadTurnoPdc(file: File) {
 
 export async function getPdcStats() {
   return api.get<PdcStats>("/pdc-stats")
+}
+
+export async function listPdcTurns(params?: { impianto?: string; profilo?: string }) {
+  const query = new URLSearchParams()
+  if (params?.impianto) query.append("impianto", params.impianto)
+  if (params?.profilo) query.append("profilo", params.profilo)
+  const qs = query.toString()
+  return api.get<{ count: number; turns: PdcTurn[] }>(
+    `/pdc-turns${qs ? "?" + qs : ""}`
+  )
+}
+
+export async function getPdcTurn(turnId: number) {
+  return api.get<PdcTurnDetail>(`/pdc-turn/${turnId}`)
 }

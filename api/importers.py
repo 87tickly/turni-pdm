@@ -52,36 +52,142 @@ async def upload_turno_personale(file: UploadFile = File(...)):
 
 @router.post("/upload-turno-pdc")
 async def upload_turno_pdc(file: UploadFile = File(...)):
-    """Importa il PDF Turni PdC rete RFI nel database.
+    """Importa il PDF Turni PdC rete RFI nel database (schema v2).
 
-    TEMPORANEAMENTE DISATTIVATO: lo schema DB PdC e' stato riprogettato
-    (pdc_turn / pdc_turn_day / pdc_block / pdc_train_periodicity).
-    Il parser PDF sara' riscritto nello step 3 del redesign — vedi
-    .claude/skills/turno-pdc-reader.md per le regole.
+    Pipeline:
+      1. Salva PDF in tempfile
+      2. Parser via turno_pdc_parser.parse_pdc_pdf
+      3. clear_pdc_data + bulk insert via save_parsed_turns_to_db
+      4. Ritorna stats + summary
+
+    Risposta tipica:
+      {
+        "status": "ok",
+        "filename": "...",
+        "turni_imported": 26,
+        "days_imported": 1315,
+        "blocks_imported": 6054,
+        "notes_imported": 2901,
+        "stats": {...},
+        "summary": [
+          {"codice": "AROR_C", "impianto": "ARONA", "days": 15, "notes": 20},
+          ...
+        ]
+      }
     """
-    raise HTTPException(
-        501,
-        detail=(
-            "Upload turno PdC temporaneamente disattivato. "
-            "Il parser e' in fase di riscrittura sullo schema v2. "
-            "Sara' riattivato a breve."
-        ),
+    from src.importer.turno_pdc_parser import (
+        parse_pdc_pdf, save_parsed_turns_to_db,
     )
+
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, detail="Il file deve essere un PDF")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, detail="File vuoto")
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        turns = parse_pdc_pdf(tmp_path)
+        if not turns:
+            raise HTTPException(
+                422,
+                detail=(
+                    "Nessun turno PdC trovato nel PDF. "
+                    "Formato atteso: Modello SGI Turni del Personale Mobile (M 704)."
+                ),
+            )
+
+        db = get_db()
+        try:
+            stats = save_parsed_turns_to_db(
+                turns, db, source_file=file.filename or "turno_pdc.pdf",
+            )
+            summary = [
+                {
+                    "codice": t.codice,
+                    "impianto": t.impianto,
+                    "planning": t.planning,
+                    "days": len(t.days),
+                    "notes": len(t.notes),
+                    "valid_from": t.valid_from,
+                    "valid_to": t.valid_to,
+                }
+                for t in turns
+            ]
+            return {
+                "status": "ok",
+                "filename": file.filename,
+                "turni_imported": stats.get("turni", 0),
+                "days_imported": stats.get("days", 0),
+                "blocks_imported": stats.get("blocks", 0),
+                "notes_imported": sum(len(t.notes) for t in turns),
+                "trains_cited": stats.get("trains", 0),
+                "stats": stats,
+                "summary": summary,
+            }
+        finally:
+            db.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, detail=f"Errore parsing turno PdC: {e}")
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
 
 
 @router.get("/pdc-stats")
 async def pdc_stats():
     """Statistiche dei turni PdC importati (schema v2)."""
     db = get_db()
-    return db.get_pdc_stats()
+    try:
+        return db.get_pdc_stats()
+    finally:
+        db.close()
+
+
+@router.get("/pdc-turns")
+async def pdc_turns(impianto: str = None, profilo: str = None):
+    """Lista turni PdC caricati, filtrabili per impianto/profilo."""
+    db = get_db()
+    try:
+        turns = db.list_pdc_turns(impianto=impianto, profilo=profilo)
+        return {"count": len(turns), "turns": turns}
+    finally:
+        db.close()
+
+
+@router.get("/pdc-turn/{turn_id}")
+async def pdc_turn_detail(turn_id: int):
+    """Dettaglio turno PdC: header + giornate + blocchi per giornata + note."""
+    db = get_db()
+    try:
+        turn = db.get_pdc_turn(turn_id)
+        if not turn:
+            raise HTTPException(404, detail="Turno PdC non trovato")
+        days = db.get_pdc_turn_days(turn_id)
+        for d in days:
+            d["blocks"] = db.get_pdc_blocks(d["id"])
+        notes = db.get_pdc_train_periodicity(turn_id)
+        return {"turn": turn, "days": days, "notes": notes}
+    finally:
+        db.close()
 
 
 @router.get("/pdc-find-train/{train_id}")
 async def pdc_find_train(train_id: str):
     """Cerca un treno nei turni PdC (schema v2)."""
     db = get_db()
-    results = db.find_pdc_train(train_id)
-    return {"train_id": train_id, "found": len(results) > 0, "results": results}
+    try:
+        results = db.find_pdc_train(train_id)
+        return {"train_id": train_id, "found": len(results) > 0, "results": results}
+    finally:
+        db.close()
 
 
 @router.get("/train-check/{train_id}")

@@ -247,10 +247,37 @@ function PersonaleResult({ data }: { data: TurnoPersonaleResult }) {
 function PdcResult({ data }: { data: TurnoPdcResult }) {
   return (
     <div className="mt-3 space-y-2">
-      <div className="grid grid-cols-2 gap-2">
-        <StatPill label="Turni importati" value={data.turni_imported} />
-        <StatPill label="Stato" value={data.status === "ok" ? "OK" : data.status} accent />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <StatPill label="Turni" value={data.turni_imported} />
+        <StatPill label="Giornate" value={data.days_imported} />
+        <StatPill label="Blocchi" value={data.blocks_imported} />
+        <StatPill label="Treni citati" value={data.trains_cited} />
       </div>
+
+      {data.summary && data.summary.length > 0 && (
+        <div className="mt-2 max-h-40 overflow-y-auto rounded-md border border-border-subtle">
+          <table className="w-full text-[11px]">
+            <thead className="bg-muted/30 sticky top-0">
+              <tr>
+                <th className="px-2 py-1 text-left font-semibold">Codice</th>
+                <th className="px-2 py-1 text-left font-semibold">Impianto</th>
+                <th className="px-2 py-1 text-right font-semibold">Giornate</th>
+                <th className="px-2 py-1 text-right font-semibold">Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.summary.map((s, i) => (
+                <tr key={i} className="border-t border-border-subtle">
+                  <td className="px-2 py-1 font-mono">{s.codice}</td>
+                  <td className="px-2 py-1">{s.impianto}</td>
+                  <td className="px-2 py-1 text-right font-mono">{s.days}</td>
+                  <td className="px-2 py-1 text-right font-mono">{s.notes}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }

@@ -4,6 +4,73 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-16 — Step 4/6 redesign turni PdC: endpoint upload + lettura
+
+### Endpoint riattivato e riscritto
+**`POST /upload-turno-pdc`** — ora funzionante su schema v2:
+1. Valida formato PDF
+2. Salva in tempfile
+3. Parser via `src.importer.turno_pdc_parser.parse_pdc_pdf`
+4. Persiste con `save_parsed_turns_to_db` (clear + insert)
+5. Risposta ricca:
+   ```json
+   {
+     "status": "ok",
+     "filename": "...",
+     "turni_imported": 26,
+     "days_imported": 1344,
+     "blocks_imported": 6925,
+     "notes_imported": 2901,
+     "trains_cited": 1889,
+     "stats": {...},
+     "summary": [{"codice":"AROR_C","impianto":"ARONA","days":15,"notes":20,...}, ...]
+   }
+   ```
+
+### Nuovi endpoint di lettura (per frontend Step 5)
+- **`GET /pdc-stats`** — statistiche globali (loaded, turni, days, blocks, trains, impianti, validita')
+- **`GET /pdc-turns?impianto=X&profilo=Y`** — lista turni filtrabile
+- **`GET /pdc-turn/{id}`** — dettaglio turno con giornate annidate + blocchi + note
+
+### Frontend `api.ts` aggiornato
+Nuove interfacce TypeScript su schema v2:
+- `TurnoPdcResult` — response dell'upload arricchita
+- `PdcStats`, `PdcTurn`, `PdcDay`, `PdcBlock`, `PdcNote`, `PdcTurnDetail`
+- `PdcTurnSummary` — riga della tabella summary
+- Nuove funzioni: `listPdcTurns()`, `getPdcTurn()`
+
+### Frontend `ImportPage.tsx` aggiornato
+Il componente `PdcResult` ora mostra:
+- 4 stat pill (Turni / Giornate / Blocchi / Treni citati)
+- Tabella summary dei turni importati (codice, impianto, giornate, note)
+- Scrollabile, max-height 40
+
+### Test end-to-end
+Con PDF reale "Turni PdC rete RFI 23/02/2026" via `TestClient(app)`:
+- POST /upload-turno-pdc -> 200, 26 turni, 1344 giornate, 6925 blocchi
+- GET /pdc-stats -> loaded=true
+- GET /pdc-turns -> count=26
+- GET /pdc-turns?impianto=ARONA -> count=1
+- GET /pdc-turn/1 -> AROR_C con 15 giornate, 20 note, blocchi con orari reali
+- GET /pdc-find-train/10243 -> found=true, 3 occorrenze
+- GET /pdc-turn/99999 -> 404 atteso
+
+### Frontend build
+- `tsc --noEmit` → 0 errori
+- `npm run build` → 336 KB JS (gzip 100 KB), 48 KB CSS
+
+### File modificati
+- `api/importers.py` — endpoint upload riattivato + 3 endpoint di lettura
+- `frontend/src/lib/api.ts` — tipi e funzioni nuove
+- `frontend/src/pages/ImportPage.tsx` — `PdcResult` con stats ricche
+- `frontend/dist/*` — build rigenerata
+
+### Prossimi step
+5. Pagina frontend **dedicata** per browsing dei turni PdC (Gantt con blocchi)
+6. Builder interno isomorfo
+
+---
+
 ## 2026-04-16 — Step 3d redesign turni PdC: orari al minuto dei blocchi
 
 ### Contesto
