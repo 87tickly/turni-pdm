@@ -580,16 +580,19 @@ class Database:
 
         Matches both the exact value and slash-joined multi-ids: searching
         for '3086' finds rows stored as '3086' or '3085/3086' or '3086/3087'.
+        Pattern viene costruito lato Python per evitare clash dei '%'
+        letterali con i format specifier di psycopg2.
         """
         cur = self._cursor()
+        like_pattern = f"%/{train_id}/%"
         cur.execute(
             self._q(
                 "SELECT * FROM train_segment "
                 "WHERE train_id = ? "
-                "   OR '/' || train_id || '/' LIKE '%/' || ? || '/%' "
+                "   OR '/' || train_id || '/' LIKE ? "
                 "ORDER BY day_index, seq"
             ),
-            (train_id, train_id),
+            (train_id, like_pattern),
         )
         return [self._dict(row) for row in cur.fetchall()]
 
@@ -1067,14 +1070,15 @@ class Database:
 
         # 1. Trova material_turn_id e day_index del treno cercato.
         #    Match flessibile per train_id "slash-joined" (es. 3085/3086).
+        like_pattern = f"%/{train_id}/%"
         cur.execute(
             self._q(
                 "SELECT DISTINCT day_index, material_turn_id "
                 "FROM train_segment "
                 "WHERE train_id = ? "
-                "   OR '/' || train_id || '/' LIKE '%/' || ? || '/%'"
+                "   OR '/' || train_id || '/' LIKE ?"
             ),
-            (train_id, train_id),
+            (train_id, like_pattern),
         )
         refs = [self._dict(row) for row in cur.fetchall()]
         if not refs:
@@ -1310,15 +1314,16 @@ class Database:
         Match flessibile per train_id slash-joined.
         """
         cur = self._cursor()
+        like_pattern = f"%/{train_id}/%"
         cur.execute(self._q("""
             SELECT mt.id, mt.turn_number, mt.total_segments, mt.source_file,
                    mt.material_type
             FROM train_segment ts
             JOIN material_turn mt ON ts.material_turn_id = mt.id
             WHERE ts.train_id = ?
-               OR '/' || ts.train_id || '/' LIKE '%/' || ? || '/%'
+               OR '/' || ts.train_id || '/' LIKE ?
             LIMIT 1
-        """), (train_id, train_id))
+        """), (train_id, like_pattern))
         row = cur.fetchone()
         if row:
             return self._dict(row)

@@ -482,6 +482,42 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 
 ---
 
+## 2026-04-16 — Fix critico: 500 su /train su PostgreSQL (psycopg2 + %)
+
+### Problema
+Dopo il deploy delle query con LIKE multi-numero, su Railway (PostgreSQL) tutte le chiamate `/train/{numero}` rispondevano `Internal Server Error`. SQLite locale invece funzionava.
+
+### Causa
+Le mie query contenevano `%` letterali nelle stringhe:
+```sql
+'/' || train_id || '/' LIKE '%/' || ? || '/%'
+```
+psycopg2 interpreta i `%` come format specifier per i parametri. Trovando `%/` o `/%` "non riconosciuti", il driver crashava prima ancora di eseguire la query.
+
+### Fix
+Pattern LIKE costruito lato Python e passato come parametro normale, eliminando i `%` letterali dalla query string:
+```python
+like_pattern = f"%/{train_id}/%"
+cur.execute(
+    "... WHERE train_id = ? OR '/' || train_id || '/' LIKE ?",
+    (train_id, like_pattern),
+)
+```
+Funziona identico in SQLite e PostgreSQL.
+
+### Query fixate
+- `query_train()` — endpoint `/train/<num>`
+- `get_material_cycle()` — costruzione catena giro materiale
+- `get_material_turn_info()` — info turno per un treno
+
+### Test
+Verificato in locale: match esatto, match slash-joined, no false positive da substring, get_material_cycle e get_material_turn_info ritornano dati corretti.
+
+### File modificato
+- `src/database/db.py` — 3 query
+
+---
+
 ## 2026-04-16 — Fix giro materiale ricerca per train_id slash-joined
 
 ### Problema
