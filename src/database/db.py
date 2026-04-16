@@ -261,27 +261,38 @@ class Database:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_sdv_weekly ON shift_day_variant(weekly_shift_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_sdv_day ON shift_day_variant(weekly_shift_id, day_number)")
 
-        # -- pdc_turno
+        # ── PdC schema v2 (turno Posto di Condotta, formato Trenord M704) ──
+        # Rimuove le vecchie tabelle scheletro (pdc_turno/pdc_prog/pdc_prog_train)
+        # che non conservavano il dettaglio Gantt dei blocchi.
+        cur.execute("DROP TABLE IF EXISTS pdc_prog_train")
+        cur.execute("DROP TABLE IF EXISTS pdc_prog")
+        cur.execute("DROP TABLE IF EXISTS pdc_turno")
+
+        # -- pdc_turn: un turno pubblicato (es. AROR_C a ARONA)
         cur.execute(f"""
-            CREATE TABLE IF NOT EXISTS pdc_turno (
+            CREATE TABLE IF NOT EXISTS pdc_turn (
                 id {pk},
-                depot TEXT NOT NULL,
-                turno_code TEXT NOT NULL,
-                turno_id TEXT DEFAULT '',
+                codice TEXT NOT NULL,
+                planning TEXT DEFAULT '',
+                impianto TEXT NOT NULL,
+                profilo TEXT DEFAULT 'Condotta',
                 valid_from TEXT DEFAULT '',
                 valid_to TEXT DEFAULT '',
                 source_file TEXT DEFAULT '',
                 imported_at TEXT DEFAULT ''
             )
         """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pdc_turn_impianto ON pdc_turn(impianto)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pdc_turn_codice ON pdc_turn(codice)")
 
-        # -- pdc_prog
+        # -- pdc_turn_day: una giornata del ciclo con periodicita' specifica
+        #    chiave logica = (pdc_turn_id, day_number, periodicita)
         cur.execute(f"""
-            CREATE TABLE IF NOT EXISTS pdc_prog (
+            CREATE TABLE IF NOT EXISTS pdc_turn_day (
                 id {pk},
-                pdc_turno_id INTEGER NOT NULL,
-                prog_number INTEGER NOT NULL,
-                day_type TEXT NOT NULL DEFAULT 'LMXGVSD',
+                pdc_turn_id INTEGER NOT NULL,
+                day_number INTEGER NOT NULL,
+                periodicita TEXT NOT NULL DEFAULT 'LMXGVSD',
                 start_time TEXT DEFAULT '',
                 end_time TEXT DEFAULT '',
                 lavoro_min INTEGER DEFAULT 0,
@@ -289,25 +300,49 @@ class Database:
                 km INTEGER DEFAULT 0,
                 notturno INTEGER DEFAULT 0,
                 riposo_min INTEGER DEFAULT 0,
-                is_rest INTEGER DEFAULT 0,
-                note TEXT DEFAULT '',
-                FOREIGN KEY (pdc_turno_id) REFERENCES pdc_turno(id) ON DELETE CASCADE
+                is_disponibile INTEGER DEFAULT 0,
+                FOREIGN KEY (pdc_turn_id) REFERENCES pdc_turn(id) ON DELETE CASCADE
             )
         """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pdc_day_turn ON pdc_turn_day(pdc_turn_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pdc_day_num ON pdc_turn_day(pdc_turn_id, day_number)")
 
-        # -- pdc_prog_train
+        # -- pdc_block: un blocco grafico del Gantt della giornata
+        #    block_type: 'train' | 'coach_transfer' | 'cv_partenza' | 'cv_arrivo'
+        #                | 'meal' | 'scomp' | 'available'
         cur.execute(f"""
-            CREATE TABLE IF NOT EXISTS pdc_prog_train (
+            CREATE TABLE IF NOT EXISTS pdc_block (
                 id {pk},
-                pdc_prog_id INTEGER NOT NULL,
-                train_id TEXT NOT NULL,
-                FOREIGN KEY (pdc_prog_id) REFERENCES pdc_prog(id) ON DELETE CASCADE
+                pdc_turn_day_id INTEGER NOT NULL,
+                seq INTEGER DEFAULT 0,
+                block_type TEXT NOT NULL,
+                train_id TEXT DEFAULT '',
+                vettura_id TEXT DEFAULT '',
+                from_station TEXT DEFAULT '',
+                to_station TEXT DEFAULT '',
+                start_time TEXT DEFAULT '',
+                end_time TEXT DEFAULT '',
+                accessori_maggiorati INTEGER DEFAULT 0,
+                FOREIGN KEY (pdc_turn_day_id) REFERENCES pdc_turn_day(id) ON DELETE CASCADE
             )
         """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pdc_block_day ON pdc_block(pdc_turn_day_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pdc_block_train ON pdc_block(train_id)")
 
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_pdc_depot ON pdc_turno(depot)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_pdc_train ON pdc_prog_train(train_id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_pdc_prog_turno ON pdc_prog(pdc_turno_id)")
+        # -- pdc_train_periodicity: note periodicita' treni (pagina finale del turno)
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS pdc_train_periodicity (
+                id {pk},
+                pdc_turn_id INTEGER NOT NULL,
+                train_id TEXT NOT NULL,
+                periodicita_text TEXT DEFAULT '',
+                non_circola_dates TEXT DEFAULT '[]',
+                circola_extra_dates TEXT DEFAULT '[]',
+                FOREIGN KEY (pdc_turn_id) REFERENCES pdc_turn(id) ON DELETE CASCADE
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pdc_tp_turn ON pdc_train_periodicity(pdc_turn_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pdc_tp_train ON pdc_train_periodicity(train_id)")
 
         # -- users
         cur.execute(f"""
@@ -1829,172 +1864,220 @@ class Database:
         }
 
     # ------------------------------------------------------------------
-    # PDC TURNO (Turni PdC rete RFI)
+    # PDC TURN (Turni PdC rete RFI — schema v2)
     # ------------------------------------------------------------------
-    def import_pdc_turni(self, turni: list, source_file: str = ""):
-        """Importa turni PdC nel DB. Cancella i dati precedenti."""
+    # Schema: pdc_turn → pdc_turn_day → pdc_block
+    #                 → pdc_train_periodicity
+    # Vedi .claude/skills/turno-pdc-reader.md per le regole di lettura.
+
+    def insert_pdc_turn(self, codice: str, planning: str, impianto: str,
+                        profilo: str = "Condotta",
+                        valid_from: str = "", valid_to: str = "",
+                        source_file: str = "") -> int:
+        """Inserisce un nuovo turno PdC. Ritorna l'ID."""
         cur = self._cursor()
-        # Pulisci tabelle PdC
-        cur.execute("DELETE FROM pdc_prog_train")
-        cur.execute("DELETE FROM pdc_prog")
-        cur.execute("DELETE FROM pdc_turno")
+        return self._lastrowid(
+            cur,
+            "INSERT INTO pdc_turn "
+            "(codice, planning, impianto, profilo, valid_from, valid_to, "
+            " source_file, imported_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (codice, planning, impianto, profilo, valid_from, valid_to,
+             source_file, datetime.now().isoformat()),
+        )
 
-        now = datetime.now().isoformat()
+    def insert_pdc_turn_day(self, pdc_turn_id: int, day_number: int,
+                            periodicita: str, start_time: str = "",
+                            end_time: str = "", lavoro_min: int = 0,
+                            condotta_min: int = 0, km: int = 0,
+                            notturno: bool = False, riposo_min: int = 0,
+                            is_disponibile: bool = False) -> int:
+        """Inserisce una giornata (numero + periodicita') del turno."""
+        cur = self._cursor()
+        return self._lastrowid(
+            cur,
+            "INSERT INTO pdc_turn_day "
+            "(pdc_turn_id, day_number, periodicita, start_time, end_time, "
+            " lavoro_min, condotta_min, km, notturno, riposo_min, is_disponibile) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (pdc_turn_id, day_number, periodicita, start_time, end_time,
+             lavoro_min, condotta_min, km, 1 if notturno else 0,
+             riposo_min, 1 if is_disponibile else 0),
+        )
 
-        for turno in turni:
-            turno_db_id = self._lastrowid(
-                cur,
-                "INSERT INTO pdc_turno (depot, turno_code, turno_id, valid_from, valid_to, "
-                "                       source_file, imported_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (turno.depot, turno.turno_code, turno.turno_id,
-                 turno.valid_from, turno.valid_to, source_file, now),
-            )
+    def insert_pdc_block(self, pdc_turn_day_id: int, seq: int,
+                         block_type: str, train_id: str = "",
+                         vettura_id: str = "", from_station: str = "",
+                         to_station: str = "", start_time: str = "",
+                         end_time: str = "",
+                         accessori_maggiorati: bool = False) -> int:
+        """Inserisce un blocco Gantt nella giornata.
 
-            for prog in turno.progs:
-                prog_db_id = self._lastrowid(
-                    cur,
-                    "INSERT INTO pdc_prog (pdc_turno_id, prog_number, day_type, "
-                    "                     start_time, end_time, lavoro_min, condotta_min, "
-                    "                     km, notturno, riposo_min, is_rest, note) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (turno_db_id, prog.prog_number, prog.day_type,
-                     prog.start_time, prog.end_time, prog.lavoro_min,
-                     prog.condotta_min, prog.km, 1 if prog.notturno else 0,
-                     prog.riposo_min, 1 if prog.is_rest else 0, prog.note),
-                )
+        block_type ∈ {'train', 'coach_transfer', 'cv_partenza',
+                      'cv_arrivo', 'meal', 'scomp', 'available'}"""
+        cur = self._cursor()
+        return self._lastrowid(
+            cur,
+            "INSERT INTO pdc_block "
+            "(pdc_turn_day_id, seq, block_type, train_id, vettura_id, "
+            " from_station, to_station, start_time, end_time, "
+            " accessori_maggiorati) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (pdc_turn_day_id, seq, block_type, train_id, vettura_id,
+             from_station, to_station, start_time, end_time,
+             1 if accessori_maggiorati else 0),
+        )
 
-                for tid in prog.train_ids:
-                    cur.execute(
-                        self._q(
-                            "INSERT INTO pdc_prog_train (pdc_prog_id, train_id) "
-                            "VALUES (?, ?)"
-                        ),
-                        (prog_db_id, tid),
-                    )
+    def insert_pdc_train_periodicity(self, pdc_turn_id: int, train_id: str,
+                                     periodicita_text: str = "",
+                                     non_circola_dates: Optional[list] = None,
+                                     circola_extra_dates: Optional[list] = None) -> int:
+        """Inserisce le note di periodicita' di un treno citato nel turno.
 
+        non_circola_dates / circola_extra_dates: liste di 'YYYY-MM-DD'."""
+        cur = self._cursor()
+        return self._lastrowid(
+            cur,
+            "INSERT INTO pdc_train_periodicity "
+            "(pdc_turn_id, train_id, periodicita_text, "
+            " non_circola_dates, circola_extra_dates) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (pdc_turn_id, train_id, periodicita_text,
+             json.dumps(non_circola_dates or []),
+             json.dumps(circola_extra_dates or [])),
+        )
+
+    def clear_pdc_data(self) -> None:
+        """Svuota tutte le tabelle PdC, rispettando l'ordine FK."""
+        cur = self._cursor()
+        # Figli prima, padri dopo (anche se CASCADE farebbe in automatico)
+        cur.execute("DELETE FROM pdc_block")
+        cur.execute("DELETE FROM pdc_train_periodicity")
+        cur.execute("DELETE FROM pdc_turn_day")
+        cur.execute("DELETE FROM pdc_turn")
         self.conn.commit()
-        cur2 = self._cursor()
-        cur2.execute("SELECT COUNT(*) as cnt FROM pdc_turno")
-        row = cur2.fetchone()
-        return row["cnt"] if isinstance(row, dict) else row[0]
 
-    def pdc_find_train(self, train_id: str) -> list[dict]:
-        """Cerca un treno nei turni PdC. Restituisce tutti i PROG che lo contengono."""
+    def get_pdc_stats(self) -> dict:
+        """Statistiche aggregate dei turni PdC caricati."""
         cur = self._cursor()
-        cur.execute(self._q("""
-            SELECT t.depot, t.turno_code, t.turno_id, t.valid_from, t.valid_to,
-                   p.id as prog_id, p.prog_number, p.day_type, p.start_time, p.end_time,
-                   p.lavoro_min, p.condotta_min, p.km, p.notturno, p.is_rest,
-                   p.note
-            FROM pdc_prog_train pt
-            JOIN pdc_prog p ON p.id = pt.pdc_prog_id
-            JOIN pdc_turno t ON t.id = p.pdc_turno_id
-            WHERE pt.train_id = ?
-            ORDER BY t.depot, p.prog_number, p.day_type
-        """), (train_id,))
-        results = []
-        for row in cur.fetchall():
-            rd = self._dict(row)
-            # Trova tutti i treni di questo PROG
-            cur2 = self._cursor()
-            cur2.execute(
-                self._q("SELECT train_id FROM pdc_prog_train WHERE pdc_prog_id = ?"),
-                (rd["prog_id"],),
-            )
-            prog_trains = [self._dict(r)["train_id"] for r in cur2.fetchall()]
-
-            results.append({
-                "depot": rd["depot"],
-                "turno_code": rd["turno_code"],
-                "turno_id": rd["turno_id"],
-                "valid_from": rd["valid_from"],
-                "valid_to": rd["valid_to"],
-                "prog_number": rd["prog_number"],
-                "day_type": rd["day_type"],
-                "start_time": rd["start_time"],
-                "end_time": rd["end_time"],
-                "lavoro_min": rd["lavoro_min"],
-                "condotta_min": rd["condotta_min"],
-                "km": rd["km"],
-                "notturno": bool(rd["notturno"]),
-                "is_rest": bool(rd["is_rest"]),
-                "note": rd["note"],
-                "other_trains": prog_trains,
-            })
-        return results
-
-    def pdc_get_stats(self) -> dict:
-        """Statistiche dei turni PdC importati."""
-        cur = self._cursor()
-        cur.execute("SELECT COUNT(*) as cnt FROM pdc_turno")
-        turni_count = self._dict(cur.fetchone())["cnt"]
-        if turni_count == 0:
-            return {"loaded": False, "turni": 0, "progs": 0, "trains": 0, "depots": []}
-
-        cur.execute("SELECT COUNT(*) as cnt FROM pdc_prog")
-        progs_count = self._dict(cur.fetchone())["cnt"]
-        cur.execute("SELECT COUNT(DISTINCT train_id) as cnt FROM pdc_prog_train")
-        trains_count = self._dict(cur.fetchone())["cnt"]
-        cur.execute("SELECT DISTINCT depot FROM pdc_turno ORDER BY depot")
-        depots = [self._dict(r)["depot"] for r in cur.fetchall()]
-
-        # Data validita'
-        cur.execute("SELECT MIN(valid_from) as v FROM pdc_turno")
+        cur.execute("SELECT COUNT(*) AS n FROM pdc_turn")
+        turni = self._dict(cur.fetchone())["n"]
+        if not turni:
+            return {
+                "loaded": False, "turni": 0, "days": 0, "blocks": 0,
+                "impianti": [], "trains": 0,
+            }
+        cur.execute("SELECT COUNT(*) AS n FROM pdc_turn_day")
+        days = self._dict(cur.fetchone())["n"]
+        cur.execute("SELECT COUNT(*) AS n FROM pdc_block")
+        blocks = self._dict(cur.fetchone())["n"]
+        cur.execute(
+            "SELECT COUNT(DISTINCT train_id) AS n FROM pdc_block "
+            "WHERE block_type = 'train' AND train_id <> ''"
+        )
+        trains = self._dict(cur.fetchone())["n"]
+        cur.execute("SELECT DISTINCT impianto FROM pdc_turn ORDER BY impianto")
+        impianti = [self._dict(r)["impianto"] for r in cur.fetchall()]
+        cur.execute("SELECT MIN(valid_from) AS v FROM pdc_turn")
         valid_from = self._dict(cur.fetchone())["v"]
-        cur.execute("SELECT MAX(valid_to) as v FROM pdc_turno")
+        cur.execute("SELECT MAX(valid_to) AS v FROM pdc_turn")
         valid_to = self._dict(cur.fetchone())["v"]
-        cur.execute("SELECT MAX(imported_at) as v FROM pdc_turno")
+        cur.execute("SELECT MAX(imported_at) AS v FROM pdc_turn")
         imported_at = self._dict(cur.fetchone())["v"]
-
         return {
-            "loaded": True,
-            "turni": turni_count,
-            "progs": progs_count,
-            "trains": trains_count,
-            "depots": depots,
-            "valid_from": valid_from,
-            "valid_to": valid_to,
+            "loaded": True, "turni": turni, "days": days, "blocks": blocks,
+            "trains": trains, "impianti": impianti,
+            "valid_from": valid_from, "valid_to": valid_to,
             "imported_at": imported_at,
         }
 
-    def pdc_get_depot_turno(self, depot: str) -> list[dict]:
-        """Restituisce tutti i PROG di un deposito."""
+    def list_pdc_turns(self, impianto: Optional[str] = None,
+                       profilo: Optional[str] = None) -> list[dict]:
+        """Elenco dei turni PdC, filtrabile per impianto/profilo."""
+        cur = self._cursor()
+        conditions = []
+        params: list = []
+        if impianto:
+            conditions.append("UPPER(impianto) = UPPER(?)")
+            params.append(impianto)
+        if profilo:
+            conditions.append("profilo = ?")
+            params.append(profilo)
+        where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+        cur.execute(
+            self._q(f"SELECT * FROM pdc_turn{where} "
+                    "ORDER BY impianto, codice"),
+            tuple(params),
+        )
+        return [self._dict(r) for r in cur.fetchall()]
+
+    def get_pdc_turn(self, turn_id: int) -> Optional[dict]:
+        """Dettaglio singolo turno."""
+        cur = self._cursor()
+        cur.execute(self._q("SELECT * FROM pdc_turn WHERE id = ?"), (turn_id,))
+        return self._dict(cur.fetchone())
+
+    def get_pdc_turn_days(self, pdc_turn_id: int) -> list[dict]:
+        """Elenco giornate di un turno, ordinate per (day_number, periodicita)."""
+        cur = self._cursor()
+        cur.execute(
+            self._q(
+                "SELECT * FROM pdc_turn_day WHERE pdc_turn_id = ? "
+                "ORDER BY day_number, periodicita"
+            ),
+            (pdc_turn_id,),
+        )
+        return [self._dict(r) for r in cur.fetchall()]
+
+    def get_pdc_blocks(self, pdc_turn_day_id: int) -> list[dict]:
+        """Blocchi Gantt di una giornata, ordinati per seq."""
+        cur = self._cursor()
+        cur.execute(
+            self._q(
+                "SELECT * FROM pdc_block WHERE pdc_turn_day_id = ? "
+                "ORDER BY seq"
+            ),
+            (pdc_turn_day_id,),
+        )
+        return [self._dict(r) for r in cur.fetchall()]
+
+    def get_pdc_train_periodicity(self, pdc_turn_id: int) -> list[dict]:
+        """Note periodicita' treni di un turno."""
+        cur = self._cursor()
+        cur.execute(
+            self._q(
+                "SELECT * FROM pdc_train_periodicity WHERE pdc_turn_id = ? "
+                "ORDER BY train_id"
+            ),
+            (pdc_turn_id,),
+        )
+        rows = []
+        for r in cur.fetchall():
+            d = self._dict(r)
+            # Deserializza JSON
+            d["non_circola_dates"] = json.loads(d.get("non_circola_dates") or "[]")
+            d["circola_extra_dates"] = json.loads(d.get("circola_extra_dates") or "[]")
+            rows.append(d)
+        return rows
+
+    def find_pdc_train(self, train_id: str) -> list[dict]:
+        """Cerca un treno nei blocchi PdC. Ritorna ogni giornata che lo include."""
         cur = self._cursor()
         cur.execute(self._q("""
-            SELECT t.depot, t.turno_code, t.turno_id, t.valid_from, t.valid_to,
-                   p.id as prog_id, p.prog_number, p.day_type, p.start_time, p.end_time,
-                   p.lavoro_min, p.condotta_min, p.km, p.notturno, p.is_rest, p.note
-            FROM pdc_prog p
-            JOIN pdc_turno t ON t.id = p.pdc_turno_id
-            WHERE UPPER(t.depot) = UPPER(?)
-            ORDER BY p.prog_number, p.day_type
-        """), (depot,))
-
-        results = []
-        for row in cur.fetchall():
-            rd = self._dict(row)
-            # Treni di questo prog
-            cur2 = self._cursor()
-            cur2.execute(
-                self._q("SELECT train_id FROM pdc_prog_train WHERE pdc_prog_id = ?"),
-                (rd["prog_id"],),
-            )
-            trains = [self._dict(r)["train_id"] for r in cur2.fetchall()]
-            results.append({
-                "depot": rd["depot"],
-                "turno_code": rd["turno_code"],
-                "prog_number": rd["prog_number"],
-                "day_type": rd["day_type"],
-                "start_time": rd["start_time"],
-                "end_time": rd["end_time"],
-                "lavoro_min": rd["lavoro_min"],
-                "condotta_min": rd["condotta_min"],
-                "km": rd["km"],
-                "is_rest": bool(rd["is_rest"]),
-                "trains": trains,
-            })
-        return results
+            SELECT t.id AS turn_id, t.codice, t.impianto, t.profilo,
+                   d.id AS day_id, d.day_number, d.periodicita,
+                   d.start_time, d.end_time,
+                   b.id AS block_id, b.seq, b.block_type, b.train_id,
+                   b.from_station, b.to_station,
+                   b.start_time AS block_start, b.end_time AS block_end,
+                   b.accessori_maggiorati
+            FROM pdc_block b
+            JOIN pdc_turn_day d ON d.id = b.pdc_turn_day_id
+            JOIN pdc_turn t ON t.id = d.pdc_turn_id
+            WHERE b.block_type = 'train' AND b.train_id = ?
+            ORDER BY t.impianto, t.codice, d.day_number, d.periodicita, b.seq
+        """), (train_id,))
+        return [self._dict(r) for r in cur.fetchall()]
 
     # ------------------------------------------------------------------
     # UTILITY

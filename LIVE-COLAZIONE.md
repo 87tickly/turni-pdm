@@ -4,6 +4,58 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-16 — Step 1/6 redesign turni PdC: schema DB v2
+
+### Contesto
+Primo step del redesign dei turni PdC. Obiettivo: sostituire lo schema scheletro (`pdc_turno`/`pdc_prog`/`pdc_prog_train`) con uno schema che catturi il dettaglio Gantt (vettura, CVp/CVa, REFEZ, S.COMP, pallino accessori maggiorati) secondo le regole della skill `turno-pdc-reader.md`.
+
+### Schema DB v2
+4 nuove tabelle in `src/database/db.py`:
+
+1. **`pdc_turn`** — header turno (codice, planning, impianto, profilo, validita', source_file)
+2. **`pdc_turn_day`** — giornata del ciclo, chiave logica `(pdc_turn_id, day_number, periodicita)` + stats (lavoro/condotta/km/notturno/riposo) + flag `is_disponibile`
+3. **`pdc_block`** — blocco grafico del Gantt, `block_type ∈ {train, coach_transfer, cv_partenza, cv_arrivo, meal, scomp, available}` + `accessori_maggiorati` (pallino nero)
+4. **`pdc_train_periodicity`** — note periodicita' treni dalla pagina finale del PDF (testo + date JSON non-circola / circola-extra)
+
+Tutti con FK cascade + indici su (impianto, codice, day_number, train_id).
+
+### Migrazione
+DROP IF EXISTS delle 3 tabelle vecchie + CREATE IF NOT EXISTS delle 4 nuove — idempotente, zero rischi (le vecchie erano vuote su entrambi i DB).
+
+### Metodi CRUD in `db.py`
+Rimossi: `import_pdc_turni`, `pdc_find_train`, `pdc_get_stats`, `pdc_get_depot_turno` (legati al vecchio schema).
+
+Aggiunti:
+- `insert_pdc_turn`, `insert_pdc_turn_day`, `insert_pdc_block`, `insert_pdc_train_periodicity`
+- `clear_pdc_data`
+- `get_pdc_stats`, `list_pdc_turns`, `get_pdc_turn`, `get_pdc_turn_days`, `get_pdc_blocks`, `get_pdc_train_periodicity`
+- `find_pdc_train` (cerca treno nei blocchi PdC)
+
+### Endpoint temporanei (`api/importers.py`)
+- `POST /upload-turno-pdc` → **501** fino allo Step 3 (parser riscritto)
+- `GET /pdc-stats` → ora usa `db.get_pdc_stats()` — torna `{loaded: false}` finche' vuoto
+- `GET /pdc-find-train/{id}` → ora usa `db.find_pdc_train()`
+- `GET /train-check/{id}` → sezione `pdc` ora usa `db.find_pdc_train()`
+
+### Test
+- `tests/test_database.py`: 2 nuovi test — `test_pdc_schema_v2_crud` (insert completo + tutte le query) + `test_pdc_old_tables_are_dropped`
+- Tutti i 7 test DB passano.
+- Non introdotta regressione sugli altri 28 test del repo.
+
+### Prossimi step
+2. Modulo calendario italiano (festivita' + `weekday_for_periodicity`)
+3. Parser PDF turno PdC (nuovo, usa lo schema v2)
+4. Rimettere online `POST /upload-turno-pdc`
+5. Pagina frontend visualizzazione turni PdC (Gantt riusabile)
+6. Builder interno isomorfo
+
+### File modificati
+- `src/database/db.py` — schema v2 + metodi CRUD nuovi
+- `api/importers.py` — endpoint aggiornati, upload 501 temporaneo
+- `tests/test_database.py` — 2 nuovi test
+
+---
+
 ## 2026-04-16 — Skill turno PdC reader (contesto lettura turno personale)
 
 ### Contesto

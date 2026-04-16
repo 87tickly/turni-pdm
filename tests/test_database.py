@@ -120,10 +120,133 @@ def test_clear_all():
     os.unlink(path)
 
 
+def test_pdc_schema_v2_crud():
+    """Turni PdC schema v2: insert + query + clear."""
+    db, path = get_test_db()
+
+    # Insert turno
+    turn_id = db.insert_pdc_turn(
+        codice="AROR_C", planning="65053", impianto="ARONA",
+        profilo="Condotta", valid_from="2026-02-23",
+        valid_to="2026-12-12", source_file="test.pdf",
+    )
+    assert turn_id > 0
+
+    # Insert giornata (LMXGVSD)
+    day_id = db.insert_pdc_turn_day(
+        pdc_turn_id=turn_id, day_number=1, periodicita="LMXGVSD",
+        start_time="18:20", end_time="00:25",
+        lavoro_min=365, condotta_min=202, km=184,
+        notturno=True, riposo_min=945, is_disponibile=False,
+    )
+    assert day_id > 0
+
+    # Insert blocchi vari
+    blocks = [
+        ("coach_transfer", "", "2434", "ARON", "DOMO", "17:25", "18:04", False),
+        ("meal", "", "", "DOMO", "", "18:40", "19:07", False),
+        ("cv_partenza", "2434", "", "DOMO", "", "19:20", "", False),
+        ("train", "10243", "", "DOMO", "Mlpg", "19:20", "22:24", False),
+        ("train", "10246", "", "Mlpg", "ARON", "22:40", "23:45", True),  # accessori maggiorati
+    ]
+    for i, (bt, tr, vet, fr, to, st, et, acc) in enumerate(blocks):
+        bid = db.insert_pdc_block(
+            pdc_turn_day_id=day_id, seq=i, block_type=bt,
+            train_id=tr, vettura_id=vet,
+            from_station=fr, to_station=to,
+            start_time=st, end_time=et, accessori_maggiorati=acc,
+        )
+        assert bid > 0
+
+    # Insert giornata "Disponibile"
+    disp_id = db.insert_pdc_turn_day(
+        pdc_turn_id=turn_id, day_number=6, periodicita="LMXGVSD",
+        is_disponibile=True, riposo_min=864,
+    )
+    assert disp_id > 0
+
+    # Insert note periodicita' treno
+    pt_id = db.insert_pdc_train_periodicity(
+        pdc_turn_id=turn_id, train_id="10226",
+        periodicita_text="Circola il sabato e la domenica",
+        non_circola_dates=["2025-12-27", "2026-01-03"],
+        circola_extra_dates=["2025-12-25"],
+    )
+    assert pt_id > 0
+
+    # Query: stats
+    stats = db.get_pdc_stats()
+    assert stats["loaded"] is True
+    assert stats["turni"] == 1
+    assert stats["days"] == 2  # giorno 1 + giorno 6 disponibile
+    assert stats["blocks"] == 5
+    assert stats["trains"] == 2  # 10243, 10246
+    assert stats["impianti"] == ["ARONA"]
+
+    # Query: lista turni
+    turns = db.list_pdc_turns(impianto="ARONA")
+    assert len(turns) == 1
+    assert turns[0]["codice"] == "AROR_C"
+
+    # Query: giornate del turno
+    days = db.get_pdc_turn_days(turn_id)
+    assert len(days) == 2
+
+    # Query: blocchi della giornata 1
+    day1_blocks = db.get_pdc_blocks(day_id)
+    assert len(day1_blocks) == 5
+    assert day1_blocks[0]["block_type"] == "coach_transfer"
+    assert day1_blocks[0]["vettura_id"] == "2434"
+    assert day1_blocks[4]["accessori_maggiorati"] == 1  # pallino nero
+
+    # Query: find by train
+    found = db.find_pdc_train("10243")
+    assert len(found) == 1
+    assert found[0]["codice"] == "AROR_C"
+    assert found[0]["day_number"] == 1
+
+    found_none = db.find_pdc_train("99999")
+    assert found_none == []
+
+    # Query: periodicita' treni
+    periodicity = db.get_pdc_train_periodicity(turn_id)
+    assert len(periodicity) == 1
+    assert periodicity[0]["train_id"] == "10226"
+    assert periodicity[0]["non_circola_dates"] == ["2025-12-27", "2026-01-03"]
+    assert periodicity[0]["circola_extra_dates"] == ["2025-12-25"]
+
+    # Clear
+    db.clear_pdc_data()
+    stats_after = db.get_pdc_stats()
+    assert stats_after["loaded"] is False
+    assert stats_after["turni"] == 0
+
+    db.close()
+    os.unlink(path)
+
+
+def test_pdc_old_tables_are_dropped():
+    """Le vecchie tabelle scheletro pdc_turno/pdc_prog/pdc_prog_train
+    non devono esistere piu' — sostituite da schema v2."""
+    import sqlite3
+    db, path = get_test_db()
+    cur = db.conn.cursor()
+    for old_table in ("pdc_turno", "pdc_prog", "pdc_prog_train"):
+        try:
+            cur.execute(f"SELECT COUNT(*) FROM {old_table}")
+            raise AssertionError(f"{old_table} non dovrebbe esistere")
+        except sqlite3.OperationalError:
+            pass  # atteso: tabella sconosciuta
+    db.close()
+    os.unlink(path)
+
+
 if __name__ == "__main__":
     test_create_tables()
     test_insert_and_query_segment()
     test_bulk_insert()
     test_segment_duration()
     test_clear_all()
+    test_pdc_schema_v2_crud()
+    test_pdc_old_tables_are_dropped()
     print("All database tests passed!")
