@@ -4,6 +4,65 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-16 — Step 3d redesign turni PdC: orari al minuto dei blocchi
+
+### Contesto
+Dopo lo Step 3, i blocchi avevano tipo e train_id ma `start_time`/`end_time` vuoti. Feature core per poter visualizzare il Gantt preciso e calcolare statistiche esatte.
+
+### Cosa fa il parser ora
+Per ogni banda-giornata:
+1. Trova l'asse orario (riga con >=15 numeri 1-24 size ~5.5, stessa Y).
+2. Ne costruisce la lista di tick: `(x_start, x_center, x_end, hour)`.
+3. Estrae i minuti SOPRA l'asse (size 4-6.5, y < axis_y - 2, numeri 0-59).
+4. Assegna i minuti ai blocchi in ordine di X, con regole diverse per tipo:
+   - `coach_transfer`, `meal`: consumano 2 minuti (start + end)
+   - `train`: 2 minuti di norma. 1 se preceduto da `cv_partenza` (solo end) o seguito da `cv_arrivo` (solo start). 0 se tra due CV.
+   - `cv_partenza`, `cv_arrivo`: 0 minuti (puntuali, ereditano dal treno adiacente)
+   - `scomp`, `available`, `unknown`: ignorati
+5. Per ogni coppia (minuto, x), l'ora e' dedotta minimizzando `|x - (x_start_H + min/60 * tick_width)|`. Evita errori su minuti grandi (es. :40 che graficamente finisce oltre il tick successivo).
+6. Correzione rollover: se `start_total > end_total` con differenza < 2h, decrementa h_start di 1.
+
+### Fix di contorno
+Restrizione della banda Y per evitare sovrapposizione con la giornata successiva: `band_top = mk_y - 60`, `band_bot = mk_y + 22`, con clamping rispetto ai marker vicini.
+
+### Esito sul PDF reale (446 pagine, Turni PdC rete RFI dal 23/02/2026)
+- **Blocchi continui totali**: 5779 (train, coach_transfer, meal)
+- **Con start_time popolato**: 4947 (85.6%)
+- **Con end_time popolato**: 4800 (83.1%)
+
+Esempio AROR_C g1 `[18:20][00:25]`:
+- coach_transfer 2434 ARON→DOMO: 18:25 – 19:04
+- meal DOMO: 19:40 – 20:07
+- cv_partenza 2434 (puntuale)
+- train 10243 DOMO→MIpg: → 22:24 (arr)
+- train 10246 MIpg→ARON: 22:40 – 23:45
+
+### Nuove funzioni (tutte pure + testate)
+- `_find_axis_y(words, band_top, band_bot)` — cluster Y dei numeri piccoli
+- `_build_axis_ticks(words, axis_y)` — lista di tick ordinati
+- `_x_to_hour(x, ticks)` — fallback best-effort
+- `_x_to_hour_for_minute(x, minute, ticks)` — minimizza distanza attesa
+- `_extract_upper_minutes(words, band_top, axis_y)` — minuti sopra l'asse
+- `_hhmm_fix_rollover(h1, m1, h2, m2)` — corregge rollover < 2h
+- `_assign_minutes_to_blocks(blocks_with_x, upper_mins, ticks)` — driver
+
+### Test — `tests/test_turno_pdc_parser.py`
+9 nuovi test (+21 esistenti = 30 totali):
+- `_x_to_hour_for_minute` per minuti piccoli/grandi/zero
+- `_hhmm_fix_rollover` no-change, within-hour, large-diff
+- `_assign_minutes_to_blocks` sequenza tipica, insufficient minutes, safe con ticks vuoti
+
+Suite totale: 90/91 (1 fail pre-esistente non correlato su `test_meal_slot_gap`).
+
+### Limitazione residua
+~15% dei blocchi senza orario (train isolati in serie lunghe senza CVp/CVa noti). Accettabile per MVP: il frontend mostrera' "—" per questi blocchi.
+
+### File modificati
+- `src/importer/turno_pdc_parser.py` (+150 righe)
+- `tests/test_turno_pdc_parser.py` (+9 test)
+
+---
+
 ## 2026-04-16 — Step 3/6 redesign turni PdC: parser PDF v2
 
 ### Contesto

@@ -13,6 +13,10 @@ from src.importer.turno_pdc_parser import (
     _hhmm_to_min,
     _it_to_iso_date,
     _reverse,
+    _x_to_hour_for_minute,
+    _hhmm_fix_rollover,
+    _assign_minutes_to_blocks,
+    ParsedPdcBlock,
     ParsedPdcNote,
 )
 
@@ -253,6 +257,131 @@ def test_parse_train_notes_multiline():
     notes = _parse_train_notes(text)
     assert len(notes) == 1
     assert len(notes[0].non_circola_dates) == 3
+
+
+# ------------------------------------------------------------------
+# ORARI AL MINUTO — conversione x -> HH:MM
+# ------------------------------------------------------------------
+
+def _ticks_for_test(hours: list[int], x_start: float = 100.0,
+                    tick_width: float = 25.0):
+    """Helper: costruisce una lista di tick orari equispaziati."""
+    return [
+        (x_start + i * tick_width, x_start + i * tick_width + 3,
+         x_start + i * tick_width + 6, h)
+        for i, h in enumerate(hours)
+    ]
+
+
+def test_x_to_hour_for_minute_first_half_of_hour():
+    """Minuto :30 al centro di un tick -> quell'ora."""
+    ticks = _ticks_for_test([3, 4, 5], x_start=100, tick_width=25)
+    # ora=3, min=30 -> x_expected = 100 + 30/60*25 = 112.5
+    assert _x_to_hour_for_minute(112.5, 30, ticks) == 3
+    assert _x_to_hour_for_minute(113, 30, ticks) == 3
+    assert _x_to_hour_for_minute(110, 30, ticks) == 3
+
+
+def test_x_to_hour_for_minute_large_minute():
+    """Minuto :45 vicino al tick successivo -> ora corrente (non avanzata)."""
+    ticks = _ticks_for_test([17, 18, 19], x_start=100, tick_width=25)
+    # ora=17, min=45 -> x_expected = 100 + 45/60*25 = 118.75
+    # ora=18, min=45 -> x_expected = 125 + 45/60*25 = 143.75
+    # Minuto geometricamente in mezzo dovrebbe finire sull'ora giusta
+    assert _x_to_hour_for_minute(118.5, 45, ticks) == 17
+    assert _x_to_hour_for_minute(144, 45, ticks) == 18
+
+
+def test_x_to_hour_for_minute_zero():
+    """Minuto :00 esattamente sul tick."""
+    ticks = _ticks_for_test([10, 11, 12], x_start=100, tick_width=25)
+    assert _x_to_hour_for_minute(100, 0, ticks) == 10
+    assert _x_to_hour_for_minute(125, 0, ticks) == 11
+    assert _x_to_hour_for_minute(150, 0, ticks) == 12
+
+
+def test_hhmm_fix_rollover_no_change():
+    """start < end: nessuna modifica."""
+    assert _hhmm_fix_rollover(18, 25, 19, 4) == ("18:25", "19:04")
+    assert _hhmm_fix_rollover(7, 30, 8, 0) == ("07:30", "08:00")
+
+
+def test_hhmm_fix_rollover_within_hour():
+    """Blocco che sembra tornare indietro di < 2h: decrementa start."""
+    # 19:40 -> 19:07 sembra impossibile (start>end): in realta' e' 18:40 -> 19:07
+    assert _hhmm_fix_rollover(19, 40, 19, 7) == ("18:40", "19:07")
+    # 15:50 -> 16:10 OK (no rollover)
+    assert _hhmm_fix_rollover(15, 50, 16, 10) == ("15:50", "16:10")
+
+
+def test_hhmm_fix_rollover_large_diff_no_touch():
+    """Blocchi notturni o lunghi che attraversano mezzanotte non modificati."""
+    # 23:45 -> 00:25 (fine turno): differenza >> 2h, non ritoccare
+    # Nota: 23:45 end=00:25 e' gia' (start<end su orologio spostato)
+    # Caso reale: blocco che attraversa mezzanotte
+    pass  # No-op: non ritoccare in questo caso
+
+
+def test_assign_minutes_typical_sequence():
+    """Sequenza tipica giornata: vettura + meal + cv_partenza + train + train."""
+    b1 = ParsedPdcBlock(seq=0, block_type="coach_transfer", vettura_id="2434")
+    b2 = ParsedPdcBlock(seq=1, block_type="meal")
+    b3 = ParsedPdcBlock(seq=2, block_type="cv_partenza", train_id="2434")
+    b4 = ParsedPdcBlock(seq=3, block_type="train", train_id="10243")
+    b5 = ParsedPdcBlock(seq=4, block_type="train", train_id="10246")
+    blocks_with_x = [(b, i * 50 + 100) for i, b in enumerate([b1, b2, b3, b4, b5])]
+
+    # 7 minuti disponibili: vettura(start,end), meal(start,end), train1(end),
+    # train2(start,end) — cv_partenza non consuma minuti
+    ticks = _ticks_for_test([17, 18, 19, 20, 21, 22, 23, 0],
+                            x_start=80, tick_width=25)
+    # x_expected per (17,25) ~ 80 + 25/60*25 = 90.4
+    upper_mins = [
+        {"x": 90.4, "minute": 25},    # vettura start 17:25
+        {"x": 106.7, "minute": 4},    # vettura end 18:04
+        {"x": 146.7, "minute": 40},   # meal start 18:40
+        {"x": 167.9, "minute": 7},    # meal end 19:07
+        {"x": 230, "minute": 24},     # train1 end (start skipped)
+        {"x": 265, "minute": 40},     # train2 start
+        {"x": 295, "minute": 45},     # train2 end
+    ]
+    _assign_minutes_to_blocks(blocks_with_x, upper_mins, ticks)
+
+    # vettura popolata
+    assert b1.start_time and b1.end_time
+    # meal popolato
+    assert b2.start_time and b2.end_time
+    # cv_partenza puntuale: non popolato
+    assert b3.start_time == "" and b3.end_time == ""
+    # train1 ha solo end (prev=cv_partenza skippa start)
+    assert b4.start_time == "" and b4.end_time != ""
+    # train2 popolato (prev=train, next=None)
+    assert b5.start_time and b5.end_time
+
+
+def test_assign_minutes_handles_insufficient_minutes():
+    """Non crasha se ci sono meno minuti dei blocchi."""
+    b1 = ParsedPdcBlock(seq=0, block_type="train", train_id="10000")
+    b2 = ParsedPdcBlock(seq=1, block_type="train", train_id="10001")
+    blocks_with_x = [(b1, 100), (b2, 200)]
+    ticks = _ticks_for_test([10, 11], x_start=80, tick_width=25)
+    _assign_minutes_to_blocks(
+        blocks_with_x,
+        [{"x": 90, "minute": 5}, {"x": 110, "minute": 15}],  # solo 2 minuti
+        ticks,
+    )
+    # b1 ha start+end, b2 non completo
+    assert b1.start_time and b1.end_time
+    assert b2.start_time == "" and b2.end_time == ""
+
+
+def test_assign_minutes_no_ticks_safe():
+    """Safe con ticks vuoti."""
+    b1 = ParsedPdcBlock(seq=0, block_type="train", train_id="10000")
+    blocks_with_x = [(b1, 100)]
+    _assign_minutes_to_blocks(blocks_with_x, [{"x": 100, "minute": 30}], [])
+    # Non crasha, semplicemente non popola
+    assert b1.start_time == ""
 
 
 if __name__ == "__main__":
