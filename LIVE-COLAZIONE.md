@@ -482,6 +482,33 @@ Il primo design (sfondo grigio chiaro, card bianche) era troppo generico/templat
 
 ---
 
+## 2026-04-16 — Fix giro materiale ricerca per train_id slash-joined
+
+### Problema
+Dopo il merge multi-numero (commit precedente), cercando `3086` via `/giro-chain/3086`:
+- `query_train()` trovava il segmento `3085/3086` (fix gia' presente)
+- MA `get_material_cycle()` e `get_giro_chain_context()` NON costruivano la chain perche' cercavano `train_id` come chiave esatta in dict/array interni
+
+Sintomo: API ritornava `chain=[], position=-1, total=0` anche se il segmento esisteva.
+
+### Fix
+- `get_material_cycle()`: aggiunta funzione locale `_canonical_tid(needle)` che cerca la chiave canonica nel `train_info` dict, provando prima match esatto e poi `needle in key.split("/")`. Usata come punto di partenza della catena.
+- `get_giro_chain_context()`: aggiornato il calcolo di `position` per accettare match slash-joined (`train_id in cid.split("/")`).
+
+### Verifica end-to-end
+Con seed DB (`3085/3086` da GALLARATE a VENTIMIGLIA + `10606` rientro):
+- `/giro-chain/3086` → chain=[3085/3086, 10606], position=0, material_type=E464N ✓
+- `/giro-chain/3085` → stesso risultato ✓
+- `/giro-chain/10606` → prev=3085/3086, position=1 ✓
+
+Badge `E464N` visibile in `/impostazioni` accanto al turno `1100` (screenshot).
+
+### File modificati
+- `src/database/db.py` — `get_material_cycle` + `get_giro_chain_context`
+- `.claude/launch.json` — aggiunto config backend per preview locale
+
+---
+
 ## 2026-04-16 — Parser v2: accessori, CVL/CB, multi-numero + badge frontend
 
 ### Nuove regole di riconoscimento sul PDF

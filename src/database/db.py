@@ -1173,11 +1173,23 @@ class Database:
                     "arr_min": _hhmm_to_min(last.get("arr_time", "")),
                 }
 
+            # Trova la chiave canonica nel train_info: gestisce train_id
+            # "slash-joined" come "3085/3086" quando si cerca "3086".
+            def _canonical_tid(needle: str) -> Optional[str]:
+                if needle in train_info:
+                    return needle
+                for k in train_info:
+                    if needle in k.split("/"):
+                        return k
+                return None
+
+            canonical = _canonical_tid(train_id)
+
             # Costruisci catena all'indietro dal treno cercato
-            chain = [train_id] if train_id in train_info else []
+            chain = [canonical] if canonical else []
             if chain:
                 # Indietro: trova chi arriva dove parte il treno corrente
-                current = train_id
+                current = canonical
                 while True:
                     ci = train_info[current]
                     best_tid, best_gap = None, MAX_GAP + 1
@@ -1199,7 +1211,7 @@ class Database:
                         break
 
                 # Avanti: trova chi parte da dove arriva il treno corrente
-                current = train_id
+                current = canonical
                 while True:
                     ci = train_info[current]
                     best_tid, best_gap = None, MAX_GAP + 1
@@ -1330,10 +1342,12 @@ class Database:
             turn_number = mt.get("turn_number")
             material_type = mt.get("material_type") or ""
 
-        # Find position of this train in the chain
+        # Find position of this train in the chain. Supports slash-joined
+        # train_ids (e.g. "3085/3086" matches search for "3086").
         pos = -1
         for i, c in enumerate(chain):
-            if c["train_id"] == train_id:
+            cid = c["train_id"]
+            if cid == train_id or train_id in cid.split("/"):
                 pos = i
                 break
 
