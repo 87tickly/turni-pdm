@@ -4,6 +4,29 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-16 — Reset turni salvati pre 15/04 (clean slate per redesign)
+
+### Contesto
+Stiamo ridisegnando tutto. I turni salvati esistenti (creati prima del 15/04/2026) sono dati di test ormai obsoleti — vanno via per partire da zero.
+
+### Operazione (una tantum, NON modifica codice)
+- DB locale `turni.db`: era già vuoto (0 saved_shift, 0 weekly_shift) — nessuna azione.
+- DB Railway PostgreSQL: cancellati **20 record** da `saved_shift` con `created_at < '2026-04-15'`.
+  - 0 record in `weekly_shift` e `shift_day_variant` (non ce n'erano)
+  - DELETE eseguito in transazione con sanity check (rollback se rowcount > soglia)
+  - Stato finale Railway: saved_shift=0, weekly_shift=0, shift_day_variant=0
+
+### Comportamento NON cambiato
+`db.clear_all()` continua a non toccare i `saved_shift` (riga 2010 di `src/database/db.py`). Il prossimo import PDF cancellerà solo segmenti/treni/turni materiale, lasciando intatti i turni salvati che verranno creati da qui in poi.
+
+### Snapshot turni cancellati
+Per traccia, prima del DELETE c'erano 20 turni — tutti di test, pre-redesign:
+- 12 turni `ALESSANDRIA G1` (LV/SAB/DOM, varianti) creati 17/03–27/03
+- 1 `ALESSANDRIA DISPONIBILE LV` del 27/03
+- 10 duplicati `SONDRIO G1-G5 LV` del 02/04
+
+---
+
 ## 2026-04-14 — Sessione A: CLAUDE.md + Sicurezza
 
 ### CLAUDE.md creato
