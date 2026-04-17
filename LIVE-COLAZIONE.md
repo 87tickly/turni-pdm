@@ -4,6 +4,92 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-17 (notte tardissimi) — Refactor BlockEditor chip-style + auto-fill + bug fix Rientro
+
+Sessione lunga di iterazione UX/UI. 9 commit incrementali su PdcBuilderPage,
+PdcGanttV2, PdcDepotPage, ApI client.
+
+### Fix critici
+
+**Drag cross-day (3 iterazioni di fix):**
+- `3e04ae0` rimosso preventDefault() in mouseDown — bloccava l'avvio HTML5 drag
+- `aa05a91` riscrittura chip treno con foreignObject overlay HTML — pattern
+  affidabile per HTML5 DnD su forme SVG (rect SVG draggable funziona male
+  in alcuni browser anche se la spec dice OK)
+- `e8c2d63` move sincrono ottimistico + auto-correzione async in background:
+  prima la UI applicava il move dopo aver atteso /train-check (300-500ms
+  di lag fastidiosi). Ora il blocco si sposta istantaneamente con orari
+  originali, e in background scatta /train-check; se trova orari canonici
+  diversi fa un secondo update silenzioso con banner di conferma.
+
+**Rientro vettura (3 iterazioni):**
+- `d060690` case-insensitive + retry senza filtro orario + log diagnostico
+  + suggerimento "scrivi TORINO PORTA NUOVA invece di torino"
+- `38a6ea9` **fix vero**: field mismatch silenzioso — il backend
+  /vt/find-return ritornava {train_number, category, from_station,
+  to_station, ...} ma il frontend si aspettava {numero, categoria, via,
+  destinazione}. Anche quando ARTURO Live trovava treni il frontend
+  mostrava "nessun treno". ReturnTrain interface allineata 1:1 + tutti i
+  siti d'uso (acceptReturnCandidate, render lista) aggiornati.
+
+### Calcoli automatici DayEditor (`840dae3`)
+
+Eliminato il form "anni 2000" con 6 input rettangolari (Inizio/Fine/Lav/
+Cct/Km/Rip min). Sostituito con riga compatta read-only:
+
+  CALCOLATO DAI BLOCCHI · Inizio 06:40 → Fine 15:01 · Lav 8h21 · Cct 5h42 · Km 0  [🌙 notturno]
+
+Helper computeDayStats(blocks) deriva tutto:
+- start_time = min start dei blocchi (gestione wrap mezzanotte via origine 03:00)
+- end_time   = max end
+- lavoro_min = end - start
+- condotta_min = somma durate dei blocchi 'train'
+- notturno = true se intervallo include 00:01-05:00
+
+useEffect ricalcola appena day.blocks cambia. Confronto coi valori attuali
+per evitare loop. Override manuale via <details> collapsed.
+
+### Accessori editabili (`5a82862`)
+
+PdcBlockInput estesa con minuti_accessori?: string. BlockEditor: chip
+"acc.min" accanto a "● magg.". I treni creati col bottone o cliccando la
+timeline nascono con minuti_accessori="5/5" come default. Il rendering
+del Gantt v2 mostra la riga ausiliaria sotto i minuti principali.
+
+### BlockEditor chip-style Linear/Notion (`38a6ea9`)
+
+Refactor radicale dell'editor blocco:
+- Una RIGA per blocco con chip cliccabili: [#0] [🚆 Treno] [10243 ◆]
+  [DOMO → Mlpg] [20:20–22:24] [acc 5/5] [✕]
+- Click su chip → popover inline con input. Esc / click fuori → chiude
+- Mappa colori: train blu, vettura grigio, CV viola, refez ambra,
+  scomp ciano, available verde
+- Bottone elimina visibile solo al hover (group-hover)
+- Helper Chip + Popover riusabili
+
+**Auto-fill al cambio numero treno** (debounce 600ms):
+1. lookupTrainInGiroMateriale → badge ◆ verde "giro materiale"
+2. Fallback trainCheck.arturo_live → badge ◆ blu "ARTURO Live"
+3. Non trovato → badge ◇ ambra "manuale"
+Sovrascrive solo i campi VUOTI, preserva edit utente.
+
+### Prossimi step (richiesti dall'utente)
+
+- **CVL/CB automatici dal giro materiale**: quando il treno richiede
+  cambio volante prima/dopo, aggiungere auto i blocchi CVp/CVa con
+  orari letti dal giro materiale.
+- **Periodicità auto del giorno**: dato il treno selezionato, suggerire
+  la periodicità della giornata (LMXGVSD vs S vs D ecc.) leggendo dalle
+  note di periodicità del treno.
+- **Auto-builder di turni**: visione lungo termine — dato un set di
+  treni iniziali, comporre automaticamente turni completi rispettando
+  le regole operative italiane (max prest 510min, max condotta 330min,
+  refezione obbligatoria, ecc.).
+- **Fase 2 parser v2**: miss 28→26 turni + pallino accessori ● + minuti
+  accessori popolati dal PDF.
+
+---
+
 ## 2026-04-17 (notte tardi) — Completamento azioni action bar + cross-day in Builder
 
 Chiuse tutte le azioni dell'action bar tranne `↔ Sposta` (che ora mostra
