@@ -199,162 +199,147 @@ export function PdcDepotPage() {
     []
   )
 
-  // Completa la move: target = (turnId, dayId)
-  // Se il blocco e' un treno con train_id valido, prima di inserirlo
-  // interroga /train-check per auto-correggere start_time/end_time agli
-  // orari canonici (giro materiale o ARTURO Live se assente nel giro).
+  // Completa la move SINCRONA: il blocco viene spostato IMMEDIATAMENTE
+  // con i suoi orari originali (UI fluida, nessuna attesa).
+  // L'auto-correzione orari via /train-check viene eseguita IN BACKGROUND
+  // dopo il move; se trova orari canonici diversi, applica un secondo
+  // setTurns che patcha i tempi del blocco appena spostato.
   const completeMove = useCallback(
-    async (targetTurnId: number, targetDayId: number) => {
+    (targetTurnId: number, targetDayId: number) => {
       if (!moveState) return
+      const ms = moveState // snapshot per le closure async
 
-      // Auto-correzione orari (non bloccante: in caso di errore usa
-      // gli orari originali senza bloccare il move)
-      let correctedBlock: PdcBlock = moveState.block
-      let correctionNote = ""
-      if (
-        moveState.block.block_type === "train" &&
-        moveState.block.train_id
-      ) {
-        try {
-          const check = await trainCheck(moveState.block.train_id)
-          // Priorita': giro materiale > ARTURO Live
-          let newStart = ""
-          let newEnd = ""
-          let newFrom = ""
-          let newTo = ""
-          let source = ""
-          if (check.db_internal.found && check.db_internal.data) {
-            newStart = check.db_internal.data.dep_time || ""
-            newEnd = check.db_internal.data.arr_time || ""
-            newFrom = check.db_internal.data.from_station || ""
-            newTo = check.db_internal.data.to_station || ""
-            source = "giro materiale"
-          } else if (check.arturo_live.found && check.arturo_live.data) {
-            newStart = check.arturo_live.data.dep_time || ""
-            newEnd = check.arturo_live.data.arr_time || ""
-            newFrom = check.arturo_live.data.origin || ""
-            newTo = check.arturo_live.data.destination || ""
-            source = "ARTURO Live"
-          }
-          if (newStart && newEnd &&
-              (newStart !== moveState.block.start_time ||
-               newEnd !== moveState.block.end_time)) {
-            correctedBlock = {
-              ...moveState.block,
-              start_time: newStart,
-              end_time: newEnd,
-              from_station: newFrom || moveState.block.from_station,
-              to_station: newTo || moveState.block.to_station,
-            }
-            correctionNote = `Orari del treno ${moveState.block.train_id} allineati a ${source}: ${newStart} → ${newEnd}`
-          }
-        } catch {
-          // silenzioso: in caso di 404 / offline il move va avanti con gli
-          // orari originali
-        }
-      }
-
+      // Step 1: SINCRONO — applica subito il move con orari originali
       setTurns((prev) => {
         const next = { ...prev }
-
-        // 1) Rimuovi il blocco dalla source (e CVp/CVa agganciati)
-        const source = next[moveState.sourceTurnId]
+        const source = next[ms.sourceTurnId]
         if (!source) return prev
+
+        // 1a) Rimuovi dal source
         const newSourceDetail = {
           ...source.detail,
           days: source.detail.days.map((d) => {
-            if (d.id !== moveState.sourceDayId) return d
-            const toRemove = new Set<number>([moveState.blockIndex])
-            const b = d.blocks[moveState.blockIndex]
+            if (d.id !== ms.sourceDayId) return d
+            const toRemove = new Set<number>([ms.blockIndex])
+            const b = d.blocks[ms.blockIndex]
             if (b?.block_type === "train") {
-              const prev = d.blocks[moveState.blockIndex - 1]
-              const nxt = d.blocks[moveState.blockIndex + 1]
-              if (prev?.block_type === "cv_partenza")
-                toRemove.add(moveState.blockIndex - 1)
-              if (nxt?.block_type === "cv_arrivo")
-                toRemove.add(moveState.blockIndex + 1)
+              const p = d.blocks[ms.blockIndex - 1]
+              const n = d.blocks[ms.blockIndex + 1]
+              if (p?.block_type === "cv_partenza") toRemove.add(ms.blockIndex - 1)
+              if (n?.block_type === "cv_arrivo")   toRemove.add(ms.blockIndex + 1)
             }
             const filtered = d.blocks.filter((_, idx) => !toRemove.has(idx))
-            return {
-              ...d,
-              blocks: filtered.map((bb, idx) => ({ ...bb, seq: idx })),
-            }
+            return { ...d, blocks: filtered.map((bb, idx) => ({ ...bb, seq: idx })) }
           }),
         }
-        next[moveState.sourceTurnId] = {
-          ...source,
-          detail: newSourceDetail,
-          dirty: true,
-        }
+        next[ms.sourceTurnId] = { ...source, detail: newSourceDetail, dirty: true }
 
-        // 2) Aggiungi il blocco (e CVp/CVa se erano in source) al target
-        // Se il target è lo stesso turno della source, usa il detail già aggiornato
-        const targetContainer =
-          targetTurnId === moveState.sourceTurnId
-            ? next[targetTurnId]
-            : next[targetTurnId]
+        // 1b) Aggiungi al target (con CVp/CVa originali se treno)
+        const targetContainer = next[targetTurnId]
         if (!targetContainer) return next
         const added: PdcBlock[] = []
-        if (moveState.block.block_type === "train") {
-          const origSource = source.detail.days.find(
-            (d) => d.id === moveState.sourceDayId
-          )
-          const origPrev = origSource?.blocks[moveState.blockIndex - 1]
-          const origNext = origSource?.blocks[moveState.blockIndex + 1]
+        if (ms.block.block_type === "train") {
+          const origSource = source.detail.days.find((d) => d.id === ms.sourceDayId)
+          const origPrev = origSource?.blocks[ms.blockIndex - 1]
+          const origNext = origSource?.blocks[ms.blockIndex + 1]
           if (origPrev?.block_type === "cv_partenza") added.push(origPrev)
-          added.push(correctedBlock)
+          added.push(ms.block)
           if (origNext?.block_type === "cv_arrivo") added.push(origNext)
         } else {
-          added.push(correctedBlock)
+          added.push(ms.block)
         }
-
-        // Notifica utente se gli orari sono stati auto-corretti
-        if (correctionNote) {
-          setError("") // reset eventuali errori precedenti
-          // Uso un'info message temporaneo
-          setInfoMsg(correctionNote)
-          setTimeout(() => setInfoMsg(""), 4000)
-        }
-
         const newTargetDetail = {
           ...targetContainer.detail,
           days: targetContainer.detail.days.map((d) => {
             if (d.id !== targetDayId) return d
             const newBlocks = [...d.blocks, ...added]
-            return {
-              ...d,
-              blocks: newBlocks.map((bb, idx) => ({ ...bb, seq: idx })),
-            }
+            return { ...d, blocks: newBlocks.map((bb, idx) => ({ ...bb, seq: idx })) }
           }),
         }
-        next[targetTurnId] = {
-          ...targetContainer,
-          detail: newTargetDetail,
-          dirty: true,
-        }
-
+        next[targetTurnId] = { ...targetContainer, detail: newTargetDetail, dirty: true }
         return next
       })
 
-      // Salvataggio debounced per entrambi i turni coinvolti
-      if (saveTimers.current[moveState.sourceTurnId])
-        clearTimeout(saveTimers.current[moveState.sourceTurnId])
-      saveTimers.current[moveState.sourceTurnId] = setTimeout(
-        () => saveTurn(moveState.sourceTurnId),
-        1500
-      )
-      if (targetTurnId !== moveState.sourceTurnId) {
-        if (saveTimers.current[targetTurnId])
-          clearTimeout(saveTimers.current[targetTurnId])
-        saveTimers.current[targetTurnId] = setTimeout(
-          () => saveTurn(targetTurnId),
-          1500
-        )
+      // Salvataggio debounced (1.5s) per entrambi i turni
+      if (saveTimers.current[ms.sourceTurnId]) clearTimeout(saveTimers.current[ms.sourceTurnId])
+      saveTimers.current[ms.sourceTurnId] = setTimeout(() => saveTurn(ms.sourceTurnId), 1500)
+      if (targetTurnId !== ms.sourceTurnId) {
+        if (saveTimers.current[targetTurnId]) clearTimeout(saveTimers.current[targetTurnId])
+        saveTimers.current[targetTurnId] = setTimeout(() => saveTurn(targetTurnId), 1500)
       }
 
       setMoveState(null)
+
+      // Step 2: ASYNC — auto-correzione orari in background.
+      // Non blocca la UI. Quando arriva la risposta, se gli orari canonici
+      // sono diversi, fa un secondo update mirato sul blocco target.
+      if (ms.block.block_type === "train" && ms.block.train_id) {
+        trainCheck(ms.block.train_id)
+          .then((check) => {
+            let newStart = ""
+            let newEnd = ""
+            let newFrom = ""
+            let newTo = ""
+            let source = ""
+            if (check.db_internal.found && check.db_internal.data) {
+              newStart = check.db_internal.data.dep_time || ""
+              newEnd = check.db_internal.data.arr_time || ""
+              newFrom = check.db_internal.data.from_station || ""
+              newTo = check.db_internal.data.to_station || ""
+              source = "giro materiale"
+            } else if (check.arturo_live.found && check.arturo_live.data) {
+              newStart = check.arturo_live.data.dep_time || ""
+              newEnd = check.arturo_live.data.arr_time || ""
+              newFrom = check.arturo_live.data.origin || ""
+              newTo = check.arturo_live.data.destination || ""
+              source = "ARTURO Live"
+            }
+            if (!newStart || !newEnd) return
+            if (newStart === ms.block.start_time && newEnd === ms.block.end_time) return
+
+            // Patcha il blocco nel target con orari canonici
+            setTurns((prev) => {
+              const next = { ...prev }
+              const tc = next[targetTurnId]
+              if (!tc) return prev
+              next[targetTurnId] = {
+                ...tc,
+                detail: {
+                  ...tc.detail,
+                  days: tc.detail.days.map((d) => {
+                    if (d.id !== targetDayId) return d
+                    return {
+                      ...d,
+                      blocks: d.blocks.map((bb) =>
+                        bb.train_id === ms.block.train_id &&
+                        bb.block_type === "train" &&
+                        bb.start_time === ms.block.start_time
+                          ? {
+                              ...bb,
+                              start_time: newStart,
+                              end_time: newEnd,
+                              from_station: newFrom || bb.from_station,
+                              to_station: newTo || bb.to_station,
+                            }
+                          : bb,
+                      ),
+                    }
+                  }),
+                },
+                dirty: true,
+              }
+              return next
+            })
+            setInfoMsg(`Orari del treno ${ms.block.train_id} allineati a ${source}: ${newStart} → ${newEnd}`)
+            setTimeout(() => setInfoMsg(""), 4000)
+            // Re-arma il save debounced del target
+            if (saveTimers.current[targetTurnId]) clearTimeout(saveTimers.current[targetTurnId])
+            saveTimers.current[targetTurnId] = setTimeout(() => saveTurn(targetTurnId), 1500)
+          })
+          .catch(() => { /* silenzioso */ })
+      }
     },
-    [moveState, saveTurn]
+    [moveState, saveTurn],
   )
 
   const toggleExpanded = (turnId: number) => {

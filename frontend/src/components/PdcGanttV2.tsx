@@ -581,15 +581,21 @@ export function PdcGanttV2({
 
   const fireAction = useCallback(
     (act: GanttAction) => {
-      if (selectedIdx === null) return
+      if (selectedIdx === null) {
+        console.warn("[PdcGanttV2] fireAction chiamato senza selezione")
+        return
+      }
       const block = blocks[selectedIdx]
-      if (!block) return
+      if (!block) {
+        console.warn("[PdcGanttV2] fireAction: blocco non trovato per idx", selectedIdx)
+        return
+      }
+      console.log("[PdcGanttV2] fireAction", act, "block:", block, "hasOnAction:", !!onAction)
       if (onAction) {
         onAction(act, block, selectedIdx)
-      } else if (typeof console !== "undefined") {
-        console.log("[PdcGanttV2] action", act, "on block", block)
       }
-      // chiudi action bar dopo l'azione
+      // chiudi action bar dopo l'azione (il toast e' renderizzato dal
+      // parent fuori dall'SVG, resta visibile anche dopo deselezione)
       setSelectedIdx(null)
     },
     [selectedIdx, blocks, onAction],

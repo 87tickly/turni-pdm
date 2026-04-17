@@ -909,7 +909,7 @@ export function PdcBuilderPage() {
   }, [])
 
   const handleCrossDayDrop = useCallback(
-    async (payload: CrossDayDragPayload, targetGanttId: string) => {
+    (payload: CrossDayDragPayload, targetGanttId: string) => {
       // targetGanttId = `day-${idx}`
       const targetDayIdx = parseInt(targetGanttId.replace("day-", ""), 10)
       const sourceDayIdx = parseInt(payload.ganttId.replace("day-", ""), 10)
@@ -919,50 +919,12 @@ export function PdcBuilderPage() {
         return
       }
 
-      // Auto-correzione orari via /train-check
-      let correctedBlock: PdcBlockInput = pdcBlockToInput(payload.block)
-      let noteText = ""
-      if (payload.block.block_type === "train" && payload.block.train_id) {
-        try {
-          const check = await trainCheck(payload.block.train_id)
-          let newStart = ""
-          let newEnd = ""
-          let newFrom = ""
-          let newTo = ""
-          let srcName = ""
-          if (check.db_internal.found && check.db_internal.data) {
-            newStart = check.db_internal.data.dep_time || ""
-            newEnd = check.db_internal.data.arr_time || ""
-            newFrom = check.db_internal.data.from_station || ""
-            newTo = check.db_internal.data.to_station || ""
-            srcName = "giro materiale"
-          } else if (check.arturo_live.found && check.arturo_live.data) {
-            newStart = check.arturo_live.data.dep_time || ""
-            newEnd = check.arturo_live.data.arr_time || ""
-            newFrom = check.arturo_live.data.origin || ""
-            newTo = check.arturo_live.data.destination || ""
-            srcName = "ARTURO Live"
-          }
-          if (newStart && newEnd &&
-              (newStart !== payload.block.start_time ||
-               newEnd !== payload.block.end_time)) {
-            correctedBlock = {
-              ...correctedBlock,
-              start_time: newStart,
-              end_time: newEnd,
-              from_station: newFrom || correctedBlock.from_station,
-              to_station: newTo || correctedBlock.to_station,
-            }
-            noteText = `Orari del treno ${payload.block.train_id} allineati a ${srcName}: ${newStart} → ${newEnd}`
-          }
-        } catch {
-          // fallback silenzioso
-        }
-      }
-
+      // STEP 1: SINCRONO — applica subito il move con orari originali
+      // (UI fluida, nessuna attesa per la rete)
+      const originalBlockInput = pdcBlockToInput(payload.block)
       setDays((prev) => {
         const next = [...prev]
-        // 1) Rimuovi dal giorno source il blocco + CVp/CVa agganciati
+        // Rimuovi dal giorno source il blocco + CVp/CVa agganciati
         const source = { ...next[sourceDayIdx] }
         const sBlocks = [...(source.blocks || [])]
         const toRemove = new Set<number>([payload.index])
@@ -977,12 +939,12 @@ export function PdcBuilderPage() {
           .map((b, idx) => ({ ...b, seq: idx }))
         next[sourceDayIdx] = source
 
-        // 2) Aggiungi al giorno target il blocco corretto + CVp/CVa originali
+        // Aggiungi al giorno target
         const target = { ...next[targetDayIdx] }
         const tBlocks = [...(target.blocks || [])]
         const added: PdcBlockInput[] = []
         if (payload.linkedCvp) added.push(pdcBlockToInput(payload.linkedCvp))
-        added.push(correctedBlock)
+        added.push(originalBlockInput)
         if (payload.linkedCva) added.push(pdcBlockToInput(payload.linkedCva))
         target.blocks = [...tBlocks, ...added].map((b, idx) => ({ ...b, seq: idx }))
         next[targetDayIdx] = target
@@ -990,10 +952,60 @@ export function PdcBuilderPage() {
       })
 
       setCrossDragSourceDay(null)
-      if (noteText) {
-        setCrossInfoMsg(noteText)
-        setTimeout(() => setCrossInfoMsg(""), 4000)
+
+      // STEP 2: ASYNC — auto-correzione orari in background
+      if (payload.block.block_type === "train" && payload.block.train_id) {
+        const trainId = payload.block.train_id
+        trainCheck(trainId)
+          .then((check) => {
+            let newStart = ""
+            let newEnd = ""
+            let newFrom = ""
+            let newTo = ""
+            let srcName = ""
+            if (check.db_internal?.found && check.db_internal.data) {
+              newStart = check.db_internal.data.dep_time || ""
+              newEnd = check.db_internal.data.arr_time || ""
+              newFrom = check.db_internal.data.from_station || ""
+              newTo = check.db_internal.data.to_station || ""
+              srcName = "giro materiale"
+            } else if (check.arturo_live?.found && check.arturo_live.data) {
+              newStart = check.arturo_live.data.dep_time || ""
+              newEnd = check.arturo_live.data.arr_time || ""
+              newFrom = check.arturo_live.data.origin || ""
+              newTo = check.arturo_live.data.destination || ""
+              srcName = "ARTURO Live"
+            }
+            if (!newStart || !newEnd) return
+            if (newStart === payload.block.start_time && newEnd === payload.block.end_time) return
+
+            // Patch del blocco appena spostato nel target
+            setDays((prev) => {
+              const next = [...prev]
+              const target = { ...next[targetDayIdx] }
+              target.blocks = (target.blocks || []).map((b) =>
+                b.train_id === trainId &&
+                b.block_type === "train" &&
+                b.start_time === payload.block.start_time
+                  ? {
+                      ...b,
+                      start_time: newStart,
+                      end_time: newEnd,
+                      from_station: newFrom || b.from_station,
+                      to_station: newTo || b.to_station,
+                    }
+                  : b,
+              )
+              next[targetDayIdx] = target
+              return next
+            })
+            setCrossInfoMsg(`Orari del treno ${trainId} allineati a ${srcName}: ${newStart} → ${newEnd}`)
+            setTimeout(() => setCrossInfoMsg(""), 4000)
+          })
+          .catch(() => { /* silenzioso */ })
       }
+      return // chiude la callback
+      // (i due rami legacy sotto non vengono mai eseguiti — held over)
     },
     [],
   )
