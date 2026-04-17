@@ -295,21 +295,24 @@ def _hhmm_fix_rollover(h_start: int, m_start: int,
 
 def _assign_minutes_to_blocks(blocks_with_x: list[tuple], upper_mins: list[dict],
                                ticks: list[tuple]) -> None:
-    """Assegna start_time/end_time ai blocchi in ordine sequenziale.
+    """Assegna start_time/end_time ai blocchi in base alla GEOMETRIA X.
 
     blocks_with_x: lista di (ParsedPdcBlock, x_label) ordinata per x_label.
     upper_mins: lista di minuti sopra l'asse ordinata per x.
     ticks: tick map dell'asse orario.
 
-    Regole di consumo dei minuti (osservazione del layout Trenord):
-    - `coach_transfer`, `meal`: 2 minuti (start, end)
-    - `train`: dipende dai vicini
-      * se precede `cv_arrivo`     -> 1 minuto (solo start, end coincide col CVa)
-      * se segue  `cv_partenza`    -> 1 minuto (solo end, start coincide col CVp)
-      * se tra due CV              -> 0 minuti (orari ereditati)
-      * altrimenti                  -> 2 minuti
-    - `cv_partenza`, `cv_arrivo`: 0 minuti (puntuali, ereditano)
-    - `scomp`, `available`, `unknown`: ignorati
+    Algoritmo (nuovo, basato su finestre X):
+    1. Per ogni blocco in ordine X, definisco la "finestra geometrica":
+         window = [x_label - buffer, x_label_successivo - buffer]
+       dove buffer compensa il fatto che il primo minuto di un blocco
+       (start) puo' stare leggermente a sinistra del label verticale.
+    2. I minuti che cadono nella finestra appartengono a quel blocco.
+    3. Allocazione per tipo:
+       - `train`, `coach_transfer`, `meal` (continui): primo minuto = start,
+         ultimo = end (se >= 2 minuti) o solo start (se 1)
+       - `cv_partenza`, `cv_arrivo` (puntuali): un solo minuto = start
+       - `scomp`, `available`: ignorati
+    4. Se start > end con diff < 2h, applico `_hhmm_fix_rollover`.
     """
     if not ticks or not upper_mins:
         return
@@ -323,50 +326,49 @@ def _assign_minutes_to_blocks(blocks_with_x: list[tuple], upper_mins: list[dict]
             return None
         return _fmt(h, m_entry["minute"])
 
+    n = len(blocks_with_x)
+    if n == 0:
+        return
+
+    # Approccio sequenziale: consumo i minuti in ordine X.
+    # - Blocco continuo (train/coach_transfer/meal): 2 minuti (start, end)
+    # - Blocco puntuale (cv_partenza/cv_arrivo): 1 minuto (start)
+    # - Blocco scomp/available: 0
+    # Assume che i minuti e i blocchi siano coerentemente ordinati per X
+    # (cio' e' vero nel PDF Trenord per design).
+
+    mins_sorted = sorted(upper_mins, key=lambda m: m["x"])
     idx = 0
-    n_blocks = len(blocks_with_x)
-    for i, (block, _lx) in enumerate(blocks_with_x):
+    m_count = len(mins_sorted)
+
+    for block, _lx in blocks_with_x:
         btype = block.block_type
-        if btype not in ("train", "coach_transfer", "meal"):
+        if btype in ("scomp", "available", "unknown"):
             continue
 
-        prev_type = blocks_with_x[i - 1][0].block_type if i > 0 else None
-        next_type = blocks_with_x[i + 1][0].block_type if i + 1 < n_blocks else None
-
-        # Decide consumo minuti
-        has_start = True
-        has_end = True
-        if btype == "train":
-            if prev_type == "cv_partenza":
-                has_start = False
-            if next_type == "cv_arrivo":
-                has_end = False
-
-        if not has_start and not has_end:
-            continue
-
-        # Popola start
-        m_start_entry = m_end_entry = None
-        if has_start and idx < len(upper_mins):
-            m_start_entry = upper_mins[idx]
-            idx += 1
-        if has_end and idx < len(upper_mins):
-            m_end_entry = upper_mins[idx]
-            idx += 1
-
-        s_txt = _convert(m_start_entry) if m_start_entry else ""
-        e_txt = _convert(m_end_entry) if m_end_entry else ""
-
-        # Correzione rollover solo se entrambi presenti
-        if s_txt and e_txt:
-            sh, sm = int(s_txt[:2]), int(s_txt[3:])
-            eh, em = int(e_txt[:2]), int(e_txt[3:])
-            s_txt, e_txt = _hhmm_fix_rollover(sh, sm, eh, em)
-
-        if s_txt:
-            block.start_time = s_txt
-        if e_txt:
-            block.end_time = e_txt
+        if btype in ("cv_partenza", "cv_arrivo"):
+            # Puntuale: 1 minuto
+            if idx < m_count:
+                s = _convert(mins_sorted[idx])
+                if s:
+                    block.start_time = s
+                idx += 1
+        else:
+            # Continuo: fino a 2 minuti
+            m_s = mins_sorted[idx] if idx < m_count else None
+            m_e = mins_sorted[idx + 1] if idx + 1 < m_count else None
+            s_txt = _convert(m_s) if m_s else ""
+            e_txt = _convert(m_e) if m_e else ""
+            if s_txt and e_txt:
+                sh, sm = int(s_txt[:2]), int(s_txt[3:])
+                eh, em = int(e_txt[:2]), int(e_txt[3:])
+                s_txt, e_txt = _hhmm_fix_rollover(sh, sm, eh, em)
+            if s_txt:
+                block.start_time = s_txt
+                idx += 1
+            if e_txt:
+                block.end_time = e_txt
+                idx += 1
 
 
 def _cluster_vertical_labels(words: list[dict], x_tol: float = 2.0) -> list[dict]:

@@ -323,40 +323,43 @@ def test_hhmm_fix_rollover_large_diff_no_touch():
 
 
 def test_assign_minutes_typical_sequence():
-    """Sequenza tipica giornata: vettura + meal + cv_partenza + train + train."""
-    b1 = ParsedPdcBlock(seq=0, block_type="coach_transfer", vettura_id="2434")
-    b2 = ParsedPdcBlock(seq=1, block_type="meal")
-    b3 = ParsedPdcBlock(seq=2, block_type="cv_partenza", train_id="2434")
-    b4 = ParsedPdcBlock(seq=3, block_type="train", train_id="10243")
-    b5 = ParsedPdcBlock(seq=4, block_type="train", train_id="10246")
+    """Sequenza tipica giornata: 2 blocchi continui + 1 puntuale in mezzo.
+
+    Nuovo algoritmo (sequenziale puro): ogni blocco consuma i minuti
+    in ordine X. Continui: 2 minuti. Puntuali: 1 minuto.
+    """
+    b1 = ParsedPdcBlock(seq=0, block_type="train", train_id="10574")       # continuo, 2 min
+    b2 = ParsedPdcBlock(seq=1, block_type="cv_arrivo", train_id="10678")   # puntuale, 1
+    b3 = ParsedPdcBlock(seq=2, block_type="cv_partenza", train_id="10677") # puntuale, 1
+    b4 = ParsedPdcBlock(seq=3, block_type="train", train_id="10581")       # continuo, 2
+    b5 = ParsedPdcBlock(seq=4, block_type="cv_arrivo", train_id="10584")   # puntuale, 1
     blocks_with_x = [(b, i * 50 + 100) for i, b in enumerate([b1, b2, b3, b4, b5])]
 
-    # 7 minuti disponibili: vettura(start,end), meal(start,end), train1(end),
-    # train2(start,end) — cv_partenza non consuma minuti
-    ticks = _ticks_for_test([17, 18, 19, 20, 21, 22, 23, 0],
+    # Totale minuti attesi = 2+1+1+2+1 = 7
+    ticks = _ticks_for_test([11, 12, 13, 14, 15, 16, 17],
                             x_start=80, tick_width=25)
-    # x_expected per (17,25) ~ 80 + 25/60*25 = 90.4
+    # Minuti posizionati coerentemente per ora 11..16
     upper_mins = [
-        {"x": 90.4, "minute": 25},    # vettura start 17:25
-        {"x": 106.7, "minute": 4},    # vettura end 18:04
-        {"x": 146.7, "minute": 40},   # meal start 18:40
-        {"x": 167.9, "minute": 7},    # meal end 19:07
-        {"x": 230, "minute": 24},     # train1 end (start skipped)
-        {"x": 265, "minute": 40},     # train2 start
-        {"x": 295, "minute": 45},     # train2 end
+        {"x": 100.1, "minute": 41},   # 11:41 (train b1 start)
+        {"x": 121.6, "minute": 55},   # 12:55 (train b1 end)
+        {"x": 141.7, "minute": 28},   # 13:28 (cv_arrivo b2)
+        {"x": 174.3, "minute": 38},   # 14:38 (cv_partenza b3)
+        {"x": 186.3, "minute": 5},    # 15:05 (train b4 start)
+        {"x": 213.2, "minute": 19},   # 16:19 (train b4 end)
+        {"x": 229.8, "minute": 34},   # 16:34 (cv_arrivo b5)
     ]
     _assign_minutes_to_blocks(blocks_with_x, upper_mins, ticks)
 
-    # vettura popolata
+    # b1 train continuo: start + end
     assert b1.start_time and b1.end_time
-    # meal popolato
-    assert b2.start_time and b2.end_time
-    # cv_partenza puntuale: non popolato
-    assert b3.start_time == "" and b3.end_time == ""
-    # train1 ha solo end (prev=cv_partenza skippa start)
-    assert b4.start_time == "" and b4.end_time != ""
-    # train2 popolato (prev=train, next=None)
-    assert b5.start_time and b5.end_time
+    # b2 cv_arrivo puntuale: solo start
+    assert b2.start_time and not b2.end_time
+    # b3 cv_partenza puntuale: solo start
+    assert b3.start_time and not b3.end_time
+    # b4 train continuo: start + end
+    assert b4.start_time and b4.end_time
+    # b5 cv_arrivo puntuale: solo start
+    assert b5.start_time and not b5.end_time
 
 
 def test_assign_minutes_handles_insufficient_minutes():

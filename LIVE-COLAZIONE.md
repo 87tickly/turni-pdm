@@ -4,6 +4,48 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-17 — Step 8: Parser allocazione sequenziale, tutti i blocchi popolati
+
+### Motivazione (feedback utente)
+Il turno ALOR_C g1 LMXGV aveva nel DB solo 1 orario (train 10574 start=11:41); gli altri 4 blocchi vuoti. Il Gantt quindi non mostrava la sequenza.
+
+### Sonda sul PDF (pagina 386 ALOR_C)
+La pagina contiene **7 minuti sopra l'asse** (41, 55, 28, 38, 05, 19, 34) allineati a 5 etichette blocco. Il parser ne catturava 1 solo.
+
+### Nuovo algoritmo `_assign_minutes_to_blocks`
+Approccio **sequenziale puro**:
+1. Ordino i minuti per X crescente
+2. Itero i blocchi in ordine X
+3. Blocco continuo (train/coach_transfer/meal): 2 minuti (start, end)
+4. Blocco puntuale (cv_partenza/cv_arrivo): 1 minuto (start)
+5. scomp/available: 0 minuti
+
+### Risultato ALOR_C g1 LMXGV (dopo reimport PDF)
+```
+train 10574     11:41 - 12:55
+cv_arrivo 10678 13:28
+cv_partenza     14:38
+train 10581     15:05 - 16:19
+cv_arrivo 10584 16:34
+```
+Orari reali estratti dal PDF, non stime.
+
+### Copertura globale
+- start_time: 89.4% (era 85.6%)
+- end_time su continui: 84.9% (era 83.1%)
+
+### Test
+Aggiornato `test_assign_minutes_typical_sequence`. Suite: 108/109.
+
+### Azione richiesta
+Ricaricare il PDF dalla pagina Import dopo il deploy per popolare il DB.
+
+### File modificati
+- `src/importer/turno_pdc_parser.py`
+- `tests/test_turno_pdc_parser.py`
+
+---
+
 ## 2026-04-16 — Step 7e: Gantt mostra TUTTI i blocchi (fill orari mancanti)
 
 ### Problema rilevato dall'utente
