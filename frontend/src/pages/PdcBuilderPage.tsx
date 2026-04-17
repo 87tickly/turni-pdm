@@ -15,7 +15,7 @@ import {
   Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { PdcGantt } from "@/components/PdcGantt"
+import { PdcGanttV2 as PdcGantt } from "@/components/PdcGanttV2"
 import {
   createPdcTurn,
   updatePdcTurn,

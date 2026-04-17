@@ -20,7 +20,7 @@ import {
   ArrowRightLeft,
   X,
 } from "lucide-react"
-import { PdcGantt } from "@/components/PdcGantt"
+import { PdcGanttV2 as PdcGantt } from "@/components/PdcGanttV2"
 import {
   listPdcTurns,
   getPdcTurn,
