@@ -1,13 +1,20 @@
 /**
- * PdcGantt — Timeline Gantt visuale per una giornata di turno PdC.
+ * PdcGantt — Timeline Gantt visuale fedele al PDF Trenord.
  *
- * Scala asse: 3 -> 24 -> 1 -> 2 -> 3 (giornata operativa, passa mezzanotte).
- * Barre colorate per tipo blocco, allineate a partire da start_time/end_time.
- * Marker puntuali per CVp/CVa. Pallino nero per accessori maggiorati.
+ * Layout stile PDF ufficiale Trenord (Modello M704):
+ *  - Asse 3→24→1→2→3 orizzontale
+ *  - Stazioni ai bordi delle barre (orizzontali, es. ARON, DOMO)
+ *  - Numero treno + stazione destinazione scritti VERTICALMENTE sopra la barra
+ *  - Linea continua nera per treni, tratteggiata per vetture/refezione
+ *  - Marker "CVp"/"CVa" verticali a lato del blocco treno adiacente
+ *  - Orari al minuto in piccolo sotto l'asse
+ *  - Zona prestazione evidenziata con fascia azzurra
+ *  - Pallino nero ● per accessori maggiorati (preriscaldo invernale)
  *
  * Modalità:
  *  - readonly (default): sola visualizzazione
- *  - onBlockClick: callback per click su un blocco (builder interattivo)
+ *  - onBlockClick: click su blocco (builder)
+ *  - onTimelineClick: click su area vuota (builder: crea blocco)
  */
 
 import type { PdcBlock } from "@/lib/api"
@@ -17,15 +24,13 @@ interface PdcGanttProps {
   startTime?: string          // orario inizio prestazione [HH:MM]
   endTime?: string            // orario fine prestazione [HH:MM]
   onBlockClick?: (block: PdcBlock, index: number) => void
-  onTimelineClick?: (hour: number, minute: number) => void  // click su area vuota
+  onTimelineClick?: (hour: number, minute: number) => void
   label?: string              // es. "g1 LMXGVSD"
+  depot?: string              // label stazione base ai bordi (es. ARON)
+  height?: number             // altezza personalizzata in px (default 180)
 }
 
 // ── Scala temporale ────────────────────────────────────────────
-// Asse: 3 -> 24 -> 1 -> 2 -> 3 (il "3" finale è le 3 del giorno successivo)
-// 25 tick in totale, 24 intervalli da 1h = 24*60 = 1440 minuti
-// L'origine temporale e' 3:00. Un orario HH:MM va convertito in minuti relativi:
-//   HH < 3 -> HH + 24 (mattina successiva)
 const ORIGIN_HOUR = 3
 const SPAN_HOURS = 24
 
@@ -44,21 +49,7 @@ function minutesRelToHhmm(minRel: number): string {
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
 }
 
-/**
- * Riempie gli orari mancanti di una sequenza di blocchi.
- *
- * Regole (mirrorano il layout dei PDF Trenord, dove molti blocchi
- * ereditano gli orari da blocchi adiacenti):
- *
- *  1. Forward pass: blocchi senza start_time ereditano l'end_time del
- *     blocco precedente. Il primissimo eredita startTime della giornata.
- *  2. Backward pass: blocchi senza end_time ereditano lo start_time del
- *     blocco successivo. L'ultimo eredita endTime della giornata.
- *  3. CVp / CVa puntuali: start_time == end_time se solo uno dei due è
- *     popolato.
- *  4. Se dopo i 3 passi manca ancora un orario, lascio null (rendering
- *     saltera' quel blocco come prima).
- */
+// Fill orari mancanti (stesso algoritmo della versione precedente)
 function fillBlockTimes(
   blocks: PdcBlock[],
   dayStart?: string,
@@ -67,11 +58,9 @@ function fillBlockTimes(
   const out = blocks.map((b) => ({ ...b }))
   const n = out.length
   if (n === 0) return out
-
   const isPuntual = (bt: string) =>
     bt === "cv_partenza" || bt === "cv_arrivo"
 
-  // ── Step 1: mirror iniziale puntuali (start<->end) ──────────
   for (const b of out) {
     if (isPuntual(b.block_type)) {
       if (!b.start_time && b.end_time) b.start_time = b.end_time
@@ -79,8 +68,6 @@ function fillBlockTimes(
     }
   }
 
-  // ── Step 2: raccogli anchor points (blocchi con start_time noto) ──
-  // Include start/end giornata come ancore virtuali esterne.
   type Anchor = { pos: number; time: number }
   const anchors: Anchor[] = []
   const dayStartMin = dayStart ? hhmmToMinutesRel(dayStart) : null
@@ -92,24 +79,17 @@ function fillBlockTimes(
   }
   if (dayEndMin !== null) anchors.push({ pos: n - 0.5, time: dayEndMin })
 
-  // ── Step 3: interpolazione lineare per start_time mancanti ──
-  // Per ogni blocco senza start_time, stima la posizione temporale
-  // interpolando tra l'anchor precedente e quello successivo.
   const findPrev = (i: number): Anchor | null => {
     let best: Anchor | null = null
     for (const a of anchors) {
-      if (a.pos < i) {
-        if (best === null || a.pos > best.pos) best = a
-      }
+      if (a.pos < i && (!best || a.pos > best.pos)) best = a
     }
     return best
   }
   const findNext = (i: number): Anchor | null => {
     let best: Anchor | null = null
     for (const a of anchors) {
-      if (a.pos > i) {
-        if (best === null || a.pos < best.pos) best = a
-      }
+      if (a.pos > i && (!best || a.pos < best.pos)) best = a
     }
     return best
   }
@@ -120,25 +100,20 @@ function fillBlockTimes(
     const after = findNext(i)
     if (before && after) {
       const slot = (after.time - before.time) / (after.pos - before.pos)
-      const est = before.time + slot * (i - before.pos)
-      out[i].start_time = minutesRelToHhmm(Math.round(est))
-    } else if (before) {
-      out[i].start_time = minutesRelToHhmm(before.time)
-    } else if (after) {
-      out[i].start_time = minutesRelToHhmm(after.time)
-    }
+      out[i].start_time = minutesRelToHhmm(
+        Math.round(before.time + slot * (i - before.pos))
+      )
+    } else if (before) out[i].start_time = minutesRelToHhmm(before.time)
+    else if (after) out[i].start_time = minutesRelToHhmm(after.time)
   }
 
-  // ── Step 4: end_time mancanti = start_time del successivo ──
   for (let i = 0; i < n - 1; i++) {
     if (!out[i].end_time && out[i + 1].start_time) {
       out[i].end_time = out[i + 1].start_time
     }
   }
-  // Ultimo blocco eredita end giornata
   if (!out[n - 1].end_time && dayEnd) out[n - 1].end_time = dayEnd
 
-  // ── Step 5: mirror finale per puntuali ──
   for (const b of out) {
     if (isPuntual(b.block_type)) {
       if (!b.start_time && b.end_time) b.start_time = b.end_time
@@ -149,31 +124,72 @@ function fillBlockTimes(
   return out
 }
 
-// ── Colori e altezze per tipo ─────────────────────────────────
-const BAR_H_TALL = 22    // train
-const BAR_H_MED = 14     // coach_transfer, meal
-const BAR_H_LONG = 10    // scomp
-const MARKER_H = 20      // cv_partenza/arrivo
+// ── Stili grafici per tipo blocco ──────────────────────────────
+const BAR_H_TRAIN = 3        // linea spessa per treno (style PDF: linea nera)
+const BAR_H_VETTURA = 2      // linea tratteggiata sottile per vettura
+const BAR_H_MEAL = 2         // linea tratteggiata per refezione
+const BAR_H_SCOMP = 2        // linea tratteggiata grigia per scomp
+const MARKER_H = 10          // altezza marker CVp/CVa
 
 function blockStyle(t: PdcBlock["block_type"]) {
   switch (t) {
     case "train":
-      return { fill: "#0062CC", stroke: "#0062CC", h: BAR_H_TALL, dash: null, label: "" }
+      return {
+        stroke: "#111827",
+        strokeWidth: BAR_H_TRAIN,
+        dash: null as string | null,
+        labelColor: "#0062CC",
+      }
     case "coach_transfer":
-      return { fill: "#7C3AED", stroke: "#7C3AED", h: BAR_H_MED, dash: "3 2", label: "" }
+      return {
+        stroke: "#111827",
+        strokeWidth: BAR_H_VETTURA,
+        dash: "2 2",
+        labelColor: "#7C3AED",
+      }
     case "meal":
-      return { fill: "#10B981", stroke: "#10B981", h: BAR_H_MED, dash: "3 2", label: "REFEZ" }
+      return {
+        stroke: "#111827",
+        strokeWidth: BAR_H_MEAL,
+        dash: "2 2",
+        labelColor: "#10B981",
+      }
     case "scomp":
-      return { fill: "#94A3B8", stroke: "#94A3B8", h: BAR_H_LONG, dash: "2 2", label: "S.COMP" }
+      return {
+        stroke: "#94A3B8",
+        strokeWidth: BAR_H_SCOMP,
+        dash: "2 2",
+        labelColor: "#64748B",
+      }
     case "cv_partenza":
-      return { fill: "#F59E0B", stroke: "#F59E0B", h: MARKER_H, dash: null, label: "CVp" }
     case "cv_arrivo":
-      return { fill: "#F59E0B", stroke: "#F59E0B", h: MARKER_H, dash: null, label: "CVa" }
-    case "available":
-      return { fill: "#E2E8F0", stroke: "#CBD5E1", h: BAR_H_LONG, dash: null, label: "DISP." }
+      return {
+        stroke: "#111827",
+        strokeWidth: 1,
+        dash: null as string | null,
+        labelColor: "#B45309",
+      }
     default:
-      return { fill: "#64748B", stroke: "#64748B", h: BAR_H_MED, dash: null, label: "" }
+      return {
+        stroke: "#64748B",
+        strokeWidth: 1,
+        dash: null as string | null,
+        labelColor: "#64748B",
+      }
   }
+}
+
+// Etichetta mostrata sopra la barra (numero + stazione destinazione)
+function blockLabel(b: PdcBlock): string {
+  const id = b.train_id || b.vettura_id || ""
+  const station = b.to_station || ""
+  if (b.block_type === "cv_partenza") return `CVp ${id}${station ? " " + station : ""}`.trim()
+  if (b.block_type === "cv_arrivo") return `CVa ${id}${station ? " " + station : ""}`.trim()
+  if (b.block_type === "meal") return "REFEZ" + (station ? " " + station : "")
+  if (b.block_type === "scomp") return "S.COMP" + (station ? " " + station : "")
+  if (b.block_type === "coach_transfer") return `(${id}${station ? " " + station : ""}`
+  if (b.block_type === "available") return "Disponibile"
+  return `${id}${station ? " " + station : ""}`
 }
 
 // ── Componente ────────────────────────────────────────────────
@@ -185,31 +201,27 @@ export function PdcGantt({
   onBlockClick,
   onTimelineClick,
   label,
+  depot,
+  height = 180,
 }: PdcGanttProps) {
-  // Riempie gli orari mancanti per poter renderizzare TUTTI i blocchi
-  // (es. CVp/CVa puntuali o treni con solo end_time per la regola
-  // "preceduto da cv_partenza -> solo end").
   const blocks = fillBlockTimes(rawBlocks, startTime, endTime)
 
   // Layout parametri
-  const CHART_W = 1200
-  const CHART_H = 100
-  const PAD_L = 90
-  const PAD_R = 20
-  const PAD_T = 34
-  const axisY = PAD_T + 30
-
+  const CHART_W = 1400
+  const PAD_L = 110
+  const PAD_R = 30
+  const PAD_T = 60      // più spazio per label verticali sopra la barra
+  const axisY = PAD_T + 40
   const plotW = CHART_W - PAD_L - PAD_R
   const minuteToX = (min: number) => PAD_L + (min / (SPAN_HOURS * 60)) * plotW
 
-  // Tick orari (0..24) che corrispondono alle ore 3..24..1..2..3
+  // Tick orari
   const ticks: { hour: number; x: number }[] = []
   for (let i = 0; i <= SPAN_HOURS; i++) {
-    const hour = ((ORIGIN_HOUR + i) % 24)
+    const hour = (ORIGIN_HOUR + i) % 24
     ticks.push({ hour, x: minuteToX(i * 60) })
   }
 
-  // Prestazione globale (contorno verde)
   const startMin = startTime ? hhmmToMinutesRel(startTime) : null
   const endMin = endTime ? hhmmToMinutesRel(endTime) : null
 
@@ -225,35 +237,38 @@ export function PdcGantt({
     onTimelineClick(absHour, minute)
   }
 
+  // Determina stazioni ai bordi dalla sequenza dei blocchi
+  const firstStation = blocks.find((b) => b.from_station)?.from_station || depot || ""
+  const lastStation =
+    [...blocks].reverse().find((b) => b.to_station)?.to_station || depot || ""
+
   return (
-    <div className="w-full overflow-x-auto border border-border-subtle rounded-lg bg-[#F8FAFC] p-2">
+    <div className="w-full overflow-x-auto border border-border-subtle rounded-lg bg-white p-2">
       <svg
-        viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+        viewBox={`0 0 ${CHART_W} ${height}`}
         width="100%"
         preserveAspectRatio="xMinYMid meet"
-        style={{ minWidth: 600, cursor: onTimelineClick ? "crosshair" : "default" }}
+        style={{ minWidth: 900, cursor: onTimelineClick ? "crosshair" : "default" }}
         onClick={handleTimelineClick}
       >
-        {/* Label a sinistra (giornata + periodicità + orari) */}
+        {/* Label giornata + periodicità a sinistra */}
         {label && (
           <text
-            x={PAD_L - 8}
-            y={axisY + 4}
-            fontSize="11"
-            textAnchor="end"
+            x={8}
+            y={axisY - 6}
+            fontSize="13"
             fill="#0F172A"
             fontFamily="'Exo 2', sans-serif"
-            fontWeight="600"
+            fontWeight="700"
           >
             {label}
           </text>
         )}
         {startTime && endTime && (
           <text
-            x={PAD_L - 8}
-            y={axisY + 16}
-            fontSize="9"
-            textAnchor="end"
+            x={8}
+            y={axisY + 8}
+            fontSize="10"
             fill="#64748B"
             fontFamily="monospace"
           >
@@ -261,65 +276,103 @@ export function PdcGantt({
           </text>
         )}
 
-        {/* Prestazione: zona evidenziata */}
+        {/* Fascia prestazione */}
         {startMin !== null && endMin !== null && (
           <rect
             x={minuteToX(startMin)}
-            y={PAD_T - 4}
+            y={PAD_T - 10}
             width={Math.max(0, minuteToX(endMin) - minuteToX(startMin))}
-            height={axisY + 30 - PAD_T + 4}
+            height={axisY - PAD_T + 40}
             fill="#DBEAFE"
-            opacity={0.25}
+            opacity={0.2}
           />
         )}
 
-        {/* Griglia verticale */}
+        {/* Griglia verticale ore */}
         {ticks.map((t, i) => (
           <line
             key={i}
             x1={t.x}
-            y1={PAD_T}
+            y1={PAD_T - 10}
             x2={t.x}
-            y2={axisY + 20}
-            stroke="#E2E8F0"
+            y2={axisY + 5}
+            stroke="#E5E7EB"
             strokeWidth={0.5}
           />
         ))}
 
-        {/* Asse orizzontale */}
-        <line
-          x1={PAD_L}
-          y1={axisY}
-          x2={PAD_L + plotW}
-          y2={axisY}
-          stroke="#475569"
-          strokeWidth={1}
-        />
+        {/* Asse orizzontale (più spezzato per stile PDF) */}
+        {ticks.map((t, i) => {
+          if (i === ticks.length - 1) return null
+          const x1 = t.x + 4
+          const x2 = ticks[i + 1].x - 4
+          return (
+            <line
+              key={`ax-${i}`}
+              x1={x1}
+              y1={axisY}
+              x2={x2}
+              y2={axisY}
+              stroke="#111827"
+              strokeWidth={1}
+            />
+          )
+        })}
 
-        {/* Tick + numeri ora */}
+        {/* Numeri ora sull'asse */}
         {ticks.map((t, i) => (
-          <g key={`tick-${i}`}>
-            <line x1={t.x} y1={axisY} x2={t.x} y2={axisY + 3} stroke="#475569" />
-            <text
-              x={t.x}
-              y={axisY + 14}
-              fontSize="10"
-              textAnchor="middle"
-              fill="#0F172A"
-              fontFamily="monospace"
-            >
-              {t.hour}
-            </text>
-          </g>
+          <text
+            key={`h-${i}`}
+            x={t.x}
+            y={axisY + 4}
+            fontSize="11"
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fill="#0F172A"
+            fontFamily="'Exo 2', sans-serif"
+            fontWeight="500"
+          >
+            {t.hour}
+          </text>
         ))}
+
+        {/* Stazione sinistra (depot) */}
+        {firstStation && (
+          <text
+            x={PAD_L - 4}
+            y={PAD_T - 2}
+            fontSize="11"
+            textAnchor="end"
+            fill="#0F172A"
+            fontFamily="'Exo 2', sans-serif"
+            fontWeight="600"
+          >
+            {firstStation}
+          </text>
+        )}
+        {/* Stazione destra (depot) */}
+        {lastStation && (
+          <text
+            x={PAD_L + plotW + 4}
+            y={PAD_T - 2}
+            fontSize="11"
+            textAnchor="start"
+            fill="#0F172A"
+            fontFamily="'Exo 2', sans-serif"
+            fontWeight="600"
+          >
+            {lastStation}
+          </text>
+        )}
 
         {/* Blocchi */}
         {blocks.map((b, i) => {
           const bs = blockStyle(b.block_type)
           const sm = hhmmToMinutesRel(b.start_time)
           const em = hhmmToMinutesRel(b.end_time)
+          const labelTxt = blockLabel(b)
 
-          // Gestione blocchi puntuali (CVp/CVa): solo un istante
+          // CVp/CVa puntuali → marker verticale
           if (b.block_type === "cv_partenza" || b.block_type === "cv_arrivo") {
             if (sm === null) return null
             const x = minuteToX(sm)
@@ -336,29 +389,33 @@ export function PdcGantt({
               >
                 <line
                   x1={x}
-                  y1={axisY - bs.h / 2}
+                  y1={PAD_T - 2}
                   x2={x}
-                  y2={axisY + bs.h / 2}
-                  stroke={bs.stroke}
-                  strokeWidth={2.5}
+                  y2={PAD_T + MARKER_H}
+                  stroke={bs.labelColor}
+                  strokeWidth={1.5}
                 />
+                {/* Etichetta verticale (ruotata -90) */}
                 <text
                   x={x}
-                  y={axisY - bs.h / 2 - 4}
-                  fontSize="8"
-                  textAnchor="middle"
-                  fill={bs.stroke}
-                  fontWeight="bold"
+                  y={PAD_T - 4}
+                  fontSize="9"
+                  textAnchor="start"
+                  fill={bs.labelColor}
+                  fontFamily="'Exo 2', sans-serif"
+                  fontWeight="600"
+                  transform={`rotate(-90, ${x}, ${PAD_T - 4})`}
                 >
-                  {bs.label}
+                  {labelTxt}
                 </text>
+                {/* Orario sotto */}
                 {b.start_time && (
                   <text
                     x={x}
-                    y={axisY + bs.h / 2 + 8}
-                    fontSize="8"
+                    y={axisY + 18}
+                    fontSize="8.5"
                     textAnchor="middle"
-                    fill="#64748B"
+                    fill="#475569"
                     fontFamily="monospace"
                   >
                     {b.start_time}
@@ -368,14 +425,13 @@ export function PdcGantt({
             )
           }
 
-          // Blocchi di durata: richiedono start + end
+          // Blocchi di durata
           if (sm === null) return null
-          const emEff = em !== null && em > sm ? em : sm + 15
+          const emEff = em !== null && em > sm ? em : sm + 5
           const x1 = minuteToX(sm)
           const x2 = minuteToX(emEff)
           const w = Math.max(2, x2 - x1)
-          const y = axisY - bs.h / 2
-          const txt = b.train_id || b.vettura_id || bs.label
+          const barY = PAD_T + 8
 
           return (
             <g
@@ -388,77 +444,58 @@ export function PdcGantt({
               }}
               style={{ cursor: onBlockClick ? "pointer" : "default" }}
             >
-              <rect
-                x={x1}
-                y={y}
-                width={w}
-                height={bs.h}
-                fill={bs.fill}
+              {/* Linea della barra (spessa per treno, tratteggiata per altri) */}
+              <line
+                x1={x1}
+                y1={barY}
+                x2={x2}
+                y2={barY}
                 stroke={bs.stroke}
-                strokeWidth={1}
+                strokeWidth={bs.strokeWidth}
                 strokeDasharray={bs.dash || undefined}
-                fillOpacity={bs.dash ? 0.15 : 0.85}
-                rx={1.5}
               />
-              {/* Testo treno / vettura sopra */}
-              {txt && (
-                <text
-                  x={x1 + w / 2}
-                  y={y - 3}
-                  fontSize="9"
-                  textAnchor="middle"
-                  fill="#0F172A"
-                  fontFamily="'Exo 2', sans-serif"
-                  fontWeight="600"
-                >
-                  {txt}
-                </text>
+              {/* Etichetta verticale sopra la barra */}
+              <text
+                x={x1 + w / 2}
+                y={barY - 4}
+                fontSize="9.5"
+                textAnchor="start"
+                fill={bs.labelColor}
+                fontFamily="'Exo 2', sans-serif"
+                fontWeight="700"
+                transform={`rotate(-90, ${x1 + w / 2}, ${barY - 4})`}
+              >
+                {labelTxt}
+              </text>
+              {/* Pallino nero per accessori maggiorati */}
+              {b.accessori_maggiorati === 1 && (
+                <circle cx={x1 + 3} cy={barY} r={2.5} fill="#000" />
               )}
-              {/* Stazione destinazione a destra */}
-              {b.to_station && w > 40 && (
-                <text
-                  x={x2 + 2}
-                  y={y + bs.h / 2 + 3}
-                  fontSize="8"
-                  fill="#64748B"
-                  fontFamily="monospace"
-                >
-                  {b.to_station}
-                </text>
-              )}
-              {/* Orari sotto */}
+              {/* Orario partenza sotto asse (in piccolo) */}
               {b.start_time && (
                 <text
                   x={x1}
-                  y={y + bs.h + 9}
+                  y={axisY + 14}
                   fontSize="8"
-                  textAnchor="start"
+                  textAnchor="middle"
                   fill="#475569"
                   fontFamily="monospace"
                 >
-                  {b.start_time}
+                  {b.start_time.slice(3)}
                 </text>
               )}
-              {b.end_time && w > 25 && (
+              {/* Orario arrivo sotto asse */}
+              {b.end_time && w > 18 && (
                 <text
                   x={x2}
-                  y={y + bs.h + 9}
+                  y={axisY + 14}
                   fontSize="8"
-                  textAnchor="end"
+                  textAnchor="middle"
                   fill="#475569"
                   fontFamily="monospace"
                 >
-                  {b.end_time}
+                  {b.end_time.slice(3)}
                 </text>
-              )}
-              {/* Pallino accessori maggiorati */}
-              {b.accessori_maggiorati === 1 && (
-                <circle
-                  cx={x1 + 4}
-                  cy={y + bs.h / 2}
-                  r={2.5}
-                  fill="#000"
-                />
               )}
             </g>
           )
@@ -468,19 +505,31 @@ export function PdcGantt({
       {/* Legenda */}
       <div className="flex flex-wrap gap-3 mt-1 text-[10px] text-muted-foreground px-1">
         <span className="flex items-center gap-1">
-          <span className="inline-block w-3 h-2 bg-[#0062CC]" /> Treno
+          <span className="inline-block w-4 h-0.5 bg-[#111827]" /> Treno
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block w-3 h-2 border border-[#7C3AED] border-dashed bg-[#7C3AED]/20" /> Vettura
+          <span
+            className="inline-block w-4 h-0"
+            style={{ borderTop: "1px dashed #111827" }}
+          />
+          Vettura
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block w-3 h-2 border border-[#10B981] border-dashed bg-[#10B981]/20" /> Refezione
+          <span
+            className="inline-block w-4 h-0"
+            style={{ borderTop: "1px dashed #10B981" }}
+          />
+          Refezione
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block w-3 h-2 border border-[#94A3B8] border-dashed bg-[#94A3B8]/20" /> S.COMP
+          <span
+            className="inline-block w-4 h-0"
+            style={{ borderTop: "1px dashed #94A3B8" }}
+          />
+          S.COMP
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block w-0.5 h-2 bg-[#F59E0B]" /> CVp/CVa
+          <span className="inline-block w-px h-3 bg-[#B45309]" /> CVp/CVa
         </span>
         <span className="flex items-center gap-1">
           <span className="inline-block w-2 h-2 rounded-full bg-black" /> Acc. magg.
