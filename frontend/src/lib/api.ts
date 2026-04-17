@@ -509,16 +509,50 @@ export interface PdcTurnSummary {
   valid_to: string
 }
 
+export interface PdcImportDiff {
+  new: Array<{ codice: string; impianto: string }>
+  updated: Array<{ codice: string; impianto: string }>
+  only_in_old: Array<{ codice: string; impianto: string }>
+  counts: { new: number; updated: number; only_in_old: number }
+}
+
+// Risposta dry_run: preview senza scrivere nel DB
+export interface TurnoPdcPreviewResult {
+  status: "preview"
+  filename: string
+  n_pagine_pdf: number
+  turni_parsed: number
+  diff: PdcImportDiff
+  summary: PdcTurnSummary[]
+}
+
 export interface TurnoPdcResult {
   status: string
   filename: string
   turni_imported: number
+  turni_superseded?: number    // versioning (schema v2.1)
+  import_id?: number           // versioning
   days_imported: number
   blocks_imported: number
   notes_imported: number
-  trains_cited: number
+  trains_cited?: number
   stats: PdcStats
   summary: PdcTurnSummary[]
+  diff?: PdcImportDiff          // versioning: stesso diff del preview
+}
+
+export interface PdcImportRecord {
+  id: number
+  filename: string
+  data_stampa: string
+  data_pubblicazione: string
+  valido_dal: string
+  valido_al: string
+  n_turni: number
+  n_pagine_pdf: number
+  imported_at: string
+  imported_by: number | null
+  turni_attivi: number
 }
 
 export interface PdcStats {
@@ -636,6 +670,16 @@ export async function uploadTurnoPersonale(file: File) {
 
 export async function uploadTurnoPdc(file: File) {
   return uploadFile<TurnoPdcResult>("/upload-turno-pdc", file)
+}
+
+/** Preview (dry_run) del caricamento PDF PdC: calcola il diff con i
+ *  turni attivi nel DB senza scrivere nulla. */
+export async function uploadTurnoPdcPreview(file: File) {
+  return uploadFile<TurnoPdcPreviewResult>("/upload-turno-pdc?dry_run=true", file)
+}
+
+export async function listPdcImports() {
+  return api.get<{ count: number; imports: PdcImportRecord[] }>("/pdc-imports")
 }
 
 export async function getPdcStats() {
