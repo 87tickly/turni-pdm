@@ -293,6 +293,9 @@ function DayEditor({
 
   // Trova rientro in vettura: usa l'ultima stazione dell'ultimo blocco
   // con to_station e cerca treni per il deposito via ARTURO Live.
+  // Strategia con retry: se la prima ricerca filtrata sull'after_time
+  // non trova nulla, riprova senza filtro temporale per mostrare comunque
+  // candidati (utile per turni mattutini molto presto).
   const findReturnVettura = async () => {
     if (!impianto.trim()) {
       setReturnMsg("⚠ Impianto non impostato")
@@ -305,26 +308,49 @@ function DayEditor({
       setReturnMsg("⚠ Nessun treno con stazione di arrivo nel turno")
       return
     }
-    const fromStation = lastWithStation.to_station || ""
+    // Normalizzo in MAIUSCOLO per evitare problemi di case sensitivity
+    // sull'autocomplete stazioni di ARTURO Live (sebbene il backend
+    // gia' fa upper, alcune ricerche fuzzy danno risultati diversi).
+    const fromStation = (lastWithStation.to_station || "").trim().toUpperCase()
+    const toStation = impianto.trim().toUpperCase()
     const afterTime = lastWithStation.end_time || "00:00"
     setReturnSearching(true)
     setReturnMsg("")
     setReturnCandidates(null)
     try {
-      const r = await findReturnTrain(fromStation, impianto, afterTime)
+      console.log("[rientro] cerca", { fromStation, toStation, afterTime })
+      const r = await findReturnTrain(fromStation, toStation, afterTime)
+      console.log("[rientro] risposta filtrata", r)
+
       if (r.error) {
-        setReturnMsg(`⚠ ${r.error}`)
+        setReturnMsg(`⚠ ${r.error} — verifica i nomi delle stazioni (es. "TORINO PORTA NUOVA" invece di "torino")`)
       } else if (r.return_trains.length === 0) {
-        setReturnMsg(
-          `Nessun treno ARTURO Live dopo ${afterTime} da ${fromStation} a ${impianto}`
-        )
+        // Retry senza filtro orario: usa "00:00" per mostrare tutti i treni
+        // di oggi, anche prima dell'orario richiesto.
+        setReturnMsg(`Nessuno dopo ${afterTime}, cerco anche prima...`)
+        const r2 = await findReturnTrain(fromStation, toStation, "00:00")
+        console.log("[rientro] risposta senza filtro", r2)
+        if (r2.return_trains.length === 0) {
+          setReturnMsg(
+            `Nessun treno ARTURO Live trovato da ${fromStation} → ${toStation} ` +
+            `(verifica nomi stazioni: per Torino prova "TORINO PORTA NUOVA", ` +
+            `per Milano "MILANO CENTRALE", ecc.)`
+          )
+        } else {
+          setReturnCandidates(r2.return_trains)
+          setReturnMsg(
+            `Nessun treno DOPO ${afterTime} da ${fromStation} → ${toStation}. ` +
+            `Mostro ${r2.return_trains.length} treno/i trovati nel resto della giornata.`
+          )
+        }
       } else {
         setReturnCandidates(r.return_trains)
         setReturnMsg(
-          `${r.return_trains.length} treno/i trovato/i da ${fromStation} → ${impianto}`
+          `${r.return_trains.length} treno/i trovato/i da ${fromStation} → ${toStation}`
         )
       }
     } catch (e) {
+      console.error("[rientro] errore", e)
       setReturnMsg(`✗ ${e instanceof Error ? e.message : "Errore"}`)
     } finally {
       setReturnSearching(false)
