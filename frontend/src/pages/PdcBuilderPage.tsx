@@ -471,6 +471,52 @@ function DayEditor({
                     })
                     onChange({ ...day, blocks })
                   }}
+                  onAction={(act, _block, idx) => {
+                    if (act === "delete") {
+                      if (!confirm("Eliminare il blocco? Se e' un treno con CVp/CVa agganciati verranno rimossi anche quelli.")) return
+                      const src = [...(day.blocks || [])]
+                      // Se e' un treno: rimuovi anche CVp prima e CVa dopo se adiacenti
+                      const target = src[idx]
+                      const toRemove = new Set<number>([idx])
+                      if (target?.block_type === "train") {
+                        const prev = src[idx - 1]
+                        if (prev && prev.block_type === "cv_partenza") toRemove.add(idx - 1)
+                        const next = src[idx + 1]
+                        if (next && next.block_type === "cv_arrivo") toRemove.add(idx + 1)
+                      }
+                      const blocks = src
+                        .filter((_, i) => !toRemove.has(i))
+                        .map((b, i) => ({ ...b, seq: i }))
+                      onChange({ ...day, blocks })
+                      return
+                    }
+                    if (act === "duplicate") {
+                      const src = [...(day.blocks || [])]
+                      const orig = src[idx]
+                      if (!orig) return
+                      const copy = { ...orig, seq: idx + 1 }
+                      // Inserisce subito dopo l'originale
+                      const blocks = [
+                        ...src.slice(0, idx + 1),
+                        copy,
+                        ...src.slice(idx + 1),
+                      ].map((b, i) => ({ ...b, seq: i }))
+                      onChange({ ...day, blocks })
+                      return
+                    }
+                    if (act === "edit") {
+                      // Scroll all'editor come onBlockClick
+                      const el = document.getElementById(`block-editor-${idx}`)
+                      if (el) {
+                        el.scrollIntoView({ behavior: "smooth", block: "center" })
+                        el.classList.add("ring-2", "ring-primary")
+                        setTimeout(() => el.classList.remove("ring-2", "ring-primary"), 1500)
+                      }
+                      return
+                    }
+                    // Altre azioni: detail / history / link / warn / move → TODO
+                    console.log("[PdcBuilder] azione non ancora collegata:", act)
+                  }}
                 />
               </div>
 

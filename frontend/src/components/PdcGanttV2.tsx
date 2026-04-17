@@ -83,7 +83,7 @@ const CHIP_Y_A = 78
 const CHIP_Y_B = 54
 const CHIP_Y_C = 30
 const MINUTES_MAIN_Y = 160
-// MINUTES_AUX_Y verra' popolato quando il parser v2 esporra' minuti_accessori
+const MINUTES_AUX_Y = 175  // riga accessori (minuti PDF ausiliari: 5/27/10)
 
 const TICK_HOURS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 1, 2, 3]
 const MAJOR_TICKS = new Set([3, 12, 24])
@@ -765,6 +765,13 @@ export function PdcGanttV2({
                       fontWeight={700} fill="#0b0d10" pointerEvents="none">
                   {minuteOnly(b.start_time)}
                 </text>
+                {b.minuti_accessori && (
+                  <text x={x} y={MINUTES_AUX_Y} textAnchor="middle"
+                        fontFamily="ui-monospace, Menlo, monospace" fontSize={8}
+                        fontStyle="italic" fill="#a1a6ae" pointerEvents="none">
+                    {b.minuti_accessori}
+                  </text>
+                )}
                 {b.end_time && (
                   <text x={x2} y={MINUTES_MAIN_Y} textAnchor="middle"
                         fontFamily="ui-monospace, Menlo, monospace" fontSize={9.5}
@@ -805,6 +812,13 @@ export function PdcGanttV2({
                       fontWeight={700} fill="#0b0d10" pointerEvents="none">
                   {minuteOnly(b.start_time)}
                 </text>
+                {b.minuti_accessori && (
+                  <text x={x} y={MINUTES_AUX_Y} textAnchor="middle"
+                        fontFamily="ui-monospace, Menlo, monospace" fontSize={8}
+                        fontStyle="italic" fill="#a1a6ae" pointerEvents="none">
+                    {b.minuti_accessori}
+                  </text>
+                )}
                 {b.end_time && (
                   <text x={x2} y={MINUTES_MAIN_Y} textAnchor="middle"
                         fontFamily="ui-monospace, Menlo, monospace" fontSize={9.5}
@@ -842,6 +856,13 @@ export function PdcGanttV2({
                       fontWeight={700} fill="#0b0d10" pointerEvents="none">
                   {minuteOnly(b.start_time)}
                 </text>
+                {b.minuti_accessori && (
+                  <text x={x} y={MINUTES_AUX_Y} textAnchor="middle"
+                        fontFamily="ui-monospace, Menlo, monospace" fontSize={8}
+                        fontStyle="italic" fill="#a1a6ae" pointerEvents="none">
+                    {b.minuti_accessori}
+                  </text>
+                )}
                 {b.end_time && (
                   <text x={x2} y={MINUTES_MAIN_Y} textAnchor="middle"
                         fontFamily="ui-monospace, Menlo, monospace" fontSize={9.5}
@@ -881,6 +902,13 @@ export function PdcGanttV2({
                       fontWeight={700} fill="#0b0d10" pointerEvents="none">
                   {minuteOnly(b.start_time)}
                 </text>
+                {b.minuti_accessori && (
+                  <text x={x} y={MINUTES_AUX_Y} textAnchor="middle"
+                        fontFamily="ui-monospace, Menlo, monospace" fontSize={8}
+                        fontStyle="italic" fill="#a1a6ae" pointerEvents="none">
+                    {b.minuti_accessori}
+                  </text>
+                )}
               </g>
             )
           }
@@ -906,6 +934,13 @@ export function PdcGanttV2({
                       fontWeight={700} fill="#0b0d10" pointerEvents="none">
                   {minuteOnly(b.start_time)}
                 </text>
+                {b.minuti_accessori && (
+                  <text x={x} y={MINUTES_AUX_Y} textAnchor="middle"
+                        fontFamily="ui-monospace, Menlo, monospace" fontSize={8}
+                        fontStyle="italic" fill="#a1a6ae" pointerEvents="none">
+                    {b.minuti_accessori}
+                  </text>
+                )}
                 {b.end_time && (
                   <text x={x2} y={MINUTES_MAIN_Y} textAnchor="middle"
                         fontFamily="ui-monospace, Menlo, monospace" fontSize={9.5}

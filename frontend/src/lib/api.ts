@@ -557,6 +557,11 @@ export interface PdcBlock {
   start_time: string
   end_time: string
   accessori_maggiorati: number
+  // Schema v2.1 (MDL-PdC v1.0) — popolati dal parser v2, legacy vuoti
+  minuti_accessori?: string  // es. "5", "27", "10" — riga ausiliaria PDF
+  fonte_orario?: "parsed" | "interpolated" | "user"
+  cv_parent_block_id?: number | null
+  accessori_note?: string
 }
 
 export interface PdcDay {
