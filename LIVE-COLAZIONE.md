@@ -4,6 +4,83 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-17 — STATO ATTUALE E PROBLEMI APERTI (punto di ripartenza)
+
+### Fatto finora (commits recenti)
+- `d494c31` Step 7 Gantt SVG visuale + builder interattivo
+- `2be4e9e` Gantt mostra tutti i blocchi con fill orari
+- `72ab5c8` Interpolazione uniforme blocchi
+- `3e17f89` Step 8 Parser sequenziale (89% copertura orari)
+- `57669ae` Step 8d Gantt stile PDF (linee sottili)
+- `05f6a81` Step 8d-h Gantt colorato + drag & drop blocchi
+- `4d1cd91` Step 9a+b+c CVp/CVa linked, snap, lookup giro materiale
+- `a5f2363` Step 9d Vista deposito (tutti turni editabili + auto-save)
+- `aee2ece` Step 10a+b+d Gantt tweaks + rientro vettura + sposta tra giornate
+
+### PROBLEMI APERTI da affrontare (per la prossima sessione)
+
+**Gantt / UX**:
+- Layout ancora "piccolo", non si legge bene come nel PDF
+- Numero treno, stazioni e orari si sovrappongono quando i blocchi sono vicini
+- La timeline 3→24→3 occupa tanto spazio inutile per turni brevi
+- Le label verticali non sono leggibili bene in alcuni punti
+
+**Drag interazione**:
+- Ancora troppo sensibile in alcuni casi (serve più threshold)
+- Il drag di un treno non rispetta sempre i CVp/CVa (vedere casi edge)
+- Manca feedback visivo "ghost" durante il drag
+- Manca snap ai blocchi vicini (es. end di un treno = start del successivo)
+
+**Parser**:
+- Copertura start_time: 89% — gli altri 11% sono giornate con layout ambiguo
+- Molti blocchi hanno orari approssimati via interpolazione invece che estratti dal PDF
+- I minuti sotto l'asse (accessori/secondari) NON sono ancora usati
+- Non rileva blocchi "accessori inizio/fine giornata" (setup, wrap-up)
+
+**Collegamento giro materiale**:
+- Lookup funziona (button 🔍) ma non è automatico quando si digita
+- Non crea automaticamente CVp/CVa quando il treno richiede cambio volante
+- Validazione vs orari reali ARTURO Live non ancora implementata
+
+**Cross-day / Multi-turno**:
+- "Incolla qui" funziona ma è macchinoso (click + scroll + click)
+- Manca vero drag & drop tra giornate
+- Nessuna validazione che impedisca conflitti (stesso treno in due turni)
+
+**Accessori**:
+- Blocchi "accessori inizio giornata" e "accessori fine giornata" non esistono
+- Il parser non li cattura
+- Il DB schema non li contempla esplicitamente
+
+**Validazione ARTURO Live**:
+- Non implementata: spostando un treno non viene verificato l'orario reale
+- Manca warning "treno ha orario diverso da ARTURO Live"
+
+**Backend**:
+- Parser v1 ancora da migliorare (coverage, minuti secondari, accessori)
+- Ri-import del PDF su Railway richiesto manualmente dopo modifiche parser
+- Nessun test end-to-end completo sul PDF reale
+
+### Strategia consigliata per la prossima sessione
+1. **Leggere prima**: CLAUDE.md + questo file + skill `.claude/skills/turno-pdc-reader.md`
+2. **Piano pulito**: l'utente vuole avvicinare il Gantt al PDF Trenord, non fare patch su patch
+3. **Priorità UX**: iterare ripartendo da mockup statico (Figma?) invece che modificare a piccoli pezzi
+4. **Parser**: lavorare a test-driven, con fixture di PDF reale
+5. **Split**: backend (parser + API) e frontend (Gantt + editor) come lavori separati
+
+### Stato DB Railway
+- 26 turni caricati (dal primo import)
+- Parser v2 push-ato ma il DB ha ancora i dati del parser v1 → serve ri-caricare il PDF
+
+### File chiave
+- `src/importer/turno_pdc_parser.py` — parser (785 righe)
+- `frontend/src/components/PdcGantt.tsx` — Gantt SVG (900 righe circa)
+- `frontend/src/pages/PdcBuilderPage.tsx` — builder
+- `frontend/src/pages/PdcDepotPage.tsx` — vista deposito
+- `api/pdc_builder.py` — CRUD + calendario
+
+---
+
 ## 2026-04-17 — Step 10a+b+d: Gantt visual tweaks + rientro vettura + sposta tra giornate
 
 ### Feedback utente
