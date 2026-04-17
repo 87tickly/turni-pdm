@@ -10,7 +10,6 @@ import {
   ChevronDown,
   ChevronRight,
   X,
-  Search,
   Home,
   Loader2,
   Moon,
@@ -171,7 +170,26 @@ function Stat({ label, value, mono }: { label: string; value: string; mono?: boo
   )
 }
 
-// ── Sottocomponente: Editor blocco ─────────────────────────────
+// ── Sottocomponente: Editor blocco (chip-row stile Linear/Notion) ──────
+//
+// Una singola riga compatta per ogni blocco. I valori sono "chip"
+// cliccabili che aprono un mini popover di edit inline. Niente piu'
+// form rettangolare con 6 input vuoti. Auto-fill al cambio del numero
+// treno (debounce 600ms): legge il giro materiale e popola in
+// automatico stazioni + orari + flag deadhead. Mostra un badge di
+// origine ("◆ giro mat" / "◆ ARTURO Live" / "◇ manuale").
+
+type ChipFieldName = "type" | "id" | "from" | "to" | "start" | "end" | "acc"
+
+const BLOCK_TYPE_META: Record<PdcBlockInput["block_type"], { icon: string; label: string; color: string }> = {
+  train:           { icon: "🚆",  label: "Treno",     color: "bg-blue-50 text-blue-800 border-blue-200" },
+  coach_transfer:  { icon: "▭",   label: "Vettura",   color: "bg-slate-50 text-slate-700 border-slate-200" },
+  cv_partenza:     { icon: "⏵",   label: "CVp",       color: "bg-violet-50 text-violet-800 border-violet-200" },
+  cv_arrivo:       { icon: "⏸",   label: "CVa",       color: "bg-violet-50 text-violet-800 border-violet-200" },
+  meal:            { icon: "🍴",  label: "Refez",     color: "bg-amber-50 text-amber-800 border-amber-200" },
+  scomp:           { icon: "⏱",   label: "S.COMP",    color: "bg-cyan-50 text-cyan-800 border-cyan-200" },
+  available:       { icon: "🛏",   label: "Riposo",    color: "bg-emerald-50 text-emerald-800 border-emerald-200" },
+}
 
 function BlockEditor({
   block,
@@ -184,154 +202,302 @@ function BlockEditor({
   onChange: (b: PdcBlockInput) => void
   onRemove: () => void
 }) {
-  const showTrain = ["train", "cv_partenza", "cv_arrivo"].includes(block.block_type)
-  const showVettura = block.block_type === "coach_transfer"
-  const showStations = !["scomp", "available"].includes(block.block_type)
-  const [lookupMsg, setLookupMsg] = useState<string>("")
+  const meta = BLOCK_TYPE_META[block.block_type] ?? BLOCK_TYPE_META.train
+  const isTrain = block.block_type === "train"
+  const isCv = block.block_type === "cv_partenza" || block.block_type === "cv_arrivo"
+  const isCoach = block.block_type === "coach_transfer"
+  const isPunctual = isCv
 
-  const handleLookup = async () => {
-    if (!block.train_id) return
-    setLookupMsg("🔍 ricerca...")
-    try {
-      const r = await lookupTrainInGiroMateriale(block.train_id)
-      if (r.found) {
-        onChange({
-          ...block,
-          from_station: r.from_station || block.from_station,
-          to_station: r.to_station || block.to_station,
-          start_time: r.dep_time || block.start_time,
-          end_time: r.arr_time || block.end_time,
-        })
-        setLookupMsg(`✓ trovato nel giro materiale (turno ${r.material_turn_id || "?"})`)
-      } else {
-        setLookupMsg(`⚠ treno ${block.train_id} non trovato nel giro materiale`)
-      }
-    } catch (e) {
-      setLookupMsg(`✗ errore: ${e instanceof Error ? e.message : "sconosciuto"}`)
+  const [editing, setEditing] = useState<ChipFieldName | null>(null)
+  // Stato auto-fill per badge origine
+  const [origin, setOrigin] = useState<"manual" | "giro" | "live" | "loading" | "miss" | null>(null)
+
+  // ── Auto-fill al cambio train_id (debounced 600ms) ────────────
+  useEffect(() => {
+    if (!isTrain || !block.train_id || !block.train_id.trim()) {
+      setOrigin(null)
+      return
     }
-    setTimeout(() => setLookupMsg(""), 4000)
+    const tid = block.train_id.trim()
+    setOrigin("loading")
+    const handle = setTimeout(async () => {
+      try {
+        // 1. Tenta giro materiale
+        const r = await lookupTrainInGiroMateriale(tid)
+        if (r.found) {
+          // Popola solo i campi vuoti (non sovrascrive edit utente)
+          const patched: PdcBlockInput = { ...block }
+          let changed = false
+          if (!block.from_station && r.from_station) { patched.from_station = r.from_station; changed = true }
+          if (!block.to_station   && r.to_station)   { patched.to_station   = r.to_station;   changed = true }
+          if (!block.start_time   && r.dep_time)     { patched.start_time   = r.dep_time;     changed = true }
+          if (!block.end_time     && r.arr_time)     { patched.end_time     = r.arr_time;     changed = true }
+          if (changed) onChange(patched)
+          setOrigin("giro")
+          return
+        }
+        // 2. Fallback ARTURO Live
+        const tc = await trainCheck(tid)
+        if (tc.arturo_live?.found && tc.arturo_live.data) {
+          const patched: PdcBlockInput = { ...block }
+          let changed = false
+          if (!block.from_station && tc.arturo_live.data.origin)      { patched.from_station = tc.arturo_live.data.origin;      changed = true }
+          if (!block.to_station   && tc.arturo_live.data.destination) { patched.to_station   = tc.arturo_live.data.destination; changed = true }
+          if (!block.start_time   && tc.arturo_live.data.dep_time)    { patched.start_time   = tc.arturo_live.data.dep_time;    changed = true }
+          if (!block.end_time     && tc.arturo_live.data.arr_time)    { patched.end_time     = tc.arturo_live.data.arr_time;    changed = true }
+          if (changed) onChange(patched)
+          setOrigin("live")
+          return
+        }
+        setOrigin("miss")
+      } catch {
+        setOrigin("miss")
+      }
+    }, 600)
+    return () => clearTimeout(handle)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [block.train_id, isTrain])
+
+  const updateField = <K extends keyof PdcBlockInput>(k: K, v: PdcBlockInput[K]) => {
+    onChange({ ...block, [k]: v })
   }
 
-  return (
-    <div className="border border-border-subtle rounded-lg p-2 bg-muted/20 space-y-2">
-      <div className="flex items-center gap-2 text-[11px]">
-        <span className="font-mono text-muted-foreground min-w-[20px]">{index}</span>
-        <select
-          className="px-2 py-1 border border-border rounded bg-background text-[11px]"
-          value={block.block_type}
-          onChange={(e) =>
-            onChange({ ...block, block_type: e.target.value as PdcBlockInput["block_type"] })
-          }
-        >
-          {BLOCK_TYPES.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.icon} {t.label}
-            </option>
-          ))}
-        </select>
+  const closeEdit = () => setEditing(null)
 
-        {showTrain && (
-          <>
-            <input
-              className="px-2 py-1 border border-border rounded font-mono w-20 text-[11px]"
-              placeholder="Treno #"
-              value={block.train_id || ""}
-              onChange={(e) => onChange({ ...block, train_id: e.target.value })}
-            />
-            {block.block_type === "train" && block.train_id && (
-              <button
-                onClick={handleLookup}
-                className="text-[10px] px-1.5 py-1 bg-primary/10 text-primary rounded hover:bg-primary/20 flex items-center gap-0.5"
-                title="Cerca nel giro materiale e popola stazioni/orari"
-                type="button"
-              >
-                <Search size={10} />
+  return (
+    <div
+      className="group flex items-center gap-1.5 py-1.5 px-2 rounded-md hover:bg-muted/40 transition-colors text-[11px] relative"
+      onClick={(e) => {
+        // Click fuori dai chip: chiude eventuale edit
+        if (e.target === e.currentTarget) closeEdit()
+      }}
+    >
+      {/* Drag handle (placeholder) + index */}
+      <span className="font-mono text-muted-foreground/60 w-5 text-right select-none">{index}</span>
+
+      {/* Chip TIPO */}
+      <Chip
+        active={editing === "type"}
+        className={meta.color}
+        onClick={() => setEditing(editing === "type" ? null : "type")}
+        title="Cambia tipo blocco"
+      >
+        <span className="text-[12px]">{meta.icon}</span>
+        <span className="font-semibold">{meta.label}</span>
+      </Chip>
+      {editing === "type" && (
+        <Popover onClose={closeEdit}>
+          <div className="grid grid-cols-2 gap-1 p-1">
+            {BLOCK_TYPES.map((t) => (
+              <button key={t.value}
+                className="text-[11px] text-left px-2 py-1 rounded hover:bg-muted flex items-center gap-1.5"
+                onClick={() => { updateField("block_type", t.value); closeEdit() }}>
+                <span>{t.icon}</span> {t.label}
               </button>
+            ))}
+          </div>
+        </Popover>
+      )}
+
+      {/* Chip ID (treno o vettura) */}
+      {(isTrain || isCv) && (
+        <Chip
+          active={editing === "id"}
+          className="bg-white border-slate-300 font-mono"
+          onClick={() => setEditing(editing === "id" ? null : "id")}
+          title="Numero treno"
+        >
+          {block.train_id || <span className="text-muted-foreground italic">treno?</span>}
+          {isTrain && origin === "loading" && <Loader2 size={9} className="animate-spin text-muted-foreground" />}
+          {isTrain && origin === "giro" && <span title="Trovato nel giro materiale" className="text-emerald-600">◆</span>}
+          {isTrain && origin === "live" && <span title="Trovato in ARTURO Live" className="text-blue-600">◆</span>}
+          {isTrain && origin === "miss" && <span title="Non trovato — inserito manualmente" className="text-amber-600">◇</span>}
+        </Chip>
+      )}
+      {isCoach && (
+        <Chip
+          active={editing === "id"}
+          className="bg-white border-slate-300 font-mono italic"
+          onClick={() => setEditing(editing === "id" ? null : "id")}
+          title="Numero vettura"
+        >
+          ({block.vettura_id || <span className="text-muted-foreground">vett?</span>}
+        </Chip>
+      )}
+      {editing === "id" && (
+        <Popover onClose={closeEdit}>
+          <input
+            autoFocus
+            type="text"
+            className="px-2 py-1 border border-border rounded font-mono text-[12px] w-32"
+            placeholder={isCoach ? "Numero vettura" : "Numero treno"}
+            value={isCoach ? (block.vettura_id || "") : (block.train_id || "")}
+            onChange={(e) =>
+              isCoach
+                ? updateField("vettura_id", e.target.value)
+                : updateField("train_id", e.target.value)
+            }
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") closeEdit() }}
+          />
+        </Popover>
+      )}
+
+      {/* Chip TRATTA from→to */}
+      {block.block_type !== "scomp" && block.block_type !== "available" && (
+        <Chip
+          active={editing === "from" || editing === "to"}
+          className="bg-white border-slate-300 font-mono"
+          onClick={() => setEditing(editing === "from" ? null : "from")}
+          title="Stazione partenza → arrivo"
+        >
+          {block.from_station || <span className="text-muted-foreground italic">da?</span>}
+          {!isPunctual && (
+            <>
+              <span className="text-muted-foreground/60 mx-0.5">→</span>
+              {block.to_station || <span className="text-muted-foreground italic">a?</span>}
+            </>
+          )}
+        </Chip>
+      )}
+      {editing === "from" && (
+        <Popover onClose={closeEdit}>
+          <div className="flex items-center gap-1 p-1">
+            <input autoFocus type="text" className="px-2 py-1 border border-border rounded text-[11px] w-28"
+              placeholder="da" value={block.from_station || ""}
+              onChange={(e) => updateField("from_station", e.target.value)} />
+            {!isPunctual && (
+              <>
+                <span className="text-muted-foreground">→</span>
+                <input type="text" className="px-2 py-1 border border-border rounded text-[11px] w-28"
+                  placeholder="a" value={block.to_station || ""}
+                  onChange={(e) => updateField("to_station", e.target.value)} />
+              </>
             )}
+          </div>
+        </Popover>
+      )}
+
+      {/* Chip ORARI start–end (o solo start per puntuali) */}
+      <Chip
+        active={editing === "start"}
+        className="bg-white border-slate-300 font-mono"
+        onClick={() => setEditing(editing === "start" ? null : "start")}
+        title="Orari del blocco"
+      >
+        {block.start_time || <span className="text-muted-foreground italic">--:--</span>}
+        {!isPunctual && (
+          <>
+            <span className="text-muted-foreground/60">–</span>
+            {block.end_time || <span className="text-muted-foreground italic">--:--</span>}
           </>
         )}
-        {showVettura && (
-          <input
-            className="px-2 py-1 border border-border rounded font-mono w-20 text-[11px]"
-            placeholder="Vettura #"
-            value={block.vettura_id || ""}
-            onChange={(e) => onChange({ ...block, vettura_id: e.target.value })}
-          />
-        )}
-
-        <div className="ml-auto flex items-center gap-1.5">
-          <label className="flex items-center gap-1 text-[10px]" title="Minuti accessori — formato 'inizio/fine' es. '5/10'">
-            <span className="text-muted-foreground">acc.min</span>
-            <input
-              type="text"
-              className="px-1.5 py-0.5 border border-border rounded w-14 text-[10px] font-mono text-center"
-              placeholder="5/5"
-              value={block.minuti_accessori || ""}
-              onChange={(e) =>
-                onChange({ ...block, minuti_accessori: e.target.value })
-              }
-            />
-          </label>
-          <label className="flex items-center gap-1 text-[10px]" title="Accessori maggiorati (preriscaldo invernale)">
-            <input
-              type="checkbox"
-              checked={block.accessori_maggiorati || false}
-              onChange={(e) =>
-                onChange({ ...block, accessori_maggiorati: e.target.checked })
-              }
-            />
-            ● magg.
-          </label>
-          <button
-            onClick={onRemove}
-            className="text-destructive hover:bg-destructive/10 p-1 rounded"
-            title="Rimuovi blocco"
-          >
-            <X size={12} />
-          </button>
-        </div>
-      </div>
-
-      {showStations && (
-        <div className="flex items-center gap-2 text-[11px]">
-          <input
-            className="px-2 py-1 border border-border rounded flex-1 text-[11px]"
-            placeholder="Stazione da"
-            value={block.from_station || ""}
-            onChange={(e) => onChange({ ...block, from_station: e.target.value })}
-          />
-          <span className="text-muted-foreground">→</span>
-          <input
-            className="px-2 py-1 border border-border rounded flex-1 text-[11px]"
-            placeholder="Stazione a"
-            value={block.to_station || ""}
-            onChange={(e) => onChange({ ...block, to_station: e.target.value })}
-          />
-        </div>
+      </Chip>
+      {editing === "start" && (
+        <Popover onClose={closeEdit}>
+          <div className="flex items-center gap-1 p-1">
+            <input autoFocus type="time" className="px-2 py-1 border border-border rounded font-mono text-[11px]"
+              value={block.start_time || ""}
+              onChange={(e) => updateField("start_time", e.target.value)} />
+            {!isPunctual && (
+              <>
+                <span className="text-muted-foreground">–</span>
+                <input type="time" className="px-2 py-1 border border-border rounded font-mono text-[11px]"
+                  value={block.end_time || ""}
+                  onChange={(e) => updateField("end_time", e.target.value)} />
+              </>
+            )}
+          </div>
+        </Popover>
       )}
 
-      {lookupMsg && (
-        <div className="text-[10px] text-muted-foreground pl-6">
-          {lookupMsg}
-        </div>
+      {/* Chip ACCESSORI (sempre visibile per i treni, opzionale altri) */}
+      {(isTrain || isCv || block.block_type === "meal") && (
+        <Chip
+          active={editing === "acc"}
+          className={(block.minuti_accessori
+            ? "bg-amber-50 border-amber-200 text-amber-800"
+            : "bg-white border-slate-300 text-muted-foreground")
+            + " font-mono"}
+          onClick={() => setEditing(editing === "acc" ? null : "acc")}
+          title="Minuti accessori (es. 5/5 = 5 prep + 5 consegna)"
+        >
+          acc {block.minuti_accessori || <span className="italic">5/5</span>}
+        </Chip>
+      )}
+      {editing === "acc" && (
+        <Popover onClose={closeEdit}>
+          <div className="flex items-center gap-1 p-1">
+            <input autoFocus type="text" className="px-2 py-1 border border-border rounded font-mono text-[11px] w-20 text-center"
+              placeholder="5/5" value={block.minuti_accessori || ""}
+              onChange={(e) => updateField("minuti_accessori", e.target.value)} />
+            <button
+              type="button"
+              className={"text-[10px] px-2 py-1 rounded border " + (block.accessori_maggiorati
+                ? "bg-red-50 border-red-200 text-red-700"
+                : "bg-white border-slate-300 text-muted-foreground")}
+              onClick={() => updateField("accessori_maggiorati", !block.accessori_maggiorati)}
+              title="Accessori maggiorati (preriscaldo)"
+            >
+              ● magg.
+            </button>
+          </div>
+        </Popover>
       )}
 
-      <div className="flex items-center gap-2 text-[11px]">
-        <label className="text-muted-foreground">Orari:</label>
-        <input
-          type="time"
-          className="px-2 py-1 border border-border rounded font-mono text-[11px]"
-          value={block.start_time || ""}
-          onChange={(e) => onChange({ ...block, start_time: e.target.value })}
-        />
-        <span className="text-muted-foreground">–</span>
-        <input
-          type="time"
-          className="px-2 py-1 border border-border rounded font-mono text-[11px]"
-          value={block.end_time || ""}
-          onChange={(e) => onChange({ ...block, end_time: e.target.value })}
-        />
-      </div>
+      {/* Spacer + azioni a destra */}
+      <span className="flex-1" />
+
+      <button
+        onClick={(e) => { e.stopPropagation(); onRemove() }}
+        className="opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:bg-destructive/10 p-1 rounded"
+        title="Rimuovi blocco"
+        type="button"
+      >
+        <X size={12} />
+      </button>
+    </div>
+  )
+}
+
+// Mini-componente: chip generico cliccabile
+function Chip({
+  children, active, className = "", onClick, title,
+}: {
+  children: React.ReactNode
+  active?: boolean
+  className?: string
+  onClick?: () => void
+  title?: string
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={(e) => { e.stopPropagation(); onClick?.() }}
+      className={
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] " +
+        "transition-colors hover:brightness-95 " +
+        className + (active ? " ring-2 ring-blue-400 ring-offset-1" : "")
+      }
+    >
+      {children}
+    </button>
+  )
+}
+
+// Popover overlay sotto il chip cliccato
+function Popover({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [onClose])
+  return (
+    <div
+      className="absolute top-full left-12 mt-1 z-20 bg-card border border-border rounded-lg shadow-lg"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {children}
     </div>
   )
 }
@@ -482,15 +648,15 @@ function DayEditor({
     blocks.push({
       block_type: "coach_transfer",
       seq: blocks.length,
-      vettura_id: rt.numero,
-      from_station: rt.via || "",
-      to_station: rt.destinazione || impianto,
+      vettura_id: rt.train_number,
+      from_station: rt.from_station || "",
+      to_station: rt.to_station || impianto,
       start_time: rt.dep_time,
       end_time: rt.arr_time,
     })
     onChange({ ...day, blocks })
     setReturnCandidates(null)
-    setReturnMsg(`✓ aggiunto rientro vettura treno ${rt.numero}`)
+    setReturnMsg(`✓ aggiunto rientro vettura treno ${rt.train_number}`)
     setTimeout(() => setReturnMsg(""), 3000)
   }
 
@@ -846,22 +1012,25 @@ function DayEditor({
                       key={i}
                       className="flex items-center gap-2 text-[11px] bg-white rounded px-2 py-1 border border-amber-100"
                     >
-                      <span className="font-mono font-semibold">{rt.numero}</span>
-                      {rt.categoria && (
+                      <span className="font-mono font-semibold">{rt.train_number}</span>
+                      {rt.category && (
                         <span className="text-[9px] text-muted-foreground">
-                          {rt.categoria}
+                          {rt.category}
                         </span>
                       )}
                       <span className="text-muted-foreground">
-                        {rt.via} → {rt.destinazione}
+                        {rt.from_station} → {rt.to_station}
                       </span>
                       <span className="font-mono text-[10px]">
                         {rt.dep_time} – {rt.arr_time}
                       </span>
-                      {rt.duration_min && (
-                        <span className="text-[9px] text-muted-foreground">
-                          ({rt.duration_min}m)
+                      {rt.destination_finale && rt.destination_finale !== rt.to_station && (
+                        <span className="text-[9px] text-muted-foreground italic">
+                          (dest. finale: {rt.destination_finale})
                         </span>
+                      )}
+                      {(rt.delay !== undefined && rt.delay > 0) && (
+                        <span className="text-[9px] text-amber-700">+{rt.delay}m</span>
                       )}
                       <button
                         onClick={() => acceptReturnCandidate(rt)}

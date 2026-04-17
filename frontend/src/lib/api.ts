@@ -810,19 +810,24 @@ export async function lookupTrainInGiroMateriale(trainId: string) {
 }
 
 // ── Find return trip via ARTURO Live ──
+// (campi mappati 1:1 sulla risposta del backend /vt/find-return)
 
 export interface ReturnTrain {
-  numero: string
-  categoria?: string
-  origine?: string
-  destinazione?: string
-  operatore?: string
-  dep_time: string         // orario partenza dalla stazione corrente
-  arr_time: string         // orario arrivo al deposito
-  via: string              // stazione di partenza
-  duration_min?: number
+  train_number: string
+  category?: string
+  from_station: string         // stazione di partenza dell'utente
+  to_station: string           // deposito di arrivo
+  dep_time: string             // orario partenza dalla stazione corrente
+  arr_time: string             // orario arrivo al deposito
+  arr_time_real?: string
   delay?: number
-  status?: string
+  delay_arr?: number
+  platform?: string
+  destination_finale?: string  // capolinea finale del treno
+  origin_treno?: string
+  running?: boolean
+  operator?: string
+  source?: "arrivi" | "partenze"
 }
 
 export async function findReturnTrain(
