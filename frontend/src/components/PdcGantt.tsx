@@ -37,6 +37,13 @@ function hhmmToMinutesRel(hhmm: string): number | null {
   return (hourAdj - ORIGIN_HOUR) * 60 + m
 }
 
+function minutesRelToHhmm(minRel: number): string {
+  const abs = (ORIGIN_HOUR * 60 + minRel) % (24 * 60)
+  const h = Math.floor(abs / 60)
+  const m = abs % 60
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
+}
+
 /**
  * Riempie gli orari mancanti di una sequenza di blocchi.
  *
@@ -58,40 +65,84 @@ function fillBlockTimes(
   dayEnd?: string,
 ): PdcBlock[] {
   const out = blocks.map((b) => ({ ...b }))
+  const n = out.length
+  if (n === 0) return out
+
   const isPuntual = (bt: string) =>
     bt === "cv_partenza" || bt === "cv_arrivo"
 
-  // Forward pass: ogni blocco eredita start_time dall'end_time del
-  // precedente. Per blocchi puntuali, se solo start_time e' noto,
-  // mirror su end_time cosi' il successivo puo' ereditare.
-  for (let i = 0; i < out.length; i++) {
-    const b = out[i]
-    if (!b.start_time) {
-      const prev = out[i - 1]
-      if (prev && prev.end_time) b.start_time = prev.end_time
-      else if (prev && prev.start_time && isPuntual(prev.block_type))
-        b.start_time = prev.start_time
-      else if (i === 0 && dayStart) b.start_time = dayStart
-    }
-    // Mirror puntuali cosi' contribuiscono al forward pass
+  // ── Step 1: mirror iniziale puntuali (start<->end) ──────────
+  for (const b of out) {
     if (isPuntual(b.block_type)) {
-      if (!b.end_time && b.start_time) b.end_time = b.start_time
+      if (!b.start_time && b.end_time) b.start_time = b.end_time
+      else if (!b.end_time && b.start_time) b.end_time = b.start_time
     }
   }
 
-  // Backward pass: ogni blocco eredita end_time dallo start_time del
-  // successivo. Mirror puntuali analogamente.
-  for (let i = out.length - 1; i >= 0; i--) {
-    const b = out[i]
-    if (!b.end_time) {
-      const next = out[i + 1]
-      if (next && next.start_time) b.end_time = next.start_time
-      else if (next && next.end_time && isPuntual(next.block_type))
-        b.end_time = next.end_time
-      else if (i === out.length - 1 && dayEnd) b.end_time = dayEnd
+  // ── Step 2: raccogli anchor points (blocchi con start_time noto) ──
+  // Include start/end giornata come ancore virtuali esterne.
+  type Anchor = { pos: number; time: number }
+  const anchors: Anchor[] = []
+  const dayStartMin = dayStart ? hhmmToMinutesRel(dayStart) : null
+  const dayEndMin = dayEnd ? hhmmToMinutesRel(dayEnd) : null
+  if (dayStartMin !== null) anchors.push({ pos: -0.5, time: dayStartMin })
+  for (let i = 0; i < n; i++) {
+    const t = hhmmToMinutesRel(out[i].start_time)
+    if (t !== null) anchors.push({ pos: i, time: t })
+  }
+  if (dayEndMin !== null) anchors.push({ pos: n - 0.5, time: dayEndMin })
+
+  // ── Step 3: interpolazione lineare per start_time mancanti ──
+  // Per ogni blocco senza start_time, stima la posizione temporale
+  // interpolando tra l'anchor precedente e quello successivo.
+  const findPrev = (i: number): Anchor | null => {
+    let best: Anchor | null = null
+    for (const a of anchors) {
+      if (a.pos < i) {
+        if (best === null || a.pos > best.pos) best = a
+      }
     }
+    return best
+  }
+  const findNext = (i: number): Anchor | null => {
+    let best: Anchor | null = null
+    for (const a of anchors) {
+      if (a.pos > i) {
+        if (best === null || a.pos < best.pos) best = a
+      }
+    }
+    return best
+  }
+
+  for (let i = 0; i < n; i++) {
+    if (out[i].start_time) continue
+    const before = findPrev(i)
+    const after = findNext(i)
+    if (before && after) {
+      const slot = (after.time - before.time) / (after.pos - before.pos)
+      const est = before.time + slot * (i - before.pos)
+      out[i].start_time = minutesRelToHhmm(Math.round(est))
+    } else if (before) {
+      out[i].start_time = minutesRelToHhmm(before.time)
+    } else if (after) {
+      out[i].start_time = minutesRelToHhmm(after.time)
+    }
+  }
+
+  // ── Step 4: end_time mancanti = start_time del successivo ──
+  for (let i = 0; i < n - 1; i++) {
+    if (!out[i].end_time && out[i + 1].start_time) {
+      out[i].end_time = out[i + 1].start_time
+    }
+  }
+  // Ultimo blocco eredita end giornata
+  if (!out[n - 1].end_time && dayEnd) out[n - 1].end_time = dayEnd
+
+  // ── Step 5: mirror finale per puntuali ──
+  for (const b of out) {
     if (isPuntual(b.block_type)) {
       if (!b.start_time && b.end_time) b.start_time = b.end_time
+      else if (!b.end_time && b.start_time) b.end_time = b.start_time
     }
   }
 
