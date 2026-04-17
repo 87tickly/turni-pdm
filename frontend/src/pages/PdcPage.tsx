@@ -18,7 +18,6 @@ import {
   LayoutGrid,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { PdcGantt } from "@/components/PdcGantt"
 import { PdcGanttV2 } from "@/components/PdcGanttV2"
 import {
   getPdcStats,
@@ -173,7 +172,7 @@ function BlocksList({ blocks }: { blocks: PdcBlock[] }) {
 
 function DayCard({ day }: { day: PdcDay }) {
   const [open, setOpen] = useState(false)
-  const [viewMode, setViewMode] = useState<"gantt-v2" | "gantt" | "list">("gantt-v2")
+  const [viewMode, setViewMode] = useState<"gantt-v2" | "list">("gantt-v2")
   return (
     <div className="border border-border-subtle rounded-lg bg-card">
       <button
@@ -234,21 +233,9 @@ function DayCard({ day }: { day: PdcDay }) {
                       : "bg-muted text-muted-foreground"
                   )}
                   onClick={() => setViewMode("gantt-v2")}
-                  title="Nuovo Gantt (MDL-PdC v1.0)"
+                  title="Gantt (MDL-PdC v1.0)"
                 >
-                  ✨ Gantt v2
-                </button>
-                <button
-                  className={cn(
-                    "text-[10px] px-2 py-0.5 rounded",
-                    viewMode === "gantt"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
-                  )}
-                  onClick={() => setViewMode("gantt")}
-                  title="Vecchio Gantt"
-                >
-                  📊 Gantt v1
+                  📊 Gantt
                 </button>
                 <button
                   className={cn(
@@ -264,13 +251,6 @@ function DayCard({ day }: { day: PdcDay }) {
               </div>
               {viewMode === "gantt-v2" ? (
                 <PdcGanttV2
-                  blocks={day.blocks}
-                  startTime={day.start_time}
-                  endTime={day.end_time}
-                  label={`g${day.day_number} ${day.periodicita}`}
-                />
-              ) : viewMode === "gantt" ? (
-                <PdcGantt
                   blocks={day.blocks}
                   startTime={day.start_time}
                   endTime={day.end_time}
