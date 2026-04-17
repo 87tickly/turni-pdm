@@ -30,6 +30,16 @@ import type { PdcBlock } from "@/lib/api"
 // ============================================================
 // Props
 // ============================================================
+export type GanttAction =
+  | "edit"
+  | "move"
+  | "duplicate"
+  | "link"
+  | "warn"
+  | "detail"
+  | "history"
+  | "delete"
+
 interface PdcGanttV2Props {
   blocks: PdcBlock[]
   startTime?: string
@@ -39,6 +49,14 @@ interface PdcGanttV2Props {
   onBlocksChange?: (
     changes: Record<number, { start_time?: string; end_time?: string }>
   ) => void
+  /**
+   * Click su una delle 8 icone dell'action bar contestuale che appare
+   * al click su una chip selezionata. Se non fornito, l'action bar
+   * rimane visiva ma le azioni scrivono solo un console.log (placeholder).
+   * In futuro le azioni distruttive (delete) richiederanno conferma UX
+   * lato parent.
+   */
+  onAction?: (action: GanttAction, block: PdcBlock, index: number) => void
   label?: string
   depot?: string
   height?: number
@@ -232,11 +250,24 @@ function Tooltip({ data }: { data: TooltipData | null }) {
 // ============================================================
 // Componente principale
 // ============================================================
+// Config delle 8 azioni contestuali (stesso ordine del mockup v5)
+const ACTION_DEFS: { act: GanttAction; icon: string; title: string; danger?: boolean; warn?: boolean; separatorAfter?: boolean }[] = [
+  { act: "edit",      icon: "✎", title: "Modifica blocco", separatorAfter: false },
+  { act: "move",      icon: "↔", title: "Sposta (drag temporale o inter-turno)" },
+  { act: "duplicate", icon: "⧉", title: "Duplica blocco", separatorAfter: true },
+  { act: "link",      icon: "🔗", title: "Collega al giro materiale" },
+  { act: "warn",      icon: "⚠", title: "Verifica discrepanze ARTURO Live", warn: true, separatorAfter: true },
+  { act: "detail",    icon: "↗", title: "Apri dettaglio treno" },
+  { act: "history",   icon: "⧗", title: "Storico ritardi (ultimi 30 giorni)", separatorAfter: true },
+  { act: "delete",    icon: "×", title: "Elimina blocco", danger: true },
+]
+
 export function PdcGanttV2({
   blocks: rawBlocks,
   onBlockClick,
   onTimelineClick,
   onBlocksChange,
+  onAction,
   height = 200,
   snapMinutes = 5,
   dragThresholdPx = 4,
@@ -480,6 +511,41 @@ export function PdcGanttV2({
       if (onBlockClick) onBlockClick(block, idx)
     },
     [onBlockClick],
+  )
+
+  // Click fuori dallo SVG / Esc → deseleziona
+  useEffect(() => {
+    if (selectedIdx === null) return
+    const onDocClick = (e: MouseEvent) => {
+      const svg = svgRef.current
+      if (!svg) return
+      if (!svg.contains(e.target as Node)) setSelectedIdx(null)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedIdx(null)
+    }
+    document.addEventListener("mousedown", onDocClick)
+    document.addEventListener("keydown", onKey)
+    return () => {
+      document.removeEventListener("mousedown", onDocClick)
+      document.removeEventListener("keydown", onKey)
+    }
+  }, [selectedIdx])
+
+  const fireAction = useCallback(
+    (act: GanttAction) => {
+      if (selectedIdx === null) return
+      const block = blocks[selectedIdx]
+      if (!block) return
+      if (onAction) {
+        onAction(act, block, selectedIdx)
+      } else if (typeof console !== "undefined") {
+        console.log("[PdcGanttV2] action", act, "on block", block)
+      }
+      // chiudi action bar dopo l'azione
+      setSelectedIdx(null)
+    },
+    [selectedIdx, blocks, onAction],
   )
 
   // MouseDown sul treno: decide kind in base alla X del click
@@ -860,6 +926,97 @@ export function PdcGanttV2({
           }
           return null
         })}
+
+        {/* ===================================================
+            ACTION BAR contestuale (sopra la chip selected)
+            Posizionata dinamicamente sopra il blocco, clampata
+            ai bordi del viewBox. 8 icone + 3 separatori.
+            =================================================== */}
+        {selectedIdx !== null && blocks[selectedIdx] && (() => {
+          const b = blocks[selectedIdx]
+          const sm = hhmmToMinutesRel(b.start_time || "")
+          if (sm === null) return null
+          const em = hhmmToMinutesRel(b.end_time || b.start_time || "") ?? sm
+          const bx = minToX(sm)
+          const bx2 = minToX(em)
+          const bw = Math.max(2, bx2 - bx)
+
+          const BTN_W = 32
+          const BTN_H = 24
+          const SEP_W = 9
+          const PAD = 6
+          const contentW = ACTION_DEFS.reduce(
+            (acc, a, i) => acc + BTN_W + (a.separatorAfter && i < ACTION_DEFS.length - 1 ? SEP_W : 0),
+            0,
+          )
+          const barW = contentW + PAD * 2
+          const barH = BTN_H + 6
+
+          let barX = bx + bw / 2 - barW / 2
+          if (barX < 5) barX = 5
+          if (barX + barW > TOTAL_WIDTH - 5) barX = TOTAL_WIDTH - 5 - barW
+          const barY = BLOCK_Y - 42
+          const pointerCenter = Math.min(
+            Math.max(bx + bw / 2 - barX, 14),
+            barW - 14,
+          )
+
+          let cx = PAD
+          return (
+            <g transform={`translate(${barX}, ${barY})`}
+               style={{ filter: "drop-shadow(0 4px 12px rgba(30,64,175,0.25))" }}
+               onMouseDown={(e) => e.stopPropagation()}>
+              {/* sfondo bianco + border blu */}
+              <rect x={0} y={0} width={barW} height={barH}
+                    rx={6} fill="#ffffff" stroke="#60a5fa" strokeWidth={1} />
+              {/* freccia verso il blocco */}
+              <polygon
+                points={`${pointerCenter - 10},${barH} ${pointerCenter},${barH + 6} ${pointerCenter + 10},${barH}`}
+                fill="#ffffff" stroke="#60a5fa" strokeWidth={1}
+              />
+              {/* rect bianco per "tagliare" la linea stroke tra bar e freccia */}
+              <rect x={pointerCenter - 9} y={barH - 0.5} width={18} height={1} fill="#ffffff" />
+
+              {ACTION_DEFS.map((a, i) => {
+                const btnX = cx
+                cx += BTN_W
+                const sep = a.separatorAfter && i < ACTION_DEFS.length - 1
+                const sepX = cx + SEP_W / 2
+                if (sep) cx += SEP_W
+
+                const fillHover = a.danger ? "#fee2e2" : a.warn ? "#fef3c7" : "#eff6ff"
+                const txtColor = a.danger ? "#b91c1c" : a.warn ? "#b45309" : "#353a42"
+
+                return (
+                  <g key={a.act}>
+                    <g style={{ cursor: "pointer" }}
+                       onMouseDown={(e) => e.stopPropagation()}
+                       onClick={(e) => { e.stopPropagation(); fireAction(a.act) }}>
+                      <title>{a.title}</title>
+                      <rect className="pdc-gantt-action-hit"
+                            x={btnX} y={3} width={BTN_W} height={BTN_H}
+                            rx={4} fill="transparent"
+                            onMouseEnter={(e) => { (e.currentTarget as SVGRectElement).setAttribute("fill", fillHover) }}
+                            onMouseLeave={(e) => { (e.currentTarget as SVGRectElement).setAttribute("fill", "transparent") }} />
+                      <text x={btnX + BTN_W / 2} y={barH - 7}
+                            textAnchor="middle"
+                            fontFamily="system-ui, sans-serif"
+                            fontSize={12} fontWeight={600} fill={txtColor}
+                            pointerEvents="none">
+                        {a.icon}
+                      </text>
+                    </g>
+                    {sep && (
+                      <line x1={sepX} y1={7} x2={sepX} y2={barH - 4}
+                            stroke="#e4e6ea" strokeWidth={1} pointerEvents="none" />
+                    )}
+                  </g>
+                )
+              })}
+            </g>
+          )
+        })()}
+
       </svg>
 
       <Tooltip data={tooltip} />
