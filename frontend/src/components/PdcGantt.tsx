@@ -37,6 +37,67 @@ function hhmmToMinutesRel(hhmm: string): number | null {
   return (hourAdj - ORIGIN_HOUR) * 60 + m
 }
 
+/**
+ * Riempie gli orari mancanti di una sequenza di blocchi.
+ *
+ * Regole (mirrorano il layout dei PDF Trenord, dove molti blocchi
+ * ereditano gli orari da blocchi adiacenti):
+ *
+ *  1. Forward pass: blocchi senza start_time ereditano l'end_time del
+ *     blocco precedente. Il primissimo eredita startTime della giornata.
+ *  2. Backward pass: blocchi senza end_time ereditano lo start_time del
+ *     blocco successivo. L'ultimo eredita endTime della giornata.
+ *  3. CVp / CVa puntuali: start_time == end_time se solo uno dei due è
+ *     popolato.
+ *  4. Se dopo i 3 passi manca ancora un orario, lascio null (rendering
+ *     saltera' quel blocco come prima).
+ */
+function fillBlockTimes(
+  blocks: PdcBlock[],
+  dayStart?: string,
+  dayEnd?: string,
+): PdcBlock[] {
+  const out = blocks.map((b) => ({ ...b }))
+  const isPuntual = (bt: string) =>
+    bt === "cv_partenza" || bt === "cv_arrivo"
+
+  // Forward pass: ogni blocco eredita start_time dall'end_time del
+  // precedente. Per blocchi puntuali, se solo start_time e' noto,
+  // mirror su end_time cosi' il successivo puo' ereditare.
+  for (let i = 0; i < out.length; i++) {
+    const b = out[i]
+    if (!b.start_time) {
+      const prev = out[i - 1]
+      if (prev && prev.end_time) b.start_time = prev.end_time
+      else if (prev && prev.start_time && isPuntual(prev.block_type))
+        b.start_time = prev.start_time
+      else if (i === 0 && dayStart) b.start_time = dayStart
+    }
+    // Mirror puntuali cosi' contribuiscono al forward pass
+    if (isPuntual(b.block_type)) {
+      if (!b.end_time && b.start_time) b.end_time = b.start_time
+    }
+  }
+
+  // Backward pass: ogni blocco eredita end_time dallo start_time del
+  // successivo. Mirror puntuali analogamente.
+  for (let i = out.length - 1; i >= 0; i--) {
+    const b = out[i]
+    if (!b.end_time) {
+      const next = out[i + 1]
+      if (next && next.start_time) b.end_time = next.start_time
+      else if (next && next.end_time && isPuntual(next.block_type))
+        b.end_time = next.end_time
+      else if (i === out.length - 1 && dayEnd) b.end_time = dayEnd
+    }
+    if (isPuntual(b.block_type)) {
+      if (!b.start_time && b.end_time) b.start_time = b.end_time
+    }
+  }
+
+  return out
+}
+
 // ── Colori e altezze per tipo ─────────────────────────────────
 const BAR_H_TALL = 22    // train
 const BAR_H_MED = 14     // coach_transfer, meal
@@ -67,13 +128,18 @@ function blockStyle(t: PdcBlock["block_type"]) {
 // ── Componente ────────────────────────────────────────────────
 
 export function PdcGantt({
-  blocks,
+  blocks: rawBlocks,
   startTime,
   endTime,
   onBlockClick,
   onTimelineClick,
   label,
 }: PdcGanttProps) {
+  // Riempie gli orari mancanti per poter renderizzare TUTTI i blocchi
+  // (es. CVp/CVa puntuali o treni con solo end_time per la regola
+  // "preceduto da cv_partenza -> solo end").
+  const blocks = fillBlockTimes(rawBlocks, startTime, endTime)
+
   // Layout parametri
   const CHART_W = 1200
   const CHART_H = 100

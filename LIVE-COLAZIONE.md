@@ -4,6 +4,51 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-16 — Step 7e: Gantt mostra TUTTI i blocchi (fill orari mancanti)
+
+### Problema rilevato dall'utente
+Nel turno ALOR_C g1 LMXGV, la vista **Lista** mostrava 5 blocchi (Treno 10574, CVa 10678, CVp 10677, Treno 10581, CVa 10584) mentre il **Gantt** ne mostrava solo 1 (il primo con orario completo). I blocchi senza `start_time` o `end_time` venivano scartati.
+
+### Cause
+Il parser PdC spesso lascia orari parziali:
+- **Puntuali** (CVp/CVa): nessun minuto proprio nel PDF (condividono con vicini)
+- **Treni** preceduti da CVp: solo `end_time` (regola -1 minuto del parser)
+- **Treni** seguiti da CVa: solo `start_time`
+
+### Fix: `fillBlockTimes(blocks, dayStart, dayEnd)`
+Funzione pura in `PdcGantt.tsx` che pre-processa i blocchi prima del render:
+
+1. **Forward pass**: ogni blocco senza `start_time` eredita l'`end_time` del precedente. Se il primo blocco non ha start, usa `startTime` della giornata.
+2. **Mirror puntuali in-loop**: CVp/CVa con solo `start_time` → `end_time = start_time` (così il successivo puo' ereditare correttamente).
+3. **Backward pass**: speculare per `end_time` vuoto → `start_time` del successivo. Ultimo blocco eredita `endTime` della giornata.
+4. **Mirror inverso** per puntuali in backward pass.
+
+### Verifica su ALOR_C g1
+Input (Lista):
+- train 10574 11:21-11:41
+- cv_arrivo 10678 vuoto
+- cv_partenza 10677 vuoto
+- train 10581 -16:10
+- cv_arrivo 10584 vuoto
+
+Output dopo fill:
+- train 10574 11:21-11:41
+- cv_arrivo 10678 11:41-11:41
+- cv_partenza 10677 11:41-11:41
+- train 10581 11:41-16:10
+- cv_arrivo 10584 16:10-16:10
+
+Tutti e 5 renderizzabili.
+
+### Build
+- `tsc --noEmit` OK, `npm run build` 375 KB JS
+
+### File modificati
+- `frontend/src/components/PdcGantt.tsx` (+45 righe `fillBlockTimes`)
+- `frontend/dist/*`
+
+---
+
 ## 2026-04-16 — Step 7: Gantt SVG visuale + builder interattivo
 
 ### Motivazione (feedback utente)
