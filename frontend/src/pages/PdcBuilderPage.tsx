@@ -15,7 +15,7 @@ import {
   Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { PdcGanttV2 as PdcGantt } from "@/components/PdcGanttV2"
+import { PdcGanttV2 as PdcGantt, type CrossDayDragPayload } from "@/components/PdcGanttV2"
 import { BlockDetailModal } from "@/components/BlockDetailModal"
 import {
   createPdcTurn,
@@ -24,6 +24,7 @@ import {
   getCalendarPeriodicity,
   lookupTrainInGiroMateriale,
   findReturnTrain,
+  trainCheck,
   type PdcTurnInput,
   type PdcDayInput,
   type PdcBlockInput,
@@ -73,6 +74,20 @@ function inputToPdcBlock(b: PdcBlockInput): PdcBlock {
     start_time: b.start_time || "",
     end_time: b.end_time || "",
     accessori_maggiorati: b.accessori_maggiorati ? 1 : 0,
+  }
+}
+
+function pdcBlockToInput(b: PdcBlock): PdcBlockInput {
+  return {
+    seq: b.seq,
+    block_type: b.block_type,
+    train_id: b.train_id,
+    vettura_id: b.vettura_id,
+    from_station: b.from_station,
+    to_station: b.to_station,
+    start_time: b.start_time,
+    end_time: b.end_time,
+    accessori_maggiorati: b.accessori_maggiorati === 1,
   }
 }
 
@@ -233,14 +248,20 @@ function BlockEditor({
 
 function DayEditor({
   day,
+  dayIndex,
   onChange,
   onRemove,
   impianto,
+  onCrossDayDragStart,
+  onCrossDayDrop,
 }: {
   day: PdcDayInput
+  dayIndex: number
   onChange: (d: PdcDayInput) => void
   onRemove: () => void
   impianto: string
+  onCrossDayDragStart?: (payload: CrossDayDragPayload) => void
+  onCrossDayDrop?: (payload: CrossDayDragPayload, targetGanttId: string) => void
 }) {
   const [open, setOpen] = useState(true)
   const [returnSearching, setReturnSearching] = useState(false)
@@ -253,6 +274,7 @@ function DayEditor({
     index: number
     mode: "detail" | "warn"
   } | null>(null)
+  const [actionToast, setActionToast] = useState("")
 
   const updateBlock = (i: number, b: PdcBlockInput) => {
     const blocks = [...(day.blocks || [])]
@@ -449,6 +471,9 @@ function DayEditor({
                   startTime={day.start_time}
                   endTime={day.end_time}
                   label={`g${day.day_number} ${day.periodicita}`}
+                  ganttId={`day-${dayIndex}`}
+                  onCrossDayDragStart={onCrossDayDragStart}
+                  onCrossDayDrop={onCrossDayDrop}
                   onBlockClick={(_, idx) => {
                     const el = document.getElementById(`block-editor-${idx}`)
                     if (el) {
@@ -530,10 +555,82 @@ function DayEditor({
                       })
                       return
                     }
-                    // Altre azioni: history / link / move → TODO
+                    if (act === "history") {
+                      // Storico ritardi: usa il modale detail (mostra ARTURO Live
+                      // con delay e stato corrente). Grafico 30gg: futuro.
+                      const src = (day.blocks || [])[idx]
+                      if (!src) return
+                      setDetailModal({
+                        block: inputToPdcBlock(src),
+                        index: idx,
+                        mode: "detail",
+                      })
+                      return
+                    }
+                    if (act === "link") {
+                      // Collega al giro materiale: interroga /train-check e
+                      // sostituisce gli orari/stazioni del blocco con quelli
+                      // ufficiali. Priorita': giro materiale > ARTURO Live.
+                      const src = (day.blocks || [])[idx]
+                      if (!src || src.block_type !== "train" || !src.train_id) {
+                        setActionToast("Collegamento disponibile solo per blocchi 'train' con numero treno")
+                        setTimeout(() => setActionToast(""), 3000)
+                        return
+                      }
+                      trainCheck(src.train_id).then((check) => {
+                        let newStart = ""
+                        let newEnd = ""
+                        let newFrom = ""
+                        let newTo = ""
+                        let srcName = ""
+                        if (check.db_internal.found && check.db_internal.data) {
+                          newStart = check.db_internal.data.dep_time || ""
+                          newEnd = check.db_internal.data.arr_time || ""
+                          newFrom = check.db_internal.data.from_station || ""
+                          newTo = check.db_internal.data.to_station || ""
+                          srcName = "giro materiale"
+                        } else if (check.arturo_live.found && check.arturo_live.data) {
+                          newStart = check.arturo_live.data.dep_time || ""
+                          newEnd = check.arturo_live.data.arr_time || ""
+                          newFrom = check.arturo_live.data.origin || ""
+                          newTo = check.arturo_live.data.destination || ""
+                          srcName = "ARTURO Live"
+                        }
+                        if (!newStart || !newEnd) {
+                          setActionToast(`Treno ${src.train_id} non trovato in giro materiale ne' in ARTURO Live`)
+                          setTimeout(() => setActionToast(""), 3500)
+                          return
+                        }
+                        const blocks = [...(day.blocks || [])]
+                        blocks[idx] = {
+                          ...blocks[idx],
+                          start_time: newStart,
+                          end_time: newEnd,
+                          from_station: newFrom || blocks[idx].from_station,
+                          to_station: newTo || blocks[idx].to_station,
+                        }
+                        onChange({ ...day, blocks })
+                        setActionToast(`Treno ${src.train_id} allineato a ${srcName}: ${newStart} → ${newEnd}`)
+                        setTimeout(() => setActionToast(""), 4000)
+                      }).catch(() => {
+                        setActionToast(`Errore nella verifica del treno ${src.train_id}`)
+                        setTimeout(() => setActionToast(""), 3000)
+                      })
+                      return
+                    }
+                    if (act === "move") {
+                      setActionToast("Trascina direttamente il blocco sull'asse temporale per spostarlo, oppure trascinalo su un'altra giornata per il cross-day move")
+                      setTimeout(() => setActionToast(""), 4500)
+                      return
+                    }
                     console.log("[PdcBuilder] azione non ancora collegata:", act)
                   }}
                 />
+                {actionToast && (
+                  <div className="mt-2 text-[11px] text-blue-800 bg-blue-50 border border-blue-200 rounded px-3 py-1.5">
+                    {actionToast}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-between pt-2 flex-wrap gap-2">
@@ -779,6 +876,104 @@ export function PdcBuilderPage() {
     setDays((prev) => prev.filter((_, idx) => idx !== i))
   }, [])
 
+  // ── Drag cross-day tra giornate dello stesso turno ────────────
+  const [crossDragSourceDay, setCrossDragSourceDay] = useState<number | null>(null)
+  const [crossInfoMsg, setCrossInfoMsg] = useState("")
+
+  const handleCrossDayDragStart = useCallback((sourceDayIdx: number) => {
+    setCrossDragSourceDay(sourceDayIdx)
+  }, [])
+
+  const handleCrossDayDrop = useCallback(
+    async (payload: CrossDayDragPayload, targetGanttId: string) => {
+      // targetGanttId = `day-${idx}`
+      const targetDayIdx = parseInt(targetGanttId.replace("day-", ""), 10)
+      const sourceDayIdx = parseInt(payload.ganttId.replace("day-", ""), 10)
+      if (!Number.isFinite(targetDayIdx) || !Number.isFinite(sourceDayIdx)) return
+      if (targetDayIdx === sourceDayIdx) {
+        setCrossDragSourceDay(null)
+        return
+      }
+
+      // Auto-correzione orari via /train-check
+      let correctedBlock: PdcBlockInput = pdcBlockToInput(payload.block)
+      let noteText = ""
+      if (payload.block.block_type === "train" && payload.block.train_id) {
+        try {
+          const check = await trainCheck(payload.block.train_id)
+          let newStart = ""
+          let newEnd = ""
+          let newFrom = ""
+          let newTo = ""
+          let srcName = ""
+          if (check.db_internal.found && check.db_internal.data) {
+            newStart = check.db_internal.data.dep_time || ""
+            newEnd = check.db_internal.data.arr_time || ""
+            newFrom = check.db_internal.data.from_station || ""
+            newTo = check.db_internal.data.to_station || ""
+            srcName = "giro materiale"
+          } else if (check.arturo_live.found && check.arturo_live.data) {
+            newStart = check.arturo_live.data.dep_time || ""
+            newEnd = check.arturo_live.data.arr_time || ""
+            newFrom = check.arturo_live.data.origin || ""
+            newTo = check.arturo_live.data.destination || ""
+            srcName = "ARTURO Live"
+          }
+          if (newStart && newEnd &&
+              (newStart !== payload.block.start_time ||
+               newEnd !== payload.block.end_time)) {
+            correctedBlock = {
+              ...correctedBlock,
+              start_time: newStart,
+              end_time: newEnd,
+              from_station: newFrom || correctedBlock.from_station,
+              to_station: newTo || correctedBlock.to_station,
+            }
+            noteText = `Orari del treno ${payload.block.train_id} allineati a ${srcName}: ${newStart} → ${newEnd}`
+          }
+        } catch {
+          // fallback silenzioso
+        }
+      }
+
+      setDays((prev) => {
+        const next = [...prev]
+        // 1) Rimuovi dal giorno source il blocco + CVp/CVa agganciati
+        const source = { ...next[sourceDayIdx] }
+        const sBlocks = [...(source.blocks || [])]
+        const toRemove = new Set<number>([payload.index])
+        if (payload.block.block_type === "train") {
+          if (sBlocks[payload.index - 1]?.block_type === "cv_partenza")
+            toRemove.add(payload.index - 1)
+          if (sBlocks[payload.index + 1]?.block_type === "cv_arrivo")
+            toRemove.add(payload.index + 1)
+        }
+        source.blocks = sBlocks
+          .filter((_, idx) => !toRemove.has(idx))
+          .map((b, idx) => ({ ...b, seq: idx }))
+        next[sourceDayIdx] = source
+
+        // 2) Aggiungi al giorno target il blocco corretto + CVp/CVa originali
+        const target = { ...next[targetDayIdx] }
+        const tBlocks = [...(target.blocks || [])]
+        const added: PdcBlockInput[] = []
+        if (payload.linkedCvp) added.push(pdcBlockToInput(payload.linkedCvp))
+        added.push(correctedBlock)
+        if (payload.linkedCva) added.push(pdcBlockToInput(payload.linkedCva))
+        target.blocks = [...tBlocks, ...added].map((b, idx) => ({ ...b, seq: idx }))
+        next[targetDayIdx] = target
+        return next
+      })
+
+      setCrossDragSourceDay(null)
+      if (noteText) {
+        setCrossInfoMsg(noteText)
+        setTimeout(() => setCrossInfoMsg(""), 4000)
+      }
+    },
+    [],
+  )
+
   const save = async () => {
     setError("")
     setSuccess(false)
@@ -921,9 +1116,12 @@ export function PdcBuilderPage() {
             <DayEditor
               key={i}
               day={d}
+              dayIndex={i}
               onChange={(nd) => updateDay(i, nd)}
               onRemove={() => removeDay(i)}
               impianto={impianto}
+              onCrossDayDragStart={() => handleCrossDayDragStart(i)}
+              onCrossDayDrop={handleCrossDayDrop}
             />
           ))}
           {days.length === 0 && (
@@ -944,6 +1142,17 @@ export function PdcBuilderPage() {
         {success && (
           <div className="text-[12px] text-success bg-success/10 p-2 rounded mb-2 flex items-center gap-2">
             <CheckCircle size={14} /> Salvato! Reindirizzo...
+          </div>
+        )}
+        {crossInfoMsg && (
+          <div className="text-[12px] text-emerald-800 bg-emerald-50 border border-emerald-200 p-2 rounded mb-2 flex items-center gap-2">
+            ✓ {crossInfoMsg}
+          </div>
+        )}
+        {crossDragSourceDay !== null && (
+          <div className="text-[11px] text-blue-800 bg-blue-50 border border-blue-200 p-2 rounded mb-2">
+            Trascina su un'altra giornata per spostare il treno
+            (gli orari verranno allineati a giro materiale / ARTURO Live se disponibili)
           </div>
         )}
         <div className="flex items-center justify-end gap-2">

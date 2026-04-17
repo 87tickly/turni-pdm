@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react"
 import { PdcGanttV2 as PdcGantt } from "@/components/PdcGanttV2"
+import { BlockDetailModal } from "@/components/BlockDetailModal"
 import {
   listPdcTurns,
   getPdcTurn,
@@ -55,6 +56,11 @@ export function PdcDepotPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [infoMsg, setInfoMsg] = useState("")
+  const [detailModal, setDetailModal] = useState<{
+    block: PdcBlock
+    index: number
+    mode: "detail" | "warn"
+  } | null>(null)
   const [expandedTurns, setExpandedTurns] = useState<Set<number>>(new Set())
   const [moveState, setMoveState] = useState<MoveState | null>(null)
 
@@ -535,6 +541,55 @@ export function PdcDepotPage() {
                                 if (!Number.isFinite(targetTurnId) || !Number.isFinite(targetDayId)) return
                                 completeMove(targetTurnId, targetDayId)
                               }}
+                              onAction={(act, block, idx) => {
+                                if (act === "detail" || act === "warn" || act === "history") {
+                                  setDetailModal({
+                                    block,
+                                    index: idx,
+                                    mode: act === "history" ? "detail" : act,
+                                  })
+                                  return
+                                }
+                                if (act === "delete") {
+                                  if (!confirm("Eliminare il blocco? Se treno, rimuove anche CVp/CVa agganciati.")) return
+                                  const src = [...day.blocks]
+                                  const toRemove = new Set<number>([idx])
+                                  if (src[idx]?.block_type === "train") {
+                                    if (src[idx - 1]?.block_type === "cv_partenza") toRemove.add(idx - 1)
+                                    if (src[idx + 1]?.block_type === "cv_arrivo") toRemove.add(idx + 1)
+                                  }
+                                  const removedIdxs = Array.from(toRemove)
+                                  // Applica cambiamenti via updateDayBlocks: converti in set di "patch"
+                                  // Qui usiamo l'approccio diretto su detail
+                                  setTurns((prev) => {
+                                    const next = { ...prev }
+                                    const tc = next[t.id]
+                                    if (!tc) return prev
+                                    next[t.id] = {
+                                      ...tc,
+                                      detail: {
+                                        ...tc.detail,
+                                        days: tc.detail.days.map((d) =>
+                                          d.id !== day.id
+                                            ? d
+                                            : {
+                                                ...d,
+                                                blocks: d.blocks
+                                                  .filter((_, i) => !removedIdxs.includes(i))
+                                                  .map((b, i) => ({ ...b, seq: i })),
+                                              },
+                                        ),
+                                      },
+                                      dirty: true,
+                                    }
+                                    return next
+                                  })
+                                  if (saveTimers.current[t.id]) clearTimeout(saveTimers.current[t.id])
+                                  saveTimers.current[t.id] = setTimeout(() => saveTurn(t.id), 1500)
+                                  return
+                                }
+                                // move / link / duplicate: TODO in Depot (prevale il drag)
+                              }}
                               height={200}
                             />
                           )}
@@ -547,6 +602,15 @@ export function PdcDepotPage() {
             )
           })}
         </div>
+      )}
+
+      {detailModal && (
+        <BlockDetailModal
+          block={detailModal.block}
+          index={detailModal.index}
+          mode={detailModal.mode}
+          onClose={() => setDetailModal(null)}
+        />
       )}
     </div>
   )

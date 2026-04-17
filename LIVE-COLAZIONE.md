@@ -4,6 +4,43 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-17 (notte tardi) — Completamento azioni action bar + cross-day in Builder
+
+Chiuse tutte le azioni dell'action bar tranne `↔ Sposta` (che ora mostra
+un hint toast perche' il drag diretto e' gia' il gesto primario), e
+abilitato il drag cross-day anche nel PdcBuilderPage tra giornate dello
+stesso turno.
+
+### PdcPage (vista sola lettura)
+- Cablato `↗ Dettaglio`, `⚠ Warning`, `⧗ Storico` al BlockDetailModal
+  (triple-check DB interno + PdC + ARTURO Live)
+
+### PdcBuilderPage
+- Drag cross-day tra giornate (ganttId=`day-{idx}`) con auto-correzione
+  orari al drop via /train-check
+- Banner blu "Trascina su un'altra giornata..." durante il drag
+- Banner verde di conferma con orari canonici applicati
+- `🔗 Collega` ora funzionale: interroga /train-check e sostituisce
+  start_time/end_time + from_station/to_station del blocco
+- `⧗ Storico` → BlockDetailModal (mostra ARTURO Live live data)
+- `↔ Sposta` → toast informativo "usa il drag diretto"
+- pdcBlockToInput() helper aggiunto (inversa di inputToPdcBlock)
+
+### PdcDepotPage
+- `↗ Dettaglio`/`⚠ Warning`/`⧗ Storico` al BlockDetailModal
+- `× Elimina` sul Gantt con conferma + debounced save (1500ms)
+
+### Test
+- tsc --noEmit: zero errori
+- build production: 425KB (da 420KB, +5KB per tutti i nuovi handler)
+
+### Rimane open
+- Fase 2 (parser v2): miss 26/28 turni, pallino accessori ●, riga
+  minuti accessori popolata
+- Grafico ritardi 30gg dedicato per `⧗ Storico` (oggi riusa detail)
+
+---
+
 ## 2026-04-17 (notte) — Fase 3 step 3+4+5: action bar, drag cross-day, triple-check
 
 Sessione lunga di iterazione su PdcGanttV2 e sulle sue pagine consumer.

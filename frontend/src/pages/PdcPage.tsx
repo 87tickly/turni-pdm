@@ -19,6 +19,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PdcGanttV2 } from "@/components/PdcGanttV2"
+import { BlockDetailModal } from "@/components/BlockDetailModal"
 import {
   getPdcStats,
   listPdcTurns,
@@ -173,6 +174,11 @@ function BlocksList({ blocks }: { blocks: PdcBlock[] }) {
 function DayCard({ day }: { day: PdcDay }) {
   const [open, setOpen] = useState(false)
   const [viewMode, setViewMode] = useState<"gantt-v2" | "list">("gantt-v2")
+  const [detailModal, setDetailModal] = useState<{
+    block: PdcBlock
+    index: number
+    mode: "detail" | "warn"
+  } | null>(null)
   return (
     <div className="border border-border-subtle rounded-lg bg-card">
       <button
@@ -255,6 +261,18 @@ function DayCard({ day }: { day: PdcDay }) {
                   startTime={day.start_time}
                   endTime={day.end_time}
                   label={`g${day.day_number} ${day.periodicita}`}
+                  onAction={(act, block, idx) => {
+                    if (act === "detail" || act === "warn") {
+                      setDetailModal({ block, index: idx, mode: act })
+                    } else if (act === "history") {
+                      // Storico ritardi: usa il modale detail che gia' mostra
+                      // dati ARTURO Live (delay, stato corrente). In futuro
+                      // separeremo un modale dedicato al grafico 30gg.
+                      setDetailModal({ block, index: idx, mode: "detail" })
+                    }
+                    // PdcPage e' sola lettura: edit/delete/duplicate/move/link
+                    // non disponibili qui (vedi builder/depot).
+                  }}
                 />
               ) : (
                 <BlocksList blocks={day.blocks} />
@@ -262,6 +280,15 @@ function DayCard({ day }: { day: PdcDay }) {
             </>
           )}
         </div>
+      )}
+
+      {detailModal && (
+        <BlockDetailModal
+          block={detailModal.block}
+          index={detailModal.index}
+          mode={detailModal.mode}
+          onClose={() => setDetailModal(null)}
+        />
       )}
     </div>
   )
