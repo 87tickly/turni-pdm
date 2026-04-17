@@ -16,8 +16,20 @@ def _make_client():
     os.environ.pop("DATABASE_URL", None)
 
     from src.database.db import Database
+    # Patch su tutti i moduli dove get_db e' importato staticamente
     import api.deps
     api.deps.get_db = lambda: Database(tmpdb)
+    # Anche nei moduli che hanno gia' fatto `from api.deps import get_db`
+    try:
+        import api.pdc_builder
+        api.pdc_builder.get_db = lambda: Database(tmpdb)
+    except ImportError:
+        pass
+    try:
+        import api.importers
+        api.importers.get_db = lambda: Database(tmpdb)
+    except ImportError:
+        pass
 
     from server import app
     return TestClient(app), tmpdb
@@ -394,5 +406,52 @@ def test_apply_turn_to_date_404_if_no_turn():
         r = client.get("/pdc-turn/99999/apply-to-date",
                        params={"date_str": "2026-04-20"})
         assert r.status_code == 404
+    finally:
+        os.unlink(tmpdb)
+
+
+# ------------------------------------------------------------------
+# GET /pdc-builder/lookup-train/{train_id}
+# ------------------------------------------------------------------
+
+def test_lookup_train_not_found():
+    client, tmpdb = _make_client()
+    try:
+        r = client.get("/pdc-builder/lookup-train/99999")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["found"] is False
+        assert data["train_id"] == "99999"
+    finally:
+        os.unlink(tmpdb)
+
+
+def test_lookup_train_found_in_giro_materiale():
+    """Lookup di un treno conosciuto nel giro materiale ritorna stazioni e orari."""
+    client, tmpdb = _make_client()
+    try:
+        # Popolo il DB con un treno nel giro materiale
+        from src.database.db import Database, TrainSegment
+        db = Database(tmpdb)
+        mt_id = db.insert_material_turn("1100", "test.pdf", 1)
+        seg = TrainSegment(
+            id=None, train_id="10600", from_station="MILANO",
+            dep_time="06:30", to_station="BERGAMO", arr_time="07:45",
+            material_turn_id=mt_id, day_index=1, seq=0, confidence=1.0,
+            raw_text="", source_page=1,
+        )
+        db.insert_segment(seg)
+        db.close()
+
+        r = client.get("/pdc-builder/lookup-train/10600")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["found"] is True
+        assert data["train_id"] == "10600"
+        assert data["from_station"] == "MILANO"
+        assert data["to_station"] == "BERGAMO"
+        assert data["dep_time"] == "06:30"
+        assert data["arr_time"] == "07:45"
+        assert data["material_turn_id"] == mt_id
     finally:
         os.unlink(tmpdb)

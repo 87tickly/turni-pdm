@@ -4,6 +4,62 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-17 — Step 9a+b+c: CVp/CVa linked, drag con snap, lookup giro materiale
+
+### Feedback utente
+1. CVp/CVa devono essere "agganciati" al treno — non modificabili da soli
+2. Drag troppo sensibile — serve threshold e snap
+3. I turni PdC devono collegarsi al giro materiale (lookup auto per orari/stazioni)
+
+### Step 9a — CVp/CVa legati al treno adiacente
+Nuove helper `getLinkedCVs()` e `getParentTrainIndex()` in `PdcGantt.tsx`:
+- `train` a indice N → CVp a N-1 (se esiste) + CVa a N+1 (se esiste) formano un "gruppo"
+- Drag di un CVp/CVa → reindirizza al treno padrone (il gruppo si sposta insieme)
+- Drag/move del treno → sposta anche CVp/CVa agganciati preservando le distanze (0 per puntuali)
+- Resize-start del treno → il CVp si aggancia al nuovo start
+- Resize-end del treno → il CVa si aggancia al nuovo end
+
+### Step 9b — Threshold + Snap
+Nuove prop `dragThresholdPx={4}` e `snapMinutes={5}` di default:
+- Drag parte SOLO dopo 4px di movimento (anti-click spurio)
+- Delta orari arrotondato al multiplo di 5 min
+- Nuovo flag `active` in `DragState` per distinguere hover/click da drag vero
+
+### Step 9c — Lookup giro materiale
+Nuovo endpoint backend **`GET /pdc-builder/lookup-train/{train_id}`**:
+- Cerca il treno in `train_segment` (giro materiale già importato)
+- Ritorna `from_station`, `to_station`, `dep_time`, `arr_time`, `material_turn_id`, `is_deadhead`
+- 200 sempre: `{found: bool, ...}`
+
+Integrazione frontend:
+- `lib/api.ts`: `lookupTrainInGiroMateriale(trainId)` + tipo `TrainLookup`
+- `PdcBuilderPage.BlockEditor`: bottone 🔍 accanto al campo `train_id`
+  - Click → chiama il lookup
+  - Se trovato → popola automaticamente `from_station`, `to_station`, `start_time`, `end_time`
+  - Mostra messaggio: ✓ trovato / ⚠ non trovato / ✗ errore
+- Bottone appare solo per `block_type === "train"` con `train_id` compilato
+
+### Test backend
+2 nuovi test in `tests/test_pdc_builder.py`:
+- `test_lookup_train_not_found` → `found: False`
+- `test_lookup_train_found_in_giro_materiale` → popola giro, cerca, verifica tutti i campi
+
+Fix: `_make_client()` ora patcha anche `api.pdc_builder.get_db` e `api.importers.get_db` direttamente (binding Python statico da `from ... import get_db`).
+
+Suite totale: 20/20 pdc_builder, 110/111 globale (1 fail pre-esistente).
+
+### Build
+- Zero errori TS, 380 KB JS (110 gzip)
+
+### File modificati
+- `frontend/src/components/PdcGantt.tsx` — onBlocksChange, getLinkedCVs, threshold+snap
+- `frontend/src/pages/PdcBuilderPage.tsx` — lookup button, nuovo onBlocksChange handler
+- `frontend/src/lib/api.ts` — lookupTrainInGiroMateriale + types
+- `api/pdc_builder.py` — endpoint GET /pdc-builder/lookup-train/{train_id}
+- `tests/test_pdc_builder.py` — 2 nuovi test + patch _make_client
+
+---
+
 ## 2026-04-17 — Step 8d-h: Gantt colorato + drag & drop blocchi
 
 ### Feedback utente

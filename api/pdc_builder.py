@@ -313,6 +313,38 @@ async def calendar_periodicity(date_str: str, local: Optional[str] = None):
     }
 
 
+@router.get("/pdc-builder/lookup-train/{train_id}")
+async def pdc_builder_lookup_train(train_id: str):
+    """Dato un numero treno, cerca nel giro materiale il segmento
+    corrispondente e ritorna stazioni + orari da usare come default
+    in fase di creazione di un blocco `train` in un turno PdC.
+
+    Questo crea il collegamento logico tra turno PdC e giro materiale:
+    quando l'utente inserisce un train_id nel builder, il sistema
+    popola automaticamente from_station, to_station, start_time,
+    end_time se il treno e' conosciuto dal giro materiale.
+    """
+    db = get_db()
+    try:
+        segs = db.query_train(train_id)
+        if not segs:
+            return {"found": False, "train_id": train_id}
+        seg = segs[0]
+        return {
+            "found": True,
+            "train_id": train_id,
+            "from_station": seg.get("from_station", ""),
+            "to_station": seg.get("to_station", ""),
+            "dep_time": seg.get("dep_time", ""),
+            "arr_time": seg.get("arr_time", ""),
+            "material_turn_id": seg.get("material_turn_id"),
+            "is_deadhead": bool(seg.get("is_deadhead", 0)),
+            "other_matches": len(segs) - 1,
+        }
+    finally:
+        db.close()
+
+
 @router.get("/pdc-turn/{turn_id}/apply-to-date")
 async def pdc_turn_apply_to_date(turn_id: int, date_str: str,
                                   local: Optional[str] = None):

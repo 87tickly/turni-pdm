@@ -8,7 +8,7 @@
  *  - Orari al minuto sotto ogni blocco
  *  - Pallino nero ● per accessori maggiorati
  *
- * Interazione (solo se `onBlockChange` è fornito):
+ * Interazione (solo se `onBlocksChange` è fornito):
  *  - Drag del CENTRO di una barra → sposta tutto il blocco preservando la durata
  *  - Drag dei BORDI (entro 6px dall'estremo) → resize start/end
  *  - Click singolo → onBlockClick (selezione/edit)
@@ -28,15 +28,54 @@ interface PdcGanttProps {
   onTimelineClick?: (hour: number, minute: number) => void
   /**
    * Callback chiamato al rilascio del mouse dopo drag/resize.
-   * Riceve l'indice del blocco e i nuovi orari (start_time / end_time).
+   * Può modificare più blocchi insieme (es. quando si sposta un treno
+   * trascina anche CVp/CVa adiacenti).
    */
-  onBlockChange?: (
-    index: number,
-    changes: { start_time?: string; end_time?: string }
+  onBlocksChange?: (
+    changes: Record<number, { start_time?: string; end_time?: string }>
   ) => void
   label?: string
   depot?: string
   height?: number
+  /** Snap del drag in minuti (default 5) */
+  snapMinutes?: number
+  /** Soglia in pixel prima di avviare il drag (default 4) */
+  dragThresholdPx?: number
+}
+
+// Ritorna gli indici dei CVp precedenti e CVa successivi "agganciati" a un treno.
+// Regola: un CVp immediatamente PRIMA di un train è sua "partenza vincolata".
+//         Un CVa immediatamente DOPO è il suo "arrivo vincolato".
+function getLinkedCVs(blocks: PdcBlock[], trainIdx: number): {
+  cvPrev: number | null
+  cvNext: number | null
+} {
+  let cvPrev: number | null = null
+  let cvNext: number | null = null
+  if (blocks[trainIdx]?.block_type !== "train") return { cvPrev, cvNext }
+  const prev = blocks[trainIdx - 1]
+  if (prev && prev.block_type === "cv_partenza") cvPrev = trainIdx - 1
+  const next = blocks[trainIdx + 1]
+  if (next && next.block_type === "cv_arrivo") cvNext = trainIdx + 1
+  return { cvPrev, cvNext }
+}
+
+// Ritorna l'indice del treno "padrone" di un CVp/CVa (quello a cui è agganciato)
+function getParentTrainIndex(
+  blocks: PdcBlock[],
+  cvIdx: number
+): number | null {
+  const cv = blocks[cvIdx]
+  if (!cv) return null
+  if (cv.block_type === "cv_partenza") {
+    const next = blocks[cvIdx + 1]
+    if (next && next.block_type === "train") return cvIdx + 1
+  }
+  if (cv.block_type === "cv_arrivo") {
+    const prev = blocks[cvIdx - 1]
+    if (prev && prev.block_type === "train") return cvIdx - 1
+  }
+  return null
 }
 
 // ── Scala temporale ────────────────────────────────────────────
@@ -216,11 +255,14 @@ function blockLabel(b: PdcBlock): string {
 // ── Componente ────────────────────────────────────────────────
 
 type DragState = {
-  index: number
+  /** Gruppo di indici che si muovono insieme (train + CVp/CVa agganciati) */
+  groupIndices: number[]
   kind: "move" | "resize-start" | "resize-end"
-  initialSm: number
-  initialEm: number
+  /** Snapshot degli orari iniziali di tutti gli indici del gruppo */
+  initial: Record<number, { sm: number; em: number }>
   initialMouseX: number
+  /** True quando il movimento ha superato la soglia */
+  active: boolean
 }
 
 export function PdcGantt({
@@ -229,10 +271,12 @@ export function PdcGantt({
   endTime,
   onBlockClick,
   onTimelineClick,
-  onBlockChange,
+  onBlocksChange,
   label,
   depot,
   height = 220,
+  snapMinutes = 5,
+  dragThresholdPx = 4,
 }: PdcGanttProps) {
   const filled = fillBlockTimes(rawBlocks, startTime, endTime)
   // Override temporanei durante drag (preview ottimistico, non sovrascrive il parent)
@@ -282,66 +326,151 @@ export function PdcGantt({
   const endMin = endTime ? hhmmToMinutesRel(endTime) : null
 
   // ── Drag handlers ────────────────────────────────────────────
+  // Avvia drag calcolando il "gruppo" agganciato (train + CVp + CVa)
   const startDrag = (
     e: React.MouseEvent,
     index: number,
     kind: DragState["kind"]
   ) => {
-    if (!onBlockChange) return
+    if (!onBlocksChange) return
     e.stopPropagation()
     e.preventDefault()
-    const b = blocks[index]
-    const sm = hhmmToMinutesRel(b.start_time)
-    const em = hhmmToMinutesRel(b.end_time)
-    if (sm === null) return
-    const emEff = em !== null && em > sm ? em : sm
+
+    // I CVp/CVa NON si muovono singolarmente: se l'utente afferra un CV,
+    // reindirizza il drag al treno padrone.
+    const srcBlock = blocks[index]
+    let mainIndex = index
+    if (srcBlock.block_type === "cv_partenza" || srcBlock.block_type === "cv_arrivo") {
+      const parent = getParentTrainIndex(blocks, index)
+      if (parent !== null) {
+        mainIndex = parent
+      } else {
+        // CV "orfano" (senza treno adiacente) → drag sul solo CV
+      }
+    }
+
+    // Costruisci gruppo: train + CVp (se presente) + CVa (se presente)
+    const groupIndices: number[] = [mainIndex]
+    if (blocks[mainIndex].block_type === "train") {
+      const { cvPrev, cvNext } = getLinkedCVs(blocks, mainIndex)
+      if (cvPrev !== null) groupIndices.unshift(cvPrev)
+      if (cvNext !== null) groupIndices.push(cvNext)
+    }
+
+    // Snapshot degli orari iniziali per ogni membro del gruppo
+    const initial: Record<number, { sm: number; em: number }> = {}
+    for (const gi of groupIndices) {
+      const b = blocks[gi]
+      const sm = hhmmToMinutesRel(b.start_time)
+      const em = hhmmToMinutesRel(b.end_time)
+      if (sm === null) continue
+      initial[gi] = { sm, em: em !== null && em > sm ? em : sm }
+    }
+
     setDragState({
-      index,
+      groupIndices,
       kind,
-      initialSm: sm,
-      initialEm: emEff,
+      initial,
       initialMouseX: e.clientX,
+      active: false,
     })
   }
 
   useEffect(() => {
     if (!dragState) return
     const handleMove = (e: MouseEvent) => {
-      const dxSvg =
-        clientXToSvgX(e.clientX) - clientXToSvgX(dragState.initialMouseX)
-      const deltaMin = (dxSvg / plotW) * SPAN_HOURS * 60
-      let newSm = dragState.initialSm
-      let newEm = dragState.initialEm
+      const deltaPx = Math.abs(e.clientX - dragState.initialMouseX)
 
-      if (dragState.kind === "move") {
-        newSm = Math.round(dragState.initialSm + deltaMin)
-        newEm = Math.round(dragState.initialEm + deltaMin)
-      } else if (dragState.kind === "resize-start") {
-        newSm = Math.round(dragState.initialSm + deltaMin)
-        if (newSm > dragState.initialEm - 5) newSm = dragState.initialEm - 5
-      } else if (dragState.kind === "resize-end") {
-        newEm = Math.round(dragState.initialEm + deltaMin)
-        if (newEm < dragState.initialSm + 5) newEm = dragState.initialSm + 5
+      // Threshold anti-click: non avvio il drag finché non supero N pixel
+      if (!dragState.active && deltaPx < dragThresholdPx) return
+
+      if (!dragState.active) {
+        setDragState((s) => (s ? { ...s, active: true } : s))
       }
 
-      // Clamp
+      const dxSvg =
+        clientXToSvgX(e.clientX) - clientXToSvgX(dragState.initialMouseX)
+      const deltaMinRaw = (dxSvg / plotW) * SPAN_HOURS * 60
+      // Snap a snapMinutes
+      const deltaMin = Math.round(deltaMinRaw / snapMinutes) * snapMinutes
       const maxMin = SPAN_HOURS * 60
-      newSm = Math.max(0, Math.min(newSm, maxMin))
-      newEm = Math.max(0, Math.min(newEm, maxMin))
 
-      setOverrides((prev) => ({
-        ...prev,
-        [dragState.index]: {
-          start_time: minutesRelToHhmm(newSm),
-          end_time: minutesRelToHhmm(newEm),
-        },
-      }))
+      const nextOverrides: Record<number, { start_time: string; end_time: string }> = {}
+
+      if (dragState.kind === "move") {
+        // Sposta TUTTO il gruppo (train + CVp/CVa) del medesimo delta
+        for (const gi of dragState.groupIndices) {
+          const init = dragState.initial[gi]
+          if (!init) continue
+          let newSm = init.sm + deltaMin
+          let newEm = init.em + deltaMin
+          newSm = Math.max(0, Math.min(newSm, maxMin))
+          newEm = Math.max(0, Math.min(newEm, maxMin))
+          nextOverrides[gi] = {
+            start_time: minutesRelToHhmm(newSm),
+            end_time: minutesRelToHhmm(newEm),
+          }
+        }
+      } else if (dragState.kind === "resize-start") {
+        // Resize start del treno. Il CVp associato si aggancia al nuovo start.
+        const trainIdx = dragState.groupIndices.find(
+          (gi) => blocks[gi].block_type === "train"
+        )
+        if (trainIdx !== undefined) {
+          const init = dragState.initial[trainIdx]
+          if (init) {
+            let newSm = init.sm + deltaMin
+            if (newSm > init.em - snapMinutes) newSm = init.em - snapMinutes
+            newSm = Math.max(0, newSm)
+            nextOverrides[trainIdx] = {
+              start_time: minutesRelToHhmm(newSm),
+              end_time: minutesRelToHhmm(init.em),
+            }
+            // CVp agganciato: spostato al newSm
+            const cvpIdx = dragState.groupIndices.find(
+              (gi) => blocks[gi].block_type === "cv_partenza"
+            )
+            if (cvpIdx !== undefined) {
+              nextOverrides[cvpIdx] = {
+                start_time: minutesRelToHhmm(newSm),
+                end_time: minutesRelToHhmm(newSm),
+              }
+            }
+          }
+        }
+      } else if (dragState.kind === "resize-end") {
+        const trainIdx = dragState.groupIndices.find(
+          (gi) => blocks[gi].block_type === "train"
+        )
+        if (trainIdx !== undefined) {
+          const init = dragState.initial[trainIdx]
+          if (init) {
+            let newEm = init.em + deltaMin
+            if (newEm < init.sm + snapMinutes) newEm = init.sm + snapMinutes
+            newEm = Math.min(maxMin, newEm)
+            nextOverrides[trainIdx] = {
+              start_time: minutesRelToHhmm(init.sm),
+              end_time: minutesRelToHhmm(newEm),
+            }
+            const cvaIdx = dragState.groupIndices.find(
+              (gi) => blocks[gi].block_type === "cv_arrivo"
+            )
+            if (cvaIdx !== undefined) {
+              nextOverrides[cvaIdx] = {
+                start_time: minutesRelToHhmm(newEm),
+                end_time: minutesRelToHhmm(newEm),
+              }
+            }
+          }
+        }
+      }
+
+      setOverrides(nextOverrides)
     }
     const handleUp = () => {
-      if (!onBlockChange || !dragState) return
-      const ov = overrides[dragState.index]
-      if (ov) {
-        onBlockChange(dragState.index, ov)
+      if (!onBlocksChange || !dragState) return
+      if (dragState.active && Object.keys(overrides).length > 0) {
+        onBlocksChange(overrides)
       }
       setDragState(null)
       setOverrides({})
@@ -352,7 +481,16 @@ export function PdcGantt({
       window.removeEventListener("mousemove", handleMove)
       window.removeEventListener("mouseup", handleUp)
     }
-  }, [dragState, overrides, plotW, clientXToSvgX, onBlockChange])
+  }, [
+    dragState,
+    overrides,
+    plotW,
+    clientXToSvgX,
+    onBlocksChange,
+    snapMinutes,
+    dragThresholdPx,
+    blocks,
+  ])
 
   const handleTimelineClick = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!onTimelineClick) return
@@ -504,7 +642,7 @@ export function PdcGantt({
           const sm = hhmmToMinutesRel(b.start_time)
           const em = hhmmToMinutesRel(b.end_time)
           const labelTxt = blockLabel(b)
-          const isDragging = dragState?.index === i
+          const isDragging = dragState?.groupIndices.includes(i) ?? false
 
           // CVp/CVa puntuali → marker verticale largo + etichetta sopra
           if (b.block_type === "cv_partenza" || b.block_type === "cv_arrivo") {
@@ -522,7 +660,7 @@ export function PdcGantt({
                   }
                 }}
                 style={{
-                  cursor: onBlockChange
+                  cursor: onBlocksChange
                     ? isDragging
                       ? "grabbing"
                       : "grab"
@@ -602,7 +740,7 @@ export function PdcGantt({
                   }
                 }}
                 style={{
-                  cursor: onBlockChange
+                  cursor: onBlocksChange
                     ? isDragging
                       ? "grabbing"
                       : "grab"
@@ -613,7 +751,7 @@ export function PdcGantt({
               />
 
               {/* Handle RESIZE-START (a sinistra) */}
-              {onBlockChange && w > 14 && (
+              {onBlocksChange && w > 14 && (
                 <rect
                   x={x1}
                   y={barY}
@@ -626,7 +764,7 @@ export function PdcGantt({
               )}
 
               {/* Handle RESIZE-END (a destra) */}
-              {onBlockChange && w > 14 && (
+              {onBlocksChange && w > 14 && (
                 <rect
                   x={x2 - RESIZE_HANDLE_W}
                   y={barY}
@@ -721,9 +859,9 @@ export function PdcGantt({
         <span className="flex items-center gap-1">
           <span className="inline-block w-2 h-2 rounded-full bg-black" /> Acc. magg.
         </span>
-        {onBlockChange && (
+        {onBlocksChange && (
           <span className="ml-auto italic text-primary">
-            🖱 Trascina il centro per spostare • Trascina i bordi per ridimensionare
+            🖱 Trascina il treno per spostarlo (CVp/CVa lo seguono) • Trascina i bordi per ridimensionare • Snap 5 min
           </span>
         )}
       </div>

@@ -735,3 +735,23 @@ export async function getCalendarPeriodicity(dateStr: string, local?: string) {
     `/italian-calendar/periodicity?${qs.toString()}`
   )
 }
+
+// ── Lookup treno nel giro materiale (per builder PdC) ──
+
+export interface TrainLookup {
+  found: boolean
+  train_id: string
+  from_station?: string
+  to_station?: string
+  dep_time?: string
+  arr_time?: string
+  material_turn_id?: number | null
+  is_deadhead?: boolean
+  other_matches?: number
+}
+
+export async function lookupTrainInGiroMateriale(trainId: string) {
+  return api.get<TrainLookup>(
+    `/pdc-builder/lookup-train/${encodeURIComponent(trainId)}`
+  )
+}

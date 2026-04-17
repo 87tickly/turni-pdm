@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   X,
+  Search,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PdcGantt } from "@/components/PdcGantt"
@@ -18,6 +19,7 @@ import {
   updatePdcTurn,
   getPdcTurn,
   getCalendarPeriodicity,
+  lookupTrainInGiroMateriale,
   type PdcTurnInput,
   type PdcDayInput,
   type PdcBlockInput,
@@ -85,6 +87,30 @@ function BlockEditor({
   const showTrain = ["train", "cv_partenza", "cv_arrivo"].includes(block.block_type)
   const showVettura = block.block_type === "coach_transfer"
   const showStations = !["scomp", "available"].includes(block.block_type)
+  const [lookupMsg, setLookupMsg] = useState<string>("")
+
+  const handleLookup = async () => {
+    if (!block.train_id) return
+    setLookupMsg("🔍 ricerca...")
+    try {
+      const r = await lookupTrainInGiroMateriale(block.train_id)
+      if (r.found) {
+        onChange({
+          ...block,
+          from_station: r.from_station || block.from_station,
+          to_station: r.to_station || block.to_station,
+          start_time: r.dep_time || block.start_time,
+          end_time: r.arr_time || block.end_time,
+        })
+        setLookupMsg(`✓ trovato nel giro materiale (turno ${r.material_turn_id || "?"})`)
+      } else {
+        setLookupMsg(`⚠ treno ${block.train_id} non trovato nel giro materiale`)
+      }
+    } catch (e) {
+      setLookupMsg(`✗ errore: ${e instanceof Error ? e.message : "sconosciuto"}`)
+    }
+    setTimeout(() => setLookupMsg(""), 4000)
+  }
 
   return (
     <div className="border border-border-subtle rounded-lg p-2 bg-muted/20 space-y-2">
@@ -105,12 +131,24 @@ function BlockEditor({
         </select>
 
         {showTrain && (
-          <input
-            className="px-2 py-1 border border-border rounded font-mono w-20 text-[11px]"
-            placeholder="Treno #"
-            value={block.train_id || ""}
-            onChange={(e) => onChange({ ...block, train_id: e.target.value })}
-          />
+          <>
+            <input
+              className="px-2 py-1 border border-border rounded font-mono w-20 text-[11px]"
+              placeholder="Treno #"
+              value={block.train_id || ""}
+              onChange={(e) => onChange({ ...block, train_id: e.target.value })}
+            />
+            {block.block_type === "train" && block.train_id && (
+              <button
+                onClick={handleLookup}
+                className="text-[10px] px-1.5 py-1 bg-primary/10 text-primary rounded hover:bg-primary/20 flex items-center gap-0.5"
+                title="Cerca nel giro materiale e popola stazioni/orari"
+                type="button"
+              >
+                <Search size={10} />
+              </button>
+            )}
+          </>
         )}
         {showVettura && (
           <input
@@ -157,6 +195,12 @@ function BlockEditor({
             value={block.to_station || ""}
             onChange={(e) => onChange({ ...block, to_station: e.target.value })}
           />
+        </div>
+      )}
+
+      {lookupMsg && (
+        <div className="text-[10px] text-muted-foreground pl-6">
+          {lookupMsg}
         </div>
       )}
 
@@ -338,10 +382,14 @@ function DayEditor({
                       setTimeout(() => el.classList.remove("ring-2", "ring-primary"), 1500)
                     }
                   }}
-                  onBlockChange={(idx, changes) => {
-                    // Modifica SOLO il blocco all'indice idx, preserva gli altri
+                  onBlocksChange={(changes) => {
+                    // Modifica uno o più blocchi (train + CVp/CVa agganciati)
+                    // preservando tutti gli altri
                     const blocks = [...(day.blocks || [])]
-                    blocks[idx] = { ...blocks[idx], ...changes }
+                    for (const [idxStr, patch] of Object.entries(changes)) {
+                      const idx = parseInt(idxStr)
+                      blocks[idx] = { ...blocks[idx], ...patch }
+                    }
                     onChange({ ...day, blocks })
                   }}
                   onTimelineClick={(h, m) => {
