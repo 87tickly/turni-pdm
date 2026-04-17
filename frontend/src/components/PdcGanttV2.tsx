@@ -368,7 +368,10 @@ export function PdcGanttV2({
     (e: React.MouseEvent, index: number, kind: DragState["kind"]) => {
       if (!onBlocksChange) return
       e.stopPropagation()
-      e.preventDefault()
+      // NB: NON chiamo e.preventDefault() qui, altrimenti l'HTML5 drag
+      // (draggable=true sulla chip) non riesce a partire. La selezione
+      // di testo durante il drag intra-Gantt e' evitata dalla classe
+      // tailwind "select-none" sul <svg>.
       didDragRef.current = false
 
       // CVp/CVa: reindirizza al treno padrone
@@ -646,6 +649,12 @@ export function PdcGanttV2({
   )
 
   const handleCrossDragEnd = useCallback((e: React.DragEvent, idx: number) => {
+    // Il browser, durante HTML5 drag, NON emette mouseup → il mio
+    // dragState interno non viene ripulito dal listener mouseup. Lo faccio qui.
+    setDragState(null)
+    setOverrides({})
+    didDragRef.current = false
+
     // Se il drop e' riuscito in un altro Gantt (dropEffect === "move"),
     // rimuovi il blocco (con CVp/CVa agganciati se treno) da questo Gantt.
     if (!crossDayEnabled) return
