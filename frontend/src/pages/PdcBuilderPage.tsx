@@ -74,6 +74,7 @@ function inputToPdcBlock(b: PdcBlockInput): PdcBlock {
     start_time: b.start_time || "",
     end_time: b.end_time || "",
     accessori_maggiorati: b.accessori_maggiorati ? 1 : 0,
+    minuti_accessori: b.minuti_accessori || "",
   }
 }
 
@@ -88,6 +89,7 @@ function pdcBlockToInput(b: PdcBlock): PdcBlockInput {
     start_time: b.start_time,
     end_time: b.end_time,
     accessori_maggiorati: b.accessori_maggiorati === 1,
+    minuti_accessori: b.minuti_accessori || "",
   }
 }
 
@@ -179,8 +181,20 @@ function BlockEditor({
           />
         )}
 
-        <div className="ml-auto flex items-center gap-1">
-          <label className="flex items-center gap-1 text-[10px]">
+        <div className="ml-auto flex items-center gap-1.5">
+          <label className="flex items-center gap-1 text-[10px]" title="Minuti accessori — formato 'inizio/fine' es. '5/10'">
+            <span className="text-muted-foreground">acc.min</span>
+            <input
+              type="text"
+              className="px-1.5 py-0.5 border border-border rounded w-14 text-[10px] font-mono text-center"
+              placeholder="5/5"
+              value={block.minuti_accessori || ""}
+              onChange={(e) =>
+                onChange({ ...block, minuti_accessori: e.target.value })
+              }
+            />
+          </label>
+          <label className="flex items-center gap-1 text-[10px]" title="Accessori maggiorati (preriscaldo invernale)">
             <input
               type="checkbox"
               checked={block.accessori_maggiorati || false}
@@ -188,7 +202,7 @@ function BlockEditor({
                 onChange({ ...block, accessori_maggiorati: e.target.checked })
               }
             />
-            ● acc. magg.
+            ● magg.
           </label>
           <button
             onClick={onRemove}
@@ -283,7 +297,8 @@ function DayEditor({
   }
   const addBlock = () => {
     const blocks = [...(day.blocks || [])]
-    blocks.push({ block_type: "train", seq: blocks.length })
+    // Default: 5 min accessori inizio + 5 min accessori fine sui treni
+    blocks.push({ block_type: "train", seq: blocks.length, minuti_accessori: "5/5" })
     onChange({ ...day, blocks })
   }
   const removeBlock = (i: number) => {
@@ -525,6 +540,7 @@ function DayEditor({
                       block_type: "train",
                       seq: blocks.length,
                       start_time: hhmm,
+                      minuti_accessori: "5/5",  // default accessori inizio/fine
                     })
                     onChange({ ...day, blocks })
                   }}

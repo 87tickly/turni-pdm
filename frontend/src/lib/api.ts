@@ -712,6 +712,10 @@ export interface PdcBlockInput {
   start_time?: string
   end_time?: string
   accessori_maggiorati?: boolean
+  // Schema v2.1: minuti accessori (riga ausiliaria PDF). Per i treni il
+  // formato consigliato e' "5/10" (5 min prep inizio + 10 min consegna fine)
+  // o un singolo numero per refezione/cv (durata o offset).
+  minuti_accessori?: string
 }
 
 export interface PdcDayInput {
