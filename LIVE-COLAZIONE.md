@@ -4,6 +4,56 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-17 — Step 8d-h: Gantt colorato + drag & drop blocchi
+
+### Feedback utente
+1. Mantenere i colori (non solo linee bianche)
+2. Ingrandire le barre (troppo piccole nel Gantt stile-PDF)
+3. Interazione non distruttiva: drag singolo blocco senza toccare gli altri
+
+### Gantt v3 (`PdcGantt.tsx`)
+Riscritto componente con:
+
+**Barre colorate e grandi**:
+- `train`: 28px blu pieno `#0062CC` (prima 3px)
+- `coach_transfer`: 20px viola tratteggiato `#A78BFA`
+- `meal`: 20px verde tratteggiato `#34D399`
+- `scomp`: 16px grigio tratteggiato `#CBD5E1`
+- `cv_partenza`/`cv_arrivo`: "bandierina" verticale ambra 30px con label sopra
+- Altezza totale SVG: 220px
+
+**Interattività drag & drop**:
+- Prop `onBlockChange(index, {start_time, end_time})` callback
+- Handle invisibili:
+  - Centro della barra -> `move` (sposta tutto preservando durata)
+  - Primi/ultimi 6px -> `resize-start` / `resize-end`
+- Cursor dinamico: `grab` / `grabbing` / `ew-resize`
+- Preview ottimistico durante il drag via `overrides` state locale
+- Al mouseup chiama `onBlockChange` solo per l'indice draggato → **gli altri blocchi non vengono toccati**
+- `userSelect: none` e pointerEvents su label/orari per non interferire
+
+**Eventi globali**: `mousemove`/`mouseup` su `window` durante drag, rimozione automatica via useEffect cleanup.
+
+### Integrazione `PdcBuilderPage`
+Il callback aggiorna `blocks[idx]` con i nuovi orari mantenendo intatti gli altri:
+```typescript
+onBlockChange={(idx, changes) => {
+  const blocks = [...(day.blocks || [])]
+  blocks[idx] = { ...blocks[idx], ...changes }
+  onChange({ ...day, blocks })
+}}
+```
+
+### Build
+- Zero errori TS
+- 378 KB JS (109 gzip)
+
+### File modificati
+- `frontend/src/components/PdcGantt.tsx` (riscritto completo)
+- `frontend/src/pages/PdcBuilderPage.tsx` (aggiunto `onBlockChange`)
+
+---
+
 ## 2026-04-17 — Step 8: Parser allocazione sequenziale, tutti i blocchi popolati
 
 ### Motivazione (feedback utente)

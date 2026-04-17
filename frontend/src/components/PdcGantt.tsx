@@ -1,33 +1,42 @@
 /**
- * PdcGantt — Timeline Gantt visuale fedele al PDF Trenord.
+ * PdcGantt — Timeline Gantt interattivo ispirato al PDF Trenord.
  *
- * Layout stile PDF ufficiale Trenord (Modello M704):
+ * Features:
+ *  - Barre colorate e ingrandite per tipo blocco
  *  - Asse 3→24→1→2→3 orizzontale
- *  - Stazioni ai bordi delle barre (orizzontali, es. ARON, DOMO)
- *  - Numero treno + stazione destinazione scritti VERTICALMENTE sopra la barra
- *  - Linea continua nera per treni, tratteggiata per vetture/refezione
- *  - Marker "CVp"/"CVa" verticali a lato del blocco treno adiacente
- *  - Orari al minuto in piccolo sotto l'asse
- *  - Zona prestazione evidenziata con fascia azzurra
- *  - Pallino nero ● per accessori maggiorati (preriscaldo invernale)
+ *  - Etichette sopra + stazioni ai bordi
+ *  - Orari al minuto sotto ogni blocco
+ *  - Pallino nero ● per accessori maggiorati
  *
- * Modalità:
- *  - readonly (default): sola visualizzazione
- *  - onBlockClick: click su blocco (builder)
- *  - onTimelineClick: click su area vuota (builder: crea blocco)
+ * Interazione (solo se `onBlockChange` è fornito):
+ *  - Drag del CENTRO di una barra → sposta tutto il blocco preservando la durata
+ *  - Drag dei BORDI (entro 6px dall'estremo) → resize start/end
+ *  - Click singolo → onBlockClick (selezione/edit)
+ *  - Click su area vuota → onTimelineClick (aggiungi blocco)
+ *
+ * Gli altri blocchi non vengono toccati durante il drag di uno solo.
  */
 
+import { useState, useRef, useCallback, useEffect } from "react"
 import type { PdcBlock } from "@/lib/api"
 
 interface PdcGanttProps {
   blocks: PdcBlock[]
-  startTime?: string          // orario inizio prestazione [HH:MM]
-  endTime?: string            // orario fine prestazione [HH:MM]
+  startTime?: string
+  endTime?: string
   onBlockClick?: (block: PdcBlock, index: number) => void
   onTimelineClick?: (hour: number, minute: number) => void
-  label?: string              // es. "g1 LMXGVSD"
-  depot?: string              // label stazione base ai bordi (es. ARON)
-  height?: number             // altezza personalizzata in px (default 180)
+  /**
+   * Callback chiamato al rilascio del mouse dopo drag/resize.
+   * Riceve l'indice del blocco e i nuovi orari (start_time / end_time).
+   */
+  onBlockChange?: (
+    index: number,
+    changes: { start_time?: string; end_time?: string }
+  ) => void
+  label?: string
+  depot?: string
+  height?: number
 }
 
 // ── Scala temporale ────────────────────────────────────────────
@@ -43,13 +52,14 @@ function hhmmToMinutesRel(hhmm: string): number | null {
 }
 
 function minutesRelToHhmm(minRel: number): string {
-  const abs = (ORIGIN_HOUR * 60 + minRel) % (24 * 60)
+  const abs = (ORIGIN_HOUR * 60 + Math.max(0, Math.min(minRel, SPAN_HOURS * 60)))
+    % (24 * 60)
   const h = Math.floor(abs / 60)
   const m = abs % 60
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
 }
 
-// Fill orari mancanti (stesso algoritmo della versione precedente)
+// Fill orari mancanti (per render, non modifica i blocchi originali)
 function fillBlockTimes(
   blocks: PdcBlock[],
   dayStart?: string,
@@ -124,75 +134,94 @@ function fillBlockTimes(
   return out
 }
 
-// ── Stili grafici per tipo blocco ──────────────────────────────
-const BAR_H_TRAIN = 3        // linea spessa per treno (style PDF: linea nera)
-const BAR_H_VETTURA = 2      // linea tratteggiata sottile per vettura
-const BAR_H_MEAL = 2         // linea tratteggiata per refezione
-const BAR_H_SCOMP = 2        // linea tratteggiata grigia per scomp
-const MARKER_H = 10          // altezza marker CVp/CVa
+// ── Stili barre colorate per tipo ──────────────────────────────
+const BAR_H_TRAIN = 28
+const BAR_H_COACH = 20
+const BAR_H_MEAL = 20
+const BAR_H_SCOMP = 16
+const MARKER_H = 30
 
 function blockStyle(t: PdcBlock["block_type"]) {
   switch (t) {
     case "train":
       return {
-        stroke: "#111827",
-        strokeWidth: BAR_H_TRAIN,
+        fill: "#0062CC",
+        stroke: "#0050A7",
+        h: BAR_H_TRAIN,
         dash: null as string | null,
-        labelColor: "#0062CC",
+        opacity: 0.92,
       }
     case "coach_transfer":
       return {
-        stroke: "#111827",
-        strokeWidth: BAR_H_VETTURA,
-        dash: "2 2",
-        labelColor: "#7C3AED",
+        fill: "#A78BFA",
+        stroke: "#7C3AED",
+        h: BAR_H_COACH,
+        dash: "4 3",
+        opacity: 0.55,
       }
     case "meal":
       return {
-        stroke: "#111827",
-        strokeWidth: BAR_H_MEAL,
-        dash: "2 2",
-        labelColor: "#10B981",
+        fill: "#34D399",
+        stroke: "#059669",
+        h: BAR_H_MEAL,
+        dash: "4 3",
+        opacity: 0.55,
       }
     case "scomp":
       return {
+        fill: "#CBD5E1",
         stroke: "#94A3B8",
-        strokeWidth: BAR_H_SCOMP,
-        dash: "2 2",
-        labelColor: "#64748B",
+        h: BAR_H_SCOMP,
+        dash: "4 3",
+        opacity: 0.7,
       }
     case "cv_partenza":
     case "cv_arrivo":
       return {
-        stroke: "#111827",
-        strokeWidth: 1,
+        fill: "#F59E0B",
+        stroke: "#B45309",
+        h: MARKER_H,
         dash: null as string | null,
-        labelColor: "#B45309",
+        opacity: 1,
+      }
+    case "available":
+      return {
+        fill: "#F1F5F9",
+        stroke: "#CBD5E1",
+        h: BAR_H_SCOMP,
+        dash: null as string | null,
+        opacity: 1,
       }
     default:
       return {
+        fill: "#94A3B8",
         stroke: "#64748B",
-        strokeWidth: 1,
+        h: BAR_H_COACH,
         dash: null as string | null,
-        labelColor: "#64748B",
+        opacity: 0.8,
       }
   }
 }
 
-// Etichetta mostrata sopra la barra (numero + stazione destinazione)
 function blockLabel(b: PdcBlock): string {
   const id = b.train_id || b.vettura_id || ""
-  const station = b.to_station || ""
-  if (b.block_type === "cv_partenza") return `CVp ${id}${station ? " " + station : ""}`.trim()
-  if (b.block_type === "cv_arrivo") return `CVa ${id}${station ? " " + station : ""}`.trim()
-  if (b.block_type === "meal") return "REFEZ" + (station ? " " + station : "")
-  if (b.block_type === "scomp") return "S.COMP" + (station ? " " + station : "")
-  if (b.block_type === "coach_transfer") return `(${id}${station ? " " + station : ""}`
+  if (b.block_type === "cv_partenza") return `CVp ${id}`.trim()
+  if (b.block_type === "cv_arrivo") return `CVa ${id}`.trim()
+  if (b.block_type === "meal") return "REFEZ"
+  if (b.block_type === "scomp") return "S.COMP"
   if (b.block_type === "available") return "Disponibile"
-  return `${id}${station ? " " + station : ""}`
+  return id
 }
 
 // ── Componente ────────────────────────────────────────────────
+
+type DragState = {
+  index: number
+  kind: "move" | "resize-start" | "resize-end"
+  initialSm: number
+  initialEm: number
+  initialMouseX: number
+}
 
 export function PdcGantt({
   blocks: rawBlocks,
@@ -200,20 +229,47 @@ export function PdcGantt({
   endTime,
   onBlockClick,
   onTimelineClick,
+  onBlockChange,
   label,
   depot,
-  height = 180,
+  height = 220,
 }: PdcGanttProps) {
-  const blocks = fillBlockTimes(rawBlocks, startTime, endTime)
+  const filled = fillBlockTimes(rawBlocks, startTime, endTime)
+  // Override temporanei durante drag (preview ottimistico, non sovrascrive il parent)
+  const [overrides, setOverrides] = useState<
+    Record<number, { start_time?: string; end_time?: string }>
+  >({})
+  const [dragState, setDragState] = useState<DragState | null>(null)
+  const svgRef = useRef<SVGSVGElement | null>(null)
+
+  // Applica gli overrides sopra i blocchi "filled"
+  const blocks = filled.map((b, i) => ({ ...b, ...(overrides[i] || {}) }))
 
   // Layout parametri
   const CHART_W = 1400
   const PAD_L = 110
   const PAD_R = 30
-  const PAD_T = 60      // più spazio per label verticali sopra la barra
-  const axisY = PAD_T + 40
+  const PAD_T = 50
+  const axisY = PAD_T + 60
   const plotW = CHART_W - PAD_L - PAD_R
   const minuteToX = (min: number) => PAD_L + (min / (SPAN_HOURS * 60)) * plotW
+
+  const svgXToMinute = useCallback(
+    (svgX: number) => {
+      if (svgX < PAD_L) return 0
+      if (svgX > PAD_L + plotW) return SPAN_HOURS * 60
+      return ((svgX - PAD_L) / plotW) * SPAN_HOURS * 60
+    },
+    [plotW]
+  )
+
+  // Converte coordinata mouse (clientX) -> svgX (viewBox space)
+  const clientXToSvgX = useCallback((clientX: number): number => {
+    const svg = svgRef.current
+    if (!svg) return 0
+    const rect = svg.getBoundingClientRect()
+    return ((clientX - rect.left) / rect.width) * CHART_W
+  }, [])
 
   // Tick orari
   const ticks: { hour: number; x: number }[] = []
@@ -225,38 +281,123 @@ export function PdcGantt({
   const startMin = startTime ? hhmmToMinutesRel(startTime) : null
   const endMin = endTime ? hhmmToMinutesRel(endTime) : null
 
+  // ── Drag handlers ────────────────────────────────────────────
+  const startDrag = (
+    e: React.MouseEvent,
+    index: number,
+    kind: DragState["kind"]
+  ) => {
+    if (!onBlockChange) return
+    e.stopPropagation()
+    e.preventDefault()
+    const b = blocks[index]
+    const sm = hhmmToMinutesRel(b.start_time)
+    const em = hhmmToMinutesRel(b.end_time)
+    if (sm === null) return
+    const emEff = em !== null && em > sm ? em : sm
+    setDragState({
+      index,
+      kind,
+      initialSm: sm,
+      initialEm: emEff,
+      initialMouseX: e.clientX,
+    })
+  }
+
+  useEffect(() => {
+    if (!dragState) return
+    const handleMove = (e: MouseEvent) => {
+      const dxSvg =
+        clientXToSvgX(e.clientX) - clientXToSvgX(dragState.initialMouseX)
+      const deltaMin = (dxSvg / plotW) * SPAN_HOURS * 60
+      let newSm = dragState.initialSm
+      let newEm = dragState.initialEm
+
+      if (dragState.kind === "move") {
+        newSm = Math.round(dragState.initialSm + deltaMin)
+        newEm = Math.round(dragState.initialEm + deltaMin)
+      } else if (dragState.kind === "resize-start") {
+        newSm = Math.round(dragState.initialSm + deltaMin)
+        if (newSm > dragState.initialEm - 5) newSm = dragState.initialEm - 5
+      } else if (dragState.kind === "resize-end") {
+        newEm = Math.round(dragState.initialEm + deltaMin)
+        if (newEm < dragState.initialSm + 5) newEm = dragState.initialSm + 5
+      }
+
+      // Clamp
+      const maxMin = SPAN_HOURS * 60
+      newSm = Math.max(0, Math.min(newSm, maxMin))
+      newEm = Math.max(0, Math.min(newEm, maxMin))
+
+      setOverrides((prev) => ({
+        ...prev,
+        [dragState.index]: {
+          start_time: minutesRelToHhmm(newSm),
+          end_time: minutesRelToHhmm(newEm),
+        },
+      }))
+    }
+    const handleUp = () => {
+      if (!onBlockChange || !dragState) return
+      const ov = overrides[dragState.index]
+      if (ov) {
+        onBlockChange(dragState.index, ov)
+      }
+      setDragState(null)
+      setOverrides({})
+    }
+    window.addEventListener("mousemove", handleMove)
+    window.addEventListener("mouseup", handleUp)
+    return () => {
+      window.removeEventListener("mousemove", handleMove)
+      window.removeEventListener("mouseup", handleUp)
+    }
+  }, [dragState, overrides, plotW, clientXToSvgX, onBlockChange])
+
   const handleTimelineClick = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!onTimelineClick) return
-    const svg = e.currentTarget
-    const rect = svg.getBoundingClientRect()
-    const viewX = ((e.clientX - rect.left) / rect.width) * CHART_W
+    if (dragState) return  // non aggiungere durante drag
+    const viewX = clientXToSvgX(e.clientX)
     if (viewX < PAD_L || viewX > PAD_L + plotW) return
-    const minFromOrigin = ((viewX - PAD_L) / plotW) * SPAN_HOURS * 60
-    const absHour = (ORIGIN_HOUR + Math.floor(minFromOrigin / 60)) % 24
-    const minute = Math.round(minFromOrigin % 60)
+    const m = svgXToMinute(viewX)
+    const absHour = (ORIGIN_HOUR + Math.floor(m / 60)) % 24
+    const minute = Math.round(m % 60)
     onTimelineClick(absHour, minute)
   }
 
-  // Determina stazioni ai bordi dalla sequenza dei blocchi
-  const firstStation = blocks.find((b) => b.from_station)?.from_station || depot || ""
+  const firstStation =
+    blocks.find((b) => b.from_station)?.from_station || depot || ""
   const lastStation =
     [...blocks].reverse().find((b) => b.to_station)?.to_station || depot || ""
+
+  const RESIZE_HANDLE_W = 6
 
   return (
     <div className="w-full overflow-x-auto border border-border-subtle rounded-lg bg-white p-2">
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${CHART_W} ${height}`}
         width="100%"
         preserveAspectRatio="xMinYMid meet"
-        style={{ minWidth: 900, cursor: onTimelineClick ? "crosshair" : "default" }}
+        style={{
+          minWidth: 900,
+          cursor: dragState
+            ? dragState.kind === "move"
+              ? "grabbing"
+              : "ew-resize"
+            : onTimelineClick
+            ? "crosshair"
+            : "default",
+          userSelect: "none",
+        }}
         onClick={handleTimelineClick}
       >
         {/* Label giornata + periodicità a sinistra */}
         {label && (
           <text
             x={8}
-            y={axisY - 6}
-            fontSize="13"
+            y={axisY - 10}
+            fontSize="14"
             fill="#0F172A"
             fontFamily="'Exo 2', sans-serif"
             fontWeight="700"
@@ -267,8 +408,8 @@ export function PdcGantt({
         {startTime && endTime && (
           <text
             x={8}
-            y={axisY + 8}
-            fontSize="10"
+            y={axisY + 6}
+            fontSize="11"
             fill="#64748B"
             fontFamily="monospace"
           >
@@ -282,9 +423,9 @@ export function PdcGantt({
             x={minuteToX(startMin)}
             y={PAD_T - 10}
             width={Math.max(0, minuteToX(endMin) - minuteToX(startMin))}
-            height={axisY - PAD_T + 40}
+            height={axisY - PAD_T + 55}
             fill="#DBEAFE"
-            opacity={0.2}
+            opacity={0.22}
           />
         )}
 
@@ -301,47 +442,40 @@ export function PdcGantt({
           />
         ))}
 
-        {/* Asse orizzontale (più spezzato per stile PDF) */}
-        {ticks.map((t, i) => {
-          if (i === ticks.length - 1) return null
-          const x1 = t.x + 4
-          const x2 = ticks[i + 1].x - 4
-          return (
-            <line
-              key={`ax-${i}`}
-              x1={x1}
-              y1={axisY}
-              x2={x2}
-              y2={axisY}
-              stroke="#111827"
-              strokeWidth={1}
-            />
-          )
-        })}
+        {/* Asse orizzontale */}
+        <line
+          x1={PAD_L}
+          y1={axisY}
+          x2={PAD_L + plotW}
+          y2={axisY}
+          stroke="#334155"
+          strokeWidth={1.2}
+        />
 
-        {/* Numeri ora sull'asse */}
+        {/* Tick e numeri ora */}
         {ticks.map((t, i) => (
-          <text
-            key={`h-${i}`}
-            x={t.x}
-            y={axisY + 4}
-            fontSize="11"
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fill="#0F172A"
-            fontFamily="'Exo 2', sans-serif"
-            fontWeight="500"
-          >
-            {t.hour}
-          </text>
+          <g key={`tick-${i}`}>
+            <line x1={t.x} y1={axisY} x2={t.x} y2={axisY + 4} stroke="#334155" />
+            <text
+              x={t.x}
+              y={axisY + 16}
+              fontSize="11"
+              textAnchor="middle"
+              fill="#0F172A"
+              fontFamily="'Exo 2', sans-serif"
+              fontWeight="500"
+            >
+              {t.hour}
+            </text>
+          </g>
         ))}
 
-        {/* Stazione sinistra (depot) */}
+        {/* Stazioni ai bordi */}
         {firstStation && (
           <text
-            x={PAD_L - 4}
-            y={PAD_T - 2}
-            fontSize="11"
+            x={PAD_L - 6}
+            y={PAD_T - 14}
+            fontSize="12"
             textAnchor="end"
             fill="#0F172A"
             fontFamily="'Exo 2', sans-serif"
@@ -350,12 +484,11 @@ export function PdcGantt({
             {firstStation}
           </text>
         )}
-        {/* Stazione destra (depot) */}
         {lastStation && (
           <text
-            x={PAD_L + plotW + 4}
-            y={PAD_T - 2}
-            fontSize="11"
+            x={PAD_L + plotW + 6}
+            y={PAD_T - 14}
+            fontSize="12"
             textAnchor="start"
             fill="#0F172A"
             fontFamily="'Exo 2', sans-serif"
@@ -371,49 +504,61 @@ export function PdcGantt({
           const sm = hhmmToMinutesRel(b.start_time)
           const em = hhmmToMinutesRel(b.end_time)
           const labelTxt = blockLabel(b)
+          const isDragging = dragState?.index === i
 
-          // CVp/CVa puntuali → marker verticale
+          // CVp/CVa puntuali → marker verticale largo + etichetta sopra
           if (b.block_type === "cv_partenza" || b.block_type === "cv_arrivo") {
             if (sm === null) return null
             const x = minuteToX(sm)
             return (
               <g
                 key={i}
+                onMouseDown={(e) => startDrag(e, i, "move")}
                 onClick={(e) => {
+                  if (dragState) return
                   if (onBlockClick) {
                     e.stopPropagation()
                     onBlockClick(b, i)
                   }
                 }}
-                style={{ cursor: onBlockClick ? "pointer" : "default" }}
+                style={{
+                  cursor: onBlockChange
+                    ? isDragging
+                      ? "grabbing"
+                      : "grab"
+                    : onBlockClick
+                    ? "pointer"
+                    : "default",
+                }}
               >
-                <line
-                  x1={x}
-                  y1={PAD_T - 2}
-                  x2={x}
-                  y2={PAD_T + MARKER_H}
-                  stroke={bs.labelColor}
-                  strokeWidth={1.5}
+                {/* "Bandierina" */}
+                <rect
+                  x={x - 3}
+                  y={axisY - MARKER_H - 4}
+                  width={6}
+                  height={MARKER_H + 8}
+                  fill={bs.fill}
+                  stroke={bs.stroke}
+                  strokeWidth={1}
+                  rx={1}
+                  opacity={isDragging ? 0.75 : 1}
                 />
-                {/* Etichetta verticale (ruotata -90) */}
                 <text
                   x={x}
-                  y={PAD_T - 4}
-                  fontSize="9"
-                  textAnchor="start"
-                  fill={bs.labelColor}
+                  y={axisY - MARKER_H - 8}
+                  fontSize="10"
+                  textAnchor="middle"
+                  fill="#B45309"
                   fontFamily="'Exo 2', sans-serif"
-                  fontWeight="600"
-                  transform={`rotate(-90, ${x}, ${PAD_T - 4})`}
+                  fontWeight="700"
                 >
                   {labelTxt}
                 </text>
-                {/* Orario sotto */}
                 {b.start_time && (
                   <text
                     x={x}
-                    y={axisY + 18}
-                    fontSize="8.5"
+                    y={axisY + 30}
+                    fontSize="9"
                     textAnchor="middle"
                     fill="#475569"
                     fontFamily="monospace"
@@ -430,71 +575,122 @@ export function PdcGantt({
           const emEff = em !== null && em > sm ? em : sm + 5
           const x1 = minuteToX(sm)
           const x2 = minuteToX(emEff)
-          const w = Math.max(2, x2 - x1)
-          const barY = PAD_T + 8
+          const w = Math.max(3, x2 - x1)
+          const barY = axisY - bs.h / 2 - 8
+          const midX = x1 + w / 2
 
           return (
-            <g
-              key={i}
-              onClick={(e) => {
-                if (onBlockClick) {
-                  e.stopPropagation()
-                  onBlockClick(b, i)
-                }
-              }}
-              style={{ cursor: onBlockClick ? "pointer" : "default" }}
-            >
-              {/* Linea della barra (spessa per treno, tratteggiata per altri) */}
-              <line
-                x1={x1}
-                y1={barY}
-                x2={x2}
-                y2={barY}
+            <g key={i}>
+              {/* Corpo della barra (zona drag-move) */}
+              <rect
+                x={x1}
+                y={barY}
+                width={w}
+                height={bs.h}
+                rx={3}
+                fill={bs.fill}
                 stroke={bs.stroke}
-                strokeWidth={bs.strokeWidth}
+                strokeWidth={1}
                 strokeDasharray={bs.dash || undefined}
+                opacity={isDragging ? 0.7 : bs.opacity}
+                onMouseDown={(e) => startDrag(e, i, "move")}
+                onClick={(e) => {
+                  if (dragState) return
+                  if (onBlockClick) {
+                    e.stopPropagation()
+                    onBlockClick(b, i)
+                  }
+                }}
+                style={{
+                  cursor: onBlockChange
+                    ? isDragging
+                      ? "grabbing"
+                      : "grab"
+                    : onBlockClick
+                    ? "pointer"
+                    : "default",
+                }}
               />
-              {/* Etichetta verticale sopra la barra */}
-              <text
-                x={x1 + w / 2}
-                y={barY - 4}
-                fontSize="9.5"
-                textAnchor="start"
-                fill={bs.labelColor}
-                fontFamily="'Exo 2', sans-serif"
-                fontWeight="700"
-                transform={`rotate(-90, ${x1 + w / 2}, ${barY - 4})`}
-              >
-                {labelTxt}
-              </text>
-              {/* Pallino nero per accessori maggiorati */}
-              {b.accessori_maggiorati === 1 && (
-                <circle cx={x1 + 3} cy={barY} r={2.5} fill="#000" />
+
+              {/* Handle RESIZE-START (a sinistra) */}
+              {onBlockChange && w > 14 && (
+                <rect
+                  x={x1}
+                  y={barY}
+                  width={RESIZE_HANDLE_W}
+                  height={bs.h}
+                  fill="transparent"
+                  onMouseDown={(e) => startDrag(e, i, "resize-start")}
+                  style={{ cursor: "ew-resize" }}
+                />
               )}
-              {/* Orario partenza sotto asse (in piccolo) */}
+
+              {/* Handle RESIZE-END (a destra) */}
+              {onBlockChange && w > 14 && (
+                <rect
+                  x={x2 - RESIZE_HANDLE_W}
+                  y={barY}
+                  width={RESIZE_HANDLE_W}
+                  height={bs.h}
+                  fill="transparent"
+                  onMouseDown={(e) => startDrag(e, i, "resize-end")}
+                  style={{ cursor: "ew-resize" }}
+                />
+              )}
+
+              {/* Label sopra la barra */}
+              {labelTxt && w > 14 && (
+                <text
+                  x={midX}
+                  y={barY - 4}
+                  fontSize="10.5"
+                  textAnchor="middle"
+                  fill="#0F172A"
+                  fontFamily="'Exo 2', sans-serif"
+                  fontWeight="700"
+                  pointerEvents="none"
+                >
+                  {labelTxt}
+                </text>
+              )}
+
+              {/* Pallino accessori maggiorati */}
+              {b.accessori_maggiorati === 1 && (
+                <circle
+                  cx={x1 + 6}
+                  cy={barY + bs.h / 2}
+                  r={3}
+                  fill="#000"
+                  pointerEvents="none"
+                />
+              )}
+
+              {/* Orario start sotto asse */}
               {b.start_time && (
                 <text
                   x={x1}
-                  y={axisY + 14}
-                  fontSize="8"
+                  y={axisY + 30}
+                  fontSize="9"
                   textAnchor="middle"
                   fill="#475569"
                   fontFamily="monospace"
+                  pointerEvents="none"
                 >
-                  {b.start_time.slice(3)}
+                  {b.start_time}
                 </text>
               )}
-              {/* Orario arrivo sotto asse */}
-              {b.end_time && w > 18 && (
+              {/* Orario end sotto asse */}
+              {b.end_time && w > 24 && (
                 <text
                   x={x2}
-                  y={axisY + 14}
-                  fontSize="8"
+                  y={axisY + 30}
+                  fontSize="9"
                   textAnchor="middle"
                   fill="#475569"
                   fontFamily="monospace"
+                  pointerEvents="none"
                 >
-                  {b.end_time.slice(3)}
+                  {b.end_time}
                 </text>
               )}
             </g>
@@ -502,38 +698,34 @@ export function PdcGantt({
         })}
       </svg>
 
-      {/* Legenda */}
-      <div className="flex flex-wrap gap-3 mt-1 text-[10px] text-muted-foreground px-1">
+      {/* Legenda + hint interattivo */}
+      <div className="flex flex-wrap gap-3 mt-1 text-[10px] text-muted-foreground px-1 items-center">
         <span className="flex items-center gap-1">
-          <span className="inline-block w-4 h-0.5 bg-[#111827]" /> Treno
+          <span className="inline-block w-4 h-2 bg-[#0062CC] rounded-sm" /> Treno
         </span>
         <span className="flex items-center gap-1">
-          <span
-            className="inline-block w-4 h-0"
-            style={{ borderTop: "1px dashed #111827" }}
-          />
+          <span className="inline-block w-4 h-2 bg-[#A78BFA]/60 rounded-sm border border-[#7C3AED] border-dashed" />
           Vettura
         </span>
         <span className="flex items-center gap-1">
-          <span
-            className="inline-block w-4 h-0"
-            style={{ borderTop: "1px dashed #10B981" }}
-          />
+          <span className="inline-block w-4 h-2 bg-[#34D399]/60 rounded-sm border border-[#059669] border-dashed" />
           Refezione
         </span>
         <span className="flex items-center gap-1">
-          <span
-            className="inline-block w-4 h-0"
-            style={{ borderTop: "1px dashed #94A3B8" }}
-          />
+          <span className="inline-block w-4 h-2 bg-[#CBD5E1] rounded-sm border border-[#94A3B8] border-dashed" />
           S.COMP
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block w-px h-3 bg-[#B45309]" /> CVp/CVa
+          <span className="inline-block w-1 h-3 bg-[#F59E0B] rounded-sm" /> CVp/CVa
         </span>
         <span className="flex items-center gap-1">
           <span className="inline-block w-2 h-2 rounded-full bg-black" /> Acc. magg.
         </span>
+        {onBlockChange && (
+          <span className="ml-auto italic text-primary">
+            🖱 Trascina il centro per spostare • Trascina i bordi per ridimensionare
+          </span>
+        )}
       </div>
     </div>
   )

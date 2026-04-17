@@ -320,10 +320,10 @@ function DayEditor({
 
           {!day.is_disponibile && (
             <>
-              {/* Gantt visuale cliccabile */}
+              {/* Gantt visuale interattivo */}
               <div className="pt-2 border-t border-border-subtle">
                 <p className="text-[10px] text-muted-foreground mb-1">
-                  Clicca sulla timeline per aggiungere un blocco all'orario indicato, o clicca un blocco esistente per modificarlo.
+                  Trascina un blocco per spostarlo, trascina i bordi per ridimensionarlo, clicca sulla timeline vuota per aggiungere un nuovo blocco.
                 </p>
                 <PdcGantt
                   blocks={(day.blocks || []).map(b => inputToPdcBlock(b))}
@@ -331,13 +331,18 @@ function DayEditor({
                   endTime={day.end_time}
                   label={`g${day.day_number} ${day.periodicita}`}
                   onBlockClick={(_, idx) => {
-                    // scrolla a lista blocchi, espandendo l'editor del blocco
                     const el = document.getElementById(`block-editor-${idx}`)
                     if (el) {
                       el.scrollIntoView({ behavior: "smooth", block: "center" })
                       el.classList.add("ring-2", "ring-primary")
                       setTimeout(() => el.classList.remove("ring-2", "ring-primary"), 1500)
                     }
+                  }}
+                  onBlockChange={(idx, changes) => {
+                    // Modifica SOLO il blocco all'indice idx, preserva gli altri
+                    const blocks = [...(day.blocks || [])]
+                    blocks[idx] = { ...blocks[idx], ...changes }
+                    onChange({ ...day, blocks })
                   }}
                   onTimelineClick={(h, m) => {
                     const blocks = [...(day.blocks || [])]
