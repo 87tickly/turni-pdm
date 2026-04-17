@@ -13,6 +13,7 @@ import {
   Search,
   Home,
   Loader2,
+  Moon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PdcGanttV2 as PdcGantt, type CrossDayDragPayload } from "@/components/PdcGanttV2"
@@ -91,6 +92,83 @@ function pdcBlockToInput(b: PdcBlock): PdcBlockInput {
     accessori_maggiorati: b.accessori_maggiorati === 1,
     minuti_accessori: b.minuti_accessori || "",
   }
+}
+
+// ── Calcoli derivati dai blocchi ───────────────────────────────
+// Origine 03:00: i turni Trenord vanno da 03:00 a 03:00 del giorno dopo,
+// quindi se vediamo 00:25 lo trattiamo come "21h25m dall'origine".
+const STATS_ORIGIN_HOUR = 3
+function _toRelMin(hhmm: string | undefined): number | null {
+  if (!hhmm || !/^\d{1,2}:\d{2}$/.test(hhmm)) return null
+  const [h, m] = hhmm.split(":").map(Number)
+  const hourAdj = h < STATS_ORIGIN_HOUR ? h + 24 : h
+  return (hourAdj - STATS_ORIGIN_HOUR) * 60 + m
+}
+function _relToHhmm(min: number): string {
+  const abs = (STATS_ORIGIN_HOUR * 60 + min) % (24 * 60)
+  const h = Math.floor(abs / 60)
+  const m = abs % 60
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`
+}
+
+interface DayStats {
+  start_time: string      // HH:MM (assoluto)
+  end_time: string        // HH:MM (assoluto, puo' essere giorno dopo)
+  lavoro_min: number
+  condotta_min: number
+  km: number
+  notturno: boolean
+}
+
+function computeDayStats(blocks: PdcBlockInput[] | undefined): DayStats {
+  const empty: DayStats = { start_time: "", end_time: "", lavoro_min: 0, condotta_min: 0, km: 0, notturno: false }
+  if (!blocks || blocks.length === 0) return empty
+
+  let firstStart: number | null = null
+  let lastEnd: number | null = null
+  let condotta = 0
+
+  for (const b of blocks) {
+    const sm = _toRelMin(b.start_time)
+    if (sm === null) continue
+    const em = _toRelMin(b.end_time) ?? sm  // blocchi puntuali (CVp/CVa) usano start
+    if (firstStart === null || sm < firstStart) firstStart = sm
+    if (lastEnd === null || em > lastEnd) lastEnd = em
+    if (b.block_type === "train" && em > sm) condotta += em - sm
+  }
+
+  if (firstStart === null || lastEnd === null) return empty
+
+  const lavoro = lastEnd - firstStart
+  // Notturno: se l'intervallo include qualche minuto tra 00:01 e 05:00 assoluti.
+  // In rel: 00:00 = 21*60=1260, 05:00 = 26*60=1560 → range [1261,1560].
+  const notturno = !(lastEnd <= 1260 || firstStart >= 1560)
+
+  return {
+    start_time: _relToHhmm(firstStart),
+    end_time: _relToHhmm(lastEnd),
+    lavoro_min: lavoro,
+    condotta_min: condotta,
+    km: 0,  // futuro: somma km dei segmenti
+    notturno,
+  }
+}
+
+function _fmtHm(min: number): string {
+  if (min <= 0) return "—"
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return `${h}h${m.toString().padStart(2, "0")}`
+}
+
+// Mini-componente: chip "Etichetta valore" leggera
+function Stat({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <span className="inline-flex items-baseline gap-1">
+      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
+      <span className={`text-[12px] font-semibold ${mono ? "font-mono tabular-nums" : ""}`}>{value}</span>
+    </span>
+  )
 }
 
 // ── Sottocomponente: Editor blocco ─────────────────────────────
@@ -290,6 +368,32 @@ function DayEditor({
   } | null>(null)
   const [actionToast, setActionToast] = useState("")
 
+  // ── Auto-calcolo stats della giornata dai blocchi ────────────
+  // Ogni volta che blocks cambia, ricalcolo start/end/lavoro/condotta/km/notturno
+  // e li propago via onChange. Confronto con i valori attuali per evitare loop.
+  useEffect(() => {
+    if (day.is_disponibile) return
+    const calc = computeDayStats(day.blocks)
+    const changed =
+      calc.start_time !== (day.start_time || "") ||
+      calc.end_time !== (day.end_time || "") ||
+      calc.lavoro_min !== (day.lavoro_min || 0) ||
+      calc.condotta_min !== (day.condotta_min || 0) ||
+      (calc.notturno ? 1 : 0) !== (day.notturno ? 1 : 0)
+    if (changed) {
+      onChange({
+        ...day,
+        start_time: calc.start_time,
+        end_time: calc.end_time,
+        lavoro_min: calc.lavoro_min,
+        condotta_min: calc.condotta_min,
+        // km non ricalcolato (no info nei blocchi); preservo se gia' settato
+        notturno: calc.notturno,
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [day.blocks, day.is_disponibile])
+
   const updateBlock = (i: number, b: PdcBlockInput) => {
     const blocks = [...(day.blocks || [])]
     blocks[i] = b
@@ -441,62 +545,64 @@ function DayEditor({
       {open && (
         <div className="p-3 space-y-2">
           {!day.is_disponibile && (
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <label className="flex items-center gap-2">
-                <span className="text-muted-foreground min-w-[70px]">Inizio:</span>
-                <input
-                  type="time"
-                  className="flex-1 px-2 py-1 border border-border rounded font-mono text-[11px]"
-                  value={day.start_time || ""}
-                  onChange={(e) => onChange({ ...day, start_time: e.target.value })}
-                />
-              </label>
-              <label className="flex items-center gap-2">
-                <span className="text-muted-foreground min-w-[70px]">Fine:</span>
-                <input
-                  type="time"
-                  className="flex-1 px-2 py-1 border border-border rounded font-mono text-[11px]"
-                  value={day.end_time || ""}
-                  onChange={(e) => onChange({ ...day, end_time: e.target.value })}
-                />
-              </label>
-
-              <label className="flex items-center gap-2">
-                <span className="text-muted-foreground min-w-[70px]">Lav min:</span>
-                <input
-                  type="number"
-                  className="flex-1 px-2 py-1 border border-border rounded text-[11px]"
-                  value={day.lavoro_min || 0}
-                  onChange={(e) => onChange({ ...day, lavoro_min: parseInt(e.target.value) || 0 })}
-                />
-              </label>
-              <label className="flex items-center gap-2">
-                <span className="text-muted-foreground min-w-[70px]">Cct min:</span>
-                <input
-                  type="number"
-                  className="flex-1 px-2 py-1 border border-border rounded text-[11px]"
-                  value={day.condotta_min || 0}
-                  onChange={(e) => onChange({ ...day, condotta_min: parseInt(e.target.value) || 0 })}
-                />
-              </label>
-              <label className="flex items-center gap-2">
-                <span className="text-muted-foreground min-w-[70px]">Km:</span>
-                <input
-                  type="number"
-                  className="flex-1 px-2 py-1 border border-border rounded text-[11px]"
-                  value={day.km || 0}
-                  onChange={(e) => onChange({ ...day, km: parseInt(e.target.value) || 0 })}
-                />
-              </label>
-              <label className="flex items-center gap-2">
-                <span className="text-muted-foreground min-w-[70px]">Rip min:</span>
-                <input
-                  type="number"
-                  className="flex-1 px-2 py-1 border border-border rounded text-[11px]"
-                  value={day.riposo_min || 0}
-                  onChange={(e) => onChange({ ...day, riposo_min: parseInt(e.target.value) || 0 })}
-                />
-              </label>
+            <div className="flex items-center flex-wrap gap-2 text-[11px] bg-muted/30 rounded-md px-3 py-2 border border-border-subtle">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Calcolato dai blocchi</span>
+              <span className="text-muted-foreground">·</span>
+              <Stat label="Inizio" value={day.start_time || "—"} mono />
+              <span className="text-muted-foreground">→</span>
+              <Stat label="Fine" value={day.end_time || "—"} mono />
+              <span className="text-muted-foreground">·</span>
+              <Stat label="Lav" value={_fmtHm(day.lavoro_min || 0)} mono />
+              <Stat label="Cct" value={_fmtHm(day.condotta_min || 0)} mono />
+              <Stat label="Km" value={(day.km || 0).toString()} mono />
+              {day.notturno && (
+                <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[10px] font-mono flex items-center gap-1">
+                  <Moon size={10} /> notturno
+                </span>
+              )}
+              <details className="ml-auto">
+                <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-foreground select-none">
+                  override manuale
+                </summary>
+                <div className="absolute z-10 mt-1 right-0 w-[420px] bg-card border border-border rounded-lg p-2 shadow-lg space-y-2">
+                  <p className="text-[10px] text-muted-foreground italic">
+                    Sovrascrivi i valori calcolati. Se modifichi qui, le modifiche resteranno
+                    fino a quando non cambi un blocco (che ricalcolera' tutto).
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex items-center gap-1 text-[11px]">
+                      <span className="text-muted-foreground min-w-[55px]">Inizio</span>
+                      <input type="time" value={day.start_time || ""} className="flex-1 px-1.5 py-0.5 border border-border rounded font-mono text-[11px]"
+                        onChange={(e) => onChange({ ...day, start_time: e.target.value })} />
+                    </label>
+                    <label className="flex items-center gap-1 text-[11px]">
+                      <span className="text-muted-foreground min-w-[55px]">Fine</span>
+                      <input type="time" value={day.end_time || ""} className="flex-1 px-1.5 py-0.5 border border-border rounded font-mono text-[11px]"
+                        onChange={(e) => onChange({ ...day, end_time: e.target.value })} />
+                    </label>
+                    <label className="flex items-center gap-1 text-[11px]">
+                      <span className="text-muted-foreground min-w-[55px]">Lav min</span>
+                      <input type="number" value={day.lavoro_min || 0} className="flex-1 px-1.5 py-0.5 border border-border rounded text-[11px]"
+                        onChange={(e) => onChange({ ...day, lavoro_min: parseInt(e.target.value) || 0 })} />
+                    </label>
+                    <label className="flex items-center gap-1 text-[11px]">
+                      <span className="text-muted-foreground min-w-[55px]">Cct min</span>
+                      <input type="number" value={day.condotta_min || 0} className="flex-1 px-1.5 py-0.5 border border-border rounded text-[11px]"
+                        onChange={(e) => onChange({ ...day, condotta_min: parseInt(e.target.value) || 0 })} />
+                    </label>
+                    <label className="flex items-center gap-1 text-[11px]">
+                      <span className="text-muted-foreground min-w-[55px]">Km</span>
+                      <input type="number" value={day.km || 0} className="flex-1 px-1.5 py-0.5 border border-border rounded text-[11px]"
+                        onChange={(e) => onChange({ ...day, km: parseInt(e.target.value) || 0 })} />
+                    </label>
+                    <label className="flex items-center gap-1 text-[11px]">
+                      <span className="text-muted-foreground min-w-[55px]">Rip min</span>
+                      <input type="number" value={day.riposo_min || 0} className="flex-1 px-1.5 py-0.5 border border-border rounded text-[11px]"
+                        onChange={(e) => onChange({ ...day, riposo_min: parseInt(e.target.value) || 0 })} />
+                    </label>
+                  </div>
+                </div>
+              </details>
             </div>
           )}
 
