@@ -40,6 +40,17 @@ export type GanttAction =
   | "history"
   | "delete"
 
+// Payload trasferito via HTML5 dataTransfer per drag cross-day
+// (MIME "application/x-colazione-block")
+export interface CrossDayDragPayload {
+  ganttId: string
+  block: PdcBlock
+  index: number
+  /** CVp/CVa agganciati al treno che si stanno spostando insieme */
+  linkedCvp?: PdcBlock
+  linkedCva?: PdcBlock
+}
+
 interface PdcGanttV2Props {
   blocks: PdcBlock[]
   startTime?: string
@@ -51,12 +62,38 @@ interface PdcGanttV2Props {
   ) => void
   /**
    * Click su una delle 8 icone dell'action bar contestuale che appare
-   * al click su una chip selezionata. Se non fornito, l'action bar
-   * rimane visiva ma le azioni scrivono solo un console.log (placeholder).
-   * In futuro le azioni distruttive (delete) richiederanno conferma UX
-   * lato parent.
+   * al click su una chip selezionata.
    */
   onAction?: (action: GanttAction, block: PdcBlock, index: number) => void
+  /**
+   * Identificativo univoco del Gantt (es. "turno-42-day-3-LMXGVSD").
+   * Serve al drag cross-day per sapere da dove parte e dove arriva.
+   * Se omesso, il drag cross-day e' disabilitato.
+   */
+  ganttId?: string
+  /**
+   * Un blocco dal Gantt e' stato rilasciato in questo Gantt.
+   * Il componente rimuove il blocco dal source (chiamando il parent),
+   * e il parent inserisce il blocco nel target. Questi due passi sono
+   * gestiti dal parent che ha la vista globale dei turni/giornate.
+   */
+  onCrossDayDrop?: (
+    payload: CrossDayDragPayload,
+    targetGanttId: string,
+    dropHourMinute: { hour: number; minute: number },
+  ) => void
+  /**
+   * Chiamato quando inizia un drag cross-day (HTML5 DnD). Utile per il
+   * parent per preparare lo stato "in spostamento" (source turn/day/idx).
+   */
+  onCrossDayDragStart?: (payload: CrossDayDragPayload) => void
+  /**
+   * Chiamato quando l'utente rimuove (via drag uscente) un blocco dal
+   * Gantt sorgente. Il parent deve rimuovere il blocco dai suoi blocks.
+   * Non e' necessario se onCrossDayDragStart + onCrossDayDrop gestiscono
+   * gia' il move atomicamente a livello parent (come PdcDepotPage).
+   */
+  onCrossDayRemove?: (index: number, withLinkedCvs: boolean) => void
   label?: string
   depot?: string
   height?: number
@@ -262,17 +299,24 @@ const ACTION_DEFS: { act: GanttAction; icon: string; title: string; danger?: boo
   { act: "delete",    icon: "×", title: "Elimina blocco", danger: true },
 ]
 
+const CROSS_DAY_MIME = "application/x-colazione-block"
+
 export function PdcGanttV2({
   blocks: rawBlocks,
   onBlockClick,
   onTimelineClick,
   onBlocksChange,
   onAction,
+  ganttId,
+  onCrossDayDrop,
+  onCrossDayDragStart,
+  onCrossDayRemove,
   height = 200,
   snapMinutes = 5,
   dragThresholdPx = 4,
   debug = false,
 }: PdcGanttV2Props) {
+  const crossDayEnabled = !!ganttId && (!!onCrossDayDrop || !!onCrossDayRemove || !!onCrossDayDragStart)
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
   const [tooltip, setTooltip] = useState<TooltipData | null>(null)
   const [overrides, setOverrides] = useState<
@@ -565,6 +609,87 @@ export function PdcGanttV2({
     [onBlocksChange, clientXToSvgX, startDrag],
   )
 
+  // ── Cross-day drag (HTML5 DnD) ─────────────────────────────────
+  // Un blocco con draggable=true puo' essere trascinato fuori dal
+  // proprio Gantt e rilasciato in un altro Gantt della stessa pagina.
+
+  const handleCrossDragStart = useCallback(
+    (e: React.DragEvent, idx: number) => {
+      if (!crossDayEnabled || !ganttId) return
+      // Cancella drag interno attivo (onMouseDown lo ha potuto avviare)
+      setDragState(null)
+      setOverrides({})
+
+      const block = blocks[idx]
+      if (!block) return
+      const linked = block.block_type === "train"
+        ? getLinkedCVs(blocks, idx)
+        : { cvPrev: null, cvNext: null }
+      const payload: CrossDayDragPayload = {
+        ganttId,
+        block,
+        index: idx,
+        linkedCvp: linked.cvPrev !== null ? blocks[linked.cvPrev] : undefined,
+        linkedCva: linked.cvNext !== null ? blocks[linked.cvNext] : undefined,
+      }
+      try {
+        e.dataTransfer.effectAllowed = "move"
+        e.dataTransfer.setData(CROSS_DAY_MIME, JSON.stringify(payload))
+        // Fallback text/plain (alcuni browser lo richiedono per iniziare il drag)
+        e.dataTransfer.setData("text/plain", `${block.block_type}:${block.train_id || block.vettura_id || ""}`)
+      } catch {
+        // no-op
+      }
+      if (onCrossDayDragStart) onCrossDayDragStart(payload)
+    },
+    [blocks, crossDayEnabled, ganttId, onCrossDayDragStart],
+  )
+
+  const handleCrossDragEnd = useCallback((e: React.DragEvent, idx: number) => {
+    // Se il drop e' riuscito in un altro Gantt (dropEffect === "move"),
+    // rimuovi il blocco (con CVp/CVa agganciati se treno) da questo Gantt.
+    if (!crossDayEnabled) return
+    if (e.dataTransfer.dropEffect === "move" && onCrossDayRemove) {
+      const b = blocks[idx]
+      const withLinkedCvs = b?.block_type === "train"
+      onCrossDayRemove(idx, withLinkedCvs)
+    }
+  }, [blocks, crossDayEnabled, onCrossDayRemove])
+
+  const handleSvgDragOver = useCallback((e: React.DragEvent) => {
+    if (!crossDayEnabled || !onCrossDayDrop) return
+    // Accetta il drop solo se il payload ha il MIME giusto
+    if (Array.from(e.dataTransfer.types).includes(CROSS_DAY_MIME)) {
+      e.preventDefault() // REQUIRED per permettere drop
+      e.dataTransfer.dropEffect = "move"
+    }
+  }, [crossDayEnabled, onCrossDayDrop])
+
+  const handleSvgDrop = useCallback((e: React.DragEvent) => {
+    if (!crossDayEnabled || !onCrossDayDrop || !ganttId) return
+    const raw = e.dataTransfer.getData(CROSS_DAY_MIME)
+    if (!raw) return
+    e.preventDefault()
+    let payload: CrossDayDragPayload
+    try { payload = JSON.parse(raw) } catch { return }
+
+    // Drop nello stesso Gantt d'origine → ignora (il drag interno
+    // gestisce gia' move temporale)
+    if (payload.ganttId === ganttId) return
+
+    // Calcola l'ora al punto di drop
+    const svgX = clientXToSvgX(e.clientX)
+    const minRel = svgXToMinRel(svgX)
+    const clamped = Math.max(0, Math.min(minRel, SPAN_HOURS * 60))
+    // Snap al granulo di minuti
+    const snapped = Math.round(clamped / snapMinutes) * snapMinutes
+    const abs = (ORIGIN_HOUR * 60 + snapped) % (24 * 60)
+    const hour = Math.floor(abs / 60)
+    const minute = Math.round(abs % 60)
+
+    onCrossDayDrop(payload, ganttId, { hour, minute })
+  }, [crossDayEnabled, onCrossDayDrop, ganttId, clientXToSvgX, svgXToMinRel, snapMinutes])
+
   if (isAvailable) {
     return (
       <div
@@ -593,6 +718,9 @@ export function PdcGanttV2({
         preserveAspectRatio="xMidYMid meet"
         className="block w-full select-none"
         style={{ overflow: "visible" }}
+        onDragOver={crossDayEnabled ? handleSvgDragOver : undefined}
+        onDrop={crossDayEnabled ? handleSvgDrop : undefined}
+        data-gantt-id={ganttId}
       >
         <defs>
           <linearGradient id="pdcGanttV2-trainGradient" x1="0" y1="0" x2="0" y2="1">
@@ -715,6 +843,13 @@ export function PdcGanttV2({
                   style={{ cursor: draggable ? "grab" : "pointer" }}
                   {...baseHandlers}
                   onMouseDown={(e) => draggable && handleTrainMouseDown(e, idx, x, w)}
+                  {...(crossDayEnabled
+                    ? {
+                        draggable: true,
+                        onDragStart: (e: React.DragEvent) => handleCrossDragStart(e, idx),
+                        onDragEnd:   (e: React.DragEvent) => handleCrossDragEnd(e, idx),
+                      }
+                    : {})}
                 />
                 {/* Resize handles invisibili */}
                 {draggable && (

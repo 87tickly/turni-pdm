@@ -345,30 +345,23 @@ export function PdcDepotPage() {
         </div>
       )}
 
-      {/* Banner "sposta blocco in altra giornata" */}
+      {/* Hint drag cross-day (compare solo durante un drag attivo) */}
       {moveState && (
-        <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3">
-          <ArrowRightLeft size={16} className="text-amber-700 shrink-0" />
-          <div className="flex-1 text-[12px]">
-            <span className="font-semibold">In spostamento:</span>{" "}
+        <div className="mb-3 p-2.5 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3">
+          <ArrowRightLeft size={14} className="text-blue-700 shrink-0" />
+          <div className="flex-1 text-[11px] text-blue-900">
+            <span className="font-semibold">Rilascia</span>{" "}
             <span className="font-mono">
               {moveState.block.train_id || moveState.block.vettura_id || "?"}
             </span>{" "}
-            <span className="text-muted-foreground">
+            <span className="text-blue-700/80">
               ({moveState.block.from_station} → {moveState.block.to_station})
-            </span>
-            {" — "}
-            <span className="text-muted-foreground">
-              Clicca{" "}
-              <span className="font-semibold text-amber-700">
-                "Incolla qui"
-              </span>{" "}
-              sulla giornata target
-            </span>
+            </span>{" "}
+            su un'altra giornata per spostarlo
           </div>
           <button
             onClick={() => setMoveState(null)}
-            className="text-[11px] px-2 py-1 rounded hover:bg-amber-100 flex items-center gap-1"
+            className="text-[11px] px-2 py-0.5 rounded hover:bg-blue-100 flex items-center gap-1"
           >
             <X size={11} /> Annulla
           </button>
@@ -450,21 +443,6 @@ export function PdcDepotPage() {
                               Lav {day.lavoro_min}m · Cct {day.condotta_min}m · Km {day.km}
                             </span>
                           </div>
-                          {/* Bottone "Incolla qui" visibile solo durante una move */}
-                          {moveState &&
-                            !(
-                              moveState.sourceTurnId === t.id &&
-                              moveState.sourceDayId === day.id
-                            ) && (
-                              <div className="mb-2 flex justify-end">
-                                <button
-                                  onClick={() => completeMove(t.id, day.id)}
-                                  className="text-[11px] px-3 py-1 rounded bg-amber-600 text-white hover:bg-amber-700 flex items-center gap-1"
-                                >
-                                  <ArrowRightLeft size={11} /> Incolla qui
-                                </button>
-                              </div>
-                            )}
                           {day.is_disponibile === 1 ? (
                             <p className="text-[11px] text-muted-foreground italic py-2 text-center">
                               Giornata disponibile / riposo
@@ -478,9 +456,17 @@ export function PdcDepotPage() {
                               onBlocksChange={(changes) =>
                                 updateDayBlocks(t.id, day.id, changes)
                               }
-                              onBlockClick={(block, idx) =>
-                                startMove(t.id, day.id, idx, block)
+                              ganttId={`${t.id}-${day.id}`}
+                              onCrossDayDragStart={(payload) =>
+                                startMove(t.id, day.id, payload.index, payload.block)
                               }
+                              onCrossDayDrop={(_payload, targetGanttId) => {
+                                const [targetTurnIdStr, targetDayIdStr] = targetGanttId.split("-")
+                                const targetTurnId = parseInt(targetTurnIdStr)
+                                const targetDayId = parseInt(targetDayIdStr)
+                                if (!Number.isFinite(targetTurnId) || !Number.isFinite(targetDayId)) return
+                                completeMove(targetTurnId, targetDayId)
+                              }}
                               height={200}
                             />
                           )}
