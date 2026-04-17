@@ -4,6 +4,88 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-17 — Fase 0 (mockup Gantt) chiusa · Fase 1 step 1 (schema + versioning DB) fatta
+
+### Contesto
+Ripartenza dopo i problemi aperti di ieri (vedi sezione più sotto).
+L'utente vuole ripensare Gantt + parser insieme, non patch su patch.
+
+### Fase 0 — mockup statici del Gantt ideale (in `mockups/`)
+
+Iterazioni fino al "target visivo finale" approvato:
+
+- `gantt-ideal-v1.html` — primo tentativo PDF-like generico (non piaciuto)
+- `gantt-ideal-v2.html` — Opzione C "moderna derivativa" (label verticali, periodicità sopra numero, minuti su 2 righe, stats come testata) — problemi di sovrapposizioni
+- `gantt-ideal-v3.html` — asse 52 px/h, stagger Y, rimosso riferimento M 704 → nostro modello **MDL-PdC v1.0**
+- `gantt-ideal-v4.html` — svolta: chip-card scura per i treni con numero+dest dentro, label orizzontali con stem su 3 livelli Y (no più rotate(-90))
+- `gantt-ideal-v5.html` — **FINALE**: chip-card **blu indigo** (gradient) invece di nero, testo adattivo (solo numero se chip<85px), interattività completa:
+  - hover → tooltip dinamico con dettagli
+  - click → selected (bordo azzurro solido) + action bar sopra
+  - click fuori / Esc → deseleziona
+  - 8 azioni nell'action bar con separatori visivi:
+    - ✎ Modifica, ↔ Sposta, ⧉ Duplica
+    - 🔗 Collega giro mat, ⚠ Warning ARTURO Live
+    - ↗ Apri dettaglio, ⧗ Storico ritardi
+    - × Elimina
+
+Preview dei mockup via `python3 -m http.server` su porta 8765
+(config in `.claude/launch.json` → nome `mockups`).
+
+### PDF reale disponibile
+
+`uploads/Turni PdC rete RFI dal 23 Febbraio 2026.pdf` (3.5 MB, **446 pagine**, **28 turni Condotta**).
+Non committato (uploads/ in .gitignore).
+Indice pag.1 confermato. Pag.2 AROR_C conferma tutti i casi attesi:
+- varianti `2 LMXGVS` + `2 D` (chiave composta)
+- giornata 4 LMXGV ha il pallino ● accessori maggiorati con nota "Tr.10205 tempi accessori maggiorati per preriscaldo"
+- casi S.COMP, REFEZ, CVp puntuali, vetture, treni commerciali
+
+### Fase 1 step 1 — schema PdC v2.1 (versioning + campi arricchiti)
+
+Doc: `docs/schema-pdc.md` (fonte unica di verità per parser+frontend+DB).
+
+Strategia sostituzione turni concordata: **i nuovi PDF sostituiscono i precedenti**
+(UI mostra solo gli attivi). Storico conservato via `superseded_by_import_id`
+come rete di sicurezza, non cancellato.
+
+**Migrazione DB aggiunta in `src/database/db.py`** (idempotente via `_run_migration`):
+
+- Nuova tabella `pdc_import` (id, filename, data_stampa, data_pubblicazione,
+  valido_dal/al, n_turni, n_pagine_pdf, imported_at, imported_by)
+- `pdc_turn`: +`import_id` FK, +`superseded_by_import_id` FK, +`data_pubblicazione`
+- `pdc_turn_day`: +`stazione_inizio`, +`stazione_fine` (capolinea ARON...ARON)
+- `pdc_block`: +`minuti_accessori`, +`fonte_orario` (parsed/interpolated/user),
+  +`cv_parent_block_id` (link CVp/CVa → treno padrone), +`accessori_note`
+- Indice `idx_pdc_turn_active` per query "turni attivi"
+
+Verifica su DB locale `turni.db`: tutte le 10 aggiunte presenti, zero perdita
+dati (DB locale era comunque vuoto, quello Railway riceverà la migrazione al
+prossimo deploy).
+
+### Prossimi step
+
+**Fase 1 step 2**: endpoint API upload PDF crea record `pdc_import`, collega
+turni creati, marca superseded i precedenti con stesso `(codice, impianto)`.
+Includere schermata diff prima della conferma sostituzione.
+
+**Fase 2**: parser v2 test-driven sul PDF reale. Fixture primaria = AROR_C.
+Obiettivo coverage 100% orari, uso minuti accessori (riga ausiliaria),
+cattura pallino `●`, varianti giornata per periodicità.
+
+**Fase 3**: sostituzione `frontend/src/components/PdcGantt.tsx` (908 righe)
+con nuovo componente che replica v5. API esterna invariata (blocchi,
+onBlocksChange) → `PdcBuilderPage` e `PdcDepotPage` non cambiano.
+
+**Fase 4**: azioni action bar reali + warning ARTURO Live + cross-day drag.
+
+### File modificati/creati questa sessione
+- `docs/schema-pdc.md` — NEW, specifica completa schema PdC v2.1
+- `src/database/db.py` — migrazione v2.1 (tabella pdc_import + colonne)
+- `mockups/gantt-ideal-v1..v5.html` — NEW, 5 iterazioni mockup statici
+- `.claude/launch.json` — aggiunta config server `mockups` (python3.12 http.server port 8765)
+
+---
+
 ## 2026-04-17 — STATO ATTUALE E PROBLEMI APERTI (punto di ripartenza)
 
 ### Fatto finora (commits recenti)

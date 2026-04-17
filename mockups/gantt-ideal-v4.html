@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>COLAZIONE — Gantt ideale v4 (treno come chip-card, label orizzontali multi-livello)</title>
+<style>
+  /* ============================================================
+     MOCKUP GANTT IDEALE v4
+     Svolta di design rispetto a v3:
+       - il TRENO non è più una linea anonima ma una CHIP-CARD
+         scura con numero + destinazione scritti DENTRO
+       - label dei blocchi secondari (vettura/refez/CVp) sono
+         ORIZZONTALI e disposte su 3 livelli Y (stagger)
+       - niente più rotate(-90) → zero sovrapposizioni
+       - ogni blocco ha una micro "zampa" (stem) che lo collega
+         alla sua etichetta
+     ============================================================ */
+
+  :root {
+    --bg:         #f6f7f9;
+    --surface:    #ffffff;
+    --ink:        #0b0d10;
+    --ink-2:      #353a42;
+    --ink-3:      #6b7280;
+    --ink-4:      #a1a6ae;
+    --line:       #e4e6ea;
+    --line-2:     #cdd1d7;
+
+    --train:      #111827;
+    --train-2:    #1f2937;
+    --coach:      #6b7280;
+    --meal:       #b45309;
+    --meal-bg:    #fef3c7;
+    --scomp:      #0e7490;
+    --scomp-bg:   #cffafe;
+    --cv:         #6d28d9;
+    --accessori:  #b91c1c;
+    --accent:     #1d4ed8;
+
+    --font-sans:  "Inter", ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
+    --font-mono:  "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.4;
+    padding: 24px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 1520px;
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  /* HEADER */
+  .turn-header {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 28px;
+    padding: 18px 26px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #fafbfc 0%, #ffffff 100%);
+    align-items: center;
+  }
+  .turn-header .brand {
+    font-weight: 800;
+    font-size: 14px;
+    letter-spacing: 0.14em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+  .turn-header .brand small {
+    display: block;
+    font-size: 9px;
+    color: var(--ink-4);
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    margin-top: 3px;
+  }
+  .turn-header .meta {
+    display: grid;
+    grid-template-columns: repeat(5, auto);
+    gap: 4px 40px;
+  }
+  .turn-header .meta .k {
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .turn-header .meta .v {
+    color: var(--ink);
+    font-weight: 700;
+    font-size: 15px;
+    font-family: var(--font-mono);
+    letter-spacing: -0.01em;
+  }
+  .turn-header .validity {
+    font-size: 11px;
+    color: var(--ink-3);
+    font-family: var(--font-mono);
+    text-align: right;
+    line-height: 1.5;
+  }
+  .turn-header .validity strong { color: var(--ink-2); font-weight: 600; }
+
+  /* RIGA GIORNATA */
+  .day-row {
+    display: grid;
+    grid-template-columns: 160px 1fr 220px;
+    border-top: 1px solid var(--line);
+    min-height: 200px;
+  }
+  .day-row:first-of-type { border-top: none; }
+
+  .day-meta {
+    padding: 16px 14px;
+    border-right: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: #fbfbfc;
+  }
+  .day-meta .period {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--ink);
+    line-height: 1;
+  }
+  .day-meta .period.holiday { color: #991b1b; }
+  .day-meta .num {
+    font-size: 40px;
+    font-weight: 800;
+    line-height: 1;
+    font-family: var(--font-mono);
+    letter-spacing: -0.04em;
+    margin-top: 4px;
+  }
+  .day-meta .prest {
+    margin-top: 10px;
+    font-size: 10px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+  }
+  .day-meta .prest .time {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: 0;
+    text-transform: none;
+    margin-top: 3px;
+    font-variant-numeric: tabular-nums;
+  }
+  .day-meta .prest .time .sep { color: var(--ink-4); margin: 0 4px; }
+  .day-meta .variant-hint {
+    margin-top: auto;
+    font-size: 10px;
+    color: var(--ink-4);
+    font-style: italic;
+  }
+
+  .gantt {
+    position: relative;
+    padding: 6px 16px 4px 16px;
+    overflow: hidden;
+  }
+
+  .stats {
+    padding: 14px 16px;
+    border-left: 1px solid var(--line);
+    background: #fbfbfc;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .stats .stats-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+  }
+  .stats .stats-row.head {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 4px;
+    margin-bottom: 6px;
+  }
+  .stats .stats-row .k {
+    font-family: var(--font-sans);
+    font-size: 10px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    text-align: center;
+  }
+  .stats .stats-row.values .k {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--ink);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    text-transform: none;
+  }
+  .stats .stats-row.values .k.warn { color: var(--accessori); }
+  .stats .stats-row.values .k.dim  { color: var(--ink-4); }
+
+  .day-available {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 80px;
+    background: repeating-linear-gradient(-45deg, #fafbfc 0 8px, #f2f3f5 8px 16px);
+  }
+  .day-available .badge {
+    background: var(--surface);
+    border: 1px dashed var(--line-2);
+    padding: 8px 18px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    color: var(--ink-2);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  /* ============================================================
+     SVG: layout Y
+       y=14-28   note accessori
+       y=30      chip level C (alto)
+       y=54      chip level B (medio)
+       y=78      chip level A (basso, più vicino al blocco)
+       y=95-117  area blocchi (22 tall)
+       y=130     asse
+       y=137-142 tick minori / 143 tick label
+       y=160     minuti main
+       y=175     minuti aux
+     ============================================================ */
+  svg.gantt-svg { display: block; width: 100%; }
+
+  /* Asse */
+  .axis-line { stroke: var(--line-2); stroke-width: 1.2; }
+  .axis-tick { stroke: var(--ink-4); stroke-width: 1; }
+  .axis-tick.major { stroke: var(--ink-2); stroke-width: 1.2; }
+  .axis-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    fill: var(--ink-3);
+    text-anchor: middle;
+    font-weight: 500;
+  }
+  .axis-label.major { fill: var(--ink-2); font-weight: 700; }
+  .night-band { fill: #0b0d10; fill-opacity: 0.03; }
+
+  /* --- BLOCCO TRENO (chip-card) --- */
+  .train-card {
+    fill: var(--train);
+    rx: 3;
+  }
+  .train-card-highlight {
+    fill: #ffffff;
+    fill-opacity: 0.06;
+    rx: 3;
+  }
+  .train-num {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    fill: #ffffff;
+    text-anchor: start;
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
+  }
+  .train-dest {
+    font-family: var(--font-sans);
+    font-size: 8.5px;
+    font-weight: 500;
+    fill: #ffffff;
+    fill-opacity: 0.65;
+    text-anchor: end;
+    letter-spacing: 0.02em;
+  }
+
+  /* --- BLOCCO VETTURA --- */
+  .coach-block {
+    fill: none;
+    stroke: var(--coach);
+    stroke-width: 1.2;
+    stroke-dasharray: 3 2;
+    rx: 2;
+  }
+  .coach-fill {
+    fill: var(--coach);
+    fill-opacity: 0.08;
+    rx: 2;
+  }
+
+  /* --- REFEZ --- */
+  .meal-block {
+    fill: var(--meal-bg);
+    stroke: var(--meal);
+    stroke-width: 1.2;
+    rx: 2;
+  }
+
+  /* --- CVp / CVa --- */
+  .cv-tick {
+    fill: var(--cv);
+    rx: 1;
+  }
+
+  /* --- S.COMP --- */
+  .scomp-block {
+    fill: var(--scomp-bg);
+    stroke: var(--scomp);
+    stroke-width: 1;
+    stroke-dasharray: 3 2;
+    rx: 3;
+  }
+  .scomp-label-inside {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    fill: var(--scomp);
+    text-anchor: middle;
+    letter-spacing: 0.06em;
+  }
+
+  /* --- CHIP LABEL (orizzontali) --- */
+  .chip-label {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    fill: var(--ink);
+    text-anchor: middle;
+    letter-spacing: -0.01em;
+  }
+  .chip-label.coach { fill: var(--coach); font-style: italic; font-weight: 500; }
+  .chip-label.meal  { fill: var(--meal); }
+  .chip-label.cv    { fill: var(--cv); font-weight: 700; }
+  .chip-label .staz { font-size: 8.5px; font-weight: 400; fill: var(--ink-3); }
+  .chip-label.coach .staz { fill: var(--coach); fill-opacity: 0.7; }
+  .chip-label.meal  .staz { fill: var(--meal); fill-opacity: 0.7; }
+  .chip-label.cv    .staz { fill: var(--cv); fill-opacity: 0.7; }
+
+  /* --- STEM (zampa di collegamento etichetta-blocco) --- */
+  .chip-stem {
+    stroke: var(--ink-4);
+    stroke-width: 0.8;
+    stroke-dasharray: 1 1.5;
+  }
+  .chip-stem.coach { stroke: var(--coach); }
+  .chip-stem.meal  { stroke: var(--meal); }
+  .chip-stem.cv    { stroke: var(--cv); }
+
+  /* --- CAPOLINEA (stazione) --- */
+  .edge-station {
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 700;
+    fill: var(--ink-2);
+    letter-spacing: 0.04em;
+  }
+  .edge-station.left  { text-anchor: end; }
+  .edge-station.right { text-anchor: start; }
+
+  /* --- MINUTI --- */
+  .minute-main {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    fill: var(--ink);
+    text-anchor: middle;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .minute-aux {
+    font-family: var(--font-mono);
+    font-size: 8px;
+    fill: var(--ink-4);
+    text-anchor: middle;
+    font-style: italic;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* --- NOTE accessori --- */
+  .accessori-note {
+    font-family: var(--font-sans);
+    font-size: 9px;
+    fill: var(--accessori);
+    font-style: italic;
+    font-weight: 500;
+  }
+
+  /* LEGENDA */
+  .legend {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    padding: 14px 26px;
+    border-top: 1px solid var(--line);
+    background: #fafbfc;
+    font-size: 11px;
+    color: var(--ink-3);
+  }
+  .legend .item { display: flex; align-items: center; gap: 7px; }
+  .legend .sw-train {
+    display: inline-flex; align-items: center; justify-content: flex-start;
+    width: 52px; height: 14px; background: var(--train); border-radius: 3px;
+    font-family: var(--font-mono); font-size: 8px; font-weight: 700; color: #fff;
+    padding-left: 4px; letter-spacing: 0;
+  }
+  .legend .sw-coach {
+    display: inline-block; width: 28px; height: 10px;
+    background: rgba(107,114,128,0.08);
+    border: 1px dashed var(--coach); border-radius: 2px;
+  }
+  .legend .sw-meal {
+    display: inline-block; width: 20px; height: 10px;
+    background: var(--meal-bg); border: 1.2px solid var(--meal); border-radius: 2px;
+  }
+  .legend .sw-cv {
+    display: inline-block; width: 4px; height: 12px;
+    background: var(--cv); border-radius: 1px;
+  }
+  .legend .sw-scomp {
+    display: inline-block; width: 34px; height: 12px;
+    background: var(--scomp-bg); border: 1px dashed var(--scomp); border-radius: 2px;
+  }
+  .legend .sw-dot {
+    display: inline-block; width: 8px; height: 8px;
+    background: var(--accessori); border-radius: 50%;
+  }
+
+  .mockup-note {
+    max-width: 1520px;
+    margin: 0 auto 18px;
+    padding: 12px 20px;
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 10px;
+    font-size: 12px;
+    color: #075985;
+  }
+  .mockup-note strong { color: #0c4a6e; }
+  .mockup-note code { background: rgba(255,255,255,0.7); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+
+</style>
+</head>
+<body>
+
+<div class="mockup-note">
+  <strong>MOCKUP v4 — svolta di design</strong>
+  &nbsp;·&nbsp; il treno è una <strong>chip-card scura</strong> con numero + destinazione dentro (non più linea anonima)
+  &nbsp;·&nbsp; label blocchi secondari <strong>orizzontali</strong> su 3 livelli Y con "zampa" di collegamento
+  &nbsp;·&nbsp; niente più <code>rotate(-90)</code> → zero sovrapposizioni
+</div>
+
+<div class="page">
+
+  <!-- HEADER -->
+  <div class="turn-header">
+    <div class="brand">COLAZIONE<small>MDL-PdC · v1.0</small></div>
+    <div class="meta">
+      <div><div class="k">Impianto</div><div class="v">ARONA</div></div>
+      <div><div class="k">Turno</div><div class="v">AROR_C</div></div>
+      <div><div class="k">Planning</div><div class="v">65053</div></div>
+      <div><div class="k">Profilo</div><div class="v">Condotta</div></div>
+      <div><div class="k">Giornate</div><div class="v">6</div></div>
+    </div>
+    <div class="validity">
+      Valido <strong>23/02/2026</strong><br>→ <strong>12/12/2026</strong>
+    </div>
+  </div>
+
+  <!--
+    Sistema di coordinate v4:
+      px_per_hour = 52, origin_x = 20
+      x(h,m) = 20 + ((h-3+24)%24)*52 + m/60*52
+      viewBox 0 0 1300 200
+
+      Y LAYOUT:
+        y=12       note accessori
+        y=30       chip C top (label Y baseline)
+        y=54       chip B
+        y=78       chip A
+        y=95-117   area blocchi principali (22 tall)
+        y=130      asse
+        y=137/143  tick/label
+        y=160      minuti main
+        y=175      minuti aux
+
+      Tick X (stesse posizioni di v3):
+        3→20   4→72   5→124  6→176  7→228  8→280  9→332  10→384
+        11→436 12→488 13→540 14→592 15→644 16→696 17→748 18→800
+        19→852 20→904 21→956 22→1008 23→1060 24→1112 1→1164 2→1216 3→1268
+
+      Staggering chip labels:
+        - calcolo manuale: se il chip i-esimo sovrappone
+          orizzontalmente il precedente, sale di un livello
+  -->
+
+  <!-- ============================================================
+       GIORNATA 1 — LMXGVSD  [18:20] → [00:25]
+         Vettura (2434 ARON→DOMO  18:25→19:04   → chip A
+         REFEZ DOMO               19:40→20:07   → chip B (collide con A)
+         CVp 2434 DOMO            20:20         → chip C (collide con B)
+         Treno 10243 DOMO→Mlpg    20:20→22:24   → DENTRO bar
+         Treno 10246 Mlpg→ARON    22:40→23:45   → DENTRO bar
+       ============================================================ -->
+  <div class="day-row">
+    <div class="day-meta">
+      <div class="period">LMXGVSD</div>
+      <div class="num">1</div>
+      <div class="prest">
+        Prestazione
+        <span class="time">18:20<span class="sep">→</span>00:25</span>
+      </div>
+      <div class="variant-hint">tutti i giorni</div>
+    </div>
+
+    <div class="gantt">
+      <svg class="gantt-svg" viewBox="0 0 1300 200" preserveAspectRatio="xMidYMid meet">
+
+        <!-- Fascia notte -->
+        <rect class="night-band" x="1112" y="120" width="156" height="20"/>
+
+        <!-- Asse -->
+        <line class="axis-line" x1="20" y1="130" x2="1268" y2="130"/>
+
+        <!-- Tick -->
+        <g>
+          <line class="axis-tick major" x1="20"   y1="125" x2="20"   y2="135"/><text class="axis-label major" x="20"   y="148">3</text>
+          <line class="axis-tick"       x1="72"   y1="127" x2="72"   y2="133"/><text class="axis-label" x="72"   y="148">4</text>
+          <line class="axis-tick"       x1="124"  y1="127" x2="124"  y2="133"/><text class="axis-label" x="124"  y="148">5</text>
+          <line class="axis-tick"       x1="176"  y1="127" x2="176"  y2="133"/><text class="axis-label" x="176"  y="148">6</text>
+          <line class="axis-tick"       x1="228"  y1="127" x2="228"  y2="133"/><text class="axis-label" x="228"  y="148">7</text>
+          <line class="axis-tick"       x1="280"  y1="127" x2="280"  y2="133"/><text class="axis-label" x="280"  y="148">8</text>
+          <line class="axis-tick"       x1="332"  y1="127" x2="332"  y2="133"/><text class="axis-label" x="332"  y="148">9</text>
+          <line class="axis-tick"       x1="384"  y1="127" x2="384"  y2="133"/><text class="axis-label" x="384"  y="148">10</text>
+          <line class="axis-tick"       x1="436"  y1="127" x2="436"  y2="133"/><text class="axis-label" x="436"  y="148">11</text>
+          <line class="axis-tick major" x1="488"  y1="125" x2="488"  y2="135"/><text class="axis-label major" x="488"  y="148">12</text>
+          <line class="axis-tick"       x1="540"  y1="127" x2="540"  y2="133"/><text class="axis-label" x="540"  y="148">13</text>
+          <line class="axis-tick"       x1="592"  y1="127" x2="592"  y2="133"/><text class="axis-label" x="592"  y="148">14</text>
+          <line class="axis-tick"       x1="644"  y1="127" x2="644"  y2="133"/><text class="axis-label" x="644"  y="148">15</text>
+          <line class="axis-tick"       x1="696"  y1="127" x2="696"  y2="133"/><text class="axis-label" x="696"  y="148">16</text>
+          <line class="axis-tick"       x1="748"  y1="127" x2="748"  y2="133"/><text class="axis-label" x="748"  y="148">17</text>
+          <line class="axis-tick"       x1="800"  y1="127" x2="800"  y2="133"/><text class="axis-label" x="800"  y="148">18</text>
+          <line class="axis-tick"       x1="852"  y1="127" x2="852"  y2="133"/><text class="axis-label" x="852"  y="148">19</text>
+          <line class="axis-tick"       x1="904"  y1="127" x2="904"  y2="133"/><text class="axis-label" x="904"  y="148">20</text>
+          <line class="axis-tick"       x1="956"  y1="127" x2="956"  y2="133"/><text class="axis-label" x="956"  y="148">21</text>
+          <line class="axis-tick"       x1="1008" y1="127" x2="1008" y2="133"/><text class="axis-label" x="1008" y="148">22</text>
+          <line class="axis-tick"       x1="1060" y1="127" x2="1060" y2="133"/><text class="axis-label" x="1060" y="148">23</text>
+          <line class="axis-tick major" x1="1112" y1="123" x2="1112" y2="137"/><text class="axis-label major" x="1112" y="148">24</text>
+          <line class="axis-tick"       x1="1164" y1="127" x2="1164" y2="133"/><text class="axis-label" x="1164" y="148">1</text>
+          <line class="axis-tick"       x1="1216" y1="127" x2="1216" y2="133"/><text class="axis-label" x="1216" y="148">2</text>
+          <line class="axis-tick major" x1="1268" y1="125" x2="1268" y2="135"/><text class="axis-label major" x="1268" y="148">3</text>
+        </g>
+
+        <!--
+          Posizioni giornata 1:
+            18:25 = 821.67   19:04 = 855.47   19:40 = 886.67   20:07 = 910.07
+            20:20 = 921.33   22:24 = 1028.8   22:40 = 1042.67  23:45 = 1099
+          Area blocchi: y=95-117 (h=22)
+        -->
+
+        <!-- Capolinea sinistro (fuori dal cluster, orizzontale) -->
+        <text class="edge-station left" x="812" y="111">ARON</text>
+
+        <!-- ============ BLOCCO VETTURA (2434 ARON→DOMO): 18:25 → 19:04 ============ -->
+        <rect class="coach-fill"  x="821.67" y="101" width="33.8" height="10"/>
+        <rect class="coach-block" x="821.67" y="101" width="33.8" height="10"/>
+        <!-- chip LEVEL A (y=78, basso vicino al blocco) -->
+        <line class="chip-stem coach" x1="838.57" y1="82" x2="838.57" y2="100"/>
+        <text class="chip-label coach" x="838.57" y="78">(2434 <tspan class="staz">DOMO</tspan></text>
+
+        <!-- ============ REFEZ DOMO: 19:40 → 20:07 ============ -->
+        <rect class="meal-block" x="886.67" y="101" width="23.4" height="10"/>
+        <!-- chip LEVEL B (y=54, medio) -->
+        <line class="chip-stem meal" x1="898.37" y1="58" x2="898.37" y2="100"/>
+        <text class="chip-label meal" x="898.37" y="54">REFEZ <tspan class="staz">DOMO</tspan></text>
+
+        <!-- ============ CVp 2434 DOMO: 20:20 (puntuale) ============ -->
+        <rect class="cv-tick" x="919.83" y="93" width="3" height="22"/>
+        <!-- chip LEVEL C (y=30, alto) -->
+        <line class="chip-stem cv" x1="921.33" y1="34" x2="921.33" y2="92"/>
+        <text class="chip-label cv" x="921.33" y="30">CVp 2434 <tspan class="staz">DOMO</tspan></text>
+
+        <!-- ============ TRENO 10243 DOMO → Mlpg: 20:20 → 22:24 ============ -->
+        <!-- Width = 1028.8 - 921.33 = 107.47 → spazio per numero + dest -->
+        <rect class="train-card"           x="921.33" y="95" width="107.47" height="22"/>
+        <rect class="train-card-highlight" x="921.33" y="95" width="107.47" height="10"/>
+        <text class="train-num"  x="927" y="109">10243</text>
+        <text class="train-dest" x="1024" y="109">→ Mlpg</text>
+
+        <!-- ============ TRENO 10246 Mlpg → ARON: 22:40 → 23:45 ============ -->
+        <!-- Width = 1099 - 1042.67 = 56.33 → numero solo, dest tagliata se stretta -->
+        <rect class="train-card"           x="1042.67" y="95" width="56.33" height="22"/>
+        <rect class="train-card-highlight" x="1042.67" y="95" width="56.33" height="10"/>
+        <text class="train-num"  x="1048" y="109">10246</text>
+        <text class="train-dest" x="1094" y="109">ARON</text>
+
+        <!-- Capolinea destro -->
+        <text class="edge-station right" x="1108" y="111">ARON</text>
+
+        <!-- MINUTI MAIN (y=160) -->
+        <text class="minute-main" x="821.67" y="160">25</text>
+        <text class="minute-main" x="855.47" y="160">04</text>
+        <text class="minute-main" x="886.67" y="160">40</text>
+        <text class="minute-main" x="910.07" y="160">07</text>
+        <text class="minute-main" x="921.33" y="160">20</text>
+        <text class="minute-main" x="1028.8" y="160">24</text>
+        <text class="minute-main" x="1042.67" y="160">40</text>
+        <text class="minute-main" x="1099"    y="160">45</text>
+
+        <!-- MINUTI AUX (y=175) -->
+        <text class="minute-aux" x="817.33" y="175">5</text>
+        <text class="minute-aux" x="886.67" y="175">27</text>
+        <text class="minute-aux" x="921.33" y="175">5</text>
+        <text class="minute-aux" x="1099"   y="175">10</text>
+
+      </svg>
+    </div>
+
+    <div class="stats">
+      <div class="stats-row head">
+        <div class="k">Lav</div><div class="k">Cct</div><div class="k">Km</div><div class="k">Not</div><div class="k">Rip</div>
+      </div>
+      <div class="stats-row values">
+        <div class="k">06:05</div><div class="k">03:22</div><div class="k">184</div><div class="k warn">sì</div><div class="k">15:45</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       GIORNATA 2 — LMXGVS  [16:10] → [23:25]
+         (10233 ARON→Mlpg    16:15→17:20   chip A
+         REFEZ Mlpg           17:30→18:40   chip B
+         CVp 10235 ARON       18:40         chip C
+         10235 Mlpg→ARON      18:45→19:45   bar (stessa X del CVp, ma offset)
+         10238 ARON→?         20:15→21:20   bar
+         10241 ?→Mlpg         21:40→22:45   bar
+         10244 Mlpg→ARON      22:45→23:25   bar
+       ============================================================ -->
+  <div class="day-row">
+    <div class="day-meta">
+      <div class="period">LMXGVS</div>
+      <div class="num">2</div>
+      <div class="prest">
+        Prestazione
+        <span class="time">16:10<span class="sep">→</span>23:25</span>
+      </div>
+      <div class="variant-hint">feriale + sabato</div>
+    </div>
+
+    <div class="gantt">
+      <svg class="gantt-svg" viewBox="0 0 1300 200" preserveAspectRatio="xMidYMid meet">
+        <line class="axis-line" x1="20" y1="130" x2="1268" y2="130"/>
+        <g>
+          <line class="axis-tick major" x1="20"   y1="125" x2="20"   y2="135"/><text class="axis-label major" x="20"   y="148">3</text>
+          <line class="axis-tick"       x1="72"   y1="127" x2="72"   y2="133"/><text class="axis-label" x="72"   y="148">4</text>
+          <line class="axis-tick"       x1="124"  y1="127" x2="124"  y2="133"/><text class="axis-label" x="124"  y="148">5</text>
+          <line class="axis-tick"       x1="176"  y1="127" x2="176"  y2="133"/><text class="axis-label" x="176"  y="148">6</text>
+          <line class="axis-tick"       x1="228"  y1="127" x2="228"  y2="133"/><text class="axis-label" x="228"  y="148">7</text>
+          <line class="axis-tick"       x1="280"  y1="127" x2="280"  y2="133"/><text class="axis-label" x="280"  y="148">8</text>
+          <line class="axis-tick"       x1="332"  y1="127" x2="332"  y2="133"/><text class="axis-label" x="332"  y="148">9</text>
+          <line class="axis-tick"       x1="384"  y1="127" x2="384"  y2="133"/><text class="axis-label" x="384"  y="148">10</text>
+          <line class="axis-tick"       x1="436"  y1="127" x2="436"  y2="133"/><text class="axis-label" x="436"  y="148">11</text>
+          <line class="axis-tick major" x1="488"  y1="125" x2="488"  y2="135"/><text class="axis-label major" x="488"  y="148">12</text>
+          <line class="axis-tick"       x1="540"  y1="127" x2="540"  y2="133"/><text class="axis-label" x="540"  y="148">13</text>
+          <line class="axis-tick"       x1="592"  y1="127" x2="592"  y2="133"/><text class="axis-label" x="592"  y="148">14</text>
+          <line class="axis-tick"       x1="644"  y1="127" x2="644"  y2="133"/><text class="axis-label" x="644"  y="148">15</text>
+          <line class="axis-tick"       x1="696"  y1="127" x2="696"  y2="133"/><text class="axis-label" x="696"  y="148">16</text>
+          <line class="axis-tick"       x1="748"  y1="127" x2="748"  y2="133"/><text class="axis-label" x="748"  y="148">17</text>
+          <line class="axis-tick"       x1="800"  y1="127" x2="800"  y2="133"/><text class="axis-label" x="800"  y="148">18</text>
+          <line class="axis-tick"       x1="852"  y1="127" x2="852"  y2="133"/><text class="axis-label" x="852"  y="148">19</text>
+          <line class="axis-tick"       x1="904"  y1="127" x2="904"  y2="133"/><text class="axis-label" x="904"  y="148">20</text>
+          <line class="axis-tick"       x1="956"  y1="127" x2="956"  y2="133"/><text class="axis-label" x="956"  y="148">21</text>
+          <line class="axis-tick"       x1="1008" y1="127" x2="1008" y2="133"/><text class="axis-label" x="1008" y="148">22</text>
+          <line class="axis-tick"       x1="1060" y1="127" x2="1060" y2="133"/><text class="axis-label" x="1060" y="148">23</text>
+          <line class="axis-tick major" x1="1112" y1="123" x2="1112" y2="137"/><text class="axis-label major" x="1112" y="148">24</text>
+          <line class="axis-tick"       x1="1164" y1="127" x2="1164" y2="133"/><text class="axis-label" x="1164" y="148">1</text>
+          <line class="axis-tick"       x1="1216" y1="127" x2="1216" y2="133"/><text class="axis-label" x="1216" y="148">2</text>
+          <line class="axis-tick major" x1="1268" y1="125" x2="1268" y2="135"/><text class="axis-label major" x="1268" y="148">3</text>
+        </g>
+
+        <!--
+          Posizioni giornata 2 LMXGVS:
+            16:15 = 709      17:20 = 765.33   17:30 = 774     18:40 = 834.67
+            18:45 = 839      19:45 = 891      20:15 = 917     21:20 = 973.33
+            21:40 = 990.67   22:45 = 1047     23:25 = 1081.67
+        -->
+
+        <text class="edge-station left" x="700" y="111">ARON</text>
+
+        <!-- Vettura (10233 ARON→Mlpg: 16:15 → 17:20 -->
+        <rect class="coach-fill"  x="709" y="101" width="56.33" height="10"/>
+        <rect class="coach-block" x="709" y="101" width="56.33" height="10"/>
+        <line class="chip-stem coach" x1="737.17" y1="82" x2="737.17" y2="100"/>
+        <text class="chip-label coach" x="737.17" y="78">(10233 <tspan class="staz">Mlpg</tspan></text>
+
+        <!-- Refezione Mlpg: 17:30 → 18:40 -->
+        <rect class="meal-block" x="774" y="101" width="60.67" height="10"/>
+        <line class="chip-stem meal" x1="804.33" y1="58" x2="804.33" y2="100"/>
+        <text class="chip-label meal" x="804.33" y="54">REFEZ <tspan class="staz">Mlpg</tspan></text>
+
+        <!-- CVp 10235 ARON: 18:40 (puntuale) -->
+        <rect class="cv-tick" x="833.17" y="93" width="3" height="22"/>
+        <line class="chip-stem cv" x1="834.67" y1="34" x2="834.67" y2="92"/>
+        <text class="chip-label cv" x="834.67" y="30">CVp 10235 <tspan class="staz">ARON</tspan></text>
+
+        <!-- Treno 10235 Mlpg → ARON: 18:45 → 19:45 -->
+        <rect class="train-card"           x="839" y="95" width="52" height="22"/>
+        <rect class="train-card-highlight" x="839" y="95" width="52" height="10"/>
+        <text class="train-num"  x="844" y="109">10235</text>
+        <text class="train-dest" x="886" y="109">ARON</text>
+
+        <!-- Treno 10238 ARON → (?): 20:15 → 21:20 -->
+        <rect class="train-card"           x="917" y="95" width="56.33" height="22"/>
+        <rect class="train-card-highlight" x="917" y="95" width="56.33" height="10"/>
+        <text class="train-num"  x="922" y="109">10238</text>
+        <text class="train-dest" x="968" y="109">ARON</text>
+
+        <!-- Treno 10241 Mlpg: 21:40 → 22:45 -->
+        <rect class="train-card"           x="990.67" y="95" width="56.33" height="22"/>
+        <rect class="train-card-highlight" x="990.67" y="95" width="56.33" height="10"/>
+        <text class="train-num"  x="996" y="109">10241</text>
+        <text class="train-dest" x="1042" y="109">Mlpg</text>
+
+        <!-- Treno 10244 Mlpg→ARON: 22:45 → 23:25 -->
+        <rect class="train-card"           x="1047" y="95" width="34.67" height="22"/>
+        <rect class="train-card-highlight" x="1047" y="95" width="34.67" height="10"/>
+        <text class="train-num"  x="1050" y="109" style="font-size:9px">10244</text>
+
+        <text class="edge-station right" x="1090" y="111">ARON</text>
+
+        <!-- MINUTI MAIN -->
+        <text class="minute-main" x="709"     y="160">15</text>
+        <text class="minute-main" x="765.33"  y="160">20</text>
+        <text class="minute-main" x="774"     y="160">30</text>
+        <text class="minute-main" x="834.67"  y="160">40</text>
+        <text class="minute-main" x="891"     y="160">45</text>
+        <text class="minute-main" x="917"     y="160">15</text>
+        <text class="minute-main" x="973.33"  y="160">20</text>
+        <text class="minute-main" x="990.67"  y="160">40</text>
+        <text class="minute-main" x="1047"    y="160">45</text>
+        <text class="minute-main" x="1081.67" y="160">25</text>
+
+        <!-- MINUTI AUX -->
+        <text class="minute-aux" x="705"    y="175">5</text>
+        <text class="minute-aux" x="834.67" y="175">10</text>
+        <text class="minute-aux" x="917"    y="175">5</text>
+        <text class="minute-aux" x="990.67" y="175">5</text>
+        <text class="minute-aux" x="1081.67" y="175">10</text>
+
+      </svg>
+    </div>
+
+    <div class="stats">
+      <div class="stats-row head">
+        <div class="k">Lav</div><div class="k">Cct</div><div class="k">Km</div><div class="k">Not</div><div class="k">Rip</div>
+      </div>
+      <div class="stats-row values">
+        <div class="k">07:15</div><div class="k">03:15</div><div class="k">193</div><div class="k dim">no</div><div class="k">13:31</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       GIORNATA 2 — D   S.COMP ARON
+       ============================================================ -->
+  <div class="day-row">
+    <div class="day-meta">
+      <div class="period holiday">D</div>
+      <div class="num">2</div>
+      <div class="prest">
+        Prestazione
+        <span class="time">16:10<span class="sep">→</span>23:25</span>
+      </div>
+      <div class="variant-hint">domenica + festivo</div>
+    </div>
+
+    <div class="gantt">
+      <svg class="gantt-svg" viewBox="0 0 1300 200" preserveAspectRatio="xMidYMid meet">
+        <rect class="night-band" x="1112" y="120" width="156" height="20"/>
+        <line class="axis-line" x1="20" y1="130" x2="1268" y2="130"/>
+        <g>
+          <line class="axis-tick major" x1="20"   y1="125" x2="20"   y2="135"/><text class="axis-label major" x="20"   y="148">3</text>
+          <line class="axis-tick"       x1="72"   y1="127" x2="72"   y2="133"/><text class="axis-label" x="72"   y="148">4</text>
+          <line class="axis-tick"       x1="124"  y1="127" x2="124"  y2="133"/><text class="axis-label" x="124"  y="148">5</text>
+          <line class="axis-tick"       x1="176"  y1="127" x2="176"  y2="133"/><text class="axis-label" x="176"  y="148">6</text>
+          <line class="axis-tick"       x1="228"  y1="127" x2="228"  y2="133"/><text class="axis-label" x="228"  y="148">7</text>
+          <line class="axis-tick"       x1="280"  y1="127" x2="280"  y2="133"/><text class="axis-label" x="280"  y="148">8</text>
+          <line class="axis-tick"       x1="332"  y1="127" x2="332"  y2="133"/><text class="axis-label" x="332"  y="148">9</text>
+          <line class="axis-tick"       x1="384"  y1="127" x2="384"  y2="133"/><text class="axis-label" x="384"  y="148">10</text>
+          <line class="axis-tick"       x1="436"  y1="127" x2="436"  y2="133"/><text class="axis-label" x="436"  y="148">11</text>
+          <line class="axis-tick major" x1="488"  y1="125" x2="488"  y2="135"/><text class="axis-label major" x="488"  y="148">12</text>
+          <line class="axis-tick"       x1="540"  y1="127" x2="540"  y2="133"/><text class="axis-label" x="540"  y="148">13</text>
+          <line class="axis-tick"       x1="592"  y1="127" x2="592"  y2="133"/><text class="axis-label" x="592"  y="148">14</text>
+          <line class="axis-tick"       x1="644"  y1="127" x2="644"  y2="133"/><text class="axis-label" x="644"  y="148">15</text>
+          <line class="axis-tick"       x1="696"  y1="127" x2="696"  y2="133"/><text class="axis-label" x="696"  y="148">16</text>
+          <line class="axis-tick"       x1="748"  y1="127" x2="748"  y2="133"/><text class="axis-label" x="748"  y="148">17</text>
+          <line class="axis-tick"       x1="800"  y1="127" x2="800"  y2="133"/><text class="axis-label" x="800"  y="148">18</text>
+          <line class="axis-tick"       x1="852"  y1="127" x2="852"  y2="133"/><text class="axis-label" x="852"  y="148">19</text>
+          <line class="axis-tick"       x1="904"  y1="127" x2="904"  y2="133"/><text class="axis-label" x="904"  y="148">20</text>
+          <line class="axis-tick"       x1="956"  y1="127" x2="956"  y2="133"/><text class="axis-label" x="956"  y="148">21</text>
+          <line class="axis-tick"       x1="1008" y1="127" x2="1008" y2="133"/><text class="axis-label" x="1008" y="148">22</text>
+          <line class="axis-tick"       x1="1060" y1="127" x2="1060" y2="133"/><text class="axis-label" x="1060" y="148">23</text>
+          <line class="axis-tick major" x1="1112" y1="123" x2="1112" y2="137"/><text class="axis-label major" x="1112" y="148">24</text>
+          <line class="axis-tick"       x1="1164" y1="127" x2="1164" y2="133"/><text class="axis-label" x="1164" y="148">1</text>
+          <line class="axis-tick"       x1="1216" y1="127" x2="1216" y2="133"/><text class="axis-label" x="1216" y="148">2</text>
+          <line class="axis-tick major" x1="1268" y1="125" x2="1268" y2="135"/><text class="axis-label major" x="1268" y="148">3</text>
+        </g>
+
+        <text class="edge-station left" x="697" y="111">ARON</text>
+
+        <!-- S.COMP ARON: 16:10 (704.67) → 23:25 (1081.67), width = 377 -->
+        <rect class="scomp-block" x="704.67" y="99" width="377" height="18"/>
+        <text class="scomp-label-inside" x="893" y="112">S.COMP ARON</text>
+
+        <text class="edge-station right" x="1090" y="111">ARON</text>
+
+        <text class="minute-main" x="704.67"  y="160">10</text>
+        <text class="minute-main" x="1081.67" y="160">25</text>
+
+      </svg>
+    </div>
+
+    <div class="stats">
+      <div class="stats-row head">
+        <div class="k">Lav</div><div class="k">Cct</div><div class="k">Km</div><div class="k">Not</div><div class="k">Rip</div>
+      </div>
+      <div class="stats-row values">
+        <div class="k">07:15</div><div class="k dim">00:00</div><div class="k dim">0</div><div class="k dim">no</div><div class="k">13:35</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       GIORNATA 6 — Disponibile
+       ============================================================ -->
+  <div class="day-row" style="min-height:100px;">
+    <div class="day-meta">
+      <div class="period">LMXGVSD</div>
+      <div class="num">6</div>
+      <div class="prest" style="color:var(--ink-4)">—</div>
+      <div class="variant-hint">riposo</div>
+    </div>
+    <div class="day-available">
+      <div class="badge">● Disponibile · riposo a casa</div>
+    </div>
+    <div class="stats" style="color:var(--ink-4)">
+      <div class="stats-row head">
+        <div class="k">Lav</div><div class="k">Cct</div><div class="k">Km</div><div class="k">Not</div><div class="k">Rip</div>
+      </div>
+      <div class="stats-row values">
+        <div class="k dim">—</div><div class="k dim">—</div><div class="k dim">—</div><div class="k dim">—</div><div class="k dim">24h+</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LEGENDA -->
+  <div class="legend">
+    <div class="item"><span class="sw-train">10243</span> Treno commerciale (numero dentro)</div>
+    <div class="item"><span class="sw-coach"></span> Vettura (deadhead)</div>
+    <div class="item"><span class="sw-meal"></span> Refezione</div>
+    <div class="item"><span class="sw-cv"></span> CVp / CVa</div>
+    <div class="item"><span class="sw-scomp"></span> S.COMP</div>
+    <div class="item"><span class="sw-dot"></span> Accessori maggiorati</div>
+    <div class="item" style="gap:4px">
+      <span style="font-family:var(--font-mono);font-size:10px;font-weight:700">40</span>
+      <span style="font-family:var(--font-mono);font-size:8px;color:var(--ink-4);font-style:italic">5</span>
+      <span>&nbsp;minuti principali + accessori</span>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

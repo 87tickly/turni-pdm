@@ -419,6 +419,79 @@ class Database:
             "ALTER TABLE weekly_shift ADD COLUMN depot_id INTEGER REFERENCES depot(id)"
         )
 
+        # ── PdC schema v2.1: versioning import + campi arricchiti (Fase 1) ──
+        # Documentato in docs/schema-pdc.md
+        #
+        # Strategia sostituzione turni:
+        #   ogni upload PDF crea un record in pdc_import. I turni precedenti
+        #   aventi stesso (codice, impianto) vengono marcati come archiviati
+        #   valorizzando pdc_turn.superseded_by_import_id. La UI mostra di
+        #   default solo i turni attivi (superseded_by_import_id IS NULL).
+
+        # Tabella pdc_import (IF NOT EXISTS → idempotente)
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS pdc_import (
+                id {pk},
+                filename TEXT NOT NULL,
+                data_stampa TEXT DEFAULT '',
+                data_pubblicazione TEXT DEFAULT '',
+                valido_dal TEXT DEFAULT '',
+                valido_al TEXT DEFAULT '',
+                n_turni INTEGER DEFAULT 0,
+                n_pagine_pdf INTEGER DEFAULT 0,
+                imported_at TEXT DEFAULT '',
+                imported_by INTEGER DEFAULT NULL
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pdc_import_filename ON pdc_import(filename)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pdc_import_stampa ON pdc_import(data_stampa)")
+
+        # Campi versioning su pdc_turn
+        self._run_migration(
+            "SELECT import_id FROM pdc_turn LIMIT 1",
+            "ALTER TABLE pdc_turn ADD COLUMN import_id INTEGER DEFAULT NULL REFERENCES pdc_import(id)"
+        )
+        self._run_migration(
+            "SELECT superseded_by_import_id FROM pdc_turn LIMIT 1",
+            "ALTER TABLE pdc_turn ADD COLUMN superseded_by_import_id INTEGER DEFAULT NULL REFERENCES pdc_import(id)"
+        )
+        self._run_migration(
+            "SELECT data_pubblicazione FROM pdc_turn LIMIT 1",
+            "ALTER TABLE pdc_turn ADD COLUMN data_pubblicazione TEXT DEFAULT ''"
+        )
+        # Indice per la query "turni attivi"
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pdc_turn_active "
+            "ON pdc_turn(superseded_by_import_id, impianto, codice)"
+        )
+
+        # Campi capolinea giornata (ARON...ARON nel PDF)
+        self._run_migration(
+            "SELECT stazione_inizio FROM pdc_turn_day LIMIT 1",
+            [
+                "ALTER TABLE pdc_turn_day ADD COLUMN stazione_inizio TEXT DEFAULT ''",
+                "ALTER TABLE pdc_turn_day ADD COLUMN stazione_fine TEXT DEFAULT ''",
+            ]
+        )
+
+        # Campi arricchiti su pdc_block
+        self._run_migration(
+            "SELECT minuti_accessori FROM pdc_block LIMIT 1",
+            "ALTER TABLE pdc_block ADD COLUMN minuti_accessori TEXT DEFAULT ''"
+        )
+        self._run_migration(
+            "SELECT fonte_orario FROM pdc_block LIMIT 1",
+            "ALTER TABLE pdc_block ADD COLUMN fonte_orario TEXT DEFAULT 'parsed'"
+        )
+        self._run_migration(
+            "SELECT cv_parent_block_id FROM pdc_block LIMIT 1",
+            "ALTER TABLE pdc_block ADD COLUMN cv_parent_block_id INTEGER DEFAULT NULL REFERENCES pdc_block(id)"
+        )
+        self._run_migration(
+            "SELECT accessori_note FROM pdc_block LIMIT 1",
+            "ALTER TABLE pdc_block ADD COLUMN accessori_note TEXT DEFAULT ''"
+        )
+
         # Auto-seed depot dalla configurazione attiva
         self._seed_depots()
 

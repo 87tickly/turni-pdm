@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>COLAZIONE — Gantt ideale v1 (mockup statico)</title>
+<style>
+  /* ============================================================
+     MOCKUP GANTT IDEALE v1
+     - Grammatica del PDF Trenord PdC:
+       asse 3→24→1→2→3, 4 corsie sopra l'asse, stats a destra,
+       chiave giornata = (numero + periodicità)
+     - Impronta COLAZIONE:
+       tipografia moderna, cromatismo semantico, densità bilanciata
+     ============================================================ */
+
+  :root {
+    /* Neutrali */
+    --bg:         #f7f7f5;
+    --surface:    #ffffff;
+    --ink:        #111418;
+    --ink-2:      #3a3f47;
+    --ink-3:      #6b7280;
+    --ink-4:      #9aa0a8;
+    --line:       #e3e5e8;
+    --line-2:     #c8ccd2;
+
+    /* Semantici blocchi */
+    --train:      #0f172a;   /* treno commerciale: nero/blu notte */
+    --coach:      #64748b;   /* vettura (deadhead): grigio */
+    --meal:       #d97706;   /* refezione: ambra */
+    --scomp:      #0891b2;   /* S.COMP: ciano */
+    --cv:         #7c3aed;   /* CVp/CVa: viola */
+    --accessori:  #dc2626;   /* pallino accessori maggiorati */
+
+    /* Accent */
+    --accent:     #2563eb;
+
+    /* Typography */
+    --font-sans:  ui-sans-serif, -apple-system, "Inter", "SF Pro Text", system-ui, sans-serif;
+    --font-mono:  ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.4;
+    padding: 28px;
+  }
+
+  /* ---------------- Wrapper pagina ---------------- */
+  .page {
+    max-width: 1280px;
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  /* ---------------- Banda header turno ---------------- */
+  .turn-header {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 24px;
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--line);
+    background: #fafafa;
+  }
+  .turn-header .brand {
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    text-transform: uppercase;
+    align-self: center;
+  }
+  .turn-header .meta {
+    display: grid;
+    grid-template-columns: repeat(5, auto);
+    gap: 6px 28px;
+    font-size: 12px;
+    align-items: end;
+  }
+  .turn-header .meta .k {
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 10px;
+    font-weight: 500;
+  }
+  .turn-header .meta .v {
+    color: var(--ink);
+    font-weight: 600;
+    font-size: 14px;
+    font-family: var(--font-mono);
+  }
+  .turn-header .validity {
+    color: var(--ink-3);
+    font-size: 11px;
+    align-self: center;
+    font-family: var(--font-mono);
+  }
+
+  /* ---------------- Riga giornata ---------------- */
+  .day-row {
+    display: grid;
+    grid-template-columns: 160px 1fr 140px;
+    border-top: 1px solid var(--line);
+    min-height: 140px;
+  }
+  .day-row:first-of-type { border-top: none; }
+
+  /* -------- Sinistra: meta giornata -------- */
+  .day-meta {
+    padding: 14px 16px;
+    border-right: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: #fcfcfb;
+  }
+  .day-meta .num {
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1;
+    font-family: var(--font-mono);
+    color: var(--ink);
+  }
+  .day-meta .period {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #eef2ff;
+    color: #3730a3;
+    border: 1px solid #c7d2fe;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    font-family: var(--font-mono);
+    width: fit-content;
+  }
+  .day-meta .period.weekend { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+  .day-meta .period.holiday { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+
+  .day-meta .prest {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .day-meta .prest .time {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: 0;
+    text-transform: none;
+    margin-top: 2px;
+  }
+  .day-meta .prest .time .sep {
+    color: var(--ink-4);
+    margin: 0 4px;
+  }
+
+  /* -------- Centro: Gantt area -------- */
+  .gantt {
+    position: relative;
+    padding: 12px 20px 6px 20px;
+    overflow: hidden;
+  }
+
+  /* -------- Destra: stats -------- */
+  .stats {
+    padding: 14px 16px;
+    border-left: 1px solid var(--line);
+    background: #fcfcfb;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    align-content: start;
+  }
+  .stats .stat { display: flex; flex-direction: column; }
+  .stats .stat .k {
+    font-size: 10px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+  }
+  .stats .stat .v {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .stats .stat.warn .v { color: var(--accessori); }
+  .stats .stat.full { grid-column: 1 / -1; }
+
+  /* -------- Giornata "Disponibile" -------- */
+  .day-available {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 72px;
+    color: var(--ink-3);
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    background: repeating-linear-gradient(
+      -45deg,
+      #fafafa 0px,
+      #fafafa 10px,
+      #f4f4f3 10px,
+      #f4f4f3 20px
+    );
+  }
+  .day-available .badge {
+    background: #ffffff;
+    border: 1px dashed var(--line-2);
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    color: var(--ink-2);
+  }
+
+  /* ============================================================
+     SVG Gantt — stili interni
+     ============================================================ */
+  svg.gantt-svg { display: block; width: 100%; }
+
+  /* Asse */
+  .axis-line       { stroke: var(--line-2); stroke-width: 1; }
+  .axis-tick       { stroke: var(--line-2); stroke-width: 1; }
+  .axis-tick.major { stroke: var(--ink-4); }
+  .axis-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    fill: var(--ink-3);
+    text-anchor: middle;
+  }
+  .axis-label.midnight { fill: var(--ink); font-weight: 700; }
+
+  /* Sottofondo fascia-notte (00:00-05:00) */
+  .night-band { fill: #0f172a; fill-opacity: 0.035; }
+
+  /* Blocchi (corsia 2 = linea) */
+  .block-train-line {
+    stroke: var(--train);
+    stroke-width: 4;
+    stroke-linecap: round;
+  }
+  .block-coach-line {
+    stroke: var(--coach);
+    stroke-width: 2.5;
+    stroke-dasharray: 4 3;
+    stroke-linecap: round;
+  }
+  .block-meal {
+    fill: var(--meal);
+    rx: 2;
+  }
+  .block-scomp {
+    fill: var(--scomp);
+    fill-opacity: 0.18;
+    stroke: var(--scomp);
+    stroke-width: 1;
+    stroke-dasharray: 2 2;
+    rx: 3;
+  }
+
+  /* CVp / CVa marker */
+  .cv-marker {
+    fill: var(--cv);
+  }
+  .cv-marker.partenza { /* triangolo a destra */ }
+  .cv-marker.arrivo   { /* triangolo a sinistra */ }
+  .cv-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    fill: var(--cv);
+    text-anchor: middle;
+  }
+
+  /* Etichetta blocco (corsia 1 = label) */
+  .block-label {
+    font-family: var(--font-sans);
+    font-size: 12px;
+    fill: var(--ink);
+  }
+  .block-label .num {
+    font-weight: 700;
+    font-family: var(--font-mono);
+  }
+  .block-label .staz {
+    fill: var(--ink-3);
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .block-label.coach .num {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-style: italic;
+    fill: var(--coach);
+  }
+  .block-label.meal {
+    fill: var(--meal);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+  }
+  .block-label.scomp {
+    fill: var(--scomp);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+  }
+
+  /* Stazione intermedia (passaggio tra blocchi) */
+  .inter-station {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    fill: var(--ink-4);
+    text-anchor: middle;
+    font-weight: 500;
+  }
+
+  /* Minuti sotto l'asse (corsia 3) */
+  .minute-text {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    fill: var(--ink-2);
+    text-anchor: middle;
+    font-weight: 600;
+  }
+  .minute-text.interpolated { fill: var(--ink-4); font-style: italic; }
+
+  /* Pallino accessori maggiorati */
+  .accessori-dot { fill: var(--accessori); }
+  .accessori-note {
+    font-family: var(--font-sans);
+    font-size: 9px;
+    fill: var(--accessori);
+    font-style: italic;
+  }
+
+  /* ---------------- Legenda ---------------- */
+  .legend {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    padding: 14px 24px;
+    border-top: 1px solid var(--line);
+    background: #fafafa;
+    font-size: 11px;
+    color: var(--ink-3);
+  }
+  .legend .item { display: flex; align-items: center; gap: 6px; }
+  .legend .swatch {
+    display: inline-block;
+    width: 24px; height: 4px;
+    border-radius: 2px;
+  }
+  .legend .swatch.train { background: var(--train); height: 4px; }
+  .legend .swatch.coach { background: repeating-linear-gradient(90deg, var(--coach) 0 4px, transparent 4px 7px); height: 2px; }
+  .legend .swatch.meal  { background: var(--meal); }
+  .legend .swatch.cv    { background: var(--cv); width: 12px; height: 12px; border-radius: 50%; }
+  .legend .swatch.scomp { background: var(--scomp); opacity: 0.4; height: 10px; border: 1px dashed var(--scomp); }
+
+  /* ---------------- Nota mockup ---------------- */
+  .mockup-note {
+    max-width: 1280px;
+    margin: 0 auto 20px;
+    padding: 14px 20px;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 8px;
+    font-size: 12px;
+    color: #78350f;
+  }
+  .mockup-note strong { color: #92400e; }
+
+</style>
+</head>
+<body>
+
+<div class="mockup-note">
+  <strong>MOCKUP STATICO v1</strong> — Questo file non contiene logica né dati reali.
+  Serve a decidere layout, densità, tipografia e colori del nuovo Gantt <em>prima</em> di toccare
+  il componente React. Esempio basato su <code>AROR_C — giornata 1</code> dalla skill
+  <code>turno-pdc-reader.md</code>.
+</div>
+
+<div class="page">
+
+  <!-- ============================================================
+       HEADER TURNO
+       ============================================================ -->
+  <div class="turn-header">
+    <div class="brand">COLAZIONE</div>
+    <div class="meta">
+      <div><div class="k">Impianto</div><div class="v">ARONA</div></div>
+      <div><div class="k">Turno</div><div class="v">AROR_C</div></div>
+      <div><div class="k">Planning</div><div class="v">65053</div></div>
+      <div><div class="k">Profilo</div><div class="v">Condotta</div></div>
+      <div><div class="k">Giornate</div><div class="v">6</div></div>
+    </div>
+    <div class="validity">Valido 23/02/2026 → 12/12/2026</div>
+  </div>
+
+  <!-- ============================================================
+       GIORNATA 1 — LMXGVSD (lavorativa tipica)
+       Blocchi:
+         vettura 2434 ARON→DOMO  17:25→18:04
+         refezione DOMO          18:40→19:07
+         CVp 2434 DOMO           19:20
+         treno 10243 DOMO→Mlpg   19:20→22:24
+         treno 10246 Mlpg→ARON   22:40→23:45
+       ============================================================ -->
+  <div class="day-row">
+    <div class="day-meta">
+      <div class="num">1</div>
+      <div class="period">LMXGVSD</div>
+      <div class="prest">
+        Prestazione
+        <span class="time">17:25 <span class="sep">→</span> 23:45</span>
+      </div>
+    </div>
+
+    <div class="gantt">
+      <!--
+        SVG coordinate system:
+          viewBox: 0 0 1000 180
+          asse X: 3 → 24 → 1 → 2 → 3
+            ticks: 3, 4, 5, ..., 24, 1, 2, 3  (25 tick, 24 ore)
+            px_per_ora = 40 → asse largo 960, origine 20px
+          Y:
+            0-28     : top padding / note
+            28-50    : LABEL (corsia 1)
+            50-90    : LINEA / BLOCCO (corsia 2, h=40)
+            90-110   : ASSE (corsia 4, tick + ora)
+            110-130  : MINUTI sotto asse (corsia 3)
+            130-180  : stazioni intermedie / spazio
+
+        mapping tempo→x (px_per_ora=40, asse inizia alle 03):
+          x(hour, min) = 20 + ((hour - 3 + 24) % 24) * 40 + (min/60)*40
+          17:25 → 20 + 14*40 + 16.67 = 596.67
+          18:04 → 20 + 15*40 + 2.67  = 622.67
+          18:40 → 20 + 15*40 + 26.67 = 646.67
+          19:07 → 20 + 16*40 + 4.67  = 664.67
+          19:20 → 20 + 16*40 + 13.33 = 673.33
+          22:24 → 20 + 19*40 + 16    = 796
+          22:40 → 20 + 19*40 + 26.67 = 806.67
+          23:45 → 20 + 20*40 + 30    = 850
+      -->
+      <svg class="gantt-svg" viewBox="0 0 1000 180" preserveAspectRatio="xMidYMid meet">
+
+        <!-- Fascia notte 00:00-05:00 = x(0:00)=20+21*40=860 → x(5:00)=20+22*40→ wait
+             (0-3+24)%24 = 21 → 20+21*40 = 860
+             (5-3+24)%24 = 2 → non-sense; l'asse finisce alle 3 quindi 5:00 non è rappresentato
+             Rappresentiamo solo la notte visibile: da 24:00 (=00:00) a 03:00 end-axis
+             x(00:00) = 20 + 21*40 = 860
+             x(03:00) = 20 + 24*40 = 980
+        -->
+        <rect class="night-band" x="860" y="90" width="120" height="20"/>
+
+        <!-- ASSE principale -->
+        <line class="axis-line" x1="20" y1="100" x2="980" y2="100"/>
+
+        <!-- Tick + label ore: 3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,1,2,3 -->
+        <!-- genero manualmente per chiarezza -->
+        <!-- h=3 -->
+        <line class="axis-tick major" x1="20"  y1="95" x2="20"  y2="105"/><text class="axis-label" x="20"  y="90">3</text>
+        <line class="axis-tick"       x1="60"  y1="97" x2="60"  y2="103"/><text class="axis-label" x="60"  y="90">4</text>
+        <line class="axis-tick"       x1="100" y1="97" x2="100" y2="103"/><text class="axis-label" x="100" y="90">5</text>
+        <line class="axis-tick"       x1="140" y1="97" x2="140" y2="103"/><text class="axis-label" x="140" y="90">6</text>
+        <line class="axis-tick"       x1="180" y1="97" x2="180" y2="103"/><text class="axis-label" x="180" y="90">7</text>
+        <line class="axis-tick"       x1="220" y1="97" x2="220" y2="103"/><text class="axis-label" x="220" y="90">8</text>
+        <line class="axis-tick"       x1="260" y1="97" x2="260" y2="103"/><text class="axis-label" x="260" y="90">9</text>
+        <line class="axis-tick"       x1="300" y1="97" x2="300" y2="103"/><text class="axis-label" x="300" y="90">10</text>
+        <line class="axis-tick"       x1="340" y1="97" x2="340" y2="103"/><text class="axis-label" x="340" y="90">11</text>
+        <line class="axis-tick major" x1="380" y1="95" x2="380" y2="105"/><text class="axis-label" x="380" y="90">12</text>
+        <line class="axis-tick"       x1="420" y1="97" x2="420" y2="103"/><text class="axis-label" x="420" y="90">13</text>
+        <line class="axis-tick"       x1="460" y1="97" x2="460" y2="103"/><text class="axis-label" x="460" y="90">14</text>
+        <line class="axis-tick"       x1="500" y1="97" x2="500" y2="103"/><text class="axis-label" x="500" y="90">15</text>
+        <line class="axis-tick"       x1="540" y1="97" x2="540" y2="103"/><text class="axis-label" x="540" y="90">16</text>
+        <line class="axis-tick"       x1="580" y1="97" x2="580" y2="103"/><text class="axis-label" x="580" y="90">17</text>
+        <line class="axis-tick"       x1="620" y1="97" x2="620" y2="103"/><text class="axis-label" x="620" y="90">18</text>
+        <line class="axis-tick"       x1="660" y1="97" x2="660" y2="103"/><text class="axis-label" x="660" y="90">19</text>
+        <line class="axis-tick"       x1="700" y1="97" x2="700" y2="103"/><text class="axis-label" x="700" y="90">20</text>
+        <line class="axis-tick"       x1="740" y1="97" x2="740" y2="103"/><text class="axis-label" x="740" y="90">21</text>
+        <line class="axis-tick"       x1="780" y1="97" x2="780" y2="103"/><text class="axis-label" x="780" y="90">22</text>
+        <line class="axis-tick"       x1="820" y1="97" x2="820" y2="103"/><text class="axis-label" x="820" y="90">23</text>
+        <line class="axis-tick major" x1="860" y1="93" x2="860" y2="107"/><text class="axis-label midnight" x="860" y="88">24</text>
+        <line class="axis-tick"       x1="900" y1="97" x2="900" y2="103"/><text class="axis-label" x="900" y="90">1</text>
+        <line class="axis-tick"       x1="940" y1="97" x2="940" y2="103"/><text class="axis-label" x="940" y="90">2</text>
+        <line class="axis-tick major" x1="980" y1="95" x2="980" y2="105"/><text class="axis-label" x="980" y="90">3</text>
+
+        <!-- ============ BLOCCHI ============ -->
+
+        <!-- Vettura 2434 ARON→DOMO: 17:25 (x=596.67) → 18:04 (x=622.67) -->
+        <line class="block-coach-line" x1="596.67" y1="75" x2="622.67" y2="75"/>
+        <!-- label sopra -->
+        <text class="block-label coach" x="596.67" y="55">
+          <tspan class="num">(2434</tspan>
+          <tspan class="staz" dx="4">ARON→DOMO</tspan>
+        </text>
+        <!-- minuti sotto l'asse: 25 e 04 -->
+        <text class="minute-text" x="596.67" y="122">25</text>
+        <text class="minute-text" x="622.67" y="122">04</text>
+
+        <!-- Refezione DOMO: 18:40 → 19:07 -->
+        <rect class="block-meal" x="646.67" y="68" width="18" height="14"/>
+        <text class="block-label meal" x="646.67" y="55">REFEZ DOMO</text>
+        <text class="minute-text" x="646.67" y="122">40</text>
+        <text class="minute-text" x="664.67" y="122">07</text>
+
+        <!-- CVp 2434 DOMO: 19:20 (x=673.33) -->
+        <polygon class="cv-marker partenza" points="673.33,67 680,75 673.33,83"/>
+        <text class="cv-label" x="673.33" y="62">CVp</text>
+        <text class="minute-text" x="673.33" y="140">20</text>
+
+        <!-- Treno 10243 DOMO→Mlpg: 19:20 → 22:24 -->
+        <line class="block-train-line" x1="673.33" y1="75" x2="796" y2="75"/>
+        <text class="block-label" x="696" y="40">
+          <tspan class="num">10243</tspan>
+          <tspan class="staz" dx="4">DOMO→Mlpg</tspan>
+        </text>
+        <!-- minuti: 20 (già mostrato da CVp) e 24 -->
+        <text class="minute-text" x="796" y="122">24</text>
+
+        <!-- Stazione intermedia Mlpg (coincidenza) -->
+        <text class="inter-station" x="801" y="68">Mlpg</text>
+
+        <!-- Treno 10246 Mlpg→ARON: 22:40 → 23:45 -->
+        <line class="block-train-line" x1="806.67" y1="75" x2="850" y2="75"/>
+        <text class="block-label" x="806.67" y="40">
+          <tspan class="num">10246</tspan>
+          <tspan class="staz" dx="4">Mlpg→ARON</tspan>
+        </text>
+        <text class="minute-text" x="806.67" y="122">40</text>
+        <text class="minute-text" x="850" y="122">45</text>
+
+        <!-- Stazione di fine turno -->
+        <text class="inter-station" x="853" y="68">ARON</text>
+
+      </svg>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">Lav</div><div class="v">06:20</div></div>
+      <div class="stat"><div class="k">Cct</div><div class="v">04:09</div></div>
+      <div class="stat"><div class="k">Km</div><div class="v">184</div></div>
+      <div class="stat"><div class="k">Not</div><div class="v">—</div></div>
+      <div class="stat full"><div class="k">Rip prossimo</div><div class="v">15:45</div></div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       GIORNATA 2 — LMXGVS (giornata con accessori maggiorati)
+       Mostra il pallino ●, il blocco con linea rinforzata,
+       e la notificazione in piccolo sopra
+       ============================================================ -->
+  <div class="day-row">
+    <div class="day-meta">
+      <div class="num">2</div>
+      <div class="period">LMXGVS</div>
+      <div class="prest">
+        Prestazione
+        <span class="time">05:40 <span class="sep">→</span> 12:10</span>
+      </div>
+    </div>
+
+    <div class="gantt">
+      <svg class="gantt-svg" viewBox="0 0 1000 180" preserveAspectRatio="xMidYMid meet">
+        <!-- Asse (identico a sopra) -->
+        <line class="axis-line" x1="20" y1="100" x2="980" y2="100"/>
+        <line class="axis-tick major" x1="20"  y1="95" x2="20"  y2="105"/><text class="axis-label" x="20"  y="90">3</text>
+        <line class="axis-tick"       x1="60"  y1="97" x2="60"  y2="103"/><text class="axis-label" x="60"  y="90">4</text>
+        <line class="axis-tick"       x1="100" y1="97" x2="100" y2="103"/><text class="axis-label" x="100" y="90">5</text>
+        <line class="axis-tick"       x1="140" y1="97" x2="140" y2="103"/><text class="axis-label" x="140" y="90">6</text>
+        <line class="axis-tick"       x1="180" y1="97" x2="180" y2="103"/><text class="axis-label" x="180" y="90">7</text>
+        <line class="axis-tick"       x1="220" y1="97" x2="220" y2="103"/><text class="axis-label" x="220" y="90">8</text>
+        <line class="axis-tick"       x1="260" y1="97" x2="260" y2="103"/><text class="axis-label" x="260" y="90">9</text>
+        <line class="axis-tick"       x1="300" y1="97" x2="300" y2="103"/><text class="axis-label" x="300" y="90">10</text>
+        <line class="axis-tick"       x1="340" y1="97" x2="340" y2="103"/><text class="axis-label" x="340" y="90">11</text>
+        <line class="axis-tick major" x1="380" y1="95" x2="380" y2="105"/><text class="axis-label" x="380" y="90">12</text>
+        <line class="axis-tick"       x1="420" y1="97" x2="420" y2="103"/><text class="axis-label" x="420" y="90">13</text>
+        <line class="axis-tick"       x1="460" y1="97" x2="460" y2="103"/><text class="axis-label" x="460" y="90">14</text>
+        <line class="axis-tick"       x1="500" y1="97" x2="500" y2="103"/><text class="axis-label" x="500" y="90">15</text>
+        <line class="axis-tick"       x1="540" y1="97" x2="540" y2="103"/><text class="axis-label" x="540" y="90">16</text>
+        <line class="axis-tick"       x1="580" y1="97" x2="580" y2="103"/><text class="axis-label" x="580" y="90">17</text>
+        <line class="axis-tick"       x1="620" y1="97" x2="620" y2="103"/><text class="axis-label" x="620" y="90">18</text>
+        <line class="axis-tick"       x1="660" y1="97" x2="660" y2="103"/><text class="axis-label" x="660" y="90">19</text>
+        <line class="axis-tick"       x1="700" y1="97" x2="700" y2="103"/><text class="axis-label" x="700" y="90">20</text>
+        <line class="axis-tick"       x1="740" y1="97" x2="740" y2="103"/><text class="axis-label" x="740" y="90">21</text>
+        <line class="axis-tick"       x1="780" y1="97" x2="780" y2="103"/><text class="axis-label" x="780" y="90">22</text>
+        <line class="axis-tick"       x1="820" y1="97" x2="820" y2="103"/><text class="axis-label" x="820" y="90">23</text>
+        <line class="axis-tick major" x1="860" y1="93" x2="860" y2="107"/><text class="axis-label midnight" x="860" y="88">24</text>
+        <line class="axis-tick"       x1="900" y1="97" x2="900" y2="103"/><text class="axis-label" x="900" y="90">1</text>
+        <line class="axis-tick"       x1="940" y1="97" x2="940" y2="103"/><text class="axis-label" x="940" y="90">2</text>
+        <line class="axis-tick major" x1="980" y1="95" x2="980" y2="105"/><text class="axis-label" x="980" y="90">3</text>
+
+        <!--
+          Esempio giornata mattutina con accessori maggiorati:
+            05:40 accessori inizio (tempi allungati per preriscaldo)
+            06:15 treno 25020 ARON→MBYE
+            09:12 treno 25023 MBYE→ARON
+            12:10 accessori fine
+          x(5:40) = 20 + 2*40 + 26.67 = 126.67
+          x(6:15) = 20 + 3*40 + 10    = 150
+          x(9:12) = 20 + 6*40 + 8     = 268
+          x(10:44)= 20 + 7*40 + 29.33 = 329.33
+          x(12:10)= 20 + 9*40 + 6.67  = 386.67
+        -->
+
+        <!-- nota accessori maggiorati sopra -->
+        <text class="accessori-note" x="150" y="20">Tr. 25020 — tempi accessori maggiorati per preriscaldo</text>
+
+        <!-- Treno 25020 con pallino accessori -->
+        <line class="block-train-line" x1="150" y1="75" x2="268" y2="75"/>
+        <circle class="accessori-dot" cx="144" cy="75" r="3.5"/>
+        <text class="block-label" x="155" y="40">
+          <tspan class="num">25020</tspan>
+          <tspan class="staz" dx="4">ARON→MBYE</tspan>
+        </text>
+        <text class="minute-text interpolated" x="126.67" y="122">40*</text>
+        <text class="minute-text" x="150"    y="122">15</text>
+        <text class="minute-text" x="268"    y="122">12</text>
+
+        <!-- Stazione MBYE -->
+        <text class="inter-station" x="276" y="68">MBYE</text>
+
+        <!-- Treno 25023 -->
+        <line class="block-train-line" x1="329.33" y1="75" x2="386.67" y2="75"/>
+        <text class="block-label" x="329.33" y="40">
+          <tspan class="num">25023</tspan>
+          <tspan class="staz" dx="4">MBYE→ARON</tspan>
+        </text>
+        <text class="minute-text" x="329.33" y="122">44</text>
+        <text class="minute-text" x="386.67" y="122">10</text>
+
+        <!-- Accessori fine (piccolo tratto grigio dopo) -->
+        <line class="block-coach-line" x1="386.67" y1="75" x2="410" y2="75" style="stroke-dasharray:2 2;stroke:var(--ink-4)"/>
+        <text class="inter-station" x="400" y="68">ARON · acc.fine</text>
+
+      </svg>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">Lav</div><div class="v">06:30</div></div>
+      <div class="stat"><div class="k">Cct</div><div class="v">03:55</div></div>
+      <div class="stat"><div class="k">Km</div><div class="v">156</div></div>
+      <div class="stat warn"><div class="k">Accessori</div><div class="v">magg.</div></div>
+      <div class="stat full"><div class="k">Rip prossimo</div><div class="v">17:20</div></div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       GIORNATA 3 — D (domenica/festivo): S.COMP
+       Caso "A disposizione" al posto di treni
+       ============================================================ -->
+  <div class="day-row">
+    <div class="day-meta">
+      <div class="num">3</div>
+      <div class="period holiday">D</div>
+      <div class="prest">
+        Prestazione
+        <span class="time">16:10 <span class="sep">→</span> 23:25</span>
+      </div>
+    </div>
+
+    <div class="gantt">
+      <svg class="gantt-svg" viewBox="0 0 1000 180" preserveAspectRatio="xMidYMid meet">
+        <rect class="night-band" x="860" y="90" width="120" height="20"/>
+        <line class="axis-line" x1="20" y1="100" x2="980" y2="100"/>
+        <!-- tick identici -->
+        <line class="axis-tick major" x1="20"  y1="95" x2="20"  y2="105"/><text class="axis-label" x="20"  y="90">3</text>
+        <line class="axis-tick"       x1="60"  y1="97" x2="60"  y2="103"/><text class="axis-label" x="60"  y="90">4</text>
+        <line class="axis-tick"       x1="100" y1="97" x2="100" y2="103"/><text class="axis-label" x="100" y="90">5</text>
+        <line class="axis-tick"       x1="140" y1="97" x2="140" y2="103"/><text class="axis-label" x="140" y="90">6</text>
+        <line class="axis-tick"       x1="180" y1="97" x2="180" y2="103"/><text class="axis-label" x="180" y="90">7</text>
+        <line class="axis-tick"       x1="220" y1="97" x2="220" y2="103"/><text class="axis-label" x="220" y="90">8</text>
+        <line class="axis-tick"       x1="260" y1="97" x2="260" y2="103"/><text class="axis-label" x="260" y="90">9</text>
+        <line class="axis-tick"       x1="300" y1="97" x2="300" y2="103"/><text class="axis-label" x="300" y="90">10</text>
+        <line class="axis-tick"       x1="340" y1="97" x2="340" y2="103"/><text class="axis-label" x="340" y="90">11</text>
+        <line class="axis-tick major" x1="380" y1="95" x2="380" y2="105"/><text class="axis-label" x="380" y="90">12</text>
+        <line class="axis-tick"       x1="420" y1="97" x2="420" y2="103"/><text class="axis-label" x="420" y="90">13</text>
+        <line class="axis-tick"       x1="460" y1="97" x2="460" y2="103"/><text class="axis-label" x="460" y="90">14</text>
+        <line class="axis-tick"       x1="500" y1="97" x2="500" y2="103"/><text class="axis-label" x="500" y="90">15</text>
+        <line class="axis-tick"       x1="540" y1="97" x2="540" y2="103"/><text class="axis-label" x="540" y="90">16</text>
+        <line class="axis-tick"       x1="580" y1="97" x2="580" y2="103"/><text class="axis-label" x="580" y="90">17</text>
+        <line class="axis-tick"       x1="620" y1="97" x2="620" y2="103"/><text class="axis-label" x="620" y="90">18</text>
+        <line class="axis-tick"       x1="660" y1="97" x2="660" y2="103"/><text class="axis-label" x="660" y="90">19</text>
+        <line class="axis-tick"       x1="700" y1="97" x2="700" y2="103"/><text class="axis-label" x="700" y="90">20</text>
+        <line class="axis-tick"       x1="740" y1="97" x2="740" y2="103"/><text class="axis-label" x="740" y="90">21</text>
+        <line class="axis-tick"       x1="780" y1="97" x2="780" y2="103"/><text class="axis-label" x="780" y="90">22</text>
+        <line class="axis-tick"       x1="820" y1="97" x2="820" y2="103"/><text class="axis-label" x="820" y="90">23</text>
+        <line class="axis-tick major" x1="860" y1="93" x2="860" y2="107"/><text class="axis-label midnight" x="860" y="88">24</text>
+        <line class="axis-tick"       x1="900" y1="97" x2="900" y2="103"/><text class="axis-label" x="900" y="90">1</text>
+        <line class="axis-tick"       x1="940" y1="97" x2="940" y2="103"/><text class="axis-label" x="940" y="90">2</text>
+        <line class="axis-tick major" x1="980" y1="95" x2="980" y2="105"/><text class="axis-label" x="980" y="90">3</text>
+
+        <!-- S.COMP ARON 16:10→23:25
+             x(16:10) = 20 + 13*40 + 6.67 = 546.67
+             x(23:25) = 20 + 20*40 + 16.67 = 836.67
+        -->
+        <rect class="block-scomp" x="546.67" y="60" width="290" height="30"/>
+        <text class="block-label scomp" x="560" y="52">S.COMP ARON</text>
+        <text class="minute-text" x="546.67" y="122">10</text>
+        <text class="minute-text" x="836.67" y="122">25</text>
+
+      </svg>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">Lav</div><div class="v">07:15</div></div>
+      <div class="stat"><div class="k">Cct</div><div class="v">—</div></div>
+      <div class="stat"><div class="k">Km</div><div class="v">—</div></div>
+      <div class="stat"><div class="k">S.COMP</div><div class="v">si</div></div>
+      <div class="stat full"><div class="k">Rip prossimo</div><div class="v">12:45</div></div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       GIORNATA 6 — LMXGVSD "Disponibile" (riposo)
+       ============================================================ -->
+  <div class="day-row" style="grid-template-rows: auto;">
+    <div class="day-meta">
+      <div class="num">6</div>
+      <div class="period">LMXGVSD</div>
+      <div class="prest" style="color:var(--ink-4)">—</div>
+    </div>
+    <div class="day-available">
+      <div class="badge">Disponibile · riposo</div>
+    </div>
+    <div class="stats" style="color:var(--ink-4)">
+      <div class="stat"><div class="k">Rip</div><div class="v">24:00+</div></div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       LEGENDA
+       ============================================================ -->
+  <div class="legend">
+    <div class="item"><span class="swatch train"></span> Treno commerciale</div>
+    <div class="item"><span class="swatch coach"></span> Vettura (deadhead)</div>
+    <div class="item"><span class="swatch meal"></span> Refezione</div>
+    <div class="item"><span class="swatch scomp"></span> S.COMP</div>
+    <div class="item"><span class="swatch cv"></span> CVp / CVa</div>
+    <div class="item" style="gap:8px">
+      <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--accessori)"></span>
+      Accessori maggiorati
+    </div>
+    <div class="item" style="gap:4px">
+      <span class="minute-text interpolated" style="font-family:var(--font-mono);font-size:11px">40*</span>
+      <span>minuto interpolato (non letto dal PDF)</span>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
