@@ -16,6 +16,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PdcGanttV2 as PdcGantt } from "@/components/PdcGanttV2"
+import { BlockDetailModal } from "@/components/BlockDetailModal"
 import {
   createPdcTurn,
   updatePdcTurn,
@@ -247,6 +248,11 @@ function DayEditor({
     null
   )
   const [returnMsg, setReturnMsg] = useState("")
+  const [detailModal, setDetailModal] = useState<{
+    block: PdcBlock
+    index: number
+    mode: "detail" | "warn"
+  } | null>(null)
 
   const updateBlock = (i: number, b: PdcBlockInput) => {
     const blocks = [...(day.blocks || [])]
@@ -514,7 +520,17 @@ function DayEditor({
                       }
                       return
                     }
-                    // Altre azioni: detail / history / link / warn / move → TODO
+                    if (act === "detail" || act === "warn") {
+                      const src = (day.blocks || [])[idx]
+                      if (!src) return
+                      setDetailModal({
+                        block: inputToPdcBlock(src),
+                        index: idx,
+                        mode: act,
+                      })
+                      return
+                    }
+                    // Altre azioni: history / link / move → TODO
                     console.log("[PdcBuilder] azione non ancora collegata:", act)
                   }}
                 />
@@ -617,6 +633,16 @@ function DayEditor({
             </>
           )}
         </div>
+      )}
+
+      {/* Modale dettaglio blocco (triple-check DB interno + PdC + ARTURO Live) */}
+      {detailModal && (
+        <BlockDetailModal
+          block={detailModal.block}
+          index={detailModal.index}
+          mode={detailModal.mode}
+          onClose={() => setDetailModal(null)}
+        />
       )}
     </div>
   )

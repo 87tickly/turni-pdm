@@ -4,6 +4,76 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-17 (notte) — Fase 3 step 3+4+5: action bar, drag cross-day, triple-check
+
+Sessione lunga di iterazione su PdcGanttV2 e sulle sue pagine consumer.
+Aggiornamento deploy: commit `d3eb861` (flusso ImportPage 2-step con preview
+diff) committato dall'utente direttamente.
+
+### PdcGanttV2: action bar contestuale (commit 61c016e)
+
+Click su una chip → appare sopra una barra con 8 icone contestuali:
+  ✎ Modifica | ↔ Sposta | ⧉ Duplica
+  🔗 Collega giro materiale | ⚠ Warning ARTURO Live
+  ↗ Dettaglio | ⧗ Storico ritardi | × Elimina
+
+Posizionamento dinamico, clampato ai bordi, freccia verso la chip.
+Esc / click fuori → deseleziona. Click su un'altra chip → switch.
+Nuovo prop onAction(action, block, idx) + tipo esportato GanttAction.
+
+### PdcGanttV2: minuti accessori + azioni reali (commit 10a656f)
+
+- Render riga ausiliaria `minuti_accessori` sotto i minuti principali
+  (italics 8px, grigio). Campo popolato dal parser v2.
+- PdcBuilderPage: Elimina (con conferma) + Duplica + Modifica collegate.
+- Elimina su un treno rimuove anche CVp/CVa agganciati.
+
+### Drag cross-day HTML5 DnD (commit d37fdec)
+
+Rimosso il vecchio flusso "Incolla qui" in PdcDepotPage.
+Ora le chip treno sono `draggable`: l'utente afferra, trascina nel
+Gantt di un'altra giornata, rilascia. CVp/CVa del treno viaggiano
+insieme come linkedCvp/linkedCva nel payload HTML5 DataTransfer.
+
+Nuovi prop PdcGanttV2:
+  ganttId                obbligatorio per DnD
+  onCrossDayDragStart    parent registra la source
+  onCrossDayDrop         parent applica il move
+  onCrossDayRemove       opzionale
+
+Banner blu "Rilascia NNNN su un'altra giornata" durante il drag.
+
+### Auto-correzione orari al drop (commit 31af3c2)
+
+Quando un treno drop-pato in un'altra giornata ha un train_id,
+PdcDepotPage chiama /train-check/{train_id}:
+  1) se giro materiale lo conosce → usa dep_time/arr_time del giro
+  2) altrimenti se ARTURO Live → usa orari live
+  3) fallback silenzioso → mantiene orari originali
+
+Banner verde transitorio: "Orari del treno NNNN allineati a
+[giro materiale|ARTURO Live]: HH:MM → HH:MM".
+
+### BlockDetailModal triple-check
+
+Componente nuovo (autore: utente). Modale con triple-check
+DB interno + PdC + ARTURO Live. Due modalita':
+  - detail  → panoramica neutra
+  - warn    → evidenzia discrepanze orari
+
+Cablato alle azioni `↗ Dettaglio` e `⚠ Warning` dell'action bar
+in PdcBuilderPage.
+
+### Prossimi step
+
+- PdcBuilderPage: abilitare drag cross-day tra giornate dello stesso
+  turno (oggi e' solo PdcDepotPage)
+- PdcPage lettura sola: cablare `↗ Dettaglio` a BlockDetailModal
+- Action bar icone ↔ Sposta / 🔗 Collega / ⧗ Storico ancora placeholder
+- Fase 2 parser v2 (miss 28→26, pallino accessori, minuti accessori)
+
+---
+
 ## 2026-04-17 (sera) — Fase 3 step 1: PdcGanttV2 (drop-in) in PdcPage
 
 ### Cosa
