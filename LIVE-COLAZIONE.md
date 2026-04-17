@@ -4,6 +4,51 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-17 (sera) — Fase 3 step 1: PdcGanttV2 (drop-in) in PdcPage
+
+### Cosa
+Nuovo componente React `frontend/src/components/PdcGanttV2.tsx` che
+implementa il design del mockup `gantt-ideal-v5.html`:
+
+- chip-card blu indigo per i treni con numero + dest dentro
+- blocchi secondari (vettura/refez/CVp/CVa) con label orizzontali su
+  3 livelli Y (stagger automatico anti-collisione)
+- stazioni capolinea orizzontali ai bordi
+- fascia notte 00-03, tick asse 3→24→1→2→3 a 52 px/h
+- hover → tooltip dettagli (HTML overlay, non SVG title)
+- click → selected (bordo azzurro solido)
+
+API esterna **compatibile** con PdcGantt v1 (drop-in): usa gli stessi
+props `blocks`, `startTime`, `endTime`, `onBlockClick`, `onTimelineClick`,
+`label`, `depot`, `height`. Il prop `onBlocksChange` c'e' ma e' ignorato
+in questa prima versione (drag&resize tornano in Fase 3 step 2).
+
+### Dove e' visibile
+`PdcPage.tsx` ora ha un **toggle a 3 viste**: `✨ Gantt v2` (default),
+`📊 Gantt v1`, `📋 Lista`. L'utente puo' confrontare al volo e tornare
+al vecchio Gantt se qualcosa non va. v2 e' default.
+
+`PdcBuilderPage` e `PdcDepotPage` restano su v1 per ora (quelle pagine
+richiedono drag&resize che v2 non ha ancora).
+
+### Verifica
+- `npx tsc --noEmit`: zero errori
+- `npm run build`: OK, dist 405KB (+11KB rispetto a 394KB precedente)
+
+### Prossimi step
+- Fase 3 step 2: drag&resize in v2, poi sostituzione v1 anche in
+  Builder/Depot
+- Fase 2: parser v2 (risolve il miss 28→26 + pallino ● + minuti accessori)
+- Fase 3 step 3: action bar con 8 azioni (come mockup), click su chip
+  apre menu contestuale sopra
+
+### File modificati questa sessione
+- `frontend/src/components/PdcGanttV2.tsx` — NEW, ~400 righe
+- `frontend/src/pages/PdcPage.tsx` — toggle v1/v2/lista
+- `frontend/dist/` — rebuilded
+
+---
+
 ## 2026-04-17 (tardo pomeriggio) — Fase 1 step 2: endpoint upload versionato + diff
 
 ### Comportamento upload PdC
