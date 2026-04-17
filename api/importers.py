@@ -51,32 +51,44 @@ async def upload_turno_personale(file: UploadFile = File(...)):
 
 
 @router.post("/upload-turno-pdc")
-async def upload_turno_pdc(file: UploadFile = File(...)):
-    """Importa il PDF Turni PdC rete RFI nel database (schema v2).
+async def upload_turno_pdc(file: UploadFile = File(...),
+                            dry_run: bool = False):
+    """Importa il PDF Turni PdC rete RFI nel database (schema v2.1, versionato).
 
-    Pipeline:
-      1. Salva PDF in tempfile
-      2. Parser via turno_pdc_parser.parse_pdc_pdf
-      3. clear_pdc_data + bulk insert via save_parsed_turns_to_db
-      4. Ritorna stats + summary
+    Comportamento:
+      - dry_run=true : parsa il PDF, calcola il diff rispetto ai turni attivi
+                        ma NON scrive nulla nel DB. Utile per anteprima UI
+                        "nuovi / aggiornati / non piu' presenti".
+      - dry_run=false (default): parsa, crea pdc_import nuovo, inserisce
+                        i turni con import_id = nuovo, marca superseded
+                        i turni attivi con stesso (codice, impianto).
+                        Lo storico NON viene cancellato.
 
-    Risposta tipica:
+    Risposta dry_run:
+      {
+        "status": "preview",
+        "filename": "...",
+        "diff": {"new":[...], "updated":[...], "only_in_old":[...], "counts":{...}},
+        "summary": [{codice, impianto, planning, days, notes, valid_from, valid_to}, ...]
+      }
+
+    Risposta import reale:
       {
         "status": "ok",
         "filename": "...",
-        "turni_imported": 26,
+        "import_id": 5,
+        "turni_imported": 28,
+        "turni_superseded": 26,
         "days_imported": 1315,
         "blocks_imported": 6054,
         "notes_imported": 2901,
-        "stats": {...},
-        "summary": [
-          {"codice": "AROR_C", "impianto": "ARONA", "days": 15, "notes": 20},
-          ...
-        ]
+        "stats": {...},          # statistiche sui turni ATTIVI
+        "summary": [...],
+        "diff": {...}            # diff del cambio
       }
     """
     from src.importer.turno_pdc_parser import (
-        parse_pdc_pdf, save_parsed_turns_to_db,
+        parse_pdc_pdf, save_parsed_turns_as_import,
     )
 
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -97,37 +109,64 @@ async def upload_turno_pdc(file: UploadFile = File(...)):
                 422,
                 detail=(
                     "Nessun turno PdC trovato nel PDF. "
-                    "Formato atteso: Modello SGI Turni del Personale Mobile (M 704)."
+                    "Formato atteso: Modello SGI Turni del Personale Mobile "
+                    "(MDL-PdC v1.0)."
                 ),
             )
 
+        # Parsing pagine per meta import (richiede pdfplumber; best-effort)
+        n_pagine_pdf = 0
+        try:
+            import pdfplumber
+            with pdfplumber.open(tmp_path) as pdf:
+                n_pagine_pdf = len(pdf.pages)
+        except Exception:
+            pass
+
+        summary = [
+            {
+                "codice": t.codice,
+                "impianto": t.impianto,
+                "planning": t.planning,
+                "days": len(t.days),
+                "notes": len(t.notes),
+                "valid_from": t.valid_from,
+                "valid_to": t.valid_to,
+            }
+            for t in turns
+        ]
+
         db = get_db()
         try:
-            stats = save_parsed_turns_to_db(
-                turns, db, source_file=file.filename or "turno_pdc.pdf",
-            )
-            summary = [
-                {
-                    "codice": t.codice,
-                    "impianto": t.impianto,
-                    "planning": t.planning,
-                    "days": len(t.days),
-                    "notes": len(t.notes),
-                    "valid_from": t.valid_from,
-                    "valid_to": t.valid_to,
+            diff = db.diff_import_candidates(turns)
+
+            if dry_run:
+                return {
+                    "status": "preview",
+                    "filename": file.filename,
+                    "n_pagine_pdf": n_pagine_pdf,
+                    "turni_parsed": len(turns),
+                    "diff": diff,
+                    "summary": summary,
                 }
-                for t in turns
-            ]
+
+            result = save_parsed_turns_as_import(
+                turns, db,
+                filename=file.filename or "turno_pdc.pdf",
+                n_pagine_pdf=n_pagine_pdf,
+            )
             return {
                 "status": "ok",
                 "filename": file.filename,
-                "turni_imported": stats.get("turni", 0),
-                "days_imported": stats.get("days", 0),
-                "blocks_imported": stats.get("blocks", 0),
-                "notes_imported": sum(len(t.notes) for t in turns),
-                "trains_cited": stats.get("trains", 0),
-                "stats": stats,
+                "import_id": result["import_id"],
+                "turni_imported": result["turni_imported"],
+                "turni_superseded": result["turni_superseded"],
+                "days_imported": result["days_imported"],
+                "blocks_imported": result["blocks_imported"],
+                "notes_imported": result["notes_imported"],
+                "stats": result["stats_active"],
                 "summary": summary,
+                "diff": diff,
             }
         finally:
             db.close()
@@ -139,6 +178,66 @@ async def upload_turno_pdc(file: UploadFile = File(...)):
         raise HTTPException(500, detail=f"Errore parsing turno PdC: {e}")
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+
+
+@router.get("/pdc-imports")
+async def pdc_imports_list():
+    """Storico degli import PdC, dal piu' recente al piu' vecchio.
+
+    Ogni record indica filename, data stampa/pubblicazione del PDF,
+    range di validita' coperto, numero turni, quando e' stato caricato.
+    """
+    db = get_db()
+    try:
+        imports = db.list_pdc_imports()
+        # Arricchisce con conteggio turni attualmente attivi per questo import
+        cur = db.conn.cursor()
+        for imp in imports:
+            cur.execute(
+                db._q(
+                    "SELECT COUNT(*) AS n FROM pdc_turn "
+                    "WHERE import_id = ? AND superseded_by_import_id IS NULL"
+                ),
+                (imp["id"],),
+            )
+            imp["turni_attivi"] = db._dict(cur.fetchone())["n"]
+        return {"count": len(imports), "imports": imports}
+    finally:
+        db.close()
+
+
+@router.get("/pdc-imports/{import_id}")
+async def pdc_import_detail(import_id: int):
+    """Dettaglio di un import: meta + turni generati da questo import
+    (attivi e superseded)."""
+    db = get_db()
+    try:
+        imp = db.get_pdc_import(import_id)
+        if not imp:
+            raise HTTPException(404, detail="Import non trovato")
+        cur = db.conn.cursor()
+        cur.execute(
+            db._q(
+                "SELECT id, codice, impianto, planning, profilo, "
+                "valid_from, valid_to, superseded_by_import_id "
+                "FROM pdc_turn WHERE import_id = ? "
+                "ORDER BY impianto, codice"
+            ),
+            (import_id,),
+        )
+        turns = [db._dict(r) for r in cur.fetchall()]
+        return {
+            "import": imp,
+            "turns": turns,
+            "active_count": sum(
+                1 for t in turns if t["superseded_by_import_id"] is None
+            ),
+            "superseded_count": sum(
+                1 for t in turns if t["superseded_by_import_id"] is not None
+            ),
+        }
+    finally:
+        db.close()
 
 
 @router.get("/pdc-stats")

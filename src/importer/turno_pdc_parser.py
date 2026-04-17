@@ -824,18 +824,90 @@ def parse_pdc_pdf(pdf_path: str) -> list[ParsedPdcTurn]:
 
 def save_parsed_turns_to_db(turns: list[ParsedPdcTurn],
                              db, source_file: str = "") -> dict:
-    """Persiste i turni parsati usando i metodi CRUD schema v2.
+    """[Legacy] Persiste i turni parsati con WIPE totale del DB PdC.
 
-    Chiama `db.clear_pdc_data()` prima per avere uno stato pulito.
-    Ritorna le statistiche dell'import.
+    DEPRECATO: usa save_parsed_turns_as_import() per il flusso versionato.
+    Mantenuto per compatibilita' con CLI e script che vogliono sostituire
+    tutto lo storico.
     """
     db.clear_pdc_data()
+    return _write_parsed_turns(turns, db, source_file=source_file,
+                               import_id=None)
 
+
+def save_parsed_turns_as_import(turns: list[ParsedPdcTurn], db,
+                                 filename: str,
+                                 data_stampa: str = "",
+                                 data_pubblicazione: str = "",
+                                 n_pagine_pdf: int = 0,
+                                 imported_by: Optional[int] = None) -> dict:
+    """Persiste i turni parsati come nuovo import versionato.
+
+    Flusso:
+      1. Crea record pdc_import
+      2. Inserisce tutti i turni/giornate/blocchi/note con import_id = nuovo
+      3. Marca superseded i turni precedenti con stesso (codice, impianto)
+      4. NON cancella nulla dal DB storico
+
+    Ritorna:
+      {
+        "import_id": N,
+        "turni_imported": N,
+        "turni_superseded": N,
+        "stats_active": {...}
+      }
+    """
+    valid_from_min = min((t.valid_from for t in turns if t.valid_from),
+                         default="")
+    valid_to_max = max((t.valid_to for t in turns if t.valid_to),
+                       default="")
+    import_id = db.insert_pdc_import(
+        filename=filename,
+        data_stampa=data_stampa,
+        data_pubblicazione=data_pubblicazione,
+        valido_dal=valid_from_min,
+        valido_al=valid_to_max,
+        n_turni=len(turns),
+        n_pagine_pdf=n_pagine_pdf,
+        imported_by=imported_by,
+    )
+
+    write_stats = _write_parsed_turns(
+        turns, db, source_file=filename,
+        import_id=import_id,
+        data_pubblicazione=data_pubblicazione,
+    )
+
+    superseded_count = db.mark_superseded_turns(import_id)
+
+    return {
+        "import_id": import_id,
+        "turni_imported": len(turns),
+        "turni_superseded": superseded_count,
+        "days_imported": write_stats.get("days", 0),
+        "blocks_imported": write_stats.get("blocks", 0),
+        "notes_imported": write_stats.get("notes", 0),
+        "stats_active": db.get_pdc_stats(),
+    }
+
+
+def _write_parsed_turns(turns: list[ParsedPdcTurn], db,
+                         source_file: str = "",
+                         import_id: Optional[int] = None,
+                         data_pubblicazione: str = "") -> dict:
+    """Worker interno: scrive turni/giornate/blocchi/note nelle tabelle.
+    Usato sia da save_parsed_turns_to_db (legacy) sia da
+    save_parsed_turns_as_import (nuovo, versionato)."""
+    days_total = 0
+    blocks_total = 0
+    notes_total = 0
     for t in turns:
         turn_id = db.insert_pdc_turn(
             codice=t.codice, planning=t.planning, impianto=t.impianto,
             profilo=t.profilo, valid_from=t.valid_from, valid_to=t.valid_to,
             source_file=source_file,
+            import_id=import_id,
+            data_pubblicazione=data_pubblicazione,
         )
         for day in t.days:
             day_id = db.insert_pdc_turn_day(
@@ -847,6 +919,7 @@ def save_parsed_turns_to_db(turns: list[ParsedPdcTurn],
                 km=day.km, notturno=day.notturno,
                 riposo_min=day.riposo_min, is_disponibile=day.is_disponibile,
             )
+            days_total += 1
             for b in day.blocks:
                 db.insert_pdc_block(
                     pdc_turn_day_id=day_id, seq=b.seq,
@@ -856,6 +929,7 @@ def save_parsed_turns_to_db(turns: list[ParsedPdcTurn],
                     start_time=b.start_time, end_time=b.end_time,
                     accessori_maggiorati=b.accessori_maggiorati,
                 )
+                blocks_total += 1
         for n in t.notes:
             db.insert_pdc_train_periodicity(
                 pdc_turn_id=turn_id, train_id=n.train_id,
@@ -863,8 +937,9 @@ def save_parsed_turns_to_db(turns: list[ParsedPdcTurn],
                 non_circola_dates=n.non_circola_dates,
                 circola_extra_dates=n.circola_extra_dates,
             )
+            notes_total += 1
     db.conn.commit()
-    return db.get_pdc_stats()
+    return {"days": days_total, "blocks": blocks_total, "notes": notes_total}
 
 
 # ══════════════════════════════════════════════════════════════════

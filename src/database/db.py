@@ -1946,17 +1946,24 @@ class Database:
     def insert_pdc_turn(self, codice: str, planning: str, impianto: str,
                         profilo: str = "Condotta",
                         valid_from: str = "", valid_to: str = "",
-                        source_file: str = "") -> int:
-        """Inserisce un nuovo turno PdC. Ritorna l'ID."""
+                        source_file: str = "",
+                        import_id: Optional[int] = None,
+                        data_pubblicazione: str = "") -> int:
+        """Inserisce un nuovo turno PdC. Ritorna l'ID.
+
+        import_id lega il turno al record pdc_import del caricamento.
+        Legacy callers che passano None lasceranno import_id = NULL.
+        """
         cur = self._cursor()
         return self._lastrowid(
             cur,
             "INSERT INTO pdc_turn "
             "(codice, planning, impianto, profilo, valid_from, valid_to, "
-            " source_file, imported_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " source_file, imported_at, import_id, data_pubblicazione) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (codice, planning, impianto, profilo, valid_from, valid_to,
-             source_file, datetime.now().isoformat()),
+             source_file, datetime.now().isoformat(),
+             import_id, data_pubblicazione),
         )
 
     def insert_pdc_turn_day(self, pdc_turn_id: int, day_number: int,
@@ -2021,41 +2028,196 @@ class Database:
         )
 
     def clear_pdc_data(self) -> None:
-        """Svuota tutte le tabelle PdC, rispettando l'ordine FK."""
+        """Svuota tutte le tabelle PdC, rispettando l'ordine FK.
+
+        DEPRECATO dopo schema v2.1 (versioning import). Mantenuto per
+        retro-compatibilita' (CLI, rollback totale). Il flusso upload
+        normale ora usa save_parsed_turns_as_import() che preserva lo
+        storico via superseded_by_import_id.
+        """
         cur = self._cursor()
-        # Figli prima, padri dopo (anche se CASCADE farebbe in automatico)
         cur.execute("DELETE FROM pdc_block")
         cur.execute("DELETE FROM pdc_train_periodicity")
         cur.execute("DELETE FROM pdc_turn_day")
         cur.execute("DELETE FROM pdc_turn")
+        cur.execute("DELETE FROM pdc_import")
         self.conn.commit()
 
-    def get_pdc_stats(self) -> dict:
-        """Statistiche aggregate dei turni PdC caricati."""
+    # ------------------------------------------------------------------
+    # VERSIONING IMPORT (schema v2.1)
+    # ------------------------------------------------------------------
+
+    def insert_pdc_import(self, filename: str, data_stampa: str = "",
+                          data_pubblicazione: str = "", valido_dal: str = "",
+                          valido_al: str = "", n_turni: int = 0,
+                          n_pagine_pdf: int = 0,
+                          imported_by: Optional[int] = None) -> int:
+        """Crea un record pdc_import e ritorna l'id. Un nuovo import
+        rappresenta un caricamento di PDF PdC; i suoi turni avranno
+        import_id = id ritornato."""
         cur = self._cursor()
-        cur.execute("SELECT COUNT(*) AS n FROM pdc_turn")
+        return self._lastrowid(
+            cur,
+            "INSERT INTO pdc_import "
+            "(filename, data_stampa, data_pubblicazione, valido_dal, "
+            " valido_al, n_turni, n_pagine_pdf, imported_at, imported_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (filename, data_stampa, data_pubblicazione, valido_dal,
+             valido_al, n_turni, n_pagine_pdf,
+             datetime.now().isoformat(), imported_by),
+        )
+
+    def list_pdc_imports(self) -> list[dict]:
+        """Elenco storico degli import PdC, piu' recenti prima."""
+        cur = self._cursor()
+        cur.execute(self._q(
+            "SELECT * FROM pdc_import ORDER BY imported_at DESC"
+        ))
+        return [self._dict(r) for r in cur.fetchall()]
+
+    def get_pdc_import(self, import_id: int) -> Optional[dict]:
+        cur = self._cursor()
+        cur.execute(self._q("SELECT * FROM pdc_import WHERE id = ?"),
+                    (import_id,))
+        return self._dict(cur.fetchone())
+
+    def mark_superseded_turns(self, new_import_id: int) -> int:
+        """Marca superseded tutti i turni attivi (non ancora superseded)
+        che hanno stesso (codice, impianto) dei turni del nuovo import.
+
+        Non tocca i turni attivi che non compaiono nel nuovo import
+        (restano attivi; la UI li puo' mostrare come "non piu' pubblicati"
+        e l'utente decide se archiviarli manualmente).
+
+        Ritorna il numero di turni marcati.
+        """
+        cur = self._cursor()
+        # Costruiamo SET di chiavi del nuovo import
+        cur.execute(self._q(
+            "SELECT DISTINCT codice, impianto FROM pdc_turn "
+            "WHERE import_id = ?"
+        ), (new_import_id,))
+        new_keys = {(self._dict(r)["codice"], self._dict(r)["impianto"])
+                    for r in cur.fetchall()}
+        if not new_keys:
+            return 0
+
+        # Trova turni attivi con stesse chiavi, diverso import
+        placeholders = ",".join(["(?, ?)"] * len(new_keys))
+        flat = [v for pair in new_keys for v in pair]
+        q = (
+            "SELECT id FROM pdc_turn "
+            "WHERE superseded_by_import_id IS NULL "
+            "  AND import_id <> ? "
+            f"  AND (codice, impianto) IN ({placeholders})"
+        )
+        # SQLite accetta tuple-in, PostgreSQL anche; funziona su entrambi
+        cur.execute(self._q(q), (new_import_id, *flat))
+        ids_to_mark = [self._dict(r)["id"] for r in cur.fetchall()]
+        if not ids_to_mark:
+            return 0
+
+        placeholders_ids = ",".join(["?"] * len(ids_to_mark))
+        cur.execute(
+            self._q(
+                f"UPDATE pdc_turn SET superseded_by_import_id = ? "
+                f"WHERE id IN ({placeholders_ids})"
+            ),
+            (new_import_id, *ids_to_mark),
+        )
+        self.conn.commit()
+        return len(ids_to_mark)
+
+    def diff_import_candidates(self, parsed_turns: list) -> dict:
+        """Dry-run: senza modificare il DB, calcola il diff fra i turni
+        parsati dal nuovo PDF e i turni attivi correnti.
+
+        parsed_turns = list[ParsedPdcTurn] (ha .codice, .impianto)
+
+        Ritorna:
+          {
+            "new":         [{"codice","impianto"} ...],       # codici nuovi
+            "updated":     [{"codice","impianto"} ...],       # stesso codice: verranno superseded
+            "only_in_old": [{"codice","impianto"} ...],       # attivi ora, non nel nuovo PDF
+            "counts": {"new": N, "updated": N, "only_in_old": N}
+          }
+        """
+        new_keys = {(t.codice, t.impianto) for t in parsed_turns}
+
+        cur = self._cursor()
+        cur.execute(self._q(
+            "SELECT codice, impianto FROM pdc_turn "
+            "WHERE superseded_by_import_id IS NULL"
+        ))
+        active_keys = {(self._dict(r)["codice"], self._dict(r)["impianto"])
+                       for r in cur.fetchall()}
+
+        new_only = sorted(new_keys - active_keys)
+        updated  = sorted(new_keys & active_keys)
+        only_old = sorted(active_keys - new_keys)
+
+        def pack(keys):
+            return [{"codice": c, "impianto": i} for (c, i) in keys]
+
+        return {
+            "new": pack(new_only),
+            "updated": pack(updated),
+            "only_in_old": pack(only_old),
+            "counts": {
+                "new": len(new_only),
+                "updated": len(updated),
+                "only_in_old": len(only_old),
+            },
+        }
+
+    def get_pdc_stats(self, include_inactive: bool = False) -> dict:
+        """Statistiche aggregate dei turni PdC caricati.
+
+        Di default considera solo i turni attivi (superseded_by_import_id IS NULL).
+        Usa include_inactive=True per statistiche sullo storico completo.
+        """
+        cur = self._cursor()
+        turn_where = "" if include_inactive else "WHERE superseded_by_import_id IS NULL"
+        day_join_where = "" if include_inactive else "WHERE t.superseded_by_import_id IS NULL"
+
+        cur.execute(f"SELECT COUNT(*) AS n FROM pdc_turn {turn_where}")
         turni = self._dict(cur.fetchone())["n"]
         if not turni:
             return {
                 "loaded": False, "turni": 0, "days": 0, "blocks": 0,
                 "impianti": [], "trains": 0,
             }
-        cur.execute("SELECT COUNT(*) AS n FROM pdc_turn_day")
+        cur.execute(
+            "SELECT COUNT(*) AS n FROM pdc_turn_day d "
+            "JOIN pdc_turn t ON t.id = d.pdc_turn_id "
+            f"{day_join_where}"
+        )
         days = self._dict(cur.fetchone())["n"]
-        cur.execute("SELECT COUNT(*) AS n FROM pdc_block")
+        cur.execute(
+            "SELECT COUNT(*) AS n FROM pdc_block b "
+            "JOIN pdc_turn_day d ON d.id = b.pdc_turn_day_id "
+            "JOIN pdc_turn t ON t.id = d.pdc_turn_id "
+            f"{day_join_where}"
+        )
         blocks = self._dict(cur.fetchone())["n"]
         cur.execute(
-            "SELECT COUNT(DISTINCT train_id) AS n FROM pdc_block "
-            "WHERE block_type = 'train' AND train_id <> ''"
+            "SELECT COUNT(DISTINCT b.train_id) AS n FROM pdc_block b "
+            "JOIN pdc_turn_day d ON d.id = b.pdc_turn_day_id "
+            "JOIN pdc_turn t ON t.id = d.pdc_turn_id "
+            "WHERE b.block_type = 'train' AND b.train_id <> '' "
+            + ("" if include_inactive else "AND t.superseded_by_import_id IS NULL")
         )
         trains = self._dict(cur.fetchone())["n"]
-        cur.execute("SELECT DISTINCT impianto FROM pdc_turn ORDER BY impianto")
+        cur.execute(
+            f"SELECT DISTINCT impianto FROM pdc_turn {turn_where} "
+            "ORDER BY impianto"
+        )
         impianti = [self._dict(r)["impianto"] for r in cur.fetchall()]
-        cur.execute("SELECT MIN(valid_from) AS v FROM pdc_turn")
+        cur.execute(f"SELECT MIN(valid_from) AS v FROM pdc_turn {turn_where}")
         valid_from = self._dict(cur.fetchone())["v"]
-        cur.execute("SELECT MAX(valid_to) AS v FROM pdc_turn")
+        cur.execute(f"SELECT MAX(valid_to) AS v FROM pdc_turn {turn_where}")
         valid_to = self._dict(cur.fetchone())["v"]
-        cur.execute("SELECT MAX(imported_at) AS v FROM pdc_turn")
+        cur.execute(f"SELECT MAX(imported_at) AS v FROM pdc_turn {turn_where}")
         imported_at = self._dict(cur.fetchone())["v"]
         return {
             "loaded": True, "turni": turni, "days": days, "blocks": blocks,
@@ -2065,11 +2227,18 @@ class Database:
         }
 
     def list_pdc_turns(self, impianto: Optional[str] = None,
-                       profilo: Optional[str] = None) -> list[dict]:
-        """Elenco dei turni PdC, filtrabile per impianto/profilo."""
+                       profilo: Optional[str] = None,
+                       include_inactive: bool = False) -> list[dict]:
+        """Elenco dei turni PdC, filtrabile per impianto/profilo.
+
+        include_inactive=False (default): solo turni attivi
+        (superseded_by_import_id IS NULL).
+        """
         cur = self._cursor()
         conditions = []
         params: list = []
+        if not include_inactive:
+            conditions.append("superseded_by_import_id IS NULL")
         if impianto:
             conditions.append("UPPER(impianto) = UPPER(?)")
             params.append(impianto)
@@ -2133,10 +2302,15 @@ class Database:
             rows.append(d)
         return rows
 
-    def find_pdc_train(self, train_id: str) -> list[dict]:
-        """Cerca un treno nei blocchi PdC. Ritorna ogni giornata che lo include."""
+    def find_pdc_train(self, train_id: str,
+                       include_inactive: bool = False) -> list[dict]:
+        """Cerca un treno nei blocchi PdC. Ritorna ogni giornata che lo include.
+
+        include_inactive=False (default): cerca solo nei turni attivi.
+        """
         cur = self._cursor()
-        cur.execute(self._q("""
+        where_active = "" if include_inactive else "AND t.superseded_by_import_id IS NULL"
+        cur.execute(self._q(f"""
             SELECT t.id AS turn_id, t.codice, t.impianto, t.profilo,
                    d.id AS day_id, d.day_number, d.periodicita,
                    d.start_time, d.end_time,
@@ -2148,6 +2322,7 @@ class Database:
             JOIN pdc_turn_day d ON d.id = b.pdc_turn_day_id
             JOIN pdc_turn t ON t.id = d.pdc_turn_id
             WHERE b.block_type = 'train' AND b.train_id = ?
+              {where_active}
             ORDER BY t.impianto, t.codice, d.day_number, d.periodicita, b.seq
         """), (train_id,))
         return [self._dict(r) for r in cur.fetchall()]

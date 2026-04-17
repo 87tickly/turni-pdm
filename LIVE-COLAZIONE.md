@@ -4,6 +4,85 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-17 (tardo pomeriggio) — Fase 1 step 2: endpoint upload versionato + diff
+
+### Comportamento upload PdC
+
+Il vecchio flusso era: `upload → clear_pdc_data (WIPE) → insert`.
+Il nuovo flusso versionato (schema v2.1) è:
+
+- `POST /upload-turno-pdc?dry_run=true` → parsa il PDF e ritorna la **diff**
+  rispetto ai turni attivi (`new` / `updated` / `only_in_old`), SENZA scrivere nulla.
+- `POST /upload-turno-pdc` (default, dry_run=false) → crea `pdc_import` nuovo,
+  inserisce i turni con `import_id = nuovo`, poi marca `superseded_by_import_id`
+  sui turni precedenti che hanno stesso `(codice, impianto)`.
+
+Nuovi endpoint:
+
+- `GET /pdc-imports` → lista storico import, piu' recenti prima, con conteggio
+  `turni_attivi` per ogni import
+- `GET /pdc-imports/{id}` → dettaglio import + lista dei turni generati
+  (mostra quali di quelli sono stati nel frattempo superseded da un import successivo)
+
+### Modifiche DB/parser
+
+**src/database/db.py** — nuovi metodi:
+
+- `insert_pdc_import(...)` crea record import
+- `list_pdc_imports()` / `get_pdc_import(id)`
+- `mark_superseded_turns(new_import_id)` archivia i precedenti con stessa (codice, impianto)
+- `diff_import_candidates(turns)` calcola new/updated/only_in_old senza scrivere
+
+Metodi esistenti modificati per default "solo turni attivi":
+
+- `list_pdc_turns(include_inactive=False)`
+- `find_pdc_train(train_id, include_inactive=False)`
+- `get_pdc_stats(include_inactive=False)`
+
+`insert_pdc_turn` ora accetta `import_id` e `data_pubblicazione` come kwargs
+opzionali (retro-compatibile: legacy callers NULL).
+
+**src/importer/turno_pdc_parser.py** — split del salvataggio:
+
+- `save_parsed_turns_as_import(turns, db, filename, ...)` → NUOVO flusso versionato
+- `save_parsed_turns_to_db(turns, db)` → LEGACY (con WIPE totale), tenuto per CLI
+- `_write_parsed_turns(...)` worker interno condiviso
+
+### Verifica end-to-end
+
+Test su `uploads/Turni PdC rete RFI dal 23 Febbraio 2026.pdf` (446 pagine).
+
+Parser v1 legge **26 turni** (l'indice ne dichiara 28 → parser miss nota,
+verra' risolta in Fase 2 con parser v2).
+
+Risultati test via HTTP a backend locale:
+
+- dry_run vs DB vergine: `{new: 26, updated: 0, only_in_old: 0}` ✓
+- import #1: crea pdc_import id=1, inserisce 26 turni + 1344 giornate + 6925 blocchi + 2901 note ✓
+- dry_run #2 (DB ora con 26 attivi): `{new: 0, updated: 26, only_in_old: 0}` ✓
+- import #2 (re-upload): marca superseded 26 turni del import #1 ✓
+- `GET /pdc-imports` restituisce 2 import, #2 con 26 attivi, #1 con 0 attivi ✓
+- stats attivi: 26 turni; stats include_inactive: 52 (storico intero conservato) ✓
+
+### Prossimi step
+
+**Fase 3** (UI): aggiornare `static/index.html` (legacy) e/o il frontend React
+per:
+- mostrare lista `GET /pdc-imports` con pulsante "Storico"
+- all'upload: prima chiama `?dry_run=true`, mostra finestra conferma con diff,
+  solo dopo OK utente chiama l'upload reale
+- pulsante "torna a import precedente" (opzionale: rollback)
+
+**Fase 2** (parser v2): risolvere il miss 28 vs 26 + coverage orari 100% +
+minuti accessori + pallino `●` accessori maggiorati.
+
+### File modificati questa sessione
+- `src/database/db.py` — metodi versioning + filtri include_inactive
+- `src/importer/turno_pdc_parser.py` — save_parsed_turns_as_import + _write_parsed_turns
+- `api/importers.py` — endpoint upload versionato + /pdc-imports
+
+---
+
 ## 2026-04-17 — Fase 0 (mockup Gantt) chiusa · Fase 1 step 1 (schema + versioning DB) fatta
 
 ### Contesto
