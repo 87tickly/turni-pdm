@@ -11,7 +11,15 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { ChevronLeft, Save, Loader2, ChevronDown, ChevronRight } from "lucide-react"
+import {
+  ChevronLeft,
+  Save,
+  Loader2,
+  ChevronDown,
+  ChevronRight,
+  ArrowRightLeft,
+  X,
+} from "lucide-react"
 import { PdcGantt } from "@/components/PdcGantt"
 import {
   listPdcTurns,
@@ -21,6 +29,14 @@ import {
   type PdcTurnDetail,
   type PdcBlock,
 } from "@/lib/api"
+
+// Stato del "move block": blocco selezionato per essere spostato in altra giornata
+type MoveState = {
+  sourceTurnId: number
+  sourceDayId: number
+  blockIndex: number
+  block: PdcBlock
+}
 
 // Stato per-turno: dati caricati + dirty flag per salvataggio automatico
 type TurnState = {
@@ -38,6 +54,7 @@ export function PdcDepotPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [expandedTurns, setExpandedTurns] = useState<Set<number>>(new Set())
+  const [moveState, setMoveState] = useState<MoveState | null>(null)
 
   // Timer debounce salvataggio (per turno_id)
   const saveTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({})
@@ -155,6 +172,124 @@ export function PdcDepotPage() {
     [saveTurn]
   )
 
+  // Avvia una "move": l'utente clicca su un blocco per spostarlo
+  const startMove = useCallback(
+    (turnId: number, dayId: number, blockIndex: number, block: PdcBlock) => {
+      // Sposta solo train (+ CVp/CVa adiacenti implicitamente via accept)
+      if (block.block_type !== "train" && block.block_type !== "coach_transfer") {
+        setError("Solo treni e vetture possono essere spostati tra giornate")
+        setTimeout(() => setError(""), 3000)
+        return
+      }
+      setMoveState({
+        sourceTurnId: turnId,
+        sourceDayId: dayId,
+        blockIndex,
+        block,
+      })
+    },
+    []
+  )
+
+  // Completa la move: target = (turnId, dayId)
+  const completeMove = useCallback(
+    (targetTurnId: number, targetDayId: number) => {
+      if (!moveState) return
+      setTurns((prev) => {
+        const next = { ...prev }
+
+        // 1) Rimuovi il blocco dalla source (e CVp/CVa agganciati)
+        const source = next[moveState.sourceTurnId]
+        if (!source) return prev
+        const newSourceDetail = {
+          ...source.detail,
+          days: source.detail.days.map((d) => {
+            if (d.id !== moveState.sourceDayId) return d
+            const toRemove = new Set<number>([moveState.blockIndex])
+            const b = d.blocks[moveState.blockIndex]
+            if (b?.block_type === "train") {
+              const prev = d.blocks[moveState.blockIndex - 1]
+              const nxt = d.blocks[moveState.blockIndex + 1]
+              if (prev?.block_type === "cv_partenza")
+                toRemove.add(moveState.blockIndex - 1)
+              if (nxt?.block_type === "cv_arrivo")
+                toRemove.add(moveState.blockIndex + 1)
+            }
+            const filtered = d.blocks.filter((_, idx) => !toRemove.has(idx))
+            return {
+              ...d,
+              blocks: filtered.map((bb, idx) => ({ ...bb, seq: idx })),
+            }
+          }),
+        }
+        next[moveState.sourceTurnId] = {
+          ...source,
+          detail: newSourceDetail,
+          dirty: true,
+        }
+
+        // 2) Aggiungi il blocco (e CVp/CVa se erano in source) al target
+        // Se il target è lo stesso turno della source, usa il detail già aggiornato
+        const targetContainer =
+          targetTurnId === moveState.sourceTurnId
+            ? next[targetTurnId]
+            : next[targetTurnId]
+        if (!targetContainer) return next
+        const added: PdcBlock[] = []
+        if (moveState.block.block_type === "train") {
+          const origSource = source.detail.days.find(
+            (d) => d.id === moveState.sourceDayId
+          )
+          const origPrev = origSource?.blocks[moveState.blockIndex - 1]
+          const origNext = origSource?.blocks[moveState.blockIndex + 1]
+          if (origPrev?.block_type === "cv_partenza") added.push(origPrev)
+          added.push(moveState.block)
+          if (origNext?.block_type === "cv_arrivo") added.push(origNext)
+        } else {
+          added.push(moveState.block)
+        }
+
+        const newTargetDetail = {
+          ...targetContainer.detail,
+          days: targetContainer.detail.days.map((d) => {
+            if (d.id !== targetDayId) return d
+            const newBlocks = [...d.blocks, ...added]
+            return {
+              ...d,
+              blocks: newBlocks.map((bb, idx) => ({ ...bb, seq: idx })),
+            }
+          }),
+        }
+        next[targetTurnId] = {
+          ...targetContainer,
+          detail: newTargetDetail,
+          dirty: true,
+        }
+
+        return next
+      })
+
+      // Salvataggio debounced per entrambi i turni coinvolti
+      if (saveTimers.current[moveState.sourceTurnId])
+        clearTimeout(saveTimers.current[moveState.sourceTurnId])
+      saveTimers.current[moveState.sourceTurnId] = setTimeout(
+        () => saveTurn(moveState.sourceTurnId),
+        1500
+      )
+      if (targetTurnId !== moveState.sourceTurnId) {
+        if (saveTimers.current[targetTurnId])
+          clearTimeout(saveTimers.current[targetTurnId])
+        saveTimers.current[targetTurnId] = setTimeout(
+          () => saveTurn(targetTurnId),
+          1500
+        )
+      }
+
+      setMoveState(null)
+    },
+    [moveState, saveTurn]
+  )
+
   const toggleExpanded = (turnId: number) => {
     setExpandedTurns((prev) => {
       const next = new Set(prev)
@@ -207,6 +342,36 @@ export function PdcDepotPage() {
       {error && (
         <div className="mb-3 p-2 text-[12px] bg-destructive/10 text-destructive rounded">
           {error}
+        </div>
+      )}
+
+      {/* Banner "sposta blocco in altra giornata" */}
+      {moveState && (
+        <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3">
+          <ArrowRightLeft size={16} className="text-amber-700 shrink-0" />
+          <div className="flex-1 text-[12px]">
+            <span className="font-semibold">In spostamento:</span>{" "}
+            <span className="font-mono">
+              {moveState.block.train_id || moveState.block.vettura_id || "?"}
+            </span>{" "}
+            <span className="text-muted-foreground">
+              ({moveState.block.from_station} → {moveState.block.to_station})
+            </span>
+            {" — "}
+            <span className="text-muted-foreground">
+              Clicca{" "}
+              <span className="font-semibold text-amber-700">
+                "Incolla qui"
+              </span>{" "}
+              sulla giornata target
+            </span>
+          </div>
+          <button
+            onClick={() => setMoveState(null)}
+            className="text-[11px] px-2 py-1 rounded hover:bg-amber-100 flex items-center gap-1"
+          >
+            <X size={11} /> Annulla
+          </button>
         </div>
       )}
 
@@ -285,6 +450,21 @@ export function PdcDepotPage() {
                               Lav {day.lavoro_min}m · Cct {day.condotta_min}m · Km {day.km}
                             </span>
                           </div>
+                          {/* Bottone "Incolla qui" visibile solo durante una move */}
+                          {moveState &&
+                            !(
+                              moveState.sourceTurnId === t.id &&
+                              moveState.sourceDayId === day.id
+                            ) && (
+                              <div className="mb-2 flex justify-end">
+                                <button
+                                  onClick={() => completeMove(t.id, day.id)}
+                                  className="text-[11px] px-3 py-1 rounded bg-amber-600 text-white hover:bg-amber-700 flex items-center gap-1"
+                                >
+                                  <ArrowRightLeft size={11} /> Incolla qui
+                                </button>
+                              </div>
+                            )}
                           {day.is_disponibile === 1 ? (
                             <p className="text-[11px] text-muted-foreground italic py-2 text-center">
                               Giornata disponibile / riposo
@@ -297,6 +477,9 @@ export function PdcDepotPage() {
                               label={`${t.codice} · g${day.day_number} ${day.periodicita}`}
                               onBlocksChange={(changes) =>
                                 updateDayBlocks(t.id, day.id, changes)
+                              }
+                              onBlockClick={(block, idx) =>
+                                startMove(t.id, day.id, idx, block)
                               }
                               height={200}
                             />

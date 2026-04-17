@@ -11,6 +11,8 @@ import {
   ChevronRight,
   X,
   Search,
+  Home,
+  Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PdcGantt } from "@/components/PdcGantt"
@@ -20,10 +22,12 @@ import {
   getPdcTurn,
   getCalendarPeriodicity,
   lookupTrainInGiroMateriale,
+  findReturnTrain,
   type PdcTurnInput,
   type PdcDayInput,
   type PdcBlockInput,
   type PdcBlock,
+  type ReturnTrain,
 } from "@/lib/api"
 
 // ── Constants ──────────────────────────────────────────────────
@@ -230,12 +234,19 @@ function DayEditor({
   day,
   onChange,
   onRemove,
+  impianto,
 }: {
   day: PdcDayInput
   onChange: (d: PdcDayInput) => void
   onRemove: () => void
+  impianto: string
 }) {
   const [open, setOpen] = useState(true)
+  const [returnSearching, setReturnSearching] = useState(false)
+  const [returnCandidates, setReturnCandidates] = useState<ReturnTrain[] | null>(
+    null
+  )
+  const [returnMsg, setReturnMsg] = useState("")
 
   const updateBlock = (i: number, b: PdcBlockInput) => {
     const blocks = [...(day.blocks || [])]
@@ -250,6 +261,64 @@ function DayEditor({
   const removeBlock = (i: number) => {
     const blocks = (day.blocks || []).filter((_, idx) => idx !== i)
     onChange({ ...day, blocks: blocks.map((b, idx) => ({ ...b, seq: idx })) })
+  }
+
+  // Trova rientro in vettura: usa l'ultima stazione dell'ultimo blocco
+  // con to_station e cerca treni per il deposito via ARTURO Live.
+  const findReturnVettura = async () => {
+    if (!impianto.trim()) {
+      setReturnMsg("⚠ Impianto non impostato")
+      return
+    }
+    const lastWithStation = [...(day.blocks || [])]
+      .reverse()
+      .find((b) => b.to_station && b.block_type !== "cv_arrivo")
+    if (!lastWithStation) {
+      setReturnMsg("⚠ Nessun treno con stazione di arrivo nel turno")
+      return
+    }
+    const fromStation = lastWithStation.to_station || ""
+    const afterTime = lastWithStation.end_time || "00:00"
+    setReturnSearching(true)
+    setReturnMsg("")
+    setReturnCandidates(null)
+    try {
+      const r = await findReturnTrain(fromStation, impianto, afterTime)
+      if (r.error) {
+        setReturnMsg(`⚠ ${r.error}`)
+      } else if (r.return_trains.length === 0) {
+        setReturnMsg(
+          `Nessun treno ARTURO Live dopo ${afterTime} da ${fromStation} a ${impianto}`
+        )
+      } else {
+        setReturnCandidates(r.return_trains)
+        setReturnMsg(
+          `${r.return_trains.length} treno/i trovato/i da ${fromStation} → ${impianto}`
+        )
+      }
+    } catch (e) {
+      setReturnMsg(`✗ ${e instanceof Error ? e.message : "Errore"}`)
+    } finally {
+      setReturnSearching(false)
+    }
+  }
+
+  // Aggiunge un treno di ritorno come coach_transfer (vettura) al turno
+  const acceptReturnCandidate = (rt: ReturnTrain) => {
+    const blocks = [...(day.blocks || [])]
+    blocks.push({
+      block_type: "coach_transfer",
+      seq: blocks.length,
+      vettura_id: rt.numero,
+      from_station: rt.via || "",
+      to_station: rt.destinazione || impianto,
+      start_time: rt.dep_time,
+      end_time: rt.arr_time,
+    })
+    onChange({ ...day, blocks })
+    setReturnCandidates(null)
+    setReturnMsg(`✓ aggiunto rientro vettura treno ${rt.numero}`)
+    setTimeout(() => setReturnMsg(""), 3000)
   }
 
   return (
@@ -405,15 +474,83 @@ function DayEditor({
                 />
               </div>
 
-              <div className="flex items-center justify-between pt-2">
+              <div className="flex items-center justify-between pt-2 flex-wrap gap-2">
                 <span className="text-[11px] font-semibold">Blocchi ({(day.blocks || []).length})</span>
-                <button
-                  onClick={addBlock}
-                  className="text-[11px] px-2 py-1 bg-primary/10 text-primary rounded hover:bg-primary/20 flex items-center gap-1"
-                >
-                  <Plus size={11} /> Aggiungi blocco
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={findReturnVettura}
+                    disabled={returnSearching}
+                    className="text-[11px] px-2 py-1 bg-amber-50 text-amber-700 rounded hover:bg-amber-100 border border-amber-200 flex items-center gap-1 disabled:opacity-50"
+                    title="Cerca un treno ARTURO Live per rientrare al deposito come vettura"
+                  >
+                    {returnSearching ? (
+                      <Loader2 size={11} className="animate-spin" />
+                    ) : (
+                      <Home size={11} />
+                    )}
+                    Rientro in vettura
+                  </button>
+                  <button
+                    onClick={addBlock}
+                    className="text-[11px] px-2 py-1 bg-primary/10 text-primary rounded hover:bg-primary/20 flex items-center gap-1"
+                  >
+                    <Plus size={11} /> Aggiungi blocco
+                  </button>
+                </div>
               </div>
+
+              {returnMsg && (
+                <div className="text-[10px] text-muted-foreground px-1">
+                  {returnMsg}
+                </div>
+              )}
+
+              {returnCandidates && returnCandidates.length > 0 && (
+                <div className="border border-amber-200 bg-amber-50 rounded-md p-2 space-y-1">
+                  <p className="text-[11px] font-semibold text-amber-800 mb-1">
+                    Treni per rientro al deposito:
+                  </p>
+                  {returnCandidates.map((rt, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2 text-[11px] bg-white rounded px-2 py-1 border border-amber-100"
+                    >
+                      <span className="font-mono font-semibold">{rt.numero}</span>
+                      {rt.categoria && (
+                        <span className="text-[9px] text-muted-foreground">
+                          {rt.categoria}
+                        </span>
+                      )}
+                      <span className="text-muted-foreground">
+                        {rt.via} → {rt.destinazione}
+                      </span>
+                      <span className="font-mono text-[10px]">
+                        {rt.dep_time} – {rt.arr_time}
+                      </span>
+                      {rt.duration_min && (
+                        <span className="text-[9px] text-muted-foreground">
+                          ({rt.duration_min}m)
+                        </span>
+                      )}
+                      <button
+                        onClick={() => acceptReturnCandidate(rt)}
+                        className="ml-auto text-[10px] px-2 py-0.5 bg-amber-600 text-white rounded hover:bg-amber-700"
+                      >
+                        + Aggiungi
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => {
+                      setReturnCandidates(null)
+                      setReturnMsg("")
+                    }}
+                    className="text-[10px] text-muted-foreground hover:text-foreground"
+                  >
+                    Chiudi
+                  </button>
+                </div>
+              )}
               <div className="space-y-2">
                 {(day.blocks || []).map((b, i) => (
                   <div id={`block-editor-${i}`} key={i} className="rounded-lg transition-all">
@@ -714,6 +851,7 @@ export function PdcBuilderPage() {
               day={d}
               onChange={(nd) => updateDay(i, nd)}
               onRemove={() => removeDay(i)}
+              impianto={impianto}
             />
           ))}
           {days.length === 0 && (

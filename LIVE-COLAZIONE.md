@@ -4,6 +4,62 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-17 — Step 10a+b+d: Gantt visual tweaks + rientro vettura + sposta tra giornate
+
+### Feedback utente
+1. Ridurre dimensione blocchi non-treno (molto sottili)
+2. Stazioni intermedie mostrate tra blocchi
+3. Pulsante "Rientro in vettura" che usa ARTURO Live
+4. Possibilità di spostare un treno tra giornate/turni del deposito
+
+### 10a — Visual tweaks Gantt
+Altezze blocchi ridotte per enfatizzare il treno:
+- train: 26px (era 28)
+- coach_transfer: **10px** (era 20)
+- meal: **10px** (era 20)
+- scomp: **8px** (era 16)
+- marker CVp/CVa: 24px (era 30)
+
+Aggiunto render **stazioni intermedie** tra coppie di blocchi consecutivi:
+- Label piccola (9px) a metà del gap tra end di un blocco e start del successivo
+- Se stazione coincide: mostra solo quella (punto di passaggio)
+- Se cambiano: mostra `A→B`
+
+### 10b — Rientro in vettura via ARTURO Live
+Nuova funzione frontend `findReturnTrain(from, to, afterTime)` che chiama il già esistente endpoint backend `GET /vt/find-return`.
+
+Nel `DayEditor`:
+- Pulsante **"Rientro in vettura"** (icona 🏠) accanto a "Aggiungi blocco"
+- Usa `impianto` del turno come destinazione
+- Usa la stazione dell'ultimo blocco con `to_station` come origine
+- Usa l'end_time dell'ultimo blocco come `after_time`
+- Mostra una lista di treni candidati da ARTURO Live
+- Click "+ Aggiungi" crea un nuovo `coach_transfer` con numero vettura e orari reali
+
+### 10d — Sposta treno tra giornate/turni (PdcDepotPage)
+Nuovo flusso "cut & paste" in `PdcDepotPage`:
+1. Utente clicca un treno o vettura in una giornata → state `moveState` attivo
+2. Banner giallo in alto con info del blocco in spostamento + bottone "Annulla"
+3. Su ogni altra giornata appare bottone **"Incolla qui"**
+4. Click → rimuove il blocco (e CVp/CVa agganciati) da source, li aggiunge a target
+5. Debounce save per entrambi i turni (source e target)
+
+### Build
+- `tsc --noEmit` OK
+- 394 KB JS (113 gzip)
+
+### File modificati
+- `frontend/src/components/PdcGantt.tsx` — altezze ridotte + label stazioni intermedie
+- `frontend/src/lib/api.ts` — `findReturnTrain`, type `ReturnTrain`
+- `frontend/src/pages/PdcBuilderPage.tsx` — pulsante Rientro vettura + candidati list, prop `impianto` per DayEditor
+- `frontend/src/pages/PdcDepotPage.tsx` — move tra giornate via click + "Incolla qui"
+
+### Limitazioni (da affrontare nei prossimi step)
+- Validazione "treno fuori orario" via ARTURO Live quando si sposta
+- Blocchi accessori inizio/fine giornata non ancora presenti
+
+---
+
 ## 2026-04-17 — Step 9d: Vista deposito completa (tutti turni editabili)
 
 ### Nuova pagina `PdcDepotPage.tsx` su route `/pdc/depot/:impianto`

@@ -174,11 +174,13 @@ function fillBlockTimes(
 }
 
 // ── Stili barre colorate per tipo ──────────────────────────────
-const BAR_H_TRAIN = 28
-const BAR_H_COACH = 20
-const BAR_H_MEAL = 20
-const BAR_H_SCOMP = 16
-const MARKER_H = 30
+// Il treno rimane dominante; gli altri blocchi sono molto piu' sottili
+// per metterli in secondo piano (come nel PDF Trenord).
+const BAR_H_TRAIN = 26
+const BAR_H_COACH = 10
+const BAR_H_MEAL = 10
+const BAR_H_SCOMP = 8
+const MARKER_H = 24
 
 function blockStyle(t: PdcBlock["block_type"]) {
   switch (t) {
@@ -195,23 +197,23 @@ function blockStyle(t: PdcBlock["block_type"]) {
         fill: "#A78BFA",
         stroke: "#7C3AED",
         h: BAR_H_COACH,
-        dash: "4 3",
-        opacity: 0.55,
+        dash: "3 2",
+        opacity: 0.5,
       }
     case "meal":
       return {
         fill: "#34D399",
         stroke: "#059669",
         h: BAR_H_MEAL,
-        dash: "4 3",
-        opacity: 0.55,
+        dash: "3 2",
+        opacity: 0.5,
       }
     case "scomp":
       return {
         fill: "#CBD5E1",
         stroke: "#94A3B8",
         h: BAR_H_SCOMP,
-        dash: "4 3",
+        dash: "3 2",
         opacity: 0.7,
       }
     case "cv_partenza":
@@ -635,6 +637,42 @@ export function PdcGantt({
             {lastStation}
           </text>
         )}
+
+        {/* Stazioni intermedie: mostrate tra ogni coppia di blocchi
+            dove lo stato "stazione attuale" cambia. Label piccola in
+            corrispondenza della posizione X (tra end del blocco N e
+            start del blocco N+1). */}
+        {blocks.map((b, i) => {
+          if (i === blocks.length - 1) return null
+          const next = blocks[i + 1]
+          const endStation = b.to_station
+          const nextStart = next.from_station || b.to_station
+          // Mostra solo se la stazione è significativa e c'è un gap
+          if (!endStation) return null
+          const sm = hhmmToMinutesRel(b.end_time) ?? hhmmToMinutesRel(b.start_time)
+          const emNext = hhmmToMinutesRel(next.start_time) ?? sm
+          if (sm === null || emNext === null) return null
+          // Nascondo se etichette coincidono con stazioni depot agli estremi
+          if (i === 0 && endStation === firstStation) return null
+          // Posiziono la label tra end e start successivo
+          const xLabel = (minuteToX(sm) + minuteToX(emNext)) / 2
+          const showJoin = endStation === nextStart
+          return (
+            <g key={`st-${i}`} pointerEvents="none">
+              <text
+                x={xLabel}
+                y={PAD_T - 2}
+                fontSize="9"
+                textAnchor="middle"
+                fill="#475569"
+                fontFamily="'Exo 2', sans-serif"
+                fontWeight="500"
+              >
+                {showJoin ? endStation : `${endStation}→${nextStart}`}
+              </text>
+            </g>
+          )
+        })}
 
         {/* Blocchi */}
         {blocks.map((b, i) => {

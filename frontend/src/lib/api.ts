@@ -755,3 +755,35 @@ export async function lookupTrainInGiroMateriale(trainId: string) {
     `/pdc-builder/lookup-train/${encodeURIComponent(trainId)}`
   )
 }
+
+// ── Find return trip via ARTURO Live ──
+
+export interface ReturnTrain {
+  numero: string
+  categoria?: string
+  origine?: string
+  destinazione?: string
+  operatore?: string
+  dep_time: string         // orario partenza dalla stazione corrente
+  arr_time: string         // orario arrivo al deposito
+  via: string              // stazione di partenza
+  duration_min?: number
+  delay?: number
+  status?: string
+}
+
+export async function findReturnTrain(
+  fromStation: string,
+  toStation: string,
+  afterTime = "00:00",
+) {
+  const qs = new URLSearchParams({
+    from_station: fromStation,
+    to_station: toStation,
+    after_time: afterTime,
+  })
+  return api.get<{
+    return_trains: ReturnTrain[]
+    error?: string
+  }>(`/vt/find-return?${qs.toString()}`)
+}
