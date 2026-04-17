@@ -4,6 +4,53 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-17 — Step 9d: Vista deposito completa (tutti turni editabili)
+
+### Nuova pagina `PdcDepotPage.tsx` su route `/pdc/depot/:impianto`
+Consente di visualizzare e modificare contemporaneamente TUTTI i turni di un deposito con tutte le loro giornate in un'unica vista.
+
+### Layout
+- Header con nome deposito + back button
+- Lista turni del deposito (filtro lato server)
+- Ogni turno: accordion espandibile (primo aperto di default)
+- Alla espansione lazy-load del dettaglio turno
+- Ogni giornata del turno: Gantt interattivo completo (200px alto)
+- Giornate "Disponibile" mostrano solo testo
+
+### Auto-save
+- `onBlocksChange` aggiorna lo state locale → `dirty=true`
+- Debounce 1.5s dopo l'ultima modifica → chiamata `PUT /pdc-turn/{id}`
+- Badge visuale per turno:
+  - 🟠 "Modificato" (dirty ma non ancora salvato)
+  - 🔵 "Salvataggio..." (spinner durante il PUT)
+  - 🟢 "Sincronizzato" (dopo commit riuscito)
+- Un debounce timer separato per turno → salvataggi paralleli, non interferiscono tra loro
+
+### Integrazione `PdcPage`
+Nuovo bottone **"Vista deposito"** nell'header del dettaglio turno accanto a Modifica/Elimina. Link a `/pdc/depot/<impianto>`.
+
+### Flusso utente
+1. Dalla pagina turni, cliccare su un turno
+2. Click "Vista deposito" → apre tutti i 1-N turni del deposito
+3. Espandere i turni di interesse → ogni giornata mostra Gantt editabile
+4. Trascinare un treno in qualsiasi giornata → auto-save dopo 1.5s
+5. Badge verde "Sincronizzato" conferma il salvataggio
+
+### Limitazioni attuali
+- Non ancora drag cross-day (spostare treno da g1 di turno A a g2 di turno B). Necessita state condiviso tra Gantt + logica di rimozione/aggiunta nel blocco source/target. Prossimo step (opzionale).
+- Ogni Gantt gestisce solo i propri blocchi: il drag resta all'interno della singola giornata.
+
+### Build
+- Zero errori TS (fixato `NodeJS.Timeout` → `ReturnType<typeof setTimeout>`)
+- 387 KB JS (111 gzip)
+
+### File creati / modificati
+- `frontend/src/pages/PdcDepotPage.tsx` — NEW, ~280 righe
+- `frontend/src/App.tsx` — route `/pdc/depot/:impianto`
+- `frontend/src/pages/PdcPage.tsx` — bottone "Vista deposito" in TurnDetail
+
+---
+
 ## 2026-04-17 — Step 9a+b+c: CVp/CVa linked, drag con snap, lookup giro materiale
 
 ### Feedback utente

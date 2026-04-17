@@ -15,6 +15,7 @@ import {
   Plus,
   Edit,
   Trash2,
+  LayoutGrid,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PdcGantt } from "@/components/PdcGantt"
@@ -271,17 +272,19 @@ function TurnDetail({
   detail,
   onEdit,
   onDelete,
+  onDepotView,
 }: {
   detail: PdcTurnDetail
   onEdit: () => void
   onDelete: () => void
+  onDepotView: () => void
 }) {
   const t = detail.turn
   return (
     <div>
       {/* Header */}
       <div className="mb-4 pb-3 border-b border-border-subtle">
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
           <h3 className="text-lg font-bold font-mono">{t.codice}</h3>
           <span className="text-[11px] font-mono text-muted-foreground">
             [{t.planning}]
@@ -290,6 +293,13 @@ function TurnDetail({
             {t.profilo}
           </span>
           <div className="ml-auto flex items-center gap-1">
+            <button
+              onClick={onDepotView}
+              className="text-[11px] px-2 py-1 rounded border border-primary/30 text-primary hover:bg-primary/10 flex items-center gap-1"
+              title="Vista completa del deposito (tutti i turni + Gantt editabili)"
+            >
+              <LayoutGrid size={11} /> Vista deposito
+            </button>
             <button
               onClick={onEdit}
               className="text-[11px] px-2 py-1 rounded border border-border hover:bg-muted flex items-center gap-1"
@@ -515,7 +525,14 @@ export function PdcPage() {
           {loadingDetail ? (
             <p className="text-[12px] text-muted-foreground">Caricamento...</p>
           ) : detail ? (
-            <TurnDetail detail={detail} onEdit={handleEdit} onDelete={handleDelete} />
+            <TurnDetail
+              detail={detail}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              onDepotView={() =>
+                navigate(`/pdc/depot/${encodeURIComponent(detail.turn.impianto)}`)
+              }
+            />
           ) : (
             <div className="h-full flex items-center justify-center text-center">
               <div>
