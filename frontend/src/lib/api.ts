@@ -792,3 +792,54 @@ export async function findReturnTrain(
     error?: string
   }>(`/vt/find-return?${qs.toString()}`)
 }
+
+// ── Triple-check treno: DB interno + PdC + ARTURO Live ────────────
+export interface TrainCheckResult {
+  train_id: string
+  db_internal: {
+    found: boolean
+    data: {
+      from_station: string
+      dep_time: string
+      to_station: string
+      arr_time: string
+      material_turn_id?: number
+      day_index?: number
+      is_deadhead?: boolean
+      giro_chain_len?: number
+    } | null
+  }
+  pdc: {
+    found: boolean
+    results: Array<{
+      turn_id: number
+      codice: string
+      impianto: string
+      day_number: number
+      periodicita: string
+      block_start: string
+      block_end: string
+      from_station: string
+      to_station: string
+    }>
+  }
+  arturo_live: {
+    found: boolean
+    data: {
+      operator: string
+      category: string
+      origin: string
+      destination: string
+      dep_time: string
+      arr_time: string
+      num_stops: number
+      delay: number
+      is_trenord: boolean
+      status: string
+    } | null
+  }
+}
+
+export async function trainCheck(trainId: string) {
+  return api.get<TrainCheckResult>(`/train-check/${encodeURIComponent(trainId)}`)
+}

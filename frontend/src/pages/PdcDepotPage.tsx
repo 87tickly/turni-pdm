@@ -25,6 +25,7 @@ import {
   listPdcTurns,
   getPdcTurn,
   updatePdcTurn,
+  trainCheck,
   type PdcTurn,
   type PdcTurnDetail,
   type PdcBlock,
@@ -53,6 +54,7 @@ export function PdcDepotPage() {
   const [turns, setTurns] = useState<Record<number, TurnState>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [infoMsg, setInfoMsg] = useState("")
   const [expandedTurns, setExpandedTurns] = useState<Set<number>>(new Set())
   const [moveState, setMoveState] = useState<MoveState | null>(null)
 
@@ -192,9 +194,60 @@ export function PdcDepotPage() {
   )
 
   // Completa la move: target = (turnId, dayId)
+  // Se il blocco e' un treno con train_id valido, prima di inserirlo
+  // interroga /train-check per auto-correggere start_time/end_time agli
+  // orari canonici (giro materiale o ARTURO Live se assente nel giro).
   const completeMove = useCallback(
-    (targetTurnId: number, targetDayId: number) => {
+    async (targetTurnId: number, targetDayId: number) => {
       if (!moveState) return
+
+      // Auto-correzione orari (non bloccante: in caso di errore usa
+      // gli orari originali senza bloccare il move)
+      let correctedBlock: PdcBlock = moveState.block
+      let correctionNote = ""
+      if (
+        moveState.block.block_type === "train" &&
+        moveState.block.train_id
+      ) {
+        try {
+          const check = await trainCheck(moveState.block.train_id)
+          // Priorita': giro materiale > ARTURO Live
+          let newStart = ""
+          let newEnd = ""
+          let newFrom = ""
+          let newTo = ""
+          let source = ""
+          if (check.db_internal.found && check.db_internal.data) {
+            newStart = check.db_internal.data.dep_time || ""
+            newEnd = check.db_internal.data.arr_time || ""
+            newFrom = check.db_internal.data.from_station || ""
+            newTo = check.db_internal.data.to_station || ""
+            source = "giro materiale"
+          } else if (check.arturo_live.found && check.arturo_live.data) {
+            newStart = check.arturo_live.data.dep_time || ""
+            newEnd = check.arturo_live.data.arr_time || ""
+            newFrom = check.arturo_live.data.origin || ""
+            newTo = check.arturo_live.data.destination || ""
+            source = "ARTURO Live"
+          }
+          if (newStart && newEnd &&
+              (newStart !== moveState.block.start_time ||
+               newEnd !== moveState.block.end_time)) {
+            correctedBlock = {
+              ...moveState.block,
+              start_time: newStart,
+              end_time: newEnd,
+              from_station: newFrom || moveState.block.from_station,
+              to_station: newTo || moveState.block.to_station,
+            }
+            correctionNote = `Orari del treno ${moveState.block.train_id} allineati a ${source}: ${newStart} → ${newEnd}`
+          }
+        } catch {
+          // silenzioso: in caso di 404 / offline il move va avanti con gli
+          // orari originali
+        }
+      }
+
       setTurns((prev) => {
         const next = { ...prev }
 
@@ -243,10 +296,18 @@ export function PdcDepotPage() {
           const origPrev = origSource?.blocks[moveState.blockIndex - 1]
           const origNext = origSource?.blocks[moveState.blockIndex + 1]
           if (origPrev?.block_type === "cv_partenza") added.push(origPrev)
-          added.push(moveState.block)
+          added.push(correctedBlock)
           if (origNext?.block_type === "cv_arrivo") added.push(origNext)
         } else {
-          added.push(moveState.block)
+          added.push(correctedBlock)
+        }
+
+        // Notifica utente se gli orari sono stati auto-corretti
+        if (correctionNote) {
+          setError("") // reset eventuali errori precedenti
+          // Uso un'info message temporaneo
+          setInfoMsg(correctionNote)
+          setTimeout(() => setInfoMsg(""), 4000)
         }
 
         const newTargetDetail = {
@@ -342,6 +403,13 @@ export function PdcDepotPage() {
       {error && (
         <div className="mb-3 p-2 text-[12px] bg-destructive/10 text-destructive rounded">
           {error}
+        </div>
+      )}
+
+      {infoMsg && (
+        <div className="mb-3 p-2 text-[12px] bg-emerald-50 text-emerald-800 border border-emerald-200 rounded flex items-center gap-2">
+          <span>✓</span>
+          {infoMsg}
         </div>
       )}
 
