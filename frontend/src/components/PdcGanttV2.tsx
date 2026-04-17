@@ -595,22 +595,9 @@ export function PdcGanttV2({
     [selectedIdx, blocks, onAction],
   )
 
-  // MouseDown sul treno: decide kind in base alla X del click
-  const handleTrainMouseDown = useCallback(
-    (e: React.MouseEvent, idx: number, x: number, w: number) => {
-      if (!onBlocksChange) return
-      const svgX = clientXToSvgX(e.clientX)
-      const localX = svgX - x
-      if (localX <= RESIZE_HANDLE_PX) {
-        startDrag(e, idx, "resize-start")
-      } else if (localX >= w - RESIZE_HANDLE_PX) {
-        startDrag(e, idx, "resize-end")
-      } else {
-        startDrag(e, idx, "move")
-      }
-    },
-    [onBlocksChange, clientXToSvgX, startDrag],
-  )
+  // (Legacy handleTrainMouseDown sostituito dal pattern foreignObject:
+  // 3 div HTML separati nel chip-card del treno gestiscono direttamente
+  // resize-start, resize-end e move — niente piu' calcolo X locale.)
 
   // ── Cross-day drag (HTML5 DnD) ─────────────────────────────────
   // Un blocco con draggable=true puo' essere trascinato fuori dal
@@ -837,10 +824,9 @@ export function PdcGanttV2({
 
           if (b.block_type === "train") {
             const showDest = w >= 85 && b.to_station
-            // Cursore: se vicino ai bordi mostra resize, altrimenti move/pointer
-            const cursor = draggable ? "ew-resize" : "pointer"
             return (
               <g key={idx}>
+                {/* Visual rect (NO listeners → eventi su foreignObject sotto) */}
                 <rect
                   x={x} y={BLOCK_Y} width={w} height={BLOCK_H} rx={3}
                   fill="url(#pdcGanttV2-trainGradient)"
@@ -849,35 +835,8 @@ export function PdcGanttV2({
                   filter={isSel
                     ? "drop-shadow(0 3px 8px rgba(30,64,175,0.5))"
                     : "drop-shadow(0 1px 2px rgba(30,64,175,0.2))"}
-                  style={{ cursor: draggable ? "grab" : "pointer" }}
-                  {...baseHandlers}
-                  onMouseDown={(e) => draggable && handleTrainMouseDown(e, idx, x, w)}
-                  {...(crossDayEnabled
-                    ? {
-                        draggable: true,
-                        onDragStart: (e: React.DragEvent) => handleCrossDragStart(e, idx),
-                        onDragEnd:   (e: React.DragEvent) => handleCrossDragEnd(e, idx),
-                      }
-                    : {})}
+                  pointerEvents="none"
                 />
-                {/* Resize handles invisibili */}
-                {draggable && (
-                  <>
-                    <rect
-                      x={x} y={BLOCK_Y} width={RESIZE_HANDLE_PX} height={BLOCK_H}
-                      fill="transparent"
-                      style={{ cursor }}
-                      onMouseDown={(e) => { e.stopPropagation(); startDrag(e, idx, "resize-start") }}
-                    />
-                    <rect
-                      x={x + w - RESIZE_HANDLE_PX} y={BLOCK_Y}
-                      width={RESIZE_HANDLE_PX} height={BLOCK_H}
-                      fill="transparent"
-                      style={{ cursor }}
-                      onMouseDown={(e) => { e.stopPropagation(); startDrag(e, idx, "resize-end") }}
-                    />
-                  </>
-                )}
                 <rect
                   x={x} y={BLOCK_Y} width={w} height={BLOCK_H / 2} rx={3}
                   fill="#ffffff" fillOpacity={0.08} pointerEvents="none"
@@ -904,6 +863,67 @@ export function PdcGanttV2({
                   <circle cx={x - 5} cy={BLOCK_Y + BLOCK_H / 2} r={3.5}
                           fill="#b91c1c" pointerEvents="none" />
                 ) : null}
+
+                {/* Overlay HTML: gestisce TUTTI gli eventi.
+                    foreignObject e' lo standard per applicare HTML5 DnD
+                    a forme SVG. I rect sopra restano per il rendering
+                    visuale (pointerEvents=none). */}
+                <foreignObject x={x} y={BLOCK_Y} width={w} height={BLOCK_H}>
+                  <div
+                    // @ts-expect-error xmlns serve per browser SSR
+                    xmlns="http://www.w3.org/1999/xhtml"
+                    style={{
+                      position: "relative",
+                      width: "100%",
+                      height: "100%",
+                    }}
+                  >
+                    {/* Resize start (sx) */}
+                    {draggable && (
+                      <div
+                        style={{
+                          position: "absolute", left: 0, top: 0,
+                          width: RESIZE_HANDLE_PX, height: "100%",
+                          cursor: "ew-resize",
+                        }}
+                        onMouseDown={(e) => { e.stopPropagation(); startDrag(e, idx, "resize-start") }}
+                      />
+                    )}
+                    {/* Resize end (dx) */}
+                    {draggable && (
+                      <div
+                        style={{
+                          position: "absolute", right: 0, top: 0,
+                          width: RESIZE_HANDLE_PX, height: "100%",
+                          cursor: "ew-resize",
+                        }}
+                        onMouseDown={(e) => { e.stopPropagation(); startDrag(e, idx, "resize-end") }}
+                      />
+                    )}
+                    {/* Centro: drag/click/hover. Draggable HTML5 per cross-day. */}
+                    <div
+                      draggable={crossDayEnabled}
+                      style={{
+                        position: "absolute",
+                        top: 0, bottom: 0,
+                        left: draggable ? RESIZE_HANDLE_PX : 0,
+                        right: draggable ? RESIZE_HANDLE_PX : 0,
+                        cursor: draggable ? "grab" : "pointer",
+                      }}
+                      onMouseDown={(e) => draggable && startDrag(e, idx, "move")}
+                      onMouseEnter={(e) => handleBlockEnter(e, b)}
+                      onMouseMove={handleBlockMove}
+                      onMouseLeave={handleBlockLeave}
+                      onClick={(e) => handleBlockClick(e, b, idx)}
+                      onDragStart={crossDayEnabled
+                        ? (e) => handleCrossDragStart(e, idx)
+                        : undefined}
+                      onDragEnd={crossDayEnabled
+                        ? (e) => handleCrossDragEnd(e, idx)
+                        : undefined}
+                    />
+                  </div>
+                </foreignObject>
                 <text x={x} y={MINUTES_MAIN_Y} textAnchor="middle"
                       fontFamily="ui-monospace, Menlo, monospace" fontSize={9.5}
                       fontWeight={700} fill="#0b0d10" pointerEvents="none">

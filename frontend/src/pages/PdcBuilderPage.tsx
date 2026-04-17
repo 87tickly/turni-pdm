@@ -572,24 +572,39 @@ function DayEditor({
                       // sostituisce gli orari/stazioni del blocco con quelli
                       // ufficiali. Priorita': giro materiale > ARTURO Live.
                       const src = (day.blocks || [])[idx]
-                      if (!src || src.block_type !== "train" || !src.train_id) {
-                        setActionToast("Collegamento disponibile solo per blocchi 'train' con numero treno")
-                        setTimeout(() => setActionToast(""), 3000)
+                      if (!src) {
+                        setActionToast("Blocco non trovato")
+                        setTimeout(() => setActionToast(""), 2500)
                         return
                       }
-                      trainCheck(src.train_id).then((check) => {
+                      if (src.block_type !== "train") {
+                        setActionToast(`Collegamento disponibile solo per i treni (questo e' '${src.block_type}')`)
+                        setTimeout(() => setActionToast(""), 3500)
+                        return
+                      }
+                      if (!src.train_id || !String(src.train_id).trim()) {
+                        setActionToast("Il treno non ha un numero — aggiungilo nell'editor sotto")
+                        setTimeout(() => setActionToast(""), 3500)
+                        return
+                      }
+                      const trainId = String(src.train_id).trim()
+                      setActionToast(`Verifica treno ${trainId}...`)
+                      trainCheck(trainId).then((check) => {
+                        // Log diagnostico (utile in DevTools)
+                        console.log("[link]", trainId, check)
+
                         let newStart = ""
                         let newEnd = ""
                         let newFrom = ""
                         let newTo = ""
                         let srcName = ""
-                        if (check.db_internal.found && check.db_internal.data) {
+                        if (check.db_internal?.found && check.db_internal.data) {
                           newStart = check.db_internal.data.dep_time || ""
                           newEnd = check.db_internal.data.arr_time || ""
                           newFrom = check.db_internal.data.from_station || ""
                           newTo = check.db_internal.data.to_station || ""
                           srcName = "giro materiale"
-                        } else if (check.arturo_live.found && check.arturo_live.data) {
+                        } else if (check.arturo_live?.found && check.arturo_live.data) {
                           newStart = check.arturo_live.data.dep_time || ""
                           newEnd = check.arturo_live.data.arr_time || ""
                           newFrom = check.arturo_live.data.origin || ""
@@ -597,8 +612,16 @@ function DayEditor({
                           srcName = "ARTURO Live"
                         }
                         if (!newStart || !newEnd) {
-                          setActionToast(`Treno ${src.train_id} non trovato in giro materiale ne' in ARTURO Live`)
-                          setTimeout(() => setActionToast(""), 3500)
+                          // Diagnostica granulare
+                          const inGiro = check.db_internal?.found ? "trovato" : "NON trovato"
+                          const inLive = check.arturo_live?.found ? "trovato" : "NON trovato"
+                          const inPdc = check.pdc?.found
+                            ? `trovato in ${check.pdc.results.length} turni PdC`
+                            : "non in nessun PdC"
+                          setActionToast(
+                            `Treno ${trainId} senza orari canonici. Giro materiale: ${inGiro}. ARTURO Live: ${inLive}. ${inPdc}.`,
+                          )
+                          setTimeout(() => setActionToast(""), 6000)
                           return
                         }
                         const blocks = [...(day.blocks || [])]
@@ -610,11 +633,12 @@ function DayEditor({
                           to_station: newTo || blocks[idx].to_station,
                         }
                         onChange({ ...day, blocks })
-                        setActionToast(`Treno ${src.train_id} allineato a ${srcName}: ${newStart} → ${newEnd}`)
-                        setTimeout(() => setActionToast(""), 4000)
-                      }).catch(() => {
-                        setActionToast(`Errore nella verifica del treno ${src.train_id}`)
-                        setTimeout(() => setActionToast(""), 3000)
+                        setActionToast(`✓ Treno ${trainId} allineato a ${srcName}: ${newStart} → ${newEnd} (${newFrom}→${newTo})`)
+                        setTimeout(() => setActionToast(""), 5000)
+                      }).catch((err) => {
+                        console.error("[link] errore trainCheck", err)
+                        setActionToast(`Errore /train-check per ${trainId}: ${err?.message || "rete o backend offline"}`)
+                        setTimeout(() => setActionToast(""), 5000)
                       })
                       return
                     }
