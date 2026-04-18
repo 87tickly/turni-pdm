@@ -896,3 +896,64 @@ export interface TrainCheckResult {
 export async function trainCheck(trainId: string) {
   return api.get<TrainCheckResult>(`/train-check/${encodeURIComponent(trainId)}`)
 }
+
+// ── Cross-reference treno: contesto giro materiale (prev/next/chain) + PdC ──
+// Endpoint backend: /train/{id}/cross-ref — vedi api/trains.py
+// Complementare a trainCheck(): mentre quest'ultimo fa triple-check DB/PdC/ARTURO,
+// trainCrossRef() focalizza sulla CONTINUAZIONE del giro materiale (quale
+// treno precede/segue questo nel ciclo) + lista esaustiva di tutti i turni
+// PdC che guidano il treno. Serve al pannello "Cross-link" nel BlockDetailModal.
+export interface TrainCrossRef {
+  train_id: string
+  material: {
+    turn_number: string | null
+    material_type: string
+    position: number            // -1 se non in giro
+    total: number
+    prev: {
+      train_id: string
+      from_station: string
+      to_station: string
+      dep_time: string
+      arr_time: string
+      is_deadhead: boolean
+    } | null
+    next: {
+      train_id: string
+      from_station: string
+      to_station: string
+      dep_time: string
+      arr_time: string
+      is_deadhead: boolean
+    } | null
+    chain: Array<{
+      train_id: string
+      from: string
+      to: string
+      dep: string
+      arr: string
+    }>
+  }
+  pdc_carriers: Array<{
+    turn_id: number | null
+    codice: string
+    impianto: string
+    profilo: string
+    day_id: number | null
+    day_number: number | null
+    periodicita: string
+    day_start: string
+    day_end: string
+    block_id: number | null
+    block_seq: number | null
+    block_start: string
+    block_end: string
+    from_station: string
+    to_station: string
+  }>
+  pdc_count: number
+}
+
+export async function trainCrossRef(trainId: string) {
+  return api.get<TrainCrossRef>(`/train/${encodeURIComponent(trainId)}/cross-ref`)
+}

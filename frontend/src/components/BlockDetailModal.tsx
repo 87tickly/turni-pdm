@@ -15,8 +15,8 @@
  */
 
 import { useEffect, useState } from "react"
-import { X, Loader2, AlertTriangle, CheckCircle2, Link2, Train, ExternalLink, Clock } from "lucide-react"
-import { trainCheck, type TrainCheckResult, type PdcBlock } from "@/lib/api"
+import { X, Loader2, AlertTriangle, CheckCircle2, Link2, Train, ExternalLink, Clock, ArrowLeft, ArrowRight } from "lucide-react"
+import { trainCheck, trainCrossRef, type TrainCheckResult, type TrainCrossRef, type PdcBlock } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 interface Props {
@@ -30,12 +30,22 @@ export function BlockDetailModal({ block, mode, onClose }: Props) {
   const [check, setCheck] = useState<TrainCheckResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  // Cross-ref: continuazione materiale (prev/next/chain) + PdC carriers completi.
+  // Caricato in parallelo al triple-check. Errore non blocca il render del modal:
+  // se /train/{id}/cross-ref fallisce, la sezione viene semplicemente omessa.
+  const [crossRef, setCrossRef] = useState<TrainCrossRef | null>(null)
 
   // Esegui triple-check solo per i treni
   useEffect(() => {
     if (block.block_type !== "train" || !block.train_id) return
     setLoading(true)
     setError("")
+    setCrossRef(null)
+    // Chiamate in parallelo: il triple-check e' piu' lento (ARTURO Live),
+    // cross-ref e' solo DB quindi istantaneo -> appare per primo
+    trainCrossRef(block.train_id)
+      .then(setCrossRef)
+      .catch(() => {}) // best-effort, non blocca il modal
     trainCheck(block.train_id)
       .then(setCheck)
       .catch((e) => setError(e instanceof Error ? e.message : "Errore triple-check"))
@@ -160,8 +170,107 @@ export function BlockDetailModal({ block, mode, onClose }: Props) {
                     )}
                   </Section>
 
+                  {/* Continuazione giro materiale (Fase 2b cross-link).
+                      Mostra prev/next treno nello stesso turno materiale +
+                      chain compatta. Dati da /train/{id}/cross-ref. */}
+                  {crossRef && crossRef.material.turn_number && (
+                    <Section
+                      title={`Continuazione giro · Turno ${crossRef.material.turn_number}${crossRef.material.total > 0 ? ` · pos ${(crossRef.material.position ?? 0) + 1}/${crossRef.material.total}` : ""}`}
+                      accent="emerald"
+                      icon={<Link2 size={12} />}
+                    >
+                      {crossRef.material.prev && (
+                        <div className="flex items-center gap-2 text-[11px] font-mono py-1">
+                          <ArrowLeft size={11} className="text-emerald-700 shrink-0" />
+                          <span className="font-bold">{crossRef.material.prev.train_id}</span>
+                          <span className="text-muted-foreground">
+                            {crossRef.material.prev.from_station || "?"} → {crossRef.material.prev.to_station || "?"}
+                          </span>
+                          {crossRef.material.prev.dep_time && (
+                            <span className="text-muted-foreground ml-auto">
+                              {crossRef.material.prev.dep_time}
+                              {crossRef.material.prev.arr_time && ` → ${crossRef.material.prev.arr_time}`}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {crossRef.material.next && (
+                        <div className="flex items-center gap-2 text-[11px] font-mono py-1">
+                          <ArrowRight size={11} className="text-emerald-700 shrink-0" />
+                          <span className="font-bold">{crossRef.material.next.train_id}</span>
+                          <span className="text-muted-foreground">
+                            {crossRef.material.next.from_station || "?"} → {crossRef.material.next.to_station || "?"}
+                          </span>
+                          {crossRef.material.next.dep_time && (
+                            <span className="text-muted-foreground ml-auto">
+                              {crossRef.material.next.dep_time}
+                              {crossRef.material.next.arr_time && ` → ${crossRef.material.next.arr_time}`}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {!crossRef.material.prev && !crossRef.material.next && crossRef.material.chain.length === 0 && (
+                        <div className="text-[11px] text-muted-foreground italic">
+                          Chain non disponibile (orari/stazioni mancanti nel giro materiale).
+                        </div>
+                      )}
+                      {crossRef.material.chain.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5 pt-1.5 border-t border-emerald-200">
+                          {crossRef.material.chain.map((c, i) => {
+                            const isCurr = c.train_id === crossRef.train_id
+                            return (
+                              <span
+                                key={i}
+                                className={cn(
+                                  "px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold",
+                                  isCurr
+                                    ? "bg-emerald-600 text-white"
+                                    : "bg-white border border-emerald-200 text-emerald-900"
+                                )}
+                                title={`${c.from} ${c.dep} → ${c.to} ${c.arr}`}
+                              >
+                                {c.train_id}
+                              </span>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </Section>
+                  )}
+
+                  {/* Tutti i PdC carriers (lista completa dal cross-ref).
+                      Usa crossRef.pdc_carriers al posto di check.pdc.results
+                      quando disponibile, perche' piu' completo e con piu' campi. */}
+                  {crossRef && crossRef.pdc_carriers.length > 0 && (
+                    <Section
+                      title={`Guidato da turni PdC (${crossRef.pdc_carriers.length})`}
+                      accent="blue"
+                      icon={<Link2 size={12} />}
+                    >
+                      <div className="max-h-36 overflow-y-auto space-y-1 text-[11px]">
+                        {crossRef.pdc_carriers.map((c, i) => (
+                          <div
+                            key={i}
+                            className="grid grid-cols-[auto_auto_1fr_auto] gap-2 py-0.5 font-mono"
+                          >
+                            <span className="font-bold">{c.codice}</span>
+                            <span className="text-muted-foreground">
+                              g{c.day_number ?? "?"} {c.periodicita}
+                            </span>
+                            <span className="truncate">
+                              {c.from_station || "?"} → {c.to_station || "?"}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {c.block_start || "--:--"}→{c.block_end || "--:--"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </Section>
+                  )}
+
                   {/* PdC (altre giornate) */}
-                  {check.pdc.found && check.pdc.results.length > 0 && (
+                  {!crossRef && check.pdc.found && check.pdc.results.length > 0 && (
                     <Section title={`Presente in altri turni PdC (${check.pdc.results.length})`} accent="blue" icon={<Link2 size={12} />}>
                       <div className="max-h-28 overflow-y-auto space-y-1 text-[11px] font-mono">
                         {check.pdc.results.slice(0, 8).map((r, i) => (
