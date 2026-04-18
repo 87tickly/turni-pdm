@@ -22,7 +22,7 @@ interface SidebarProps {
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/treni", icon: Search, label: "Cerca treni" },
-  { to: "/turni", icon: ClipboardList, label: "Turni" },
+  { to: "/turni", icon: ClipboardList, label: "Turni Materiale" },
   { to: "/builder", icon: PlusCircle, label: "Nuovo turno" },
   { to: "/calendario", icon: Calendar, label: "Calendario" },
   { to: "/pdc", icon: Train, label: "Turni PdC" },
@@ -31,7 +31,10 @@ const navItems = [
 
 export function Sidebar({ username, isAdmin, onLogout }: SidebarProps) {
   return (
-    <aside className="flex flex-col w-56 bg-sidebar h-screen fixed left-0 top-0 border-r border-sidebar-border">
+    <aside
+      className="flex flex-col w-56 h-screen fixed left-0 top-0"
+      style={{ backgroundColor: "var(--color-surface-container-low)" }}
+    >
       {/* Brand */}
       <div className="px-4 py-4">
         <Logo size="sm" />
@@ -46,15 +49,31 @@ export function Sidebar({ username, isAdmin, onLogout }: SidebarProps) {
             end={to === "/"}
             className={({ isActive }) =>
               cn(
-                "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-all duration-150",
+                "relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-all duration-150",
                 isActive
-                  ? "bg-brand/8 text-brand"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                  ? "text-brand"
+                  : "text-muted-foreground hover:text-foreground"
               )
             }
+            style={({ isActive }) =>
+              isActive
+                ? { backgroundColor: "var(--color-surface-container-high)" }
+                : undefined
+            }
           >
-            <Icon size={15} strokeWidth={1.8} />
-            {label}
+            {({ isActive }) => (
+              <>
+                {isActive && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute left-0.5 top-1/2 -translate-y-1/2 h-3.5 w-0.5 rounded-full"
+                    style={{ backgroundColor: "var(--color-dot)" }}
+                  />
+                )}
+                <Icon size={15} strokeWidth={1.8} />
+                {label}
+              </>
+            )}
           </NavLink>
         ))}
 
@@ -63,21 +82,40 @@ export function Sidebar({ username, isAdmin, onLogout }: SidebarProps) {
             to="/impostazioni"
             className={({ isActive }) =>
               cn(
-                "flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-all duration-150",
+                "relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-all duration-150",
                 isActive
-                  ? "bg-brand/8 text-brand"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                  ? "text-brand"
+                  : "text-muted-foreground hover:text-foreground"
               )
             }
+            style={({ isActive }) =>
+              isActive
+                ? { backgroundColor: "var(--color-surface-container-high)" }
+                : undefined
+            }
           >
-            <Settings size={15} strokeWidth={1.8} />
-            Impostazioni
+            {({ isActive }) => (
+              <>
+                {isActive && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute left-0.5 top-1/2 -translate-y-1/2 h-3.5 w-0.5 rounded-full"
+                    style={{ backgroundColor: "var(--color-dot)" }}
+                  />
+                )}
+                <Settings size={15} strokeWidth={1.8} />
+                Impostazioni
+              </>
+            )}
           </NavLink>
         </div>
       </nav>
 
-      {/* User */}
-      <div className="px-3 py-3 border-t border-sidebar-border">
+      {/* User — separazione tonal (no border-top) */}
+      <div
+        className="px-3 py-3"
+        style={{ backgroundColor: "var(--color-surface-container)" }}
+      >
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-full bg-brand/10 flex items-center justify-center text-[10px] font-bold text-brand uppercase">
             {username[0]}
