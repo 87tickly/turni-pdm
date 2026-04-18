@@ -4,6 +4,78 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-18 — Frontend React: cross-link PdC<->Materiale nel BlockDetailModal
+
+**Feature visibile all'utente** (Fase 2 completata).
+
+### Contesto
+
+Nello screenshot del turno PdC (ALOR_C g1) l'utente ha segnalato che
+"non trova la continuazione del giro materiale" di un treno selezionato,
+costringendolo a scrollare/memorizzare. La pipeline ora risolve questo.
+
+### Stack deliverable
+
+1. **Backend endpoint** `/train/{id}/cross-ref` (commit c3be053):
+   aggrega `db.get_giro_chain_context()` + `db.find_pdc_train()` in una
+   singola risposta con material context e pdc_carriers.
+
+2. **Client API React** `trainCrossRef()` in `frontend/src/lib/api.ts`:
+   type `TrainCrossRef` completo, chiamato in parallelo a trainCheck().
+
+3. **BlockDetailModal esteso** (commit f087da9):
+   - Nuova sezione "Continuazione giro · Turno X · pos Y/Z"
+     con frecce prev/next e chain compatta come pill-list
+   - Lista "Guidato da turni PdC" piu' completa che sostituisce la
+     sezione legacy del triple-check quando cross-ref e' disponibile
+   - Zero regressione: se /cross-ref fallisce, il triple-check classico
+     resta visibile
+
+### Caso d'uso verificato
+
+Click su treno 10581 (visibile nello screenshot originale):
+```
+Continuazione giro · Turno 1116 · pos 1/1
+Guidato da turni PdC (2):
+  ALOR_C  g1  LMXGV  [15:05 → 16:19]  → AL
+  PVOR_C  g21 S      [16:19 → 16:41]  → AL
+                                        ↑
+                                   handoff alle 16:19
+```
+
+Il dispatcher vede in un'occhiata che PVOR_C prende il treno alle 16:19
+esattamente dove ALOR_C lo lascia — continuita' di servizio evidente.
+
+### Prerequisiti risolti durante la sessione
+
+- DB locale era vuoto: importati turno materiale (54 turni, 11306
+  segmenti) e PdC (26 turni, 1344 giornate, 6925 blocchi)
+- `import_turno_materiale.py` hardcoded path Windows: fixato
+  cross-platform (argv[1]=DB, argv[2]=JSON, fallback cwd)
+
+### Errore corretto
+
+Inizialmente stavo lavorando su `static/index.html` pensando fosse il
+frontend in produzione. Quando `frontend/dist/` esiste (ed esiste),
+server.py serve SOLO la build React (L78-81) e il legacy non viene
+servito. Identificato, rollback-ato le modifiche non committate al
+legacy, portato il lavoro su React. Tokens CSS committati in precedenza
+(c75d38a) restano su master come lavoro dormiente.
+
+### TODO follow-up
+
+- **Fase 2c**: implementare "Rientro in vettura" / "Raggiungimento
+  treno" via ARTURO Live API (servizio gia' presente in
+  `services/arturo_client.py`)
+- Rendere cliccabili i pill della chain per navigare al treno prev/next
+  (al momento mostrano tooltip ma non sono hook attivi)
+- Rendere cliccabili le righe "Guidato da turni PdC" per saltare alla
+  giornata PdC corrispondente (stub `goToPdcTurn` in preparazione)
+- Valutare Fase 1b: sostituire valori hardcoded in React componenti con
+  tokens o variabili Tailwind consistenti
+
+---
+
 ## 2026-04-18 — Frontend legacy: design tokens estesi (Fase 1a UI refactor)
 
 Prima tappa del refactor UX del frontend legacy `static/index.html`.
