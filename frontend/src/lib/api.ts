@@ -957,3 +957,54 @@ export interface TrainCrossRef {
 export async function trainCrossRef(trainId: string) {
   return api.get<TrainCrossRef>(`/train/${encodeURIComponent(trainId)}/cross-ref`)
 }
+
+// ────────────────────────────────────────────────────────────────
+// Dashboard
+// ────────────────────────────────────────────────────────────────
+
+export interface DashboardKpi {
+  totale_turni: number
+  turni_settimana: number
+  giorni_lavorati: number
+  giorni_max: number
+  ore_settimana_min: number
+  ore_max_min: number
+  delta_30gg_pct: number | null
+}
+
+export async function getDashboardKpi() {
+  return api.get<DashboardKpi>(`/api/dashboard/kpi`)
+}
+
+export interface ActivityItem {
+  id: number | null
+  type: "edit" | "validate" | "import" | "conflict"
+  title: string
+  subtitle: string
+  created_at: string | null
+}
+
+export async function getActivityRecent(limit = 20) {
+  return api.get<{ items: ActivityItem[]; count: number }>(
+    `/api/activity/recent?limit=${limit}`,
+  )
+}
+
+export interface LineaAttivaRow {
+  treno: string
+  tratta: string
+  stato: "ok" | "ritardo" | "soppresso"
+  ritardo_min: number
+  ritardo_label: string
+  origine: string
+  destinazione: string
+}
+
+export async function getLineaAttiva() {
+  return api.get<{
+    items: LineaAttivaRow[]
+    count: number
+    cached_at: string | null
+    note: string | null
+  }>(`/api/linea/attiva`)
+}

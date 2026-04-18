@@ -1,6 +1,14 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { getHealth, getSavedShifts, type SavedShift } from "@/lib/api"
+import {
+  getHealth,
+  getDashboardKpi,
+  getActivityRecent,
+  getLineaAttiva,
+  type DashboardKpi,
+  type ActivityItem,
+  type LineaAttivaRow,
+} from "@/lib/api"
 import { useAuth } from "@/hooks/useAuth"
 import {
   PlusCircle,
@@ -20,34 +28,6 @@ import {
   Train,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-
-// ─────────────────────────────────────────────────────────────────
-// MOCK DATA — placeholder finche` non esistono i 3 endpoint backend
-// (/dashboard/kpi, /activity/recent, /linea/attiva). Da rimuovere
-// quando saranno implementati gli endpoint (vedi HANDOFF §04).
-// ─────────────────────────────────────────────────────────────────
-const MOCK_KPI = {
-  turni_attivi: 42,
-  giorni_lavorati: 5,
-  giorni_max: 7,
-  ore_settimana_h: 38,
-  ore_settimana_m: 45,
-  ore_max: 42,
-  delta_30gg: "+12%",
-}
-
-const MOCK_LINEA: Array<{
-  treno: string
-  tratta: string
-  stato: "ok" | "ritardo" | "soppresso"
-  ritardo: string
-}> = [
-  { treno: "RV 2831", tratta: "Milano C.le → Bergamo", stato: "ok", ritardo: "—" },
-  { treno: "R 10581", tratta: "Lecco → Milano P.G.", stato: "ritardo", ritardo: "+8′" },
-  { treno: "RE 2615", tratta: "Brescia → Verona PN", stato: "ok", ritardo: "—" },
-]
-
-// ─────────────────────────────────────────────────────────────────
 
 function KpiCard({
   label,
@@ -230,20 +210,30 @@ export function DashboardPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [health, setHealth] = useState<string>("...")
-  const [recentShifts, setRecentShifts] = useState<SavedShift[]>([])
-  const [totalShifts, setTotalShifts] = useState<number>(0)
+  const [kpi, setKpi] = useState<DashboardKpi | null>(null)
+  const [activity, setActivity] = useState<ActivityItem[]>([])
+  const [linea, setLinea] = useState<LineaAttivaRow[]>([])
+  const [lineaNote, setLineaNote] = useState<string | null>(null)
 
   useEffect(() => {
     getHealth()
       .then((h) => setHealth(h.status))
       .catch(() => setHealth("errore"))
 
-    getSavedShifts()
-      .then((data) => {
-        setTotalShifts(data.count ?? data.shifts.length)
-        setRecentShifts(data.shifts.slice(0, 4))
+    getDashboardKpi()
+      .then(setKpi)
+      .catch(() => setKpi(null))
+
+    getActivityRecent(4)
+      .then((r) => setActivity(r.items))
+      .catch(() => setActivity([]))
+
+    getLineaAttiva()
+      .then((r) => {
+        setLinea(r.items)
+        setLineaNote(r.note)
       })
-      .catch(() => {})
+      .catch((e) => setLineaNote(`Errore caricamento: ${e.message ?? e}`))
   }, [])
 
   const hour = new Date().getHours()
@@ -315,29 +305,37 @@ export function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <KpiCard
           label="Totale turni"
-          value={totalShifts}
-          delta={MOCK_KPI.delta_30gg}
-          sublabel="vs 30gg"
+          value={kpi?.totale_turni ?? "—"}
+          delta={
+            kpi?.delta_30gg_pct != null
+              ? `${kpi.delta_30gg_pct > 0 ? "+" : ""}${kpi.delta_30gg_pct}%`
+              : undefined
+          }
+          sublabel={kpi?.delta_30gg_pct != null ? "vs 30gg" : "—"}
           icon={LayoutGrid}
         />
         <KpiCard
-          label="Turni attivi"
-          value={MOCK_KPI.turni_attivi}
-          sublabel="In corso ora"
-          live
+          label="Turni settimana"
+          value={kpi?.turni_settimana ?? "—"}
+          sublabel="In questa settimana"
+          live={kpi != null && kpi.turni_settimana > 0}
         />
         <KpiCard
           label="Lavorati settimana"
-          value={MOCK_KPI.giorni_lavorati}
-          unit={`/${MOCK_KPI.giorni_max} gg`}
-          sublabel="2 riposi programmati"
+          value={kpi?.giorni_lavorati ?? "—"}
+          unit={kpi ? `/${kpi.giorni_max} gg` : undefined}
+          sublabel={
+            kpi
+              ? `${Math.max(0, kpi.giorni_max - kpi.giorni_lavorati)} rimasti`
+              : "—"
+          }
           icon={Calendar}
         />
         <KpiCard
           label="Ore settimana"
-          value={MOCK_KPI.ore_settimana_h}
-          unit={`h ${MOCK_KPI.ore_settimana_m}m`}
-          sublabel={`Max ${MOCK_KPI.ore_max}h`}
+          value={kpi ? Math.floor(kpi.ore_settimana_min / 60) : "—"}
+          unit={kpi ? `h ${kpi.ore_settimana_min % 60}m` : undefined}
+          sublabel={kpi ? `Max ${Math.floor(kpi.ore_max_min / 60)}h` : "—"}
           icon={Clock}
         />
       </div>
@@ -371,7 +369,7 @@ export function DashboardPage() {
               </button>
             </div>
             <div className="px-2.5 pb-2.5 space-y-0.5">
-              {recentShifts.length === 0 ? (
+              {activity.length === 0 ? (
                 <ActivityRow
                   icon={FileText}
                   tone="slate"
@@ -380,29 +378,49 @@ export function DashboardPage() {
                   time="—"
                 />
               ) : (
-                recentShifts.map((s, i) => (
-                  <ActivityRow
-                    key={s.id}
-                    icon={i === 0 ? Pencil : i === 1 ? CheckCircle2 : i === 2 ? FileText : AlertTriangle}
-                    tone={i === 0 ? "blue" : i === 1 ? "green" : i === 2 ? "slate" : "amber"}
-                    title={s.name}
-                    subtitle={`${s.deposito} · ${s.day_type} · ${
-                      typeof s.train_ids === "string"
-                        ? s.train_ids.split(",").length
-                        : s.train_ids.length
-                    } treni`}
-                    time={new Date(s.created_at).toLocaleDateString("it-IT", {
-                      day: "numeric",
-                      month: "short",
-                    })}
-                    onClick={() => navigate("/turni")}
-                  />
-                ))
+                activity.map((ev) => {
+                  const toneByType: Record<
+                    ActivityItem["type"],
+                    "blue" | "green" | "amber" | "slate"
+                  > = {
+                    edit: "blue",
+                    validate: "green",
+                    conflict: "amber",
+                    import: "slate",
+                  }
+                  const iconByType: Record<
+                    ActivityItem["type"],
+                    typeof Pencil
+                  > = {
+                    edit: Pencil,
+                    validate: CheckCircle2,
+                    conflict: AlertTriangle,
+                    import: FileText,
+                  }
+                  return (
+                    <ActivityRow
+                      key={ev.id ?? `${ev.type}-${ev.title}`}
+                      icon={iconByType[ev.type]}
+                      tone={toneByType[ev.type]}
+                      title={ev.title}
+                      subtitle={ev.subtitle}
+                      time={
+                        ev.created_at
+                          ? new Date(ev.created_at).toLocaleDateString(
+                              "it-IT",
+                              { day: "numeric", month: "short" },
+                            )
+                          : "—"
+                      }
+                      onClick={() => navigate("/turni")}
+                    />
+                  )
+                })
               )}
             </div>
           </div>
 
-          {/* Linea attiva (mock) */}
+          {/* Linea attiva — dati reali da ARTURO Live (cache 60s) */}
           <div
             className="rounded-xl shadow-sm overflow-hidden"
             style={{ backgroundColor: "var(--color-surface-container-lowest)" }}
@@ -418,90 +436,95 @@ export function DashboardPage() {
               >
                 Monitoraggio linea attiva
               </span>
-              <span
-                className="ml-2 text-[9.5px] uppercase font-bold px-1.5 py-0.5 rounded"
-                style={{
-                  color: "var(--color-on-surface-quiet)",
-                  backgroundColor: "var(--color-surface-container)",
-                  letterSpacing: "0.1em",
-                }}
-              >
-                Mock
-              </span>
-              <div className="ml-auto flex gap-2">
-                <StatoChip stato="ok" />
-                <StatoChip stato="ritardo" />
+              <div className="ml-auto flex items-center gap-2">
+                {linea.length > 0 && (
+                  <>
+                    <StatoChip stato="ok" />
+                    {linea.some((r) => r.stato === "ritardo") && (
+                      <StatoChip stato="ritardo" />
+                    )}
+                  </>
+                )}
               </div>
             </div>
-            <table className="w-full text-[12px] border-collapse">
-              <thead>
-                <tr
-                  style={{
-                    backgroundColor: "var(--color-surface-container-low)",
-                  }}
-                >
-                  {["Treno", "Tratta", "Stato", "Ritardo"].map((h) => (
-                    <th
-                      key={h}
-                      className="text-[9.5px] font-bold uppercase text-left px-5 py-2"
-                      style={{
-                        color: "var(--color-on-surface-quiet)",
-                        letterSpacing: "0.1em",
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {MOCK_LINEA.map((r) => (
+            {linea.length === 0 ? (
+              <div
+                className="px-5 py-6 text-[12px]"
+                style={{ color: "var(--color-on-surface-muted)" }}
+              >
+                {lineaNote ?? "Nessun treno monitorato al momento. Crea un turno per popolare la lista."}
+              </div>
+            ) : (
+              <table className="w-full text-[12px] border-collapse">
+                <thead>
                   <tr
-                    key={r.treno}
-                    className="transition-colors hover:bg-[var(--color-surface-container-low)]"
+                    style={{
+                      backgroundColor: "var(--color-surface-container-low)",
+                    }}
                   >
-                    <td className="px-5 py-2.5">
-                      <span
-                        className="font-bold"
+                    {["Treno", "Tratta", "Stato", "Ritardo"].map((h) => (
+                      <th
+                        key={h}
+                        className="text-[9.5px] font-bold uppercase text-left px-5 py-2"
                         style={{
-                          fontFamily: "var(--font-mono)",
-                          color: "var(--color-brand)",
-                          fontSize: "12.5px",
+                          color: "var(--color-on-surface-quiet)",
+                          letterSpacing: "0.1em",
                         }}
                       >
-                        {r.treno}
-                      </span>
-                    </td>
-                    <td
-                      className="px-5 py-2.5"
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        color: "var(--color-on-surface-muted)",
-                        fontSize: "11.5px",
-                      }}
-                    >
-                      {r.tratta}
-                    </td>
-                    <td className="px-5 py-2.5">
-                      <StatoChip stato={r.stato} />
-                    </td>
-                    <td
-                      className="px-5 py-2.5"
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        color:
-                          r.stato === "ritardo"
-                            ? "var(--color-warning)"
-                            : "var(--color-on-surface-muted)",
-                        fontWeight: r.stato === "ritardo" ? 700 : 400,
-                      }}
-                    >
-                      {r.ritardo}
-                    </td>
+                        {h}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {linea.map((r) => (
+                    <tr
+                      key={r.treno}
+                      className="transition-colors hover:bg-[var(--color-surface-container-low)]"
+                    >
+                      <td className="px-5 py-2.5">
+                        <span
+                          className="font-bold"
+                          style={{
+                            fontFamily: "var(--font-mono)",
+                            color: "var(--color-brand)",
+                            fontSize: "12.5px",
+                          }}
+                        >
+                          {r.treno}
+                        </span>
+                      </td>
+                      <td
+                        className="px-5 py-2.5"
+                        style={{
+                          fontFamily: "var(--font-mono)",
+                          color: "var(--color-on-surface-muted)",
+                          fontSize: "11.5px",
+                        }}
+                      >
+                        {r.tratta}
+                      </td>
+                      <td className="px-5 py-2.5">
+                        <StatoChip stato={r.stato} />
+                      </td>
+                      <td
+                        className="px-5 py-2.5"
+                        style={{
+                          fontFamily: "var(--font-mono)",
+                          color:
+                            r.stato === "ritardo"
+                              ? "var(--color-warning)"
+                              : "var(--color-on-surface-muted)",
+                          fontWeight: r.stato === "ritardo" ? 700 : 400,
+                        }}
+                      >
+                        {r.ritardo_label}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
@@ -535,7 +558,7 @@ export function DashboardPage() {
                   }}
                 />
                 <div className="font-semibold">
-                  {recentShifts[0]?.name ?? "Nessun turno attivo"}
+                  {activity[0]?.title ?? "Nessun turno attivo"}
                 </div>
                 <div
                   className="inline-flex gap-0.5"
@@ -583,7 +606,7 @@ export function DashboardPage() {
                   fontSize: "12.5px",
                 }}
               >
-                {totalShifts} turni archiviati
+                {kpi?.totale_turni ?? "—"} turni archiviati
               </div>
               <div
                 className="mt-0.5 opacity-80"
