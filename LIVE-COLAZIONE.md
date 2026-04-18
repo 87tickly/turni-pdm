@@ -4,6 +4,110 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-18 — Design pipeline Stitch → Claude Design (UI refresh pianificato)
+
+Sessione di pianificazione del refresh visivo del frontend React. Dopo
+una prima iterazione di alleggerimento del legacy `static/index.html`
+(rivelatosi non servito da Railway — vedi entry successiva), il focus
+si è spostato sul frontend React reale (`frontend/`) con un approccio
+design-first tramite tool AI esterni.
+
+### Pipeline adottata
+
+1. **Google Stitch** (stitch.withgoogle.com) — prima generazione design
+   system "The Kinetic Conductor" per ARTURO·. Output: 16 schermate
+   + 2 DESIGN.md in `~/Downloads/stitch_colazione_pianificazione_turni_pdc/`.
+   Asset copiati anche in `~/Desktop/claude-design-upload/` per riuso.
+
+2. **Claude Design** (claude.ai/design — by Anthropic Labs, in Research
+   Preview dal 17/04/2026) — raffinamento del design Stitch con accesso
+   diretto al codebase (GitHub + cartella locale). Vantaggi vs Stitch:
+   - Legge codebase completo → capisce token CSS già in uso
+   - Export diretto "Handoff to Claude Code" → zero traduzione manuale
+   - Conversazione iterativa (non one-shot come Stitch)
+   - Custom sliders per micro-aggiustamenti
+
+### Materiale preparato per Claude Design
+
+In `~/Desktop/claude-design-upload/` (11 file pronti per drag&drop):
+- Screenshot Stitch 01-07 (editor PdC, drawer cross-link, dashboard,
+  command palette, cerca treno, calendario, import PDF)
+- `08-design-system-arturo.md` — "Kinetic Conductor" design system
+- `09-design-system-precision.md` — variante alternativa
+- `10-current-tokens.css` — copia di `frontend/src/index.css`
+- `11-BlockDetailModal.tsx` — componente React attuale con cross-link
+
+Setup Claude Design: GitHub `87tickly/turni-pdm` connesso + cartella
+COLAZIONE linkata come contesto filesystem diretto.
+
+### Design system "Kinetic Conductor" (estratto)
+
+Principi chiave da `08-design-system-arturo.md`:
+- **No-Line rule**: niente border 1px solid per sezionare, usare shift
+  di background (`surface` → `surface-container-low`)
+- **Tonal Layering**: profondità via nesting di superfici, non shadow
+- **Kinetic Dot**: `#22C55E` come ancora visiva unica (status attivo)
+- **Glass & Gradient**: CTAs primari con gradient 135° primary →
+  primary-container; modali con backdrop-blur 12-20px
+- **Tipografia**: Exo 2 (display) + Inter (body) + monospace obbligatorio
+  per orari (HH:MM) e numeri treno
+- **Palette hex**: brand `#0062CC`, accent `#0070B5`, kinetic `#22C55E`,
+  background `#F7F8FA`, foreground `#0F172A`
+
+### Schermate prioritarie per l'implementazione
+
+Ordine di priorità concordato con l'utente:
+1. **Editor Turno PdC con drawer cross-link destro** (pain point #1:
+   oggi il dispatcher non vede la continuazione materiale e quali altri
+   turni PdC guidano lo stesso treno)
+2. **Command Palette ⌘K** (navigazione globale turno/treno/azione)
+3. **Dashboard** (KPI + attività recente + oggi in servizio)
+4. **Cerca treni** (con side panel cross-ref)
+
+### Pipeline di implementazione a 5 fasi (pianificata)
+
+| Fase | Oggetto | Ore stimate |
+|---|---|---|
+| 1 | Facelift visivo (token, tipografia, spacing applicati) | 4-6 |
+| 2 | Drawer cross-link al posto di BlockDetailModal centrato | 3-4 |
+| 3 | Drag & drop + edit inline sui blocchi Gantt | 6-8 |
+| 4 | Rientro in vettura / Raggiungimento treno via ARTURO Live | 4-5 |
+| 5 | Command palette + scorciatoie + polish finale | 3-4 |
+
+Tot: ~20-27h distribuite su 7-10 sessioni.
+
+### Stato attuale
+
+- Stitch: completato, export ricevuto
+- Claude Design: in corso (utente sta generando le 4 schermate hi-fi)
+- Implementazione React: **ferma** in attesa dell'output Claude Design,
+  per non rifare lavoro
+
+### Lezioni dalla sessione (metodo)
+
+1. **Prompt lunghi vanno benissimo per Stitch** (no context esplorabile,
+   serve tutto esplicito). **Ma per Claude Design** — che ha accesso al
+   codebase — un prompt breve + FOCUS esplicito (es. "analizza solo
+   frontend/, ignora backend/uploads/tests/.venv") produce risultati
+   migliori perché evita context bloat.
+2. **Verificare sempre cosa il server serve davvero** prima di
+   investire tempo su un file. `static/index.html` era stato modificato
+   senza accorgersi che `server.py:78` serve solo `frontend/dist/`
+   quando esiste. I commit ce89bf6 + c75d38a (tokens) restano su master
+   come lavoro dormiente.
+3. **Hex code e font name vanno SEMPRE espliciti nei prompt visivi**.
+   "Blu primario" non basta, serve `#0062CC` + "Exo 2" + gli anti-esempi
+   ("no Material Blue #3B82F6").
+
+### Follow-up per prossime sessioni
+
+- Ricevere output Claude Design (screenshot o bundle handoff)
+- Confrontare con Stitch e decidere design finale
+- Eseguire Fase 1 (facelift visivo) su PdcPage + Sidebar + Layout
+- Poi Fase 2 (drawer cross-link) — trasformare BlockDetailModal
+
+---
+
 ## 2026-04-18 — Frontend React: cross-link PdC<->Materiale nel BlockDetailModal
 
 **Feature visibile all'utente** (Fase 2 completata).

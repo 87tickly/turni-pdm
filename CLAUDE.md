@@ -9,6 +9,12 @@
    - Fai `git commit` con messaggio descrittivo
    - Fai `git push`
 3. **Mai lavorare senza contesto**: se non hai letto LIVE-COLAZIONE.md, leggilo prima di fare qualsiasi cosa
+4. **Design UX/UI → SEMPRE via Claude Design** (claude.ai/design, by Anthropic Labs): quando la conversazione riguarda aspetto visivo, layout, interazioni, design system, nuove schermate, restyle di componenti, mockup, wireframe → NON iniziare a generare CSS/Tailwind inline o proporre markup a mano. Invece:
+   - Indirizzare l'utente a Claude Design per la generazione delle mockup
+   - Preparare il materiale di contesto (screenshot, token CSS, componenti di riferimento) e collegare il repo via GitHub
+   - Ricevere l'export di Claude Design (screenshot, codice, handoff bundle) e SOLO POI implementare in React
+   - Rispettare il design system "Kinetic Conductor" documentato in `~/Desktop/claude-design-upload/08-design-system-arturo.md` (no-line rule, tonal layering, kinetic dot `#22C55E`, Exo 2 + Inter + monospace per orari/numeri)
+   - **Motivo**: Claude Design ha Claude Opus 4.7 vision, legge il codebase via GitHub, esporta handoff diretto a Claude Code. Produce risultati migliori del disegnare ad-hoc in chat. Evitare scorciatoie: un'ora di prep con Claude Design = risparmio di 5-10h di iterazioni frustranti in CSS a mano.
 
 ## Scopo
 
