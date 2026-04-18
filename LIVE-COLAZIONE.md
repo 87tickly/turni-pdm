@@ -4,6 +4,56 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-18 — Frontend legacy: design tokens estesi (Fase 1a UI refactor)
+
+Prima tappa del refactor UX del frontend legacy `static/index.html`.
+Obiettivo della roadmap: rendere il frontend piu' fluido da modificare e
+piu' moderno visivamente, senza perdere una sola feature.
+
+### Contesto
+
+L'utente ha segnalato che l'interfaccia attuale e' "vecchia e macchinosa":
+troppi click per modifiche, difficile trovare la continuazione materiale di
+un treno o dove quel treno compare in altri turni PdC.
+
+Branch `legacy-before-refactor` creato come punto di ritorno di sicurezza
+prima di qualsiasi modifica.
+
+### Cosa e' cambiato in questo commit
+
+**Solo `:root` di `static/index.html`**:
+
+1. Variabili esistenti preservate al 100% (retrocompat totale)
+2. Aggiunte scale standardizzate:
+   - **Tipografia**: `--text-2xs` (9px) → `--text-5xl` (28px) — 11 livelli
+   - **Spacing** (4pt grid): `--space-0` → `--space-16` (64px) — 12 livelli
+   - **Radius**: `--radius-md` (alias), `--radius-pill` (9999px)
+   - **Shadow**: `--shadow-md` (alias)
+   - **Motion**: `--transition-fast`, `--transition-slow`
+3. Header commentato con guida alla modifica (leggibile da chiunque)
+4. Documentato `--orange` come deprecated (alias di `--amber`, stesso valore)
+
+### Zero rischi
+
+- Nessuna regola CSS modificata
+- Nessun valore di stile alterato
+- File: +77 righe (5441 → 5518), tutte dentro `:root {}`
+- Zero impatto visivo o comportamentale
+
+### Prossimi step (opzionali, su richiesta)
+
+- **Fase 1b**: sostituire valori hardcoded (font-size, padding, colori) con
+  le scale nei punti dove sono ripetuti (es. `padding:10px 14px` compare
+  5 volte, `font-size:12px` 13 volte)
+- **Fase 2a**: endpoint `/api/train/{id}/pdc-carriers` per cross-link
+  PdC ↔ materiale (richiede DB popolato — il locale e' vuoto)
+- **Fase 2b**: pannello slide-in a destra con continuazione materiale +
+  chi guida il treno nelle altre giornate PdC
+- **Fase 2c**: implementazione "Rientro in vettura" / "Raggiungimento treno"
+  via `services/arturo_client.py` (ARTURO Live API)
+
+---
+
 ## 2026-04-18 — Parser PdC: accessori_partenza + accessori_arrivo (B.3.1)
 
 Aggiunto calcolo accessori a livello giornata, zero regressione sul parser

@@ -11,19 +11,57 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
+  /* ═══════════════════════════════════════════════════════════
+   * DESIGN TOKENS — modifica qui per cambiare il look globale
+   * ═══════════════════════════════════════════════════════════
+   * Struttura:
+   *   1. Layout            (sidebar, container)
+   *   2. Superfici         (bg, surface)
+   *   3. Testo             (colori testo)
+   *   4. Bordi             (border)
+   *   5. Palette semantica (blue/green/amber/red/violet/cyan/indigo/orange)
+   *   6. Tipografia        (scala font-size da --text-2xs a --text-4xl)
+   *   7. Spacing           (scala 4pt grid da --space-0 a --space-12)
+   *   8. Radius            (sm/md/lg)
+   *   9. Shadow            (sm/md/lg)
+   *  10. Motion            (transition)
+   *
+   * Le scale (6-7) sono state aggiunte per standardizzare: usarle al
+   * posto di valori hardcoded quando modifichi o aggiungi CSS.
+   * ═══════════════════════════════════════════════════════════ */
+
+  /* 1. Layout */
   --sidebar:260px;
+
+  /* 2. Superfici */
   --bg:#FFFFFF;
   --bg-secondary:#F5F5F7;
   --bg-tertiary:#FAFAFA;
   --surface:#FFFFFF;
   --surface-hover:#F5F5F7;
   --surface-solid:#F5F5F7;
+
+  /* 3. Testo */
   --text:#1D1D1F;
   --text-secondary:#86868B;
   --text-muted:#AEAEB2;
+
+  /* 4. Bordi */
   --border:#D2D2D7;
   --border-light:#E5E5EA;
   --border-strong:#C7C7CC;
+
+  /* 5. Palette semantica
+   * Regola: un colore = uno scopo.
+   *   blue   = azioni primarie
+   *   green  = successo, riposo
+   *   amber  = warning, accessori (ACCp/ACCa)
+   *   red    = errore, violazione
+   *   violet = vuote (deadhead)
+   *   cyan   = info secondaria
+   *   indigo = giro materiale
+   *   orange = alias di amber (deprecato, usa --amber)
+   */
   --blue:#007AFF;
   --blue-soft:rgba(0,122,255,.08);
   --green:#34C759;
@@ -38,15 +76,53 @@
   --cyan-soft:rgba(50,173,230,.08);
   --indigo:#5856D6;
   --indigo-soft:rgba(88,86,214,.08);
-  --orange:#FF9500;
+  --orange:#FF9500;            /* deprecato: alias di --amber */
   --orange-soft:rgba(255,149,0,.08);
-  --radius:12px;
-  --radius-lg:16px;
+
+  /* 6. Tipografia — scala (usare al posto di font-size hardcoded) */
+  --text-2xs:9px;      /* micro (legend, tick) */
+  --text-xs:10px;      /* label uppercase, stat-label */
+  --text-sm:11px;      /* badge, breadcrumb, tag */
+  --text-base:12px;    /* body piccolo, text-sm utility */
+  --text-md:13px;      /* body default, input, button */
+  --text-lg:14px;      /* body normale */
+  --text-xl:15px;      /* card-title, toast */
+  --text-2xl:16px;     /* upload-zone h3 */
+  --text-3xl:18px;     /* sidebar-brand h1 */
+  --text-4xl:20px;     /* page-title */
+  --text-5xl:28px;     /* stat-value */
+
+  /* 7. Spacing — scala 4pt grid (usare al posto di padding/margin hardcoded) */
+  --space-0:0;
+  --space-1:4px;
+  --space-2:8px;
+  --space-3:12px;
+  --space-4:16px;
+  --space-5:20px;
+  --space-6:24px;
+  --space-7:28px;
+  --space-8:32px;
+  --space-10:40px;
+  --space-12:48px;
+  --space-16:64px;
+
+  /* 8. Radius */
+  --radius:12px;       /* = --radius-md (alias per retrocompat) */
   --radius-sm:8px;
-  --shadow:0 4px 12px rgba(0,0,0,.08);
+  --radius-md:12px;
+  --radius-lg:16px;
+  --radius-pill:9999px;
+
+  /* 9. Shadow */
   --shadow-sm:0 1px 3px rgba(0,0,0,.06);
+  --shadow:0 4px 12px rgba(0,0,0,.08);      /* = --shadow-md (alias) */
+  --shadow-md:0 4px 12px rgba(0,0,0,.08);
   --shadow-lg:0 8px 24px rgba(0,0,0,.12);
+
+  /* 10. Motion */
   --transition:all .2s ease;
+  --transition-fast:all .12s ease;
+  --transition-slow:all .35s cubic-bezier(.4,0,.2,1);
 }
 html,body{height:100%;overflow:hidden}
 body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text','Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);display:flex;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
@@ -2330,7 +2406,8 @@ async function suggestNextTrain() {
   if (!manualTrains.length) return toast('Aggiungi almeno un treno prima', 'warn');
   const dep = document.getElementById('manDeposito').value;
   const out = document.getElementById('manSuggestions');
-  out.innerHTML = '<span class="spinner"></span>Ricerca suggerimenti...';
+  out.textContent = '';
+  out.insertAdjacentHTML('beforeend', '<span class="spinner"></span>Ricerca suggerimenti...');
 
   try {
     // Get last train info
@@ -2347,8 +2424,49 @@ async function suggestNextTrain() {
 
     const lastStation = valData.last_station || '';
     const segs = filterSegments(valData.segments || []);
-    const lastArr = segs.length ? segs[segs.length - 1].arr_time : '00:00';
-    if (!lastStation) { out.innerHTML = '<p class="text-muted text-sm">Impossibile determinare ultima stazione</p>'; return; }
+    const scheduledLastArr = segs.length ? segs[segs.length - 1].arr_time : '00:00';
+    if (!lastStation) { out.textContent = ''; out.insertAdjacentHTML('beforeend', '<p class="text-muted text-sm">Impossibile determinare ultima stazione</p>'); return; }
+
+    // === FIX CRITICO: usa orario REALE da VT, non orario programmato ===
+    const trainNum = lastTrainId.replace(/\D/g, '');
+    let lastArr = scheduledLastArr; // fallback
+    let vtNote = '';
+    if (trainNum) {
+      try {
+        const vtPassage = await api('/vt/real-passage?train_number=' + trainNum + '&station=' + encodeURIComponent(lastStation));
+
+        // Treno gia' arrivato a destinazione finale: viaggio completato
+        if (vtPassage.train_finished) {
+          out.textContent = '';
+          out.insertAdjacentHTML('beforeend',
+            '<div class="card" style="margin:0;padding:16px;border-color:var(--success)">' +
+            '<div style="color:var(--success);font-weight:600;margin-bottom:4px">Viaggio completato</div>' +
+            '<p class="text-muted text-sm">Il treno ' + esc(lastTrainId) + ' \u00e8 gi\u00e0 arrivato a destinazione. Non servono alternative.</p></div>');
+          return;
+        }
+
+        // Dati VT troppo vecchi (> 2 ore): non mostrare alternative inaffidabili
+        if (vtPassage.stale) {
+          out.textContent = '';
+          out.insertAdjacentHTML('beforeend',
+            '<div class="card" style="margin:0;padding:16px;border-color:var(--warning)">' +
+            '<div style="color:var(--warning);font-weight:600;margin-bottom:4px">Dati non aggiornati</div>' +
+            '<p class="text-muted text-sm">Ultimo rilevamento VT: ' + esc(vtPassage.last_detected_station || '?') +
+            ' alle ' + esc(vtPassage.last_detected_time || '?') + '. Dati troppo vecchi per suggerire alternative affidabili.</p></div>');
+          return;
+        }
+
+        // Usa orario reale se disponibile
+        if (vtPassage.real_time) {
+          lastArr = vtPassage.real_time;
+          vtNote = ' (reale VT: ' + vtPassage.real_time + ', programmato: ' + scheduledLastArr + ')';
+        } else if (vtPassage.last_detected_time && vtPassage.last_detected_station) {
+          vtNote = ' (VT: ultima rilevazione ' + vtPassage.last_detected_station + ' ' + vtPassage.last_detected_time + ')';
+        }
+      } catch (e) {
+        console.warn('VT real-passage fallback:', e.message);
+      }
+    }
 
     const provUsed = getProvisionalTrainIds();
     const allExclude = [...manualTrains.map(t => t.train_id), ...provUsed];
@@ -2391,7 +2509,7 @@ async function suggestNextTrain() {
     const conns = filterSegments(conn.connections || []);
 
     if (conns.length) {
-      html += '<div class="card" style="margin:0;padding:16px"><div class="card-title mb-12">Altri treni da ' + esc(lastStation) + ' dopo ' + esc(lastArr) + '</div>';
+      html += '<div class="card" style="margin:0;padding:16px"><div class="card-title mb-12">Altri treni da ' + esc(lastStation) + ' dopo ' + esc(lastArr) + esc(vtNote) + '</div>';
       html += '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Treno</th><th>Partenza</th><th>Destinazione</th><th>Arrivo</th><th>Dopo (Giro Mat.)</th><th></th></tr></thead><tbody>';
       conns.forEach(c => {
         const alreadyAdded = manualTrains.some(t => t.train_id === c.train_id) || provUsed.has(c.train_id);
@@ -2416,9 +2534,11 @@ async function suggestNextTrain() {
       html += '<p class="text-muted text-sm">Nessun treno disponibile da ' + esc(lastStation) + '</p>';
     }
 
-    out.innerHTML = html;
+    out.textContent = '';
+    out.insertAdjacentHTML('beforeend', html);
   } catch (e) {
-    out.innerHTML = '<div class="violation"><span class="v-icon">!</span>' + esc(e.message) + '</div>';
+    out.textContent = '';
+    out.insertAdjacentHTML('beforeend', '<div class="violation"><span class="v-icon">!</span>' + esc(e.message) + '</div>');
   }
 }
 
@@ -2589,9 +2709,36 @@ async function addReturnTrain() {
 
     const lastStation = valData.last_station || '';
     const segs = filterSegments(valData.segments || []);
-    const lastArr = segs.length ? segs[segs.length - 1].arr_time : '00:00';
+    const scheduledLastArr = segs.length ? segs[segs.length - 1].arr_time : '00:00';
 
-    if (lastStation.toUpperCase() === dep.toUpperCase()) { out.innerHTML = '<p class="text-muted text-sm">Sei gia al deposito</p>'; return; }
+    if (lastStation.toUpperCase() === dep.toUpperCase()) { out.textContent = ''; out.insertAdjacentHTML('beforeend', '<p class="text-muted text-sm">Sei gia al deposito</p>'); return; }
+
+    // === FIX CRITICO: usa orario REALE da VT per il rientro ===
+    const trainNum = lastTrainId.replace(/\D/g, '');
+    let lastArr = scheduledLastArr;
+    if (trainNum) {
+      try {
+        const vtPassage = await api('/vt/real-passage?train_number=' + trainNum + '&station=' + encodeURIComponent(lastStation));
+        if (vtPassage.train_finished) {
+          out.textContent = '';
+          out.insertAdjacentHTML('beforeend',
+            '<div class="card" style="margin:0;padding:16px;border-color:var(--success)">' +
+            '<div style="color:var(--success);font-weight:600;margin-bottom:4px">Viaggio completato</div>' +
+            '<p class="text-muted text-sm">Il treno ' + esc(lastTrainId) + ' \u00e8 gi\u00e0 arrivato a destinazione.</p></div>');
+          return;
+        }
+        if (vtPassage.stale) {
+          out.textContent = '';
+          out.insertAdjacentHTML('beforeend',
+            '<div class="card" style="margin:0;padding:16px;border-color:var(--warning)">' +
+            '<div style="color:var(--warning);font-weight:600;margin-bottom:4px">Dati non aggiornati</div>' +
+            '<p class="text-muted text-sm">Ultimo rilevamento VT: ' + esc(vtPassage.last_detected_station || '?') +
+            ' alle ' + esc(vtPassage.last_detected_time || '?') + '. Dati troppo vecchi.</p></div>');
+          return;
+        }
+        if (vtPassage.real_time) lastArr = vtPassage.real_time;
+      } catch (e) { console.warn('VT real-passage fallback (return):', e.message); }
+    }
 
     // Chiama return-trains (solo per Giro Materiale) e ViaggiaTreno in parallelo
     const [rt, vtResult] = await Promise.all([
