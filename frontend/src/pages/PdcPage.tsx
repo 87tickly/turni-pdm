@@ -75,11 +75,19 @@ function TurnsList({
 }) {
   return (
     <div className="flex flex-col h-full">
-      <div className="px-3 py-2 border-b border-border-subtle">
+      <div
+        className="px-3 py-2.5"
+        style={{ backgroundColor: "var(--color-surface-container-low)" }}
+      >
         <select
-          className="w-full text-[12px] px-2 py-1.5 rounded-md border border-border bg-background"
+          className="w-full text-[12px] px-2 py-1.5 rounded-md outline-none"
           value={filter}
           onChange={(e) => onFilter(e.target.value)}
+          style={{
+            backgroundColor: "var(--color-surface-container-lowest)",
+            color: "var(--color-on-surface)",
+            boxShadow: "inset 0 0 0 1px var(--color-ghost)",
+          }}
         >
           <option value="">Tutti gli impianti ({turns.length})</option>
           {impianti.map((i) => (
@@ -87,27 +95,66 @@ function TurnsList({
           ))}
         </select>
       </div>
-      <div className="overflow-y-auto flex-1">
+      <div className="overflow-y-auto flex-1 p-1.5 space-y-0.5">
         {turns.length === 0 ? (
-          <p className="p-4 text-[12px] text-muted-foreground text-center">
+          <p
+            className="p-4 text-[12px] text-center"
+            style={{ color: "var(--color-on-surface-muted)" }}
+          >
             Nessun turno caricato. Carica un PDF da <b>Import</b>.
           </p>
         ) : (
-          turns.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => onSelect(t.id)}
-              className={cn(
-                "w-full text-left px-3 py-2 border-b border-border-subtle transition-colors text-[12px]",
-                selectedId === t.id
-                  ? "bg-primary/8 border-l-2 border-l-primary"
-                  : "hover:bg-muted/40"
-              )}
-            >
-              <div className="font-mono font-semibold">{t.codice}</div>
-              <div className="text-muted-foreground text-[11px] truncate">{t.impianto}</div>
-            </button>
-          ))
+          turns.map((t) => {
+            const isSel = selectedId === t.id
+            return (
+              <button
+                key={t.id}
+                onClick={() => onSelect(t.id)}
+                className="relative w-full text-left px-2.5 py-2 rounded-md transition-colors text-[12px]"
+                style={{
+                  backgroundColor: isSel
+                    ? "var(--color-surface-container-high)"
+                    : "transparent",
+                  color: isSel
+                    ? "var(--color-on-surface-strong)"
+                    : "var(--color-on-surface)",
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSel)
+                    e.currentTarget.style.backgroundColor =
+                      "var(--color-surface-container-low)"
+                }}
+                onMouseLeave={(e) => {
+                  if (!isSel) e.currentTarget.style.backgroundColor = "transparent"
+                }}
+              >
+                {isSel && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute left-0.5 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full"
+                    style={{ backgroundColor: "var(--color-dot)" }}
+                  />
+                )}
+                <div
+                  className="font-bold"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    color: isSel
+                      ? "var(--color-brand)"
+                      : "var(--color-on-surface-strong)",
+                  }}
+                >
+                  {t.codice}
+                </div>
+                <div
+                  className="text-[11px] truncate mt-0.5"
+                  style={{ color: "var(--color-on-surface-muted)" }}
+                >
+                  {t.impianto}
+                </div>
+              </button>
+            )
+          })
         )}
       </div>
     </div>
@@ -182,9 +229,15 @@ function DayCard({ day }: { day: PdcDay }) {
     mode: "detail" | "warn"
   } | null>(null)
   return (
-    <div className="border border-border-subtle rounded-lg bg-card">
+    <div
+      className="rounded-lg overflow-hidden"
+      style={{
+        backgroundColor: "var(--color-surface-container-lowest)",
+        boxShadow: "var(--shadow-sm)",
+      }}
+    >
       <button
-        className="w-full flex items-center gap-3 px-3 py-2 hover:bg-muted/30 transition-colors"
+        className="w-full flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-[var(--color-surface-container-low)]"
         onClick={() => setOpen(!open)}
       >
         {open ? (
@@ -224,7 +277,10 @@ function DayCard({ day }: { day: PdcDay }) {
         </div>
       </button>
       {open && (
-        <div className="px-3 pb-3 border-t border-border-subtle pt-2">
+        <div
+          className="px-3 pb-3 pt-3"
+          style={{ backgroundColor: "var(--color-surface-container-low)" }}
+        >
           {day.is_disponibile === 1 ? (
             <p className="text-[11px] text-muted-foreground italic text-center py-2">
               Giornata disponibile (riposo / disponibilità)
@@ -322,13 +378,45 @@ function TurnDetail({
   return (
     <div>
       {/* Header */}
-      <div className="mb-4 pb-3 border-b border-border-subtle">
+      <div
+        className="mb-4 pb-3"
+        style={{ boxShadow: "inset 0 -1px 0 var(--color-ghost)" }}
+      >
+        <div
+          className="text-[10px] font-bold uppercase mb-1"
+          style={{
+            color: "var(--color-on-surface-quiet)",
+            letterSpacing: "0.12em",
+          }}
+        >
+          Turno PdC
+        </div>
         <div className="flex items-center gap-2 mb-1 flex-wrap">
-          <h3 className="text-lg font-bold font-mono">{t.codice}</h3>
-          <span className="text-[11px] font-mono text-muted-foreground">
+          <h3
+            className="text-lg font-bold"
+            style={{
+              fontFamily: "var(--font-mono)",
+              color: "var(--color-on-surface-strong)",
+            }}
+          >
+            {t.codice}
+          </h3>
+          <span
+            className="text-[11px]"
+            style={{
+              fontFamily: "var(--font-mono)",
+              color: "var(--color-on-surface-muted)",
+            }}
+          >
             [{t.planning}]
           </span>
-          <span className="text-[11px] px-2 py-0.5 rounded bg-primary/10 text-primary">
+          <span
+            className="text-[11px] px-2 py-0.5 rounded font-semibold"
+            style={{
+              backgroundColor: "rgba(0, 98, 204, 0.10)",
+              color: "var(--color-brand)",
+            }}
+          >
             {t.profilo}
           </span>
           <div className="ml-auto flex items-center gap-1">
@@ -385,9 +473,15 @@ function TurnDetail({
           <h4 className="text-[13px] font-semibold mb-2">
             Note periodicità treni ({detail.notes.length})
           </h4>
-          <div className="space-y-1 max-h-96 overflow-y-auto border border-border-subtle rounded-lg p-2">
+          <div
+            className="space-y-0.5 max-h-96 overflow-y-auto rounded-lg p-2"
+            style={{ backgroundColor: "var(--color-surface-container-low)" }}
+          >
             {detail.notes.map((n) => (
-              <details key={n.id} className="text-[11px] border-b border-border-subtle last:border-0 py-1">
+              <details
+                key={n.id}
+                className="text-[11px] rounded p-1.5 transition-colors hover:bg-[var(--color-surface-container-lowest)]"
+              >
                 <summary className="cursor-pointer flex items-center gap-2">
                   <span className="font-mono font-semibold">Treno {n.train_id}</span>
                   <span className="text-muted-foreground truncate flex-1">
@@ -500,44 +594,88 @@ export function PdcPage() {
   return (
     <div className="h-[calc(100vh-6rem)] flex flex-col">
       {/* Header */}
-      <div className="mb-4 flex items-start justify-between">
+      <div className="mb-5 flex items-start justify-between">
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">Turni PdC</h2>
-          <p className="text-[13px] text-muted-foreground mt-0.5">
+          <div
+            className="text-[10px] font-bold uppercase mb-1"
+            style={{
+              color: "var(--color-on-surface-quiet)",
+              letterSpacing: "0.12em",
+            }}
+          >
+            Turni PdC
+          </div>
+          <h2
+            className="font-bold tracking-tight"
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: "22px",
+              letterSpacing: "-0.02em",
+              color: "var(--color-on-surface-strong)",
+            }}
+          >
+            Personale di Condotta
+          </h2>
+          <p
+            className="text-[13px] mt-0.5"
+            style={{ color: "var(--color-on-surface-muted)" }}
+          >
             Turni Posto di Condotta (Trenord / rete RFI)
           </p>
         </div>
         <button
           onClick={() => navigate("/pdc/new")}
-          className="text-[12px] px-3 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 flex items-center gap-1 font-semibold"
+          className="text-[12.5px] px-3.5 py-2 rounded-md text-white flex items-center gap-1.5 font-semibold transition-opacity hover:opacity-90"
+          style={{
+            background: "var(--gradient-primary)",
+            boxShadow: "var(--shadow-sm)",
+          }}
         >
           <Plus size={14} /> Nuovo turno
         </button>
       </div>
 
-      {/* Stats */}
+      {/* Stats — KPI style */}
       {stats && stats.loaded && (
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4 text-[11px]">
-          <div className="bg-muted/40 rounded-md px-3 py-2">
-            <p className="text-muted-foreground">Turni</p>
-            <p className="font-mono text-[14px] font-semibold">{stats.turni}</p>
-          </div>
-          <div className="bg-muted/40 rounded-md px-3 py-2">
-            <p className="text-muted-foreground">Giornate</p>
-            <p className="font-mono text-[14px] font-semibold">{stats.days}</p>
-          </div>
-          <div className="bg-muted/40 rounded-md px-3 py-2">
-            <p className="text-muted-foreground">Blocchi</p>
-            <p className="font-mono text-[14px] font-semibold">{stats.blocks}</p>
-          </div>
-          <div className="bg-muted/40 rounded-md px-3 py-2">
-            <p className="text-muted-foreground">Treni</p>
-            <p className="font-mono text-[14px] font-semibold">{stats.trains}</p>
-          </div>
-          <div className="bg-muted/40 rounded-md px-3 py-2">
-            <p className="text-muted-foreground">Impianti</p>
-            <p className="font-mono text-[14px] font-semibold">{stats.impianti.length}</p>
-          </div>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
+          {[
+            { label: "Turni", value: stats.turni },
+            { label: "Giornate", value: stats.days },
+            { label: "Blocchi", value: stats.blocks },
+            { label: "Treni", value: stats.trains },
+            { label: "Impianti", value: stats.impianti.length },
+          ].map((k) => (
+            <div
+              key={k.label}
+              className="rounded-lg px-3.5 py-2.5"
+              style={{
+                backgroundColor: "var(--color-surface-container-lowest)",
+                boxShadow: "var(--shadow-sm)",
+              }}
+            >
+              <div
+                className="text-[9.5px] font-bold uppercase"
+                style={{
+                  color: "var(--color-on-surface-muted)",
+                  letterSpacing: "0.1em",
+                }}
+              >
+                {k.label}
+              </div>
+              <div
+                className="mt-1 leading-none"
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: "22px",
+                  fontWeight: 700,
+                  color: "var(--color-on-surface-strong)",
+                  letterSpacing: "-0.02em",
+                }}
+              >
+                {k.value}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -550,7 +688,13 @@ export function PdcPage() {
 
       {/* Split layout */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4 overflow-hidden">
-        <div className="border border-border-subtle rounded-lg bg-card overflow-hidden">
+        <div
+          className="rounded-lg overflow-hidden"
+          style={{
+            backgroundColor: "var(--color-surface-container-lowest)",
+            boxShadow: "var(--shadow-sm)",
+          }}
+        >
           <TurnsList
             turns={turns}
             selectedId={selectedId}
@@ -560,7 +704,13 @@ export function PdcPage() {
             impianti={impianti}
           />
         </div>
-        <div className="border border-border-subtle rounded-lg bg-card p-4 overflow-y-auto">
+        <div
+          className="rounded-lg p-5 overflow-y-auto"
+          style={{
+            backgroundColor: "var(--color-surface-container-lowest)",
+            boxShadow: "var(--shadow-sm)",
+          }}
+        >
           {loadingDetail ? (
             <p className="text-[12px] text-muted-foreground">Caricamento...</p>
           ) : detail ? (
