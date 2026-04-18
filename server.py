@@ -42,6 +42,7 @@ from api.shifts import router as shifts_router
 from api.importers import router as importers_router
 from api.pdc_builder import router as pdc_builder_router
 from api.viaggiatreno import router as vt_router
+from api.dashboard import router as dashboard_router
 
 app = FastAPI(
     title="Turni PDM API",
@@ -69,6 +70,7 @@ app.include_router(shifts_router)
 app.include_router(importers_router)
 app.include_router(pdc_builder_router)
 app.include_router(vt_router)
+app.include_router(dashboard_router)
 
 # Serve frontend: React build (frontend/dist/) in produzione, static/ come fallback
 # DOPO i router — così le API hanno priorità
