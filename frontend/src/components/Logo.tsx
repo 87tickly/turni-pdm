@@ -7,18 +7,26 @@ export function Logo({ size = "lg" }: { size?: "sm" | "lg" }) {
   return (
     <Link
       to="/"
-      className="flex items-baseline gap-0.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-      aria-label="COLAZIONE PDM — Homepage"
+      className="flex items-baseline gap-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+      aria-label="ARTURO PDM — Homepage"
     >
       <span
-        className={`${textSize} font-black tracking-tight`}
-        style={{ color: "#0062CC" }}
+        className={`${textSize} font-extrabold tracking-tight`}
+        style={{
+          color: "var(--color-brand)",
+          fontFamily: "var(--font-display)",
+          letterSpacing: "-0.02em",
+        }}
       >
-        COLAZIONE
+        ARTURO
       </span>
       <span
         className={`inline-block ${dotSize} rounded-full animate-pulse-dot`}
-        style={{ backgroundColor: "#30D158" }}
+        style={{
+          backgroundColor: "var(--color-dot)",
+          boxShadow: "0 0 0 3px rgb(34 197 94 / 0.18)",
+        }}
+        aria-hidden="true"
       />
     </Link>
   )
