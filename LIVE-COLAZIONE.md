@@ -4,6 +4,69 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-18 — Parser turno materiale: refactor vertical extraction (sezione A completata)
+
+Refactor completo di `parse_turno_materiale.py` per supportare il nuovo
+formato PDF Trenord 2026+ dove i numeri treno sono scritti VERTICALMENTE
+(upright=False), una cifra per riga Y, da leggere bottom-to-top.
+
+### Nuova funzione `extract_vertical_trains(page)`
+
+Algoritmo:
+1. Filtra char con `upright == False` (verticali)
+2. Trova bande Y globali della pagina (gap > 20pt = separazione Gantt-band)
+3. Cluster per X (tolleranza 2pt)
+4. Sort per Y ascendente (bottom-to-top = ordine lettura)
+5. Split intra-banda se gap > 8pt (separazione tra varianti)
+6. Match pattern `\d{4,6}i?` per ID treno + vuote con suffisso `i`
+7. Caso misto (colonna digit+letter tipo `28220iMICE`): estrae solo con
+   lettere presenti (evita falsi positivi da colonne minuti `22552255`)
+
+### Integrazione main loop
+
+- Aggiunto `page_to_turno` map con carry-forward: pagine di continuazione
+  (senza header "Turno NNN") vengono associate al turno attivo corrente
+- `vertical_trains_by_turno` raccoglie i treni estratti per turno
+- Output: nuova variante `(vertical-extraction)` per ogni turno che
+  contiene treni verticali, additiva alle varianti orizzontali esistenti
+
+### Risultati su `Turno Materiale Trenord dal 2_3_26.pdf` (353 pagine)
+
+| Metrica | Prima | Dopo |
+|---------|-------|------|
+| Turni | 54 | 54 |
+| Treni distinti regolari | 31 (1%) | 3301 (115% vs storico) |
+| Vuote distinte | 9 | 532 |
+| Totale occorrenze per-turno | N/A | 4343 (vs 3790 storico, +15%) |
+
+Coverage sui turni campione:
+- Turno 1100: **100%** (8/8 treni, 4/4 vuote) ✓
+- Turno 1110: **100%** (72/72 treni)
+- Turno 1191A: **92%** (68/74 treni; 6 miss sono rinumerazioni schedule)
+
+Overlap globale con JSON storico: 86.1% — il 14% "mancante" è quasi
+interamente dovuto a **rinumerazione schedule 2024→2026**:
+- Vecchi `4xxx` → nuovi `24xxx` (+20000)
+- Vecchi `20xxx` → nuovi `920xxx` (+900000)
+- Vecchi `2xxx` S-line → nuovi `92xxxx`
+
+Verificato: i treni "missing" non esistono più nel PDF 2026.
+
+### File intoccati
+
+- `turno_materiale_treni.json` (JSON storico): NON sovrascritto, solo
+  line-endings CRLF→LF staged (non modifica dati). Rimane fonte per
+  builder e Gantt finché utente non decide di switchare al nuovo.
+- Output di test sempre in `/tmp/turno_materiale_test.json`.
+
+### Cosa manca (follow-up opzionale)
+
+- Step A.3.5 (estrazione minuti partenza/arrivo verticali) — non serve
+  ai fini del recupero ID treni, skippato
+- Step A.3.6 (parsing stazioni verticali) — idem, skippato
+
+---
+
 ## 2026-04-18 — Parser turno materiale: fix regex + diagnosi formato PDF cambiato
 
 Sessione di analisi del parser `parse_turno_materiale.py` sul PDF reale

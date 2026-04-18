@@ -112,18 +112,18 @@ def extract_vertical_trains(page, x_tol=2.0, band_gap=20.0, intra_char_gap=8.0):
 
             for group in subgroups:
                 text = ''.join(c['text'] for c in group)
-                # Caso 1: colonna pulita = un solo numero
+                # Caso 1: colonna pulita = un solo numero treno
                 m = re.fullmatch(r'(\d{4,6})(i?)', text)
                 if m:
                     results.append((m.group(1), m.group(2) == 'i'))
                     continue
-                # Caso 2: colonna mista digit+letter (es. "28220iMICE")
-                # Estrai tutti i pattern \d{4,6}i? concatenati
-                for sub in re.finditer(r'(\d{4,6})(i?)(?=\D|$|\d{4,6})', text):
-                    tid = sub.group(1)
-                    # Evita falsi positivi: minuti a 2-3 cifre non vengono matchati
-                    # (pattern e' \d{4,6})
-                    results.append((tid, sub.group(2) == 'i'))
+                # Caso 2: colonna mista digit+letter (es. "28220iMICE").
+                # Attiva SOLO se contiene lettere: evita di splittare colonne
+                # di minuti concatenati (tipo "22552255") che sarebbero falsi
+                # positivi di treni a 4 cifre.
+                if any(c.isalpha() for c in text):
+                    for sub in re.finditer(r'(\d{4,6})(i?)(?=[A-Za-z]|$)', text):
+                        results.append((sub.group(1), sub.group(2) == 'i'))
 
     return results
 
@@ -196,6 +196,11 @@ for text in all_rows:
     # Marker di inizio pagina iniettato in fase di estrazione
     if text.startswith('__PAGE_START__'):
         current_page = int(text.split('__PAGE_START__')[1])
+        # Carry-forward: se il turno corrente e' definito, associa questa
+        # pagina ad esso. Verra' sovrascritto se la pagina contiene un
+        # nuovo header di turno.
+        if current_turno is not None:
+            page_to_turno[current_page] = current_turno
         continue
     m = turno_header_re.search(text)
     if m:
