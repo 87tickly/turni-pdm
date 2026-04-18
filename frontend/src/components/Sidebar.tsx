@@ -17,6 +17,7 @@ interface SidebarProps {
   username: string
   isAdmin: boolean
   onLogout: () => void
+  onOpenPalette?: () => void
 }
 
 const navItems = [
@@ -29,7 +30,8 @@ const navItems = [
   { to: "/import", icon: Upload, label: "Import" },
 ]
 
-export function Sidebar({ username, isAdmin, onLogout }: SidebarProps) {
+export function Sidebar({ username, isAdmin, onLogout, onOpenPalette }: SidebarProps) {
+  const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform)
   return (
     <aside
       className="flex flex-col w-56 h-screen fixed left-0 top-0"
@@ -39,6 +41,35 @@ export function Sidebar({ username, isAdmin, onLogout }: SidebarProps) {
       <div className="px-4 py-4">
         <Logo size="sm" />
       </div>
+
+      {/* Quick search (apre CommandPalette) */}
+      {onOpenPalette && (
+        <div className="px-2 mb-2">
+          <button
+            type="button"
+            onClick={onOpenPalette}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[12px] transition-colors"
+            style={{
+              backgroundColor: "var(--color-surface-container-lowest)",
+              color: "var(--color-on-surface-muted)",
+              boxShadow: "inset 0 0 0 1px var(--color-ghost)",
+            }}
+          >
+            <Search size={13} strokeWidth={1.8} />
+            <span className="flex-1 text-left">Cerca…</span>
+            <kbd
+              className="text-[9.5px] font-bold px-1 rounded"
+              style={{
+                fontFamily: "var(--font-mono)",
+                color: "var(--color-on-surface-quiet)",
+                backgroundColor: "var(--color-surface-container)",
+              }}
+            >
+              {isMac ? "⌘K" : "Ctrl+K"}
+            </kbd>
+          </button>
+        </div>
+      )}
 
       {/* Navigation */}
       <nav className="flex-1 px-2 space-y-0.5">

@@ -1,9 +1,25 @@
+import { useEffect, useState } from "react"
 import { Outlet, Navigate } from "react-router-dom"
 import { Sidebar } from "./Sidebar"
+import { CommandPalette } from "./CommandPalette"
 import { useAuth } from "@/hooks/useAuth"
 
 export function Layout() {
   const { user, loading, logout } = useAuth()
+  const [paletteOpen, setPaletteOpen] = useState(false)
+
+  // Hotkey globale ⌘K / Ctrl+K
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const isMeta = e.metaKey || e.ctrlKey
+      if (isMeta && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        setPaletteOpen((o) => !o)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
 
   if (loading) {
     return (
@@ -26,12 +42,18 @@ export function Layout() {
         username={user.username}
         isAdmin={user.is_admin}
         onLogout={logout}
+        onOpenPalette={() => setPaletteOpen(true)}
       />
       <main className="flex-1 ml-56">
         <div className="max-w-6xl mx-auto px-8 py-6">
           <Outlet />
         </div>
       </main>
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onLogout={logout}
+      />
     </div>
   )
 }
