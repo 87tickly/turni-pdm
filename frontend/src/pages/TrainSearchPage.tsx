@@ -10,6 +10,8 @@ import {
   Loader2,
   Database,
   Radio,
+  Link2,
+  Users,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
@@ -19,12 +21,14 @@ import {
   vtArrivals,
   vtTrainInfo,
   getGiroChain,
+  trainCrossRef,
   type TrainSegment,
   type VtDeparture,
   type VtStation,
   type VtTrainInfo,
   type VtStop,
   type GiroChainContext,
+  type TrainCrossRef,
 } from "@/lib/api"
 
 // ── Tab component ────────────────────────────────────────────────
@@ -256,6 +260,387 @@ function SegmentRow({ seg }: { seg: TrainSegment }) {
   )
 }
 
+// ── Cross-ref side panel ─────────────────────────────────────────
+// Riusa /train/{id}/cross-ref (stesso endpoint del TrainDetailDrawer)
+// per mostrare Giro Materiale prev/curr/next + PdC che guidano il treno.
+
+function CrossRefPanel({ trainId }: { trainId: string | null }) {
+  const [data, setData] = useState<TrainCrossRef | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    if (!trainId) {
+      setData(null)
+      setError("")
+      return
+    }
+    setLoading(true)
+    setError("")
+    trainCrossRef(trainId)
+      .then(setData)
+      .catch((e) => setError(e?.message ?? "Errore"))
+      .finally(() => setLoading(false))
+  }, [trainId])
+
+  if (!trainId) {
+    return (
+      <div
+        className="rounded-xl p-5 text-[12px]"
+        style={{
+          backgroundColor: "var(--color-surface-container-lowest)",
+          color: "var(--color-on-surface-muted)",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
+        <div
+          className="font-semibold mb-2"
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: "14px",
+            color: "var(--color-on-surface-strong)",
+          }}
+        >
+          Cross-ref
+        </div>
+        Cerca un treno per vedere Giro Materiale e PdC che lo guidano.
+      </div>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div
+        className="rounded-xl p-6 flex items-center justify-center"
+        style={{
+          backgroundColor: "var(--color-surface-container-lowest)",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
+        <Loader2
+          size={18}
+          className="animate-spin"
+          style={{ color: "var(--color-on-surface-quiet)" }}
+        />
+      </div>
+    )
+  }
+
+  if (error || !data) {
+    return (
+      <div
+        className="rounded-xl p-5 text-[12px]"
+        style={{
+          backgroundColor: "var(--color-surface-container-lowest)",
+          color: "var(--color-on-surface-muted)",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
+        {error || "Cross-ref non disponibile"}
+      </div>
+    )
+  }
+
+  const hasMaterial = data.material.position >= 0
+  const m = data.material
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Giro Materiale */}
+      <div
+        className="rounded-xl overflow-hidden"
+        style={{
+          backgroundColor: "var(--color-surface-container-lowest)",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
+        <div className="px-4 py-3 flex items-center gap-2">
+          <Link2 size={14} style={{ color: "var(--color-brand)" }} />
+          <span
+            className="font-semibold"
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: "13px",
+              color: "var(--color-on-surface-strong)",
+            }}
+          >
+            Giro Materiale
+          </span>
+          {hasMaterial && (
+            <span
+              className="ml-auto text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold"
+              style={{
+                backgroundColor: "var(--color-surface-container)",
+                color: "var(--color-on-surface-muted)",
+              }}
+            >
+              {m.position + 1} / {m.total}
+            </span>
+          )}
+        </div>
+        <div className="px-4 pb-3">
+          {!hasMaterial ? (
+            <p
+              className="text-[12px]"
+              style={{ color: "var(--color-on-surface-muted)" }}
+            >
+              Treno non presente in un giro materiale.
+            </p>
+          ) : (
+            <>
+              {m.material_type && (
+                <div className="mb-2">
+                  <span
+                    className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold"
+                    style={{
+                      backgroundColor: "rgba(0, 98, 204, 0.10)",
+                      color: "var(--color-brand)",
+                    }}
+                  >
+                    {m.material_type}
+                  </span>
+                  {m.turn_number && (
+                    <span
+                      className="ml-2 text-[11px]"
+                      style={{ color: "var(--color-on-surface-muted)" }}
+                    >
+                      Turno {m.turn_number}
+                    </span>
+                  )}
+                </div>
+              )}
+              {/* prev → curr → next */}
+              <div className="flex flex-col gap-1.5 text-[11.5px]">
+                {m.prev && (
+                  <CrossRefSegment
+                    label="prec"
+                    segment={m.prev}
+                    muted
+                  />
+                )}
+                <CrossRefSegment
+                  label="ora"
+                  segment={{
+                    train_id: data.train_id,
+                    from_station: m.chain[m.position]?.from ?? "",
+                    to_station: m.chain[m.position]?.to ?? "",
+                    dep_time: m.chain[m.position]?.dep ?? "",
+                    arr_time: m.chain[m.position]?.arr ?? "",
+                    is_deadhead: false,
+                  }}
+                  current
+                />
+                {m.next && (
+                  <CrossRefSegment
+                    label="succ"
+                    segment={m.next}
+                    muted
+                    handoff={m.next.dep_time === (m.chain[m.position]?.arr ?? "")}
+                  />
+                )}
+              </div>
+
+              {/* chain compatta */}
+              {m.chain.length > 1 && (
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {m.chain.map((c, i) => (
+                    <span
+                      key={i}
+                      className="px-1.5 py-0.5 rounded font-mono text-[10px]"
+                      style={{
+                        backgroundColor:
+                          i === m.position
+                            ? "var(--color-brand)"
+                            : "var(--color-surface-container)",
+                        color:
+                          i === m.position
+                            ? "#fff"
+                            : "var(--color-on-surface-muted)",
+                        fontWeight: i === m.position ? 700 : 500,
+                      }}
+                    >
+                      {c.train_id}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* PdC carriers */}
+      <div
+        className="rounded-xl overflow-hidden"
+        style={{
+          backgroundColor: "var(--color-surface-container-lowest)",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
+        <div className="px-4 py-3 flex items-center gap-2">
+          <Users size={14} style={{ color: "var(--color-brand)" }} />
+          <span
+            className="font-semibold"
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: "13px",
+              color: "var(--color-on-surface-strong)",
+            }}
+          >
+            Turni PdC che lo guidano
+          </span>
+          <span
+            className="ml-auto text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold"
+            style={{
+              backgroundColor: "var(--color-surface-container)",
+              color: "var(--color-on-surface-muted)",
+            }}
+          >
+            {data.pdc_count}
+          </span>
+        </div>
+        <div className="px-2 pb-2">
+          {data.pdc_carriers.length === 0 ? (
+            <p
+              className="px-2 py-3 text-[12px]"
+              style={{ color: "var(--color-on-surface-muted)" }}
+            >
+              Nessun turno PdC guida questo treno.
+            </p>
+          ) : (
+            data.pdc_carriers.slice(0, 10).map((c, i) => (
+              <div
+                key={`${c.turn_id}-${c.day_id}-${c.block_id}-${i}`}
+                className="px-2.5 py-2 rounded-md hover:bg-[var(--color-surface-container-low)] transition-colors"
+              >
+                <div className="flex items-center gap-2 text-[12px]">
+                  <span
+                    className="font-bold"
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      color: "var(--color-brand)",
+                    }}
+                  >
+                    {c.codice}
+                  </span>
+                  <span
+                    className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                    style={{
+                      backgroundColor: "var(--color-surface-container)",
+                      color: "var(--color-on-surface-muted)",
+                    }}
+                  >
+                    g{c.day_number ?? "?"} · {c.periodicita}
+                  </span>
+                </div>
+                <div
+                  className="mt-0.5 text-[10.5px] truncate"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    color: "var(--color-on-surface-muted)",
+                  }}
+                >
+                  {c.from_station} {c.block_start} → {c.to_station} {c.block_end}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CrossRefSegment({
+  label,
+  segment,
+  current,
+  muted,
+  handoff,
+}: {
+  label: string
+  segment: {
+    train_id: string
+    from_station: string
+    to_station: string
+    dep_time: string
+    arr_time: string
+    is_deadhead: boolean
+  }
+  current?: boolean
+  muted?: boolean
+  handoff?: boolean
+}) {
+  return (
+    <div
+      className="px-2 py-1.5 rounded"
+      style={{
+        backgroundColor: current
+          ? "var(--color-surface-container-high)"
+          : "var(--color-surface-container-low)",
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className="text-[9.5px] font-bold uppercase"
+          style={{
+            letterSpacing: "0.1em",
+            color: current
+              ? "var(--color-brand)"
+              : "var(--color-on-surface-quiet)",
+          }}
+        >
+          {label}
+        </span>
+        <span
+          className="font-bold"
+          style={{
+            fontFamily: "var(--font-mono)",
+            color: muted
+              ? "var(--color-on-surface-muted)"
+              : "var(--color-on-surface-strong)",
+            fontSize: "11.5px",
+          }}
+        >
+          {segment.train_id}
+        </span>
+        {segment.is_deadhead && (
+          <span
+            className="text-[9px] px-1 rounded font-bold"
+            style={{
+              backgroundColor: "var(--color-warning-container)",
+              color: "var(--color-warning)",
+            }}
+          >
+            VUOTA
+          </span>
+        )}
+        {handoff && (
+          <span
+            className="ml-auto text-[9.5px] px-1.5 rounded font-semibold"
+            style={{
+              backgroundColor: "var(--color-success-container)",
+              color: "var(--color-success)",
+            }}
+          >
+            Handoff OK
+          </span>
+        )}
+      </div>
+      <div
+        className="mt-0.5 text-[10.5px] truncate"
+        style={{
+          fontFamily: "var(--font-mono)",
+          color: "var(--color-on-surface-muted)",
+        }}
+      >
+        {segment.from_station} {segment.dep_time} → {segment.to_station}{" "}
+        {segment.arr_time}
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ────────────────────────────────────────────────────
 
 export function TrainSearchPage() {
@@ -458,51 +843,60 @@ export function TrainSearchPage() {
         </div>
       )}
 
-      {/* ── TRENO RESULTS ── */}
+      {/* ── TRENO RESULTS (2 colonne: 1fr + 340px cross-ref panel) ── */}
       {tab === "treno" && !loading && dbSegments.length > 0 && (
-        <div className="space-y-3">
-          {/* DB locale results */}
-          <div className="bg-card rounded-lg border border-border-subtle">
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
-              <Database size={14} className="text-muted-foreground" />
-              <span className="text-[12px] font-medium">Database locale</span>
-              <span className="text-[11px] text-muted-foreground ml-auto">
-                {dbSegments.length} segmento/i
-              </span>
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-4">
+          <div className="space-y-3 min-w-0">
+            {/* DB locale results */}
+            <div className="bg-card rounded-lg border border-border-subtle">
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
+                <Database size={14} className="text-muted-foreground" />
+                <span className="text-[12px] font-medium">Database locale</span>
+                <span className="text-[11px] text-muted-foreground ml-auto">
+                  {dbSegments.length} segmento/i
+                </span>
+              </div>
+              <div className="p-1">
+                {dbSegments.map((seg, i) => (
+                  <SegmentRow key={i} seg={seg} />
+                ))}
+              </div>
             </div>
-            <div className="p-1">
-              {dbSegments.map((seg, i) => (
-                <SegmentRow key={i} seg={seg} />
-              ))}
-            </div>
+
+            {/* Real-time expand */}
+            {canExpandRealtime && (
+              <div className="bg-card rounded-lg border border-border-subtle">
+                <button
+                  onClick={() =>
+                    setExpandedTrain(expandedTrain === trainNum ? null : trainNum)
+                  }
+                  className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-muted/30 transition-colors"
+                >
+                  <Radio size={14} className="text-primary" />
+                  <span className="text-[12px] font-medium">
+                    Dati real-time (ARTURO Live)
+                  </span>
+                  {expandedTrain === trainNum ? (
+                    <ChevronUp size={14} className="ml-auto text-muted-foreground" />
+                  ) : (
+                    <ChevronDown size={14} className="ml-auto text-muted-foreground" />
+                  )}
+                </button>
+                {expandedTrain === trainNum && (
+                  <div className="px-4 pb-4 border-t border-border-subtle">
+                    <TrainDetail trainNumber={trainNum} />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Real-time expand */}
-          {canExpandRealtime && (
-            <div className="bg-card rounded-lg border border-border-subtle">
-              <button
-                onClick={() =>
-                  setExpandedTrain(expandedTrain === trainNum ? null : trainNum)
-                }
-                className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-muted/30 transition-colors"
-              >
-                <Radio size={14} className="text-primary" />
-                <span className="text-[12px] font-medium">
-                  Dati real-time (ARTURO Live)
-                </span>
-                {expandedTrain === trainNum ? (
-                  <ChevronUp size={14} className="ml-auto text-muted-foreground" />
-                ) : (
-                  <ChevronDown size={14} className="ml-auto text-muted-foreground" />
-                )}
-              </button>
-              {expandedTrain === trainNum && (
-                <div className="px-4 pb-4 border-t border-border-subtle">
-                  <TrainDetail trainNumber={trainNum} />
-                </div>
-              )}
-            </div>
-          )}
+          {/* Cross-ref side panel (340px) */}
+          <aside className="min-w-0">
+            <CrossRefPanel
+              trainId={dbSegments[0]?.train_id ?? String(trainNum)}
+            />
+          </aside>
         </div>
       )}
 
