@@ -4,6 +4,96 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-18 — Diagnosi parser PdC + campo minuti_accessori (sessione di ricerca)
+
+Sessione di diagnostica approfondita del `turno_pdc_parser.py` sul PDF
+reale `uploads/Turni PdC rete RFI dal 23 Febbraio 2026.pdf`.
+
+### Risultato commit
+- Solo aggiunta del campo `minuti_accessori: str = ""` a `ParsedPdcBlock`
+  (base per popolarlo quando estendiamo l'estrazione testo ausiliario)
+- Zero regressione: train/coach/meal miss_start/miss_end **identici** al
+  baseline pre-sessione
+- Tutti i fix tentati (1, 2, 3) sono stati **revertati** perche'
+  peggioravano il dataset reale
+
+### Tre problemi investigati
+
+**1. "Miss 28→26 turni": FALSO**. Il PDF ha 26 turni nell'indice pag 1.
+Ne estraiamo 26/26 = 100%. Zero mancanti, zero extra. Memo sbagliato.
+
+**2. Pallino ● accessori: irrilevante**. L'utente ha chiarito che basta
+prendere il valore `minuti_accessori` direttamente (es. "5/5"), non
+serve rilevare il pallino grafico. Aggiunto campo al dataclass; il
+parser NON lo popola ancora (TODO futuro).
+
+**3. Orari mancanti: 9-18% dei blocchi continui senza start/end**.
+Distribuzione baseline:
+- train (4237 tot): 393 miss_start (9%), 611 miss_end (14%)
+- coach_transfer (860): 105/137 (12%/16%)
+- meal (682): 91/124 (13%/18%)
+- cv_partenza/cv_arrivo (puntuali): ~0 miss
+
+Pattern: gli ultimi blocchi della giornata tendono a non avere end_time.
+
+### Fix tentati (tutti revertati)
+
+**Fix 1** — regex per `CVa`/`CVp` senza numero treno (ora `unknown`):
+rendeva piu' CVp/CVa classificate, ma degradava train da 9%/14% a 13%/18%
+perche' il cursore sequenziale avanzava su CV che nel PDF non sempre
+hanno un minuto puntuale corrispondente.
+
+**Fix 2** — `_assign_minutes_to_blocks` da sequenziale a window-based
+(ogni blocco prende minuti nella sua finestra X): **gravemente peggiorato**
+(meal miss_end da 18% a 87%, train miss_end da 14% a 43%). Le finestre X
+nei Gantt serrati sono troppo strette e tagliano fuori minuti legittimi.
+
+**Fix 3** — ampliato filtro size/zona di `_extract_upper_minutes`:
+effetto combinato con Fix 1 ancora peggiorativo. Revertato insieme a
+Fix 1 per coerenza.
+
+### Root cause reale (da affrontare in sessione dedicata)
+
+Il deep-dive su AROR_C g4/LMXGV (12 label verticali, 11 minuti estratti,
+stats Lav=477m Cct=266m) mostra che:
+
+- I **minuti estratti sono meno di quelli attesi** (~11 vs ~15-20
+  per 12 label). Alcuni minuti di start (es. `33` sotto tick 5 alle 05:33)
+  non vengono catturati — il filtro size del font o il band_top li
+  tagliano fuori.
+- La **ratio label↔blocco logico non e' 1:1**. Label come `10205ARON`
+  (stazione partenza + treno) e `10205MIpg` (stazione arrivo + treno)
+  possono essere due label del **MEDESIMO** blocco treno logico. Il
+  parser attualmente le vede come due blocchi train separati.
+- Le **label CVa/CVp senza numero** sono reali nel PDF e il classify
+  le esclude.
+
+### Cosa serve per fixare davvero (TODO prossima sessione)
+
+1. **Analisi visuale del PDF su casi specifici**: aprire il PDF Gantt
+   di AROR_C g4 LMXGV e mappare visivamente label, minuti e blocchi
+   logici. Capire se il modello "1 treno = 2 label" e' davvero la
+   convenzione o se ho interpretato male.
+
+2. **Test dataset con ground truth**: almeno 5-10 giornate del PDF
+   con orari attesi annotati manualmente, per validare qualsiasi
+   modifica al parser senza regressioni.
+
+3. **Algoritmo ibrido**: sequenziale con TOLLERANZA (se il minuto
+   corrente e' a distanza X > soglia dal label, skip senza avanzare
+   idx; oppure fallback a window-based con buffer dinamico).
+
+4. **Popolamento `minuti_accessori`**: estrarre la stringa "5/5"
+   (o simile) dal testo ausiliario sotto il minuto principale dei
+   blocchi train all'inizio/fine della giornata.
+
+### Test suite
+1 test preesistente fallisce (`tests/test_validator.py::test_meal_slot_gap`
+— non correlato al parser PdC, bug in `find_meal_slot` del validator).
+Spawnato task dedicato per investigare.
+
+---
+
 ## 2026-04-17 (notte tardissimi) — Refactor BlockEditor chip-style + auto-fill + bug fix Rientro
 
 Sessione lunga di iterazione UX/UI. 9 commit incrementali su PdcBuilderPage,

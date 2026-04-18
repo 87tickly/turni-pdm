@@ -45,6 +45,7 @@ class ParsedPdcBlock:
     start_time: str = ""
     end_time: str = ""
     accessori_maggiorati: bool = False
+    minuti_accessori: str = ""  # es. "5/5" (presa/consegna servizio)
 
 
 @dataclass
