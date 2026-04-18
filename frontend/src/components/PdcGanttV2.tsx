@@ -103,6 +103,28 @@ interface PdcGanttV2Props {
 }
 
 // ============================================================
+// Design system colors per block type
+// (mapping: train=brand, vuota/coach=dashed neutral, meal=success,
+//  scomp=warning, cvp/cva=viola — vedi HANDOFF §01 Gantt track)
+// ============================================================
+const DS = {
+  brandSolid:    "#0062CC",  // train base
+  brandDeep:     "#004B9F",  // train gradient end
+  brandRing:     "#0062CC",  // selected ring (brand)
+  selectionDot:  "#22C55E",  // kinetic dot (selected halo)
+  mealBg:        "#DCFCE7",  // success-container soft (rgba 34,197,94,0.20 ~ flat)
+  mealFg:        "#15803D",  // success deep
+  mealStroke:    "#16A34A",  // success
+  scompBg:       "#FFEDD5",  // warning-container soft
+  scompFg:       "#9A3412",  // warning deep
+  scompStroke:   "#EA580C",  // warning
+  vettBg:        "rgba(15,23,42,0.05)",  // vuota neutral fill
+  vettFg:        "#5A6478",  // on-surface-muted
+  vettStroke:    "#94A3B8",  // muted gray
+  cvViola:       "#6D28D9",  // CVp/CVa viola (preservato)
+}
+
+// ============================================================
 // Scala temporale
 // ============================================================
 const ORIGIN_HOUR = 3
@@ -725,9 +747,9 @@ export function PdcGanttV2({
         data-gantt-id={ganttId}
       >
         <defs>
-          <linearGradient id="pdcGanttV2-trainGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#2563eb" />
-            <stop offset="100%" stopColor="#1e3a8a" />
+          <linearGradient id="pdcGanttV2-trainGradient" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor={DS.brandDeep} />
+            <stop offset="100%" stopColor={DS.brandSolid} />
           </linearGradient>
         </defs>
 
@@ -836,11 +858,11 @@ export function PdcGanttV2({
                 <rect
                   x={x} y={BLOCK_Y} width={w} height={BLOCK_H} rx={3}
                   fill="url(#pdcGanttV2-trainGradient)"
-                  stroke={isSel ? "#60a5fa" : "rgba(147,197,253,0.25)"}
+                  stroke={isSel ? DS.selectionDot : "rgba(255,255,255,0.18)"}
                   strokeWidth={isSel ? 2 : 0.5}
                   filter={isSel
-                    ? "drop-shadow(0 3px 8px rgba(30,64,175,0.5))"
-                    : "drop-shadow(0 1px 2px rgba(30,64,175,0.2))"}
+                    ? "drop-shadow(0 3px 8px rgba(0,75,159,0.45))"
+                    : "drop-shadow(0 1px 2px rgba(0,75,159,0.18))"}
                   pointerEvents="none"
                 />
                 <rect
@@ -957,23 +979,23 @@ export function PdcGanttV2({
             return (
               <g key={idx}>
                 <rect x={x} y={BLOCK_Y + 6} width={w} height={BLOCK_H - 12}
-                      fill="#6b7280" fillOpacity={0.08} rx={2} pointerEvents="none" />
+                      fill={DS.vettBg} rx={2} pointerEvents="none" />
                 <rect x={x} y={BLOCK_Y + 6} width={w} height={BLOCK_H - 12}
-                      fill="none" stroke={isSel ? "#60a5fa" : "#6b7280"}
+                      fill="none" stroke={isSel ? DS.brandRing : DS.vettStroke}
                       strokeWidth={isSel ? 1.8 : 1.2} strokeDasharray="3 2" rx={2}
                       style={{ cursor: draggable ? "grab" : "pointer" }}
                       {...baseHandlers}
                       onMouseDown={(e) => draggable && startDrag(e, idx, "move")} />
                 <line x1={x + w / 2} y1={chipY + 4} x2={x + w / 2} y2={BLOCK_Y + 5}
-                      stroke="#6b7280" strokeWidth={0.8} strokeDasharray="1 1.5"
+                      stroke={DS.vettStroke} strokeWidth={0.8} strokeDasharray="1 1.5"
                       pointerEvents="none" />
                 <text x={x + w / 2} y={chipY} textAnchor="middle"
                       fontFamily="ui-monospace, Menlo, monospace" fontSize={9.5}
-                      fontWeight={500} fontStyle="italic" fill="#6b7280"
+                      fontWeight={500} fontStyle="italic" fill={DS.vettFg}
                       pointerEvents="none">
                   ({b.vettura_id || b.train_id}
                   {b.to_station && (
-                    <tspan fill="#6b7280" fillOpacity={0.7} fontSize={8.5}
+                    <tspan fill={DS.vettFg} fillOpacity={0.7} fontSize={8.5}
                            fontWeight={400} dx="3">{b.to_station}</tspan>
                   )}
                 </text>
@@ -1004,20 +1026,20 @@ export function PdcGanttV2({
             return (
               <g key={idx}>
                 <rect x={x} y={BLOCK_Y + 6} width={w} height={BLOCK_H - 12}
-                      fill="#fef3c7" stroke={isSel ? "#60a5fa" : "#b45309"}
+                      fill={DS.mealBg} stroke={isSel ? DS.brandRing : DS.mealStroke}
                       strokeWidth={isSel ? 1.8 : 1.2} rx={2}
                       style={{ cursor: draggable ? "grab" : "pointer" }}
                       {...baseHandlers}
                       onMouseDown={(e) => draggable && startDrag(e, idx, "move")} />
                 <line x1={x + w / 2} y1={chipY + 4} x2={x + w / 2} y2={BLOCK_Y + 5}
-                      stroke="#b45309" strokeWidth={0.8} strokeDasharray="1 1.5"
+                      stroke={DS.mealFg} strokeWidth={0.8} strokeDasharray="1 1.5"
                       pointerEvents="none" />
                 <text x={x + w / 2} y={chipY} textAnchor="middle"
                       fontFamily="ui-monospace, Menlo, monospace" fontSize={9.5}
-                      fontWeight={700} fill="#b45309" pointerEvents="none">
+                      fontWeight={700} fill={DS.mealFg} pointerEvents="none">
                   REFEZ
                   {b.from_station && (
-                    <tspan fill="#b45309" fillOpacity={0.7} fontSize={8.5}
+                    <tspan fill={DS.mealFg} fillOpacity={0.7} fontSize={8.5}
                            fontWeight={400} dx="3">{b.from_station}</tspan>
                   )}
                 </text>
@@ -1050,20 +1072,20 @@ export function PdcGanttV2({
             return (
               <g key={idx}>
                 <rect x={x - 1.5} y={BLOCK_Y - 2} width={3} height={BLOCK_H + 4}
-                      fill="#6d28d9" rx={1}
-                      stroke={isSel ? "#60a5fa" : "none"} strokeWidth={isSel ? 1.5 : 0}
+                      fill={DS.cvViola} rx={1}
+                      stroke={isSel ? DS.brandRing : "none"} strokeWidth={isSel ? 1.5 : 0}
                       style={{ cursor: draggable ? "grab" : "pointer" }}
                       {...baseHandlers}
                       onMouseDown={(e) => draggable && startDrag(e, idx, "move")} />
                 <line x1={x} y1={chipY + 4} x2={x} y2={BLOCK_Y - 2}
-                      stroke="#6d28d9" strokeWidth={0.8} strokeDasharray="1 1.5"
+                      stroke={DS.cvViola} strokeWidth={0.8} strokeDasharray="1 1.5"
                       pointerEvents="none" />
                 <text x={x} y={chipY} textAnchor="middle"
                       fontFamily="ui-monospace, Menlo, monospace" fontSize={9.5}
-                      fontWeight={700} fill="#6d28d9" pointerEvents="none">
+                      fontWeight={700} fill={DS.cvViola} pointerEvents="none">
                   {label} {b.train_id}
                   {b.from_station && (
-                    <tspan fill="#6d28d9" fillOpacity={0.7} fontSize={8.5}
+                    <tspan fill={DS.cvViola} fillOpacity={0.7} fontSize={8.5}
                            fontWeight={400} dx="3">{b.from_station}</tspan>
                   )}
                 </text>
@@ -1087,15 +1109,15 @@ export function PdcGanttV2({
             return (
               <g key={idx}>
                 <rect x={x} y={BLOCK_Y + 4} width={w} height={BLOCK_H - 8}
-                      fill="#cffafe" fillOpacity={0.6}
-                      stroke={isSel ? "#60a5fa" : "#0e7490"}
+                      fill={DS.scompBg} fillOpacity={0.85}
+                      stroke={isSel ? DS.brandRing : DS.scompStroke}
                       strokeWidth={isSel ? 1.6 : 1} strokeDasharray="3 2" rx={3}
                       style={{ cursor: draggable ? "grab" : "pointer" }}
                       {...baseHandlers}
                       onMouseDown={(e) => draggable && startDrag(e, idx, "move")} />
                 <text x={x + w / 2} y={BLOCK_Y + BLOCK_H / 2 + 4} textAnchor="middle"
                       fontFamily="ui-monospace, Menlo, monospace" fontSize={10}
-                      fontWeight={700} fill="#0e7490" letterSpacing="0.06em"
+                      fontWeight={700} fill={DS.scompFg} letterSpacing="0.06em"
                       pointerEvents="none">
                   S.COMP {b.from_station || ""}
                 </text>

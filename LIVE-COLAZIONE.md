@@ -4,6 +4,68 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-18 — Facelift veloce Fase 2 P2 (4 commit)
+
+Implementazione compressa della parte visibile del piano "Facelift" del
+HANDOFF (sezioni Logo, Sidebar, Dashboard, Gantt). Solo frontend, zero
+nuovi endpoint backend, 100% funzionalità preservate.
+
+### Commit 1 — Logo (`d131fdd`)
+- "COLAZIONE" → "ARTURO" font-display Exo 2 + dot kinetic verde con
+  halo box-shadow (DS "Kinetic Conductor")
+- File: `frontend/src/components/Logo.tsx`
+
+### Commit 2 — Sidebar (`fa50447`)
+- Rimosso `border-r`: sfondo `surface-container-low`
+- Active item: bg `surface-container-high` + indicator verticale verde
+  3.5×2px sulla sinistra (kinetic dot) anziché bg color flat
+- Sezione user: separazione tonal (`surface-container`) anziché `border-top`
+- Voce "Turni" → "Turni Materiale"
+- File: `frontend/src/components/Sidebar.tsx`
+
+### Commit 3 — Dashboard (`e52b109`)
+- Hero con eyebrow + display title (Exo 2)
+- 4 KPI card: Totale turni (reale dal backend), Attivi LIVE, Lavorati
+  settimana, Ore settimana (mock)
+- 2-col layout: Activity feed (turni recenti reali) + Linea attiva
+  (mock con chip "Mock") | Today card gradient + Azioni rapide compatte
+- Componenti riusabili: `KpiCard`, `ActivityRow` con tone
+  blue/green/amber/slate, `StatoChip` per ok/ritardo/soppresso
+- Quick actions ora compatte in side panel (preserva navigation)
+- Mock data marcato esplicitamente: sostituibili quando arriveranno gli
+  endpoint `/dashboard/kpi`, `/activity/recent`, `/linea/attiva`
+  (HANDOFF §04)
+- File: `frontend/src/pages/DashboardPage.tsx`
+
+### Commit 4 — Gantt block colors (questo commit)
+- Costanti `DS` in cima a `PdcGanttV2.tsx` mappa colori per block_type:
+  - `train` → gradient brand (#004B9F → #0062CC)
+  - `coach_transfer` (vuota) → fill neutro `rgba(15,23,42,0.05)` +
+    border tratteggiato gray (resta dashed come prima)
+  - `meal` (refez) → success container `#DCFCE7` + stroke `#16A34A`,
+    text `#15803D` (era amber)
+  - `scomp` → warning container `#FFEDD5` + stroke `#EA580C`, text
+    `#9A3412` (era cyan)
+  - `cv_partenza/cv_arrivo` → viola `#6D28D9` standardizzato
+- Selected ring: kinetic dot `#22C55E` (treno) / brand `#0062CC`
+  (refez/scomp/vuota)
+- File: `frontend/src/components/PdcGanttV2.tsx`
+
+### Cosa NON è incluso
+
+- Nessuna modifica backend (no endpoint `/dashboard/kpi` etc.)
+- Nessuna modifica a pagine non-Dashboard/Sidebar/Logo/Gantt
+- Nessun nuovo file (zero CSS file, zero componenti aggiunti — KpiCard
+  e ActivityRow sono inline in DashboardPage.tsx finché non saranno
+  riusati altrove)
+- CommandPalette ⌘K (P1 nel piano) → rimandato
+
+### Build size
+
+CSS 65.7 → 63.9 KB (Tailwind purge), JS 438 → 447 KB (+9 KB Dashboard).
+
+---
+
 ## 2026-04-18 — UI Refresh Fase 1 + Fase 2 P0 (design Claude Design → produzione)
 
 Prima implementazione reale del refresh UI basato sull'handoff ricevuto
