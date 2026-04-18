@@ -381,10 +381,30 @@ export function PdcDepotPage() {
             <ChevronLeft size={18} />
           </button>
           <div>
-            <h2 className="text-lg font-semibold tracking-tight">
+            <div
+              className="text-[10px] font-bold uppercase mb-1"
+              style={{
+                color: "var(--color-on-surface-quiet)",
+                letterSpacing: "0.12em",
+              }}
+            >
+              Vista deposito
+            </div>
+            <h2
+              className="font-bold tracking-tight"
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: "22px",
+                letterSpacing: "-0.02em",
+                color: "var(--color-on-surface-strong)",
+              }}
+            >
               Deposito {impianto}
             </h2>
-            <p className="text-[13px] text-muted-foreground mt-0.5">
+            <p
+              className="text-[13px] mt-0.5"
+              style={{ color: "var(--color-on-surface-muted)" }}
+            >
               Tutti i turni del deposito con giornate editabili. Le modifiche
               si salvano automaticamente 1.5s dopo l'ultima azione.
             </p>
@@ -442,10 +462,14 @@ export function PdcDepotPage() {
             return (
               <div
                 key={t.id}
-                className="border border-border-subtle rounded-lg bg-card"
+                className="rounded-lg overflow-hidden"
+                style={{
+                  backgroundColor: "var(--color-surface-container-lowest)",
+                  boxShadow: "var(--shadow-sm)",
+                }}
               >
                 <button
-                  className="w-full flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors"
+                  className="w-full flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-[var(--color-surface-container-low)]"
                   onClick={() => toggleExpanded(t.id)}
                 >
                   {open ? (
@@ -480,14 +504,24 @@ export function PdcDepotPage() {
                 </button>
 
                 {open && (
-                  <div className="px-3 pb-3 border-t border-border-subtle pt-3 space-y-3">
+                  <div
+                    className="px-3 pb-3 pt-3 space-y-3"
+                    style={{
+                      backgroundColor: "var(--color-surface-container-low)",
+                    }}
+                  >
                     {!st ? (
                       <p className="text-[11px] text-muted-foreground">Caricamento...</p>
                     ) : (
                       st.detail.days.map((day) => (
                         <div
                           key={day.id}
-                          className="border border-border-subtle rounded-md p-2 bg-white"
+                          className="rounded-md p-2"
+                          style={{
+                            backgroundColor:
+                              "var(--color-surface-container-lowest)",
+                            boxShadow: "var(--shadow-sm)",
+                          }}
                         >
                           <div className="flex items-center gap-3 mb-1 text-[11px]">
                             <span className="font-mono font-bold">

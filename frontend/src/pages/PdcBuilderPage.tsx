@@ -662,8 +662,17 @@ function DayEditor({
   }
 
   return (
-    <div className="border border-border-subtle rounded-lg bg-card">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle">
+    <div
+      className="rounded-lg overflow-hidden"
+      style={{
+        backgroundColor: "var(--color-surface-container-lowest)",
+        boxShadow: "var(--shadow-sm)",
+      }}
+    >
+      <div
+        className="flex items-center gap-2 px-3 py-2.5"
+        style={{ backgroundColor: "var(--color-surface-container-low)" }}
+      >
         <button onClick={() => setOpen(!open)}>
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
@@ -712,7 +721,10 @@ function DayEditor({
       {open && (
         <div className="p-3 space-y-2">
           {!day.is_disponibile && (
-            <div className="flex items-center flex-wrap gap-2 text-[11px] bg-muted/30 rounded-md px-3 py-2 border border-border-subtle">
+            <div
+              className="flex items-center flex-wrap gap-2 text-[11px] rounded-md px-3 py-2"
+              style={{ backgroundColor: "var(--color-surface-container-low)" }}
+            >
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Calcolato dai blocchi</span>
               <span className="text-muted-foreground">·</span>
               <Stat label="Inizio" value={day.start_time || "—"} mono />
@@ -776,7 +788,13 @@ function DayEditor({
           {!day.is_disponibile && (
             <>
               {/* Gantt visuale interattivo */}
-              <div className="pt-2 border-t border-border-subtle">
+              <div
+                className="pt-3 -mx-3 -mb-3 px-3 pb-3"
+                style={{
+                  backgroundColor: "var(--color-surface-container-low)",
+                  marginTop: "10px",
+                }}
+              >
                 <p className="text-[10px] text-muted-foreground mb-1">
                   Trascina un blocco per spostarlo, trascina i bordi per ridimensionarlo, clicca sulla timeline vuota per aggiungere un nuovo blocco.
                 </p>
@@ -1101,7 +1119,13 @@ function CalendarPreview() {
   }, [date])
 
   return (
-    <div className="border border-border-subtle rounded-lg p-3 bg-muted/20">
+    <div
+      className="rounded-lg p-3"
+      style={{
+        backgroundColor: "var(--color-surface-container-lowest)",
+        boxShadow: "var(--shadow-sm)",
+      }}
+    >
       <div className="flex items-center gap-2 text-[12px] font-semibold mb-2">
         <Calendar size={14} className="text-primary" />
         Preview calendario
@@ -1367,12 +1391,32 @@ export function PdcBuilderPage() {
   return (
     <div className="max-w-4xl mx-auto pb-20">
       {/* Header */}
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-5 flex items-start justify-between">
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">
+          <div
+            className="text-[10px] font-bold uppercase mb-1"
+            style={{
+              color: "var(--color-on-surface-quiet)",
+              letterSpacing: "0.12em",
+            }}
+          >
             {editId ? "Modifica turno PdC" : "Nuovo turno PdC"}
+          </div>
+          <h2
+            className="font-bold tracking-tight"
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: "22px",
+              letterSpacing: "-0.02em",
+              color: "var(--color-on-surface-strong)",
+            }}
+          >
+            {editId ? "Editor turno PdC" : "Nuovo turno PdC"}
           </h2>
-          <p className="text-[13px] text-muted-foreground mt-0.5">
+          <p
+            className="text-[13px] mt-0.5"
+            style={{ color: "var(--color-on-surface-muted)" }}
+          >
             {editId
               ? "Modifica un turno PdC esistente"
               : "Crea un turno PdC nel formato ufficiale Trenord"}
@@ -1380,7 +1424,17 @@ export function PdcBuilderPage() {
         </div>
         <button
           onClick={() => navigate("/pdc")}
-          className="text-[12px] text-muted-foreground hover:text-foreground px-3 py-1"
+          className="text-[12px] px-3 py-1.5 rounded-md transition-colors"
+          style={{ color: "var(--color-on-surface-muted)" }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor =
+              "var(--color-surface-container-low)"
+            e.currentTarget.style.color = "var(--color-on-surface-strong)"
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = "transparent"
+            e.currentTarget.style.color = "var(--color-on-surface-muted)"
+          }}
         >
           Annulla
         </button>
@@ -1392,8 +1446,23 @@ export function PdcBuilderPage() {
       </div>
 
       {/* Header turno */}
-      <div className="border border-border-subtle rounded-lg bg-card p-4 mb-4">
-        <h3 className="text-[13px] font-semibold mb-3">Dati del turno</h3>
+      <div
+        className="rounded-lg p-4 mb-4"
+        style={{
+          backgroundColor: "var(--color-surface-container-lowest)",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
+        <h3
+          className="font-semibold mb-3"
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: "13px",
+            color: "var(--color-on-surface-strong)",
+          }}
+        >
+          Dati del turno
+        </h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <label className="flex flex-col gap-1">
             <span className="text-[11px] text-muted-foreground">Codice *</span>

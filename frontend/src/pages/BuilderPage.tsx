@@ -248,8 +248,30 @@ export function BuilderPage() {
       <div className="space-y-4">
         {/* Header */}
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">Costruzione turno</h2>
-          <p className="text-[13px] text-muted-foreground mt-0.5">
+          <div
+            className="text-[10px] font-bold uppercase mb-1"
+            style={{
+              color: "var(--color-on-surface-quiet)",
+              letterSpacing: "0.12em",
+            }}
+          >
+            Nuovo turno
+          </div>
+          <h2
+            className="font-bold tracking-tight"
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: "22px",
+              letterSpacing: "-0.02em",
+              color: "var(--color-on-surface-strong)",
+            }}
+          >
+            Costruzione turno
+          </h2>
+          <p
+            className="text-[13px] mt-0.5"
+            style={{ color: "var(--color-on-surface-muted)" }}
+          >
             Aggiungi treni per costruire la giornata
           </p>
         </div>
@@ -329,7 +351,13 @@ export function BuilderPage() {
         </div>
 
         {/* Search */}
-        <div className="bg-card rounded-lg border border-border-subtle p-3 space-y-3">
+        <div
+          className="rounded-lg p-3 space-y-3"
+          style={{
+            backgroundColor: "var(--color-surface-container-lowest)",
+            boxShadow: "var(--shadow-sm)",
+          }}
+        >
           <div className="flex gap-2">
             {/* Search mode tabs */}
             <button
@@ -416,10 +444,27 @@ export function BuilderPage() {
 
         {/* Added trains */}
         {trainIds.length > 0 && (
-          <div className="bg-card rounded-lg border border-border-subtle">
-            <div className="px-3 py-2 border-b border-border-subtle flex items-center gap-2">
-              <Train size={14} className="text-muted-foreground" />
-              <span className="text-[12px] font-medium">
+          <div
+            className="rounded-lg overflow-hidden"
+            style={{
+              backgroundColor: "var(--color-surface-container-lowest)",
+              boxShadow: "var(--shadow-sm)",
+            }}
+          >
+            <div
+              className="px-3 py-2 flex items-center gap-2"
+              style={{
+                backgroundColor: "var(--color-surface-container-low)",
+              }}
+            >
+              <Train
+                size={14}
+                style={{ color: "var(--color-on-surface-quiet)" }}
+              />
+              <span
+                className="text-[12px] font-semibold"
+                style={{ color: "var(--color-on-surface-strong)" }}
+              >
                 Treni nel turno ({trainIds.length})
               </span>
             </div>
@@ -483,7 +528,13 @@ export function BuilderPage() {
 
         {/* Gantt Timeline */}
         {validation && validation.timeline.length > 0 && (
-          <div className="bg-card rounded-lg border border-border-subtle p-3">
+          <div
+            className="rounded-lg p-3"
+            style={{
+              backgroundColor: "var(--color-surface-container-lowest)",
+              boxShadow: "var(--shadow-sm)",
+            }}
+          >
             <GanttFromValidation
               blocks={validation.timeline}
               dayLabel={dayType}
@@ -501,7 +552,13 @@ export function BuilderPage() {
       {/* ── RIGHT: Validation panel ── */}
       <div className="space-y-4">
         {/* Validation stats */}
-        <div className="bg-card rounded-lg border border-border-subtle p-4 space-y-3 sticky top-6">
+        <div
+          className="rounded-lg p-4 space-y-3 sticky top-6"
+          style={{
+            backgroundColor: "var(--color-surface-container-lowest)",
+            boxShadow: "var(--shadow-sm)",
+          }}
+        >
           <div className="flex items-center justify-between">
             <p className="text-[12px] font-medium">Validazione</p>
             {validating && <Loader2 size={12} className="animate-spin text-muted-foreground" />}

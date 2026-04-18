@@ -4,6 +4,73 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-19 — DS copertura completa: Login + Settings + PdcBuilder + PdcDepot + Builder
+
+Estesa la coverage del design system alle 5 pagine ancora sullo stile
+vecchio dopo la sessione precedente. 1 commit unico (non separato per
+pagina per snellire: cambi sono piccoli e omogenei).
+
+### LoginPage
+- Sfondo con gradient orb (brand + kinetic green radiali su rgba bassissima)
+- Eyebrow "GESTIONALE TURNI PDC" + subtitle "Personale di macchina"
+- Card con `shadow-lg` su `surface-container-lowest` (era border)
+- Input: `surface-container-low` + inset ghost border (DS pattern)
+- Bottone `gradient-primary` + shadow-md (era solid brand)
+
+### SettingsPage
+- Eyebrow "IMPOSTAZIONI" + display title "Configurazione e informazioni"
+- 4 StatCard in KPI style (font-display 24px, label uppercase)
+- Container principale tonal (shadow-sm + surface-container-lowest)
+- Turni materiale: wrapper interno `surface-container-low` con chip
+  dentro `surface-container-lowest` (nested tonal layering)
+- Health chip usa i nuovi `success-container` / `destructive-container`
+
+### PdcBuilderPage (1536 righe, cambi mirati)
+- Header: eyebrow + display title Exo 2
+- Bottone "Annulla" con hover tonal anziche colore solo
+- "Dati del turno" card: No-Line + display title sezione
+- CalendarPreview card: No-Line
+- DayCard: No-Line outer + header tonal (surface-container-low) + body
+  espanso tonal (era border-t)
+- Campi "Calcolato dai blocchi": tonal chip (era border + bg-muted/30)
+- Input/select di editing mantenuti con border-1: boundary funzionale
+  (non sezionatore di layout)
+
+### PdcDepotPage
+- Eyebrow "VISTA DEPOSITO" + display title Exo 2 "Deposito {impianto}"
+- Turn item: No-Line outer (shadow-sm)
+- Espansione turno: body con tonal shift (surface-container-low)
+- Day card dentro turno: shadow-sm + surface-container-lowest (era
+  border + bg-white)
+
+### BuilderPage
+- Eyebrow + display title "Costruzione turno"
+- Card "Search": No-Line
+- "Treni nel turno" card: header tonal (surface-container-low), body
+  surface-container-lowest
+- Gantt timeline card: No-Line
+- Validation panel sticky: No-Line
+- Input/select/toggle FR mantenuti come prima (boundary funzionale)
+
+### Cosa rimane
+
+- **BlocksList / TurnsList interni ai builder**: ancora stile chip
+  colorato per block_type (border + bg per tipo). HANDOFF §01 consiglia
+  sostituzione con classi `.gblock.{train,accp,vuota,refez,vettura}`
+  coerenti col Gantt — rimandato perche coinvolge refactor piu esteso
+  e potrebbe cambiare semantica del rendering
+- **Font self-hosted** Inter/JetBrainsMono — oggi fallback a system
+  (SF Mono, Menlo, ui-monospace)
+- **Audit log backend** per activity/recent piu ricco (oggi derivato
+  da saved_shift). Richiede tabella dedicata
+
+### Build finale
+
+CSS 65 → 61 KB (Tailwind purge grosso per classi bg-card/border-border
+rimosse dove sostituite con inline style). JS 467 → 469 KB.
+
+---
+
 ## 2026-04-19 — Fase 2 completa: endpoint backend + CommandPalette + TrainSearch + No-Line
 
 Sessione "fai con la dovuta calma tutti i 4 punti" dopo validazione utente

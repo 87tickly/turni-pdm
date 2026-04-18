@@ -9,7 +9,6 @@ import {
   CircleX,
   Server,
 } from "lucide-react"
-import { cn } from "@/lib/utils"
 
 function StatCard({
   icon: Icon,
@@ -23,16 +22,47 @@ function StatCard({
   sub?: string
 }) {
   return (
-    <div className="bg-card rounded-lg border border-border p-4">
-      <div className="flex items-center gap-2 mb-2">
-        <Icon size={14} className="text-muted-foreground" />
-        <span className="text-[12px] text-muted-foreground font-medium">
+    <div
+      className="rounded-lg px-4 py-3"
+      style={{
+        backgroundColor: "var(--color-surface-container-lowest)",
+        boxShadow: "var(--shadow-sm)",
+      }}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <Icon
+          size={13}
+          style={{ color: "var(--color-on-surface-quiet)" }}
+        />
+        <span
+          className="text-[10px] font-bold uppercase"
+          style={{
+            color: "var(--color-on-surface-muted)",
+            letterSpacing: "0.1em",
+          }}
+        >
           {label}
         </span>
       </div>
-      <p className="text-2xl font-semibold tracking-tight">{value}</p>
+      <div
+        className="leading-none"
+        style={{
+          fontFamily: "var(--font-display)",
+          fontSize: "24px",
+          fontWeight: 700,
+          color: "var(--color-on-surface-strong)",
+          letterSpacing: "-0.02em",
+        }}
+      >
+        {value}
+      </div>
       {sub && (
-        <p className="text-[11px] text-muted-foreground mt-1">{sub}</p>
+        <p
+          className="text-[11px] mt-1"
+          style={{ color: "var(--color-on-surface-muted)" }}
+        >
+          {sub}
+        </p>
       )}
     </div>
   )
@@ -56,24 +86,70 @@ export function SettingsPage() {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-lg font-semibold tracking-tight">Impostazioni</h2>
-        <p className="text-[13px] text-muted-foreground mt-0.5">
-          Configurazione e informazioni di sistema
+        <div
+          className="text-[10px] font-bold uppercase mb-1"
+          style={{
+            color: "var(--color-on-surface-quiet)",
+            letterSpacing: "0.12em",
+          }}
+        >
+          Impostazioni
+        </div>
+        <h2
+          className="font-bold tracking-tight"
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: "22px",
+            letterSpacing: "-0.02em",
+            color: "var(--color-on-surface-strong)",
+          }}
+        >
+          Configurazione e informazioni
+        </h2>
+        <p
+          className="text-[13px] mt-0.5"
+          style={{ color: "var(--color-on-surface-muted)" }}
+        >
+          Diagnostica sistema, statistiche database, elenco turni materiale
         </p>
       </div>
 
       {/* System status */}
-      <div className="bg-card rounded-xl border border-border p-5 mb-6">
+      <div
+        className="rounded-xl p-5 mb-6"
+        style={{
+          backgroundColor: "var(--color-surface-container-lowest)",
+          boxShadow: "var(--shadow-sm)",
+        }}
+      >
         <div className="flex items-center gap-2 mb-4">
-          <Server size={15} className="text-muted-foreground" />
-          <h3 className="text-[14px] font-semibold">Stato sistema</h3>
+          <Server
+            size={15}
+            style={{ color: "var(--color-on-surface-quiet)" }}
+          />
+          <h3
+            className="font-semibold"
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: "14px",
+              color: "var(--color-on-surface-strong)",
+            }}
+          >
+            Stato sistema
+          </h3>
           <div
-            className={cn(
-              "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ml-auto",
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ml-auto"
+            style={
               health === "ok"
-                ? "bg-success-muted text-success"
-                : "bg-destructive/10 text-destructive"
-            )}
+                ? {
+                    backgroundColor: "var(--color-success-container)",
+                    color: "var(--color-success)",
+                  }
+                : {
+                    backgroundColor: "var(--color-destructive-container)",
+                    color: "var(--color-destructive)",
+                  }
+            }
           >
             {health === "ok" ? (
               <CircleCheck size={11} />
@@ -85,7 +161,13 @@ export function SettingsPage() {
         </div>
 
         {error && (
-          <div className="bg-destructive/10 text-destructive text-[13px] p-3 rounded-lg border border-destructive/20 mb-4">
+          <div
+            className="text-[13px] p-3 rounded-lg mb-4"
+            style={{
+              backgroundColor: "var(--color-destructive-container)",
+              color: "var(--color-destructive)",
+            }}
+          >
             {error}
           </div>
         )}
@@ -123,22 +205,47 @@ export function SettingsPage() {
             {info.material_turns.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-[13px] font-medium">
+                  <h4
+                    className="font-semibold"
+                    style={{
+                      fontFamily: "var(--font-display)",
+                      fontSize: "13px",
+                      color: "var(--color-on-surface-strong)",
+                    }}
+                  >
                     Turni materiale importati
                   </h4>
-                  <span className="text-[11px] text-muted-foreground">
+                  <span
+                    className="text-[11px]"
+                    style={{ color: "var(--color-on-surface-muted)" }}
+                  >
                     {info.material_turns.length} turni
                   </span>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
+                <div
+                  className="flex flex-wrap gap-1.5 p-3 rounded-lg"
+                  style={{
+                    backgroundColor: "var(--color-surface-container-low)",
+                  }}
+                >
                   {info.material_turns.map((t) => (
                     <span
                       key={t.id}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-muted hover:bg-border rounded text-[11px] font-mono text-muted-foreground hover:text-foreground transition-colors cursor-default"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono transition-colors"
+                      style={{
+                        backgroundColor: "var(--color-surface-container-lowest)",
+                        color: "var(--color-on-surface-muted)",
+                      }}
                     >
                       {t.turn_number}
                       {t.material_type && (
-                        <span className="px-1 py-px rounded bg-brand/10 text-brand text-[9px] font-semibold">
+                        <span
+                          className="px-1 py-px rounded text-[9px] font-semibold"
+                          style={{
+                            backgroundColor: "rgba(0, 98, 204, 0.10)",
+                            color: "var(--color-brand)",
+                          }}
+                        >
                           {t.material_type}
                         </span>
                       )}
@@ -151,7 +258,10 @@ export function SettingsPage() {
         ) : (
           !error && (
             <div className="flex items-center justify-center h-24">
-              <div className="w-5 h-5 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+              <div
+                className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin"
+                style={{ borderColor: "var(--color-brand)", borderTopColor: "transparent" }}
+              />
             </div>
           )
         )}

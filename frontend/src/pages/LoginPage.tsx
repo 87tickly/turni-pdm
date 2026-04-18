@@ -31,31 +31,77 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50">
+    <div
+      className="flex items-center justify-center min-h-screen relative overflow-hidden"
+      style={{ backgroundColor: "var(--color-surface)" }}
+    >
       {/* Subtle gradient orb */}
-      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-brand/5 rounded-full blur-3xl pointer-events-none" />
+      <div
+        className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[520px] h-[520px] rounded-full blur-3xl pointer-events-none"
+        style={{ backgroundColor: "rgba(0, 98, 204, 0.05)" }}
+      />
+      <div
+        className="absolute bottom-[-120px] right-[-120px] w-[320px] h-[320px] rounded-full blur-3xl pointer-events-none"
+        style={{ backgroundColor: "rgba(34, 197, 94, 0.06)" }}
+      />
 
-      <div className="relative w-full max-w-sm">
+      <div className="relative w-full max-w-sm px-4">
         {/* Brand */}
         <div className="flex flex-col items-center mb-8">
           <Logo size="lg" />
-          <p className="text-[13px] text-muted-foreground mt-2">
-            Gestionale Turni PDM
+          <div
+            className="text-[10px] font-bold uppercase mt-3"
+            style={{
+              color: "var(--color-on-surface-quiet)",
+              letterSpacing: "0.12em",
+            }}
+          >
+            Gestionale Turni PdC
+          </div>
+          <p
+            className="text-[13px] mt-1"
+            style={{ color: "var(--color-on-surface-muted)" }}
+          >
+            Personale di macchina
           </p>
         </div>
 
         {/* Card */}
-        <div className="bg-white rounded-xl border border-border shadow-sm p-6">
+        <div
+          className="rounded-2xl p-6"
+          style={{
+            backgroundColor: "var(--color-surface-container-lowest)",
+            boxShadow: "var(--shadow-lg)",
+          }}
+        >
+          <div
+            className="text-[10px] font-bold uppercase mb-3"
+            style={{
+              color: "var(--color-on-surface-quiet)",
+              letterSpacing: "0.12em",
+            }}
+          >
+            {isRegister ? "Registrazione" : "Accesso"}
+          </div>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-[12px] font-medium text-muted-foreground mb-1.5">
+              <label
+                className="block text-[12px] font-semibold mb-1.5"
+                style={{ color: "var(--color-on-surface-muted)" }}
+              >
                 Username
               </label>
               <input
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-[13px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand transition-colors"
+                className="w-full px-3 py-2.5 rounded-lg text-[13px] outline-none transition-all focus:ring-2"
+                style={{
+                  backgroundColor: "var(--color-surface-container-low)",
+                  color: "var(--color-on-surface-strong)",
+                  boxShadow: "inset 0 0 0 1px var(--color-ghost)",
+                  fontFamily: "var(--font-sans)",
+                }}
                 placeholder="Il tuo username"
                 required
                 autoFocus
@@ -63,21 +109,36 @@ export function LoginPage() {
             </div>
 
             <div>
-              <label className="block text-[12px] font-medium text-muted-foreground mb-1.5">
+              <label
+                className="block text-[12px] font-semibold mb-1.5"
+                style={{ color: "var(--color-on-surface-muted)" }}
+              >
                 Password
               </label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-[13px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand transition-colors"
+                className="w-full px-3 py-2.5 rounded-lg text-[13px] outline-none transition-all focus:ring-2"
+                style={{
+                  backgroundColor: "var(--color-surface-container-low)",
+                  color: "var(--color-on-surface-strong)",
+                  boxShadow: "inset 0 0 0 1px var(--color-ghost)",
+                  fontFamily: "var(--font-sans)",
+                }}
                 placeholder="La tua password"
                 required
               />
             </div>
 
             {error && (
-              <div className="bg-destructive/8 text-destructive text-[12px] p-2.5 rounded-lg border border-destructive/15">
+              <div
+                className="text-[12px] p-2.5 rounded-lg"
+                style={{
+                  backgroundColor: "var(--color-destructive-container)",
+                  color: "var(--color-destructive)",
+                }}
+              >
                 {error}
               </div>
             )}
@@ -85,7 +146,11 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2 px-4 bg-brand text-white rounded-lg text-[13px] font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
+              className="w-full py-2.5 px-4 rounded-lg text-[13.5px] font-semibold text-white transition-opacity disabled:opacity-50 hover:opacity-90"
+              style={{
+                background: "var(--gradient-primary)",
+                boxShadow: "var(--shadow-md)",
+              }}
             >
               {loading ? (
                 <span className="inline-flex items-center gap-2">
@@ -102,13 +167,20 @@ export function LoginPage() {
         </div>
 
         {/* Toggle */}
-        <div className="mt-4 text-center">
+        <div className="mt-5 text-center">
           <button
             onClick={() => {
               setIsRegister(!isRegister)
               setError("")
             }}
-            className="text-[12px] text-muted-foreground hover:text-foreground transition-colors"
+            className="text-[12px] transition-colors"
+            style={{ color: "var(--color-on-surface-muted)" }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.color = "var(--color-on-surface-strong)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.color = "var(--color-on-surface-muted)")
+            }
           >
             {isRegister
               ? "Hai gia un account? Accedi"
