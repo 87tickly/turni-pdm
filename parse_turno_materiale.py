@@ -25,6 +25,109 @@ PDF_PATH = sys.argv[1] if len(sys.argv) > 1 else 'C:/Users/studio54/Downloads/Vu
 # nella working directory corrente (cross-platform).
 OUTPUT_PATH = sys.argv[2] if len(sys.argv) > 2 else 'turno_materiale_treni.json'
 
+
+# ============================================================
+# VERTICAL EXTRACTOR (new PDF format 2026+)
+# ============================================================
+# Nel PDF Trenord post-2026 i numeri treno sono scritti VERTICALMENTE
+# (upright=False) sopra le barre del Gantt: una cifra per riga Y, da
+# leggere BOTTOM-TO-TOP (prima cifra al fondo).
+#
+# Varianti dello stesso turno (es. LV + esclusioni) appaiono come
+# row-band Gantt separate, quindi lo stesso treno puo' comparire piu'
+# volte nella stessa colonna X a bande Y diverse.
+def _find_y_bands(chars, band_gap=20.0):
+    """Trova bande Y globali della pagina usando i salti > band_gap.
+
+    Ritorna lista di (y_min, y_max) per ogni banda.
+    """
+    if not chars:
+        return []
+    ys = sorted(set(round(float(c['y0']), 1) for c in chars))
+    bands = []
+    band_start = ys[0]
+    prev = ys[0]
+    for y in ys[1:]:
+        if y - prev > band_gap:
+            bands.append((band_start, prev))
+            band_start = y
+        prev = y
+    bands.append((band_start, prev))
+    return bands
+
+
+def extract_vertical_trains(page, x_tol=2.0, band_gap=20.0, intra_char_gap=8.0):
+    """Estrae ID treni da colonne verticali di char rotated (upright=False).
+
+    Algoritmo:
+    1. Filtra char con upright=False
+    2. Trova bande Y globali (gap verticali > band_gap pt)
+    3. Dentro ogni banda, cluster char per X (tolleranza x_tol)
+    4. Sort by Y ASCENDING (bottom-to-top = ordine lettura)
+    5. Split intra-banda se intra_char_gap superato (riduce falsi positivi
+       quando una banda contiene numero+stazione adiacenti)
+    6. Match pattern numero treno: \\d{4,6} con 'i' opzionale finale
+
+    Args:
+        page: pdfplumber.Page
+        x_tol: tolleranza clustering X in pt (default 2).
+        band_gap: gap Y minimo per separare bande Gantt (default 20pt).
+        intra_char_gap: gap max tra char consecutivi di uno stesso numero (default 8pt).
+
+    Returns:
+        lista di (train_id:str, is_deadhead:bool)
+    """
+    rot_chars = [c for c in page.chars if not c.get('upright', True)]
+    if not rot_chars:
+        return []
+
+    # 1. Bande Y globali
+    bands = _find_y_bands(rot_chars, band_gap=band_gap)
+
+    results = []
+    for band_lo, band_hi in bands:
+        # 2. Char appartenenti alla banda
+        band_chars = [c for c in rot_chars if band_lo - 0.5 <= float(c['y0']) <= band_hi + 0.5]
+
+        # 3. Cluster per X
+        cols = defaultdict(list)
+        for c in band_chars:
+            x_key = round(float(c['x0']) / x_tol) * x_tol
+            cols[x_key].append(c)
+
+        for x_key, chars in cols.items():
+            # Sort per Y crescente (bottom-to-top)
+            chars.sort(key=lambda c: float(c['y0']))
+
+            # 5. Split per gap intra-char (evita concatenazioni spurie)
+            subgroups = []
+            current = [chars[0]]
+            for c in chars[1:]:
+                if float(c['y0']) - float(current[-1]['y0']) > intra_char_gap:
+                    subgroups.append(current)
+                    current = [c]
+                else:
+                    current.append(c)
+            subgroups.append(current)
+
+            for group in subgroups:
+                text = ''.join(c['text'] for c in group)
+                # Caso 1: colonna pulita = un solo numero
+                m = re.fullmatch(r'(\d{4,6})(i?)', text)
+                if m:
+                    results.append((m.group(1), m.group(2) == 'i'))
+                    continue
+                # Caso 2: colonna mista digit+letter (es. "28220iMICE")
+                # Estrai tutti i pattern \d{4,6}i? concatenati
+                for sub in re.finditer(r'(\d{4,6})(i?)(?=\D|$|\d{4,6})', text):
+                    tid = sub.group(1)
+                    # Evita falsi positivi: minuti a 2-3 cifre non vengono matchati
+                    # (pattern e' \d{4,6})
+                    results.append((tid, sub.group(2) == 'i'))
+
+    return results
+
+
 # ============================================================
 # EXTRACT ALL ROWS (bottom-to-top per page)
 # ============================================================
@@ -33,15 +136,27 @@ pdf = pdfplumber.open(PDF_PATH)
 print(f"Pagine: {len(pdf.pages)}")
 
 all_rows = []
+# Per ogni pagina: raccogli i numeri treno verticali (nuovo formato 2026+).
+# Li annotiamo con un marker speciale sulla pagina corrente per poterli
+# associare al turno rilevato dalle righe orizzontali.
+vertical_trains_by_page = {}
 for pi in range(len(pdf.pages)):
     page = pdf.pages[pi]
     chars = page.chars
     if not chars:
         continue
+    # Estrazione verticale (nuovo formato)
+    v_trains = extract_vertical_trains(page)
+    if v_trains:
+        vertical_trains_by_page[pi] = v_trains
+
+    # Estrazione orizzontale (formato storico + header/metadati)
     y_rows = defaultdict(list)
     for c in chars:
         y = round(float(c['y0']), 0)
         y_rows[y].append(c)
+    # Marca inizio pagina per tracciare associazione vertical-trains -> turno
+    all_rows.append(f"__PAGE_START__{pi}")
     for y in sorted(y_rows.keys(), reverse=True):
         row = sorted(y_rows[y], key=lambda c: float(c['x0']))
         text = ''.join(c['text'] for c in row).strip()
@@ -49,6 +164,9 @@ for pi in range(len(pdf.pages)):
             all_rows.append(text)
 
 print(f"Righe totali estratte: {len(all_rows)}")
+print(f"Pagine con treni verticali: {len(vertical_trains_by_page)}")
+total_v = sum(len(v) for v in vertical_trains_by_page.values())
+print(f"Totale occorrenze treni verticali: {total_v}")
 
 # ============================================================
 # SPLIT INTO TURNO SECTIONS
@@ -69,27 +187,47 @@ turno_header_re = re.compile(
 turno_detail_re = re.compile(r'^Turno\s*(\d{4,5}[A-Z]?)$', re.IGNORECASE)
 
 current_turno = None
+current_page = None
 turno_lines = OrderedDict()
+# Mappa pagina -> turno attivo (per associare treni verticali)
+page_to_turno = {}
 
 for text in all_rows:
+    # Marker di inizio pagina iniettato in fase di estrazione
+    if text.startswith('__PAGE_START__'):
+        current_page = int(text.split('__PAGE_START__')[1])
+        continue
     m = turno_header_re.search(text)
     if m:
         # Il regex ha due alternative; prendi il primo gruppo non-None
         current_turno = m.group(1) or m.group(2)
         if current_turno not in turno_lines:
             turno_lines[current_turno] = []
+        if current_page is not None:
+            page_to_turno[current_page] = current_turno
         continue
     m = turno_detail_re.match(text)
     if m:
         current_turno = m.group(1)
         if current_turno not in turno_lines:
             turno_lines[current_turno] = []
+        if current_page is not None:
+            page_to_turno[current_page] = current_turno
         continue
     if current_turno and current_turno in turno_lines:
         turno_lines[current_turno].append(text)
 
 print(f"Turni trovati: {len(turno_lines)}")
 print(f"Lista: {list(turno_lines.keys())}")
+
+# Associa treni verticali -> turno via page_to_turno
+# vertical_trains_by_turno: {turno_code: [(tid, is_dh), ...]}
+vertical_trains_by_turno = defaultdict(list)
+for pi, v_trains in vertical_trains_by_page.items():
+    turno = page_to_turno.get(pi)
+    if turno:
+        vertical_trains_by_turno[turno].extend(v_trains)
+print(f"Turni con treni verticali associati: {len(vertical_trains_by_turno)}")
 
 # ============================================================
 # METADATA PATTERNS TO SKIP
@@ -404,6 +542,10 @@ for tnum in sorted(turno_lines.keys(), key=lambda x: (x.rstrip('ABCDEFG'), x)):
     # Split into variant blocks
     raw_variants = split_into_variants(lines)
 
+    # Estrazione verticale: treni raccolti dalle colonne rotated del PDF
+    # nuovo formato. Non hanno variant info, li aggiungiamo come pool globale.
+    v_trains = vertical_trains_by_turno.get(tnum, [])
+
     # Collect ALL train IDs globally for fragment filtering
     all_trains_global = {}
     for var in raw_variants:
@@ -418,6 +560,19 @@ for tnum in sorted(turno_lines.keys(), key=lambda x: (x.rstrip('ABCDEFG'), x)):
                 all_trains_global[tid_clean] = {'deadhead': is_dh}
             if is_dh:
                 all_trains_global[tid_clean]['deadhead'] = True
+
+    # Aggiungi treni verticali al pool globale (deduplica via dict)
+    for tid, is_dh in v_trains:
+        tid_clean = str(int(tid))
+        tid_int = int(tid_clean)
+        if tid_int < 100:
+            continue
+        if tid_clean in ('2026', '2025', '2024'):
+            continue
+        if tid_clean not in all_trains_global:
+            all_trains_global[tid_clean] = {'deadhead': is_dh}
+        if is_dh:
+            all_trains_global[tid_clean]['deadhead'] = True
 
     # Fragment filtering (global across all variants)
     train_set = set(all_trains_global.keys())
@@ -470,6 +625,47 @@ for tnum in sorted(turno_lines.keys(), key=lambda x: (x.rstrip('ABCDEFG'), x)):
                 'validity': var['validity'],
                 'treni': regular,
                 'vuote': deadhead,
+            })
+
+    # Se esistono treni dall'estrazione verticale ma non sono comparsi in
+    # nessuna variante orizzontale, aggiungi una variante "vertical" che li
+    # espone nell'output. Questa logica e' additiva: non altera i variant
+    # classici se il formato era orizzontale (PDF storico).
+    if v_trains:
+        v_train_map = {}
+        for tid, is_dh in v_trains:
+            tid_clean = str(int(tid))
+            tid_int = int(tid_clean)
+            if tid_int < 100 or tid_clean in ('2026', '2025', '2024'):
+                continue
+            if tid_clean in fragments:
+                continue
+            if tid_clean not in v_train_map:
+                v_train_map[tid_clean] = is_dh
+            if is_dh:
+                v_train_map[tid_clean] = True
+        v_regular = sorted(
+            [t for t, dh in v_train_map.items() if not dh],
+            key=lambda x: int(x)
+        )
+        v_deadhead = sorted(
+            [t for t, dh in v_train_map.items() if dh],
+            key=lambda x: int(x)
+        )
+        # Check se c'e' gia' una variante che contiene tutti questi treni
+        already_covered = False
+        for pv in processed_variants:
+            if set(v_regular).issubset(set(pv['treni'])) and \
+               set(v_deadhead).issubset(set(pv['vuote'])):
+                already_covered = True
+                break
+        if not already_covered and (v_regular or v_deadhead):
+            processed_variants.append({
+                'variant_index': len(processed_variants),
+                'day_index': None,
+                'validity': '(vertical-extraction)',
+                'treni': v_regular,
+                'vuote': v_deadhead,
             })
 
     # Combined lists (backward compat)
