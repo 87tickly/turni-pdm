@@ -15,20 +15,28 @@ Strategy:
 4. Add deadhead (vuote) segments with is_deadhead=1
 """
 
+import os
+import sys
 import sqlite3
 import json
 import shutil
 from datetime import datetime
 
-DB_PATH = 'C:/Users/studio54/Desktop/COLAZIONE/turni.db'
-JSON_PATH = 'C:/Users/studio54/Desktop/COLAZIONE/turno_materiale_treni.json'
-BACKUP_PATH = f'C:/Users/studio54/Desktop/COLAZIONE/turni_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db'
+# Path cross-platform: accetta CLI args oppure usa relativi alla cwd
+#   argv[1] = DB path (default: turni.db nella cwd)
+#   argv[2] = JSON path (default: turno_materiale_treni.json nella cwd)
+DB_PATH = sys.argv[1] if len(sys.argv) > 1 else 'turni.db'
+JSON_PATH = sys.argv[2] if len(sys.argv) > 2 else 'turno_materiale_treni.json'
+BACKUP_PATH = f'{DB_PATH}.backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
 
 # ============================================================
 # BACKUP
 # ============================================================
-print(f"Backup DB → {BACKUP_PATH}")
-shutil.copy2(DB_PATH, BACKUP_PATH)
+if os.path.exists(DB_PATH):
+    print(f"Backup DB → {BACKUP_PATH}")
+    shutil.copy2(DB_PATH, BACKUP_PATH)
+else:
+    print(f"DB {DB_PATH} non esiste, verra' creato vuoto")
 
 # ============================================================
 # LOAD NEW DATA

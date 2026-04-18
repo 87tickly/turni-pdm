@@ -21,6 +21,102 @@ def query_train(train_id: str):
         db.close()
 
 
+@router.get("/train/{train_id}/cross-ref")
+def train_cross_ref(train_id: str):
+    """Cross-reference aggregato per un treno: continuazione materiale + PdC.
+
+    Aggrega in una singola risposta tutto cio' che serve a un pannello UI
+    di navigazione contestuale:
+      - `material`: turno materiale, treno prev/next nel giro, chain ridotta
+      - `pdc_carriers`: elenco (codice_turno, giorno, periodicita, orari)
+        di tutti i turni PdC che guidano questo treno
+
+    Serve al pannello cross-link (laterale slide-in) per permettere al
+    dispatcher di navigare in un click tra turno PdC aperto e:
+      - cosa fa il materiale prima/dopo questo treno
+      - quali altri turni PdC prendono questo stesso treno (in altre
+        giornate o altre periodicita')
+
+    Risposta:
+      {
+        "train_id": "10603",
+        "material": {
+          "turn_number": "1100",
+          "position": 0,
+          "total": 4,
+          "prev": {...} | null,
+          "next": {...} | null,
+          "chain": [{"train_id": ..., "from": ..., "to": ..., ...}, ...]
+        },
+        "pdc_carriers": [
+          {
+            "turn_id": 126,
+            "codice": "ALOR_C",
+            "impianto": "ALESSANDRIA",
+            "day_id": 6529,
+            "day_number": 1,
+            "periodicita": "LMXGV",
+            "day_start": "11:21",
+            "day_end": "16:34",
+            "block_start": "15:05",
+            "block_end": "16:19",
+            "from_station": "",
+            "to_station": "AL"
+          },
+          ...
+        ]
+      }
+
+    Se il treno non esiste da nessuna parte, ritorna struttura con
+    material/pdc_carriers vuoti (status 200, non 404): il frontend
+    visualizza "nessuna continuazione conosciuta".
+    """
+    db = get_db()
+    try:
+        # 1. Contesto materiale (prev/next + chain)
+        giro = db.get_giro_chain_context(train_id)
+        material = {
+            "turn_number": giro.get("turn_number"),
+            "material_type": giro.get("material_type", ""),
+            "position": giro.get("position", -1),
+            "total": giro.get("total", 0),
+            "prev": giro.get("prev"),
+            "next": giro.get("next"),
+            "chain": giro.get("chain", []),
+        }
+
+        # 2. PdC carriers (chi guida questo treno)
+        pdc_rows = db.find_pdc_train(train_id)
+        pdc_carriers = []
+        for r in pdc_rows:
+            pdc_carriers.append({
+                "turn_id": r.get("turn_id"),
+                "codice": r.get("codice", ""),
+                "impianto": r.get("impianto", ""),
+                "profilo": r.get("profilo", ""),
+                "day_id": r.get("day_id"),
+                "day_number": r.get("day_number"),
+                "periodicita": r.get("periodicita", ""),
+                "day_start": r.get("start_time", ""),
+                "day_end": r.get("end_time", ""),
+                "block_id": r.get("block_id"),
+                "block_seq": r.get("seq"),
+                "block_start": r.get("block_start", ""),
+                "block_end": r.get("block_end", ""),
+                "from_station": r.get("from_station", ""),
+                "to_station": r.get("to_station", ""),
+            })
+
+        return {
+            "train_id": train_id,
+            "material": material,
+            "pdc_carriers": pdc_carriers,
+            "pdc_count": len(pdc_carriers),
+        }
+    finally:
+        db.close()
+
+
 @router.get("/giro-materiale/{train_id}")
 def giro_materiale(train_id: str):
     """Restituisce il ciclo materiale completo a cui appartiene il treno."""
