@@ -61,6 +61,16 @@ class ParsedPdcDay:
     riposo_min: int = 0
     is_disponibile: bool = False
     blocks: list[ParsedPdcBlock] = field(default_factory=list)
+    # Accessori della giornata (minuti interi)
+    #   accessori_partenza (ACCp): minuti di presa servizio PRIMA del primo blocco
+    #     = first_block.start_time - day.start_time
+    #   accessori_arrivo   (ACCa): minuti di consegna DOPO l'ultimo blocco
+    #     = day.end_time - last_block.end_time
+    # Valore 0 = nessun accessorio o dati insufficienti per calcolare.
+    # Il rendering frontend usa questi valori per disegnare una linea
+    # tratteggiata sottile prima/dopo i blocchi della giornata.
+    accessori_partenza: int = 0
+    accessori_arrivo: int = 0
 
 
 @dataclass
@@ -135,6 +145,73 @@ def _hhmm_to_min(s: str) -> int:
         return int(h) * 60 + int(m)
     except Exception:
         return 0
+
+
+def _time_diff_min(start: str, end: str) -> int:
+    """Differenza end - start in minuti, gestendo wrap a mezzanotte.
+
+    Entrambi in formato 'HH:MM'. Se end < start (es. start=23:45, end=00:25)
+    si assume che end sia il giorno dopo, quindi diff = (24h + end) - start.
+
+    Ritorna 0 se uno dei due e' vuoto o malformato.
+    """
+    if not start or not end:
+        return 0
+    s = _hhmm_to_min(start)
+    e = _hhmm_to_min(end)
+    if s == 0 and start != "00:00":
+        return 0
+    if e == 0 and end != "00:00":
+        return 0
+    diff = e - s
+    if diff < 0:
+        diff += 24 * 60  # wrap mezzanotte
+    return diff
+
+
+def _compute_accessori(day_start: str, day_end: str,
+                       blocks: list) -> tuple[int, int]:
+    """Calcola ACCp e ACCa per una giornata tramite differenze aritmetiche.
+
+    ACCp = first_block_con_start.start - day_start
+    ACCa = day_end - last_block_con_end.end
+
+    Nessun valore viene estratto dal PDF: si usa solo l'orario della
+    giornata (gia' parsato da DAY_RE) e gli start/end dei blocchi.
+
+    Blocchi 'available' e 'scomp' vengono esclusi dal calcolo (sono
+    gestiti a parte). Se nessun blocco rilevante ha un orario, ritorna
+    (0, 0).
+    """
+    # Blocchi con orario, escludendo quelli non rappresentativi
+    _BLOCK_TYPES_FOR_ACC = {
+        'train', 'coach_transfer', 'cv_partenza', 'cv_arrivo', 'meal'
+    }
+    relevant = [b for b in blocks if b.block_type in _BLOCK_TYPES_FOR_ACC]
+    if not relevant:
+        return 0, 0
+
+    accp = 0
+    acca = 0
+
+    # ACCp: richiede che il PRIMO blocco abbia start_time. Se il primo
+    # blocco non ha orario ma i successivi si', NON possiamo calcolare
+    # ACCp accuratamente (ci sarebbero blocchi non rilevati tra day_start
+    # e il primo blocco con orario) -> lasciamo 0.
+    if day_start and relevant[0].start_time:
+        d = _time_diff_min(day_start, relevant[0].start_time)
+        if 0 <= d <= 180:  # guardia: realistico 0..3h
+            accp = d
+
+    # ACCa: simmetrico — richiede che l'ULTIMO blocco abbia end_time.
+    # Se manca, non possiamo calcolare (es. AROR_C g1: ultimo treno
+    # senza orario falsa ACCa).
+    if day_end and relevant[-1].end_time:
+        d = _time_diff_min(relevant[-1].end_time, day_end)
+        if 0 <= d <= 180:
+            acca = d
+
+    return accp, acca
 
 
 def _it_to_iso_date(d: str) -> str:
@@ -632,6 +709,14 @@ def _extract_day_from_band(words: list[dict], band_top: float,
         # Giornata disponibile: unico blocco 'available'
         blocks.append(ParsedPdcBlock(seq=0, block_type="available"))
 
+    # Calcolo accessori per differenze aritmetiche (zero regressione).
+    # Niente estrazione di testo addizionale dal PDF: si usano solo gli orari
+    # gia' parsati (giornata + blocchi).
+    if is_disponibile:
+        accp = acca = 0
+    else:
+        accp, acca = _compute_accessori(start_time, end_time, blocks)
+
     return ParsedPdcDay(
         day_number=day_number,
         periodicita=periodicita,
@@ -644,6 +729,8 @@ def _extract_day_from_band(words: list[dict], band_top: float,
         riposo_min=riposo_min,
         is_disponibile=is_disponibile,
         blocks=blocks,
+        accessori_partenza=accp,
+        accessori_arrivo=acca,
     )
 
 

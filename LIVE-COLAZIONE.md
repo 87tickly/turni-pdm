@@ -4,6 +4,66 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-18 — Parser PdC: accessori_partenza + accessori_arrivo (B.3.1)
+
+Aggiunto calcolo accessori a livello giornata, zero regressione sul parser
+PdC esistente.
+
+### Modifiche
+
+**`ParsedPdcDay` dataclass**:
+```python
+accessori_partenza: int = 0   # minuti ACCp (presa servizio)
+accessori_arrivo:   int = 0   # minuti ACCa (consegna)
+```
+
+**Approccio: arithmetico** (non PDF extraction):
+- `ACCp = first_block.start_time - day.start_time`
+- `ACCa = day.end_time - last_block.end_time`
+- Guardia: 0..180 min (scarta outlier tipo wrap mezzanotte errati)
+- Conservativo: se primo/ultimo blocco non ha l'orario richiesto → 0
+  (meglio di un valore sbagliato)
+- Blocchi `available`/`scomp` esclusi dal calcolo
+
+**Razionale**: i valori accessori sono sempre numeri singoli (confermato da
+utente). Calcolo aritmetico evita estrazione testo fragile e dà valori
+corretti ovunque i blocchi abbiano orari.
+
+### Verifica no-regression
+
+Baseline B.2 identico al pre-sessione:
+```
+train           tot=4237  miss_s=393  miss_e=611   (invariato)
+coach_transfer  tot= 860  miss_s=105  miss_e=137   (invariato)
+meal            tot= 682  miss_s= 91  miss_e=124   (invariato)
+```
+
+### Verifica valori
+
+AROR_C giorno 1 (default atteso 5/5):
+- day=[18:20→00:25], first_block=18:25 → ACCp=5 ✓
+- last_block senza end_time → ACCa=0 (conservativo)
+
+AROR_C giorno 4:
+- day=[05:33→13:30], first_block=06:53 → ACCp=80
+
+Distribuzione globale su 1218 giorni:
+- **ACCp>0**: 732 giorni (60%) — valori frequenti 5, 60, 15, 20, 55, 65
+- **ACCa>0**: 348 giorni (28%) — valori frequenti 5, 35, 20, 40, 15
+
+ACCa meno popolato perche' ultimi blocchi spesso senza end_time (miss_e=611
+su train), dato strutturale del PDF, non bug del parser.
+
+### Follow-up TODO
+
+- Validazione cross-parser: ACCp + ACCa insieme nella stessa giornata e'
+  ammesso solo se il treno non ha continuazione di servizio (controllo
+  via turno materiale). Da implementare in un validator separato.
+- Rendering frontend: usare i due campi per disegnare linea tratteggiata
+  sottile prima/dopo i blocchi quando valore > 0.
+
+---
+
 ## 2026-04-18 — Parser turno materiale: refactor vertical extraction (sezione A completata)
 
 Refactor completo di `parse_turno_materiale.py` per supportare il nuovo
