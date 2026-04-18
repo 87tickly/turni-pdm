@@ -4,6 +4,93 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-19 — Fase 2 completa: endpoint backend + CommandPalette + TrainSearch + No-Line
+
+Sessione "fai con la dovuta calma tutti i 4 punti" dopo validazione utente
+del facelift. Niente rotture, 5 commit pubblicati + rebuild dist in ognuno.
+
+### 1 · Backend Dashboard (commit `d726ae5`)
+Nuovo `api/dashboard.py` registrato in `server.py`:
+- `GET /api/dashboard/kpi` — totale_turni, turni_settimana, giorni_lavorati
+  (distinti), ore_settimana_min, delta_30gg_pct (variazione % saved_shift
+  ultimi 30gg vs 30gg precedenti).
+- `GET /api/activity/recent?limit=20` — feed derivato da saved_shift.
+  type=`validate` se 0 violations, `conflict` se ≥1 errore. Placeholder
+  fino ad audit log Fase 3.
+- `GET /api/linea/attiva` — stato dei primi 5 treni piu recenti dell'utente
+  via ARTURO Live. Cache in-memory 60s per rate-limit 30 req/min IP.
+  Fail-soft: ritorna items=[] + note di errore se ARTURO non raggiungibile.
+- Tutti i 111 test continuano a passare.
+
+### 2 · Dashboard cablata ai veri endpoint (commit `5c70655`)
+- Rimossi `MOCK_KPI` e `MOCK_LINEA`
+- `frontend/src/lib/api.ts`: +3 funzioni tipizzate (getDashboardKpi,
+  getActivityRecent, getLineaAttiva) e tipi (DashboardKpi, ActivityItem,
+  LineaAttivaRow)
+- `DashboardPage.tsx`:
+  - "Turni attivi" (mock) → "Turni settimana" (reale)
+  - KPI card con placeholder "—" in loading/errore
+  - Activity feed mappa type→icona/tone automaticamente
+  - Linea attiva: mostra messaggio esplicativo se linea.length === 0
+    (usa `lineaNote` quando ARTURO Live non raggiungibile)
+  - Today card: primo activity item al posto del primo recentShift
+
+### 3 · CommandPalette ⌘K (commit `1f2aa63`)
+Componente self-contained `CommandPalette.tsx` (~330 righe). **Zero nuove
+dipendenze npm** — niente cmdk né radix-dialog, tutto con React primitives
++ Tailwind.
+- Hotkey globale ⌘K/Ctrl+K in `Layout.tsx` (toggle)
+- Glassmorphism: rgba(255,255,255,0.94) + backdrop-blur(24px) saturate(180%)
+- Filtro fuzzy: tutti i token della query devono match (case-insensitive)
+- Gruppi: Suggerimenti · Navigazione · Turni · Azioni
+- Nav tastiera completa: ↑↓ Home End Enter Esc + scroll-into-view
+- Click backdrop per chiudere; footer con shortcut hint + count
+- Turni caricati via `getSavedShifts()` al primo open (cache per sessione)
+- Sidebar: pulsante "Cerca…" con kbd ⌘K/Ctrl+K per feature discovery
+
+### 4 · TrainSearchPage side panel cross-ref (commit `3513e96`)
+- Aggiunto `CrossRefPanel` (~240 righe) che consuma `/train/{id}/cross-ref`
+  (stesso endpoint del TrainDetailDrawer — coerenza cross-link)
+- Layout a 2 colonne su xl (>=1280px): `minmax(0,1fr) 340px`. Sotto 1280px
+  stacking naturale
+- Side panel mostra:
+  - Giro Materiale: prev/curr/next con chip verde "Handoff OK" quando
+    next.dep_time === curr.arr_time; chain compatta con badge brand sul
+    treno corrente
+  - PdC carriers: fino a 10 turni con codice, g#, periodicità LMXGVSD,
+    orari block_start→block_end
+- Tutto il comportamento esistente preservato (tabs, autocomplete, DB
+  locale, real-time ARTURO Live, giro chain)
+
+### 5 · No-Line rule su liste (questo commit)
+Applicato tonal-layering minimale ai container esterni di:
+- `ShiftsPage.tsx` (riga 62): rimosso `border border-border-subtle`,
+  aggiunto `shadow-sm` + bg `surface-container-lowest`
+- `CalendarPage.tsx` (riga 144): stesso pattern
+- `ImportPage.tsx` (righe 90-92): container + header via tonal shift
+  (`surface-container-low` sull'header)
+
+Bordi interni (separators `border-t` dentro card espanse) lasciati: hanno
+senso semantico come ghost border (ammesso da DS in tabelle dense).
+
+### Cosa rimane aperto
+
+- **Endpoint audit log** per `activity/recent` più ricco (Fase 3 —
+  oggi il type è solo validate/conflict derivato da saved_shift)
+- **Self-host Inter.woff2** e **JetBrainsMono.woff2** (oggi fallback
+  system — nessun impatto visivo grosso ma design-system vorrebbe i tre
+  font self-hosted)
+- **No-Line rule** a BlocksList/TurnsList (componenti dentro i builder) —
+  rimandato perché toccano logica di rendering più articolata
+
+### Build finale
+
+CSS 65.7 → 64.7 KB, JS 438 → 463 KB (+25 KB distribuiti su:
+CommandPalette ~10 KB, CrossRefPanel ~8 KB, Dashboard wiring ~2 KB).
+Zero dipendenze npm aggiunte. Zero breaking change.
+
+---
+
 ## 2026-04-18 — Facelift veloce Fase 2 P2 (4 commit)
 
 Implementazione compressa della parte visibile del piano "Facelift" del

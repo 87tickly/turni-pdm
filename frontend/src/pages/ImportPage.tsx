@@ -87,9 +87,18 @@ function UploadCard({
   )
 
   return (
-    <div className="bg-card rounded-lg border border-border-subtle">
-      {/* Header */}
-      <div className="px-4 py-3 flex items-center gap-3 border-b border-border-subtle">
+    <div
+      className="rounded-lg overflow-hidden"
+      style={{
+        backgroundColor: "var(--color-surface-container-lowest)",
+        boxShadow: "var(--shadow-sm)",
+      }}
+    >
+      {/* Header — separazione tonal anziche border-b */}
+      <div
+        className="px-4 py-3 flex items-center gap-3"
+        style={{ backgroundColor: "var(--color-surface-container-low)" }}
+      >
         <div
           className={cn(
             "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",

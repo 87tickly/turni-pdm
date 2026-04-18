@@ -59,7 +59,13 @@ function ShiftCard({
   }, [expanded, timeline, shift.id])
 
   return (
-    <div className="bg-card rounded-lg border border-border-subtle hover:border-border transition-colors">
+    <div
+      className="rounded-lg transition-shadow hover:shadow-md"
+      style={{
+        backgroundColor: "var(--color-surface-container-lowest)",
+        boxShadow: "var(--shadow-sm)",
+      }}
+    >
       {/* Header */}
       <button
         onClick={handleExpand}
