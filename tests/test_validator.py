@@ -82,13 +82,14 @@ def test_night_minutes_parziale():
 
 def test_meal_slot_gap():
     v = TurnValidator()
+    # Gap 12:00-13:00 cade nella finestra contrattuale 1 (11:30-15:30)
     segments = [
-        make_seg("100", "A", "06:00", "B", "07:30"),
-        make_seg("101", "B", "08:30", "C", "10:00"),  # 60 min gap
+        make_seg("100", "A", "06:00", "B", "12:00"),
+        make_seg("101", "B", "13:00", "C", "15:00"),  # 60 min gap in finestra pranzo
     ]
     start, end = v.find_meal_slot(segments)
-    assert start == "07:30"
-    assert end == "08:00"
+    assert start == "12:00"
+    assert end == "12:30"
 
 
 def test_meal_slot_no_gap():

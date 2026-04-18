@@ -88,9 +88,28 @@ stats Lav=477m Cct=266m) mostra che:
    blocchi train all'inizio/fine della giornata.
 
 ### Test suite
-1 test preesistente fallisce (`tests/test_validator.py::test_meal_slot_gap`
-— non correlato al parser PdC, bug in `find_meal_slot` del validator).
-Spawnato task dedicato per investigare.
+Il test preesistente `tests/test_validator.py::test_meal_slot_gap` falliva
+su master pulito (non correlato al parser PdC). Sistemato in sessione
+parallela — vedi sezione sotto.
+
+---
+
+## 2026-04-18 — Fix test `test_meal_slot_gap` (test outdated)
+
+Test `tests/test_validator.py::test_meal_slot_gap` falliva su master pulito:
+atteso `start == "07:30"`, ricevuto `"11:30"`.
+
+**Diagnosi**: la logica di `find_meal_slot` in `src/validator/rules.py:225` è
+corretta. Secondo le regole operative (CLAUDE.md: "Refezione 30 min in finestra
+11:30-15:30 o 18:30-22:30") la refezione è consentita SOLO nelle finestre
+contrattuali. Il gap 07:30-08:30 è fuori da entrambe → la funzione cade nel
+fallback `_meal_in_window` che ritorna "11:30" (inizio finestra 1) — cioè
+comportamento corretto. Il test era stato scritto prima dell'introduzione delle
+finestre contrattuali.
+
+**Fix**: aggiornato il test per usare un gap dentro la finestra valida
+(12:00-13:00), con asserzione su `("12:00", "12:30")`. Nessuna modifica alla
+logica di business. Tutti i 23 test del validator passano.
 
 ---
 
