@@ -1,0 +1,366 @@
+<div class="screen active">
+  <!-- sidebar injected -->
+  <div class="content">
+
+    <!-- Top bar: codice, impianto, profilo, data, azioni -->
+    <div class="topbar">
+      <div class="editor-code">
+        <span class="k">Editor Turno</span>
+        <span class="v mono">RT-992</span>
+      </div>
+      <div class="topbar-meta">
+        <div class="topbar-field">
+          <span class="k">Impianto</span>
+          <span class="v">Milano C.le</span>
+        </div>
+        <div class="topbar-field">
+          <span class="k">Profilo</span>
+          <span class="v">Dispatcher</span>
+        </div>
+        <div class="topbar-field">
+          <span class="k">Data validità</span>
+          <span class="v mono">24 ott 2026 → 31 dic 2026</span>
+        </div>
+      </div>
+      <div class="topbar-spacer"></div>
+      <div class="topbar-actions">
+        <button class="btn btn-secondary">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M4 17v-6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v6"/><circle cx="8" cy="19" r="1.5"/><circle cx="16" cy="19" r="1.5"/><path d="M4 11h16"/></svg>
+          Rientro in vettura
+        </button>
+        <button class="icon-btn" title="Notifiche">
+          <svg class="ic-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
+        </button>
+        <button class="icon-btn" title="Profilo">
+          <svg class="ic-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="content-body">
+      <div class="page-title-row">
+        <h1 class="page-title">Giornate Turno</h1>
+        <div class="page-subtitle">Gestione giornaliera del turno RT-992 · 6 giornate definite</div>
+        <div style="margin-left:auto; display:flex; gap:8px;">
+          <span class="chip chip-brand chip-dot">Attivo</span>
+          <span class="chip chip-success chip-dot">Sincronizzato</span>
+        </div>
+      </div>
+
+      <!-- Day 1 — Lunedì LMXGV (open, gantt visible) -->
+      <div class="day open">
+        <div class="day-hd">
+          <svg class="ic chevron" viewBox="0 0 24 24" style="transform: rotate(90deg)"><path d="m9 6 6 6-6 6"/></svg>
+          <div>
+            <div class="title">Lunedì <span style="color:var(--on-surface-muted); font-weight:500;">· LMXGV</span></div>
+            <div class="sub">Servizio ordinario feriale · partenza Milano C.le 06:45</div>
+          </div>
+          <div></div>
+          <div class="dur">
+            <span class="k">Durata totale</span>
+            <span class="v">07:45</span>
+          </div>
+        </div>
+        <div class="day-body">
+          <div class="gantt">
+            <div class="gantt-ruler">
+              <span class="tick mono" style="left: calc(100%/24 * 0)">00</span>
+              <span class="tick mono" style="left: calc(100%/24 * 4)">04</span>
+              <span class="tick mono" style="left: calc(100%/24 * 8)">08</span>
+              <span class="tick mono" style="left: calc(100%/24 * 12)">12</span>
+              <span class="tick mono" style="left: calc(100%/24 * 16)">16</span>
+              <span class="tick mono" style="left: calc(100%/24 * 20)">20</span>
+              <span class="tick mono" style="left: calc(100%/24 * 24)">24</span>
+            </div>
+            <div class="gantt-track">
+              <!-- ACCp 06:15 → 06:45 -->
+              <div class="gblock accp" style="left: calc(100%/24 * 6.25); width: calc(100%/24 * 0.5)">
+                <div class="tag">ACCp</div>
+              </div>
+              <!-- REG 2304 06:45 → 10:42 (MI → BO) -->
+              <div class="gblock train" style="left: calc(100%/24 * 6.75); width: calc(100%/24 * 3.95)">
+                <div class="tag">REG 2304</div>
+                <div class="meta">MI → BO</div>
+              </div>
+              <!-- VUOTA 10:42 → 12:30 -->
+              <div class="gblock vuota" style="left: calc(100%/24 * 10.70); width: calc(100%/24 * 1.80)">
+                <div class="tag">VUOTA</div>
+              </div>
+              <!-- REFEZ 12:30 → 13:00 -->
+              <div class="gblock refez" style="left: calc(100%/24 * 12.50); width: calc(100%/24 * 0.50)">
+                <div class="tag">REFEZ</div>
+              </div>
+              <!-- FR 8821 13:00 → 14:30 selected (BO → MI) -->
+              <div class="gblock train selected" style="left: calc(100%/24 * 13.00); width: calc(100%/24 * 1.50)">
+                <div class="tag">FR 8821</div>
+                <div class="meta">BO → MI</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Legend & footer actions -->
+          <div style="display:flex; align-items:center; margin-top:14px; padding: 0 4px;">
+            <div class="legend">
+              <div class="item"><span class="sw" style="background:var(--brand)"></span> Treno</div>
+              <div class="item"><span class="sw" style="background:rgba(234,88,12,0.50)"></span> ACCp/ACCa</div>
+              <div class="item"><span class="sw" style="background:rgba(124,58,237,0.50)"></span> Vettura</div>
+              <div class="item"><span class="sw" style="background:rgba(34,197,94,0.50)"></span> Refezione</div>
+              <div class="item"><span class="sw" style="background:var(--surface-container)"></span> Vuota</div>
+            </div>
+            <div style="margin-left:auto; font-size:11px; color:var(--on-surface-muted);">
+              Blocco selezionato: <span class="mono" style="color:var(--brand); font-weight:700">FR 8821</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Day 2 — Sabato (collapsed) -->
+      <div class="day">
+        <div class="day-hd">
+          <svg class="ic chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
+          <div>
+            <div class="title">Sabato <span style="color:var(--on-surface-muted); font-weight:500;">· S</span></div>
+            <div class="sub">Servizio festivo ridotto</div>
+          </div>
+          <div></div>
+          <div class="dur">
+            <span class="k">Durata totale</span>
+            <span class="v">05:20</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Day 3 — Domenica (collapsed) -->
+      <div class="day">
+        <div class="day-hd">
+          <svg class="ic chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
+          <div>
+            <div class="title">Domenica <span style="color:var(--on-surface-muted); font-weight:500;">· D</span></div>
+            <div class="sub">Servizio domenica e festività</div>
+          </div>
+          <div></div>
+          <div class="dur">
+            <span class="k">Durata totale</span>
+            <span class="v">04:15</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer bar -->
+    <div class="footer-bar">
+      <button class="btn btn-ghost">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        Aggiungi giornata
+      </button>
+      <button class="btn btn-ghost">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></svg>
+        Esporta PDF
+      </button>
+      <div class="spacer"></div>
+      <div class="legend" style="font-size:11px;">
+        <div class="item"><span class="sw" style="background:var(--brand)"></span> Guida</div>
+        <div class="item"><span class="sw" style="background:rgba(124,58,237,0.60)"></span> Vettura</div>
+        <div class="item"><span class="sw" style="background:rgba(234,88,12,0.60)"></span> Accessori</div>
+      </div>
+      <button class="btn btn-primary btn-lg">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+        Pubblica turno
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== DRAWER ===== -->
+  <div class="drawer-backdrop"></div>
+  <aside class="drawer">
+    <div class="drawer-hd">
+      <div class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 4h12a2 2 0 0 1 2 2v8a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V6a2 2 0 0 1 2-2Z"/>
+          <path d="M4 10h16"/><path d="m8 22 2-4"/><path d="m16 22-2-4"/>
+        </svg>
+      </div>
+      <div>
+        <div class="title">Treno <span class="mono" style="color:var(--brand)">10581</span></div>
+        <div class="sub">ALOR · Milano Centrale → Verona P.N.</div>
+      </div>
+      <button class="icon-btn">
+        <svg class="ic-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="drawer-body">
+      <!-- Origine / Destinazione -->
+      <div class="dsec">
+        <div class="dsec-hd">
+          <span class="t">Dettaglio treno</span>
+          <span class="chip chip-success chip-dot mono" style="letter-spacing:0.02em">In orario</span>
+        </div>
+        <div class="trip">
+          <div class="col">
+            <div class="k">Origine</div>
+            <div class="station">Milano C.le</div>
+            <div class="time">15:05</div>
+          </div>
+          <div class="arrow">
+            <svg class="ic-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </div>
+          <div class="col right">
+            <div class="k">Destinazione</div>
+            <div class="station">Verona P.N.</div>
+            <div class="time">16:41</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Giro Materiale (prev / next) -->
+      <div class="dsec">
+        <div class="dsec-hd">
+          <span class="t">
+            <svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:-2px; margin-right:4px;"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
+            Giro materiale · Turno #47 · pos 3/6
+          </span>
+          <span class="chip chip-muted mono" style="letter-spacing:0.02em">ETR 425</span>
+        </div>
+
+        <div class="handoff">
+          <svg class="ic dir" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+          <div class="main">
+            <div class="ln1">
+              <span class="label">Precedente</span>
+              <span style="color:var(--on-surface-strong)">REG 2098</span>
+            </div>
+            <div class="ln2">Brescia → Milano C.le · bin. 14</div>
+          </div>
+          <div class="tim">
+            <div class="k">Arr. MI</div>
+            <div class="v">14:47</div>
+          </div>
+        </div>
+
+        <div class="handoff highlight">
+          <svg class="ic dir" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>
+          <div class="main">
+            <div class="ln1">
+              <span class="label">Corrente</span>
+              <span style="color:var(--on-surface-strong)">10581</span>
+            </div>
+            <div class="ln2">Milano C.le → Verona P.N.</div>
+          </div>
+          <div class="tim">
+            <div class="k">MI → VR</div>
+            <div class="v">15:05→16:41</div>
+          </div>
+        </div>
+
+        <div class="handoff">
+          <svg class="ic dir" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          <div class="main">
+            <div class="ln1">
+              <span class="label">Successivo</span>
+              <span style="color:var(--on-surface-strong)">REG 2611</span>
+            </div>
+            <div class="ln2">Verona P.N. → Bologna C.le · bin. 3</div>
+          </div>
+          <div class="tim">
+            <div class="k">Part. VR</div>
+            <div class="v">17:05</div>
+          </div>
+        </div>
+
+        <!-- Chain -->
+        <div class="chain">
+          <span class="node">2034</span>
+          <span class="sep">›</span>
+          <span class="node">2098</span>
+          <span class="sep">›</span>
+          <span class="node curr">10581</span>
+          <span class="sep">›</span>
+          <span class="node">2611</span>
+          <span class="sep">›</span>
+          <span class="node">9840</span>
+          <span class="sep">›</span>
+          <span class="node">2705</span>
+        </div>
+      </div>
+
+      <!-- Guidato da altri turni PdC -->
+      <div class="dsec">
+        <div class="dsec-hd">
+          <span class="t">
+            <svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:-2px; margin-right:4px;"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            Guidato da altri turni PdC
+          </span>
+          <span class="label mono" style="color:var(--on-surface-quiet)">2 turni</span>
+        </div>
+
+        <div class="carrier active">
+          <div class="idx">1</div>
+          <div class="info">
+            <div class="top">
+              <span class="code">ALOR_C</span>
+              <span class="day">g1 · LMXGV</span>
+            </div>
+            <div class="sub">Milano C.le → Verona P.N.</div>
+          </div>
+          <div class="tail">
+            <div class="time">15:05 → 16:19</div>
+            <div>Consegna Verona</div>
+          </div>
+        </div>
+
+        <div class="carrier">
+          <div class="idx">2</div>
+          <div class="info">
+            <div class="top">
+              <span class="code">PVOR_C</span>
+              <span class="day">g21 · S</span>
+            </div>
+            <div class="sub">Verona P.N. → Verona P.N.</div>
+          </div>
+          <div class="tail">
+            <div class="time">16:19 → 16:41</div>
+            <div style="color:var(--success); font-weight:700;">Handoff OK</div>
+          </div>
+        </div>
+
+        <div style="margin-top:10px; padding:10px 14px; background:rgba(34,197,94,0.08); border-radius:var(--r-md); font-size:11px; color:#15803D; display:flex; gap:8px; align-items:center;">
+          <svg class="ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>
+          Handoff alle <span class="mono" style="font-weight:700">16:19</span> · nessuna sovrapposizione CVp/CVa
+        </div>
+      </div>
+
+      <!-- Asset & risorse -->
+      <div class="dsec">
+        <div class="dsec-hd">
+          <span class="t">Codice duty · status</span>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div style="padding:12px 14px; background:var(--surface-container-low); border-radius:var(--r-md);">
+            <div class="eyebrow" style="margin-bottom:6px">Codice duty</div>
+            <div class="mono" style="font-size:13.5px; font-weight:700;">MIL-2304-X</div>
+          </div>
+          <div style="padding:12px 14px; background:var(--surface-container-low); border-radius:var(--r-md);">
+            <div class="eyebrow" style="margin-bottom:6px">Status</div>
+            <div style="display:flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--success)">
+              <span style="width:6px; height:6px; border-radius:50%; background:var(--success); box-shadow:0 0 0 3px rgba(34,197,94,0.18);"></span>
+              Approvato
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="drawer-ft">
+      <button class="btn btn-ghost">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></svg>
+        Scarica scheda
+      </button>
+      <div class="spacer"></div>
+      <button class="btn btn-primary">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        Modifica blocco
+      </button>
+    </div>
+  </aside>
+</div>

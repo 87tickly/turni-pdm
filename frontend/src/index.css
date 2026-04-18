@@ -17,12 +17,30 @@
 }
 
 @theme {
-  /* ── Brand ARTURO ── */
+  /* ═══════════════════════════════════════════════════════════
+   * DESIGN TOKENS — ARTURO· "The Kinetic Conductor"
+   * ═══════════════════════════════════════════════════════════
+   * Organizzazione:
+   *   1. Brand + Palette legacy (da non rimuovere, usata in tutto il codice)
+   *   2. Surface hierarchy (No-Line rule, da handoff Claude Design)
+   *   3. Ink tonale (gerarchia testo sfondi complessi)
+   *   4. Ghost borders (fallback a11y per tabelle dense)
+   *   5. Shadows tinted (ombre su on-surface, non grigio)
+   *   6. Gradient CTA (Kinetic)
+   *   7. Semantic
+   *   8. Sidebar
+   *   9. Radii / Typography
+   *
+   * Regola: aggiungere token mai rimuovere. Evitare `border: 1px solid`
+   * per sezionare — preferire tonal shift (vedi DESIGN system).
+   * ═══════════════════════════════════════════════════════════ */
+
+  /* ── 1. Brand ARTURO (legacy, preservato) ── */
   --color-brand: #0062CC;
   --color-brand-secondary: #0070B5;
   --color-dot: #22C55E;
 
-  /* ── Palette light (bianca, pulita) ── */
+  /* ── Palette light (legacy, preservato per backward-compat) ── */
   --color-background: #F7F8FA;
   --color-foreground: #0F172A;
   --color-card: #FFFFFF;
@@ -35,7 +53,7 @@
   --color-input: #F1F5F9;
   --color-ring: #0062CC;
 
-  /* Accent */
+  /* ── Accent (legacy) ── */
   --color-primary: #0062CC;
   --color-primary-foreground: #FFFFFF;
   --color-primary-hover: #004FA6;
@@ -44,31 +62,76 @@
   --color-accent: #0070B5;
   --color-accent-foreground: #FFFFFF;
 
-  /* Semantic */
+  /* ── 2. Surface hierarchy (DS: No-Line via tonal nesting) ──
+   * Usare questi al posto di border 1px per sezionare.
+   * Stack: lowest (cards/top) > low/container/high/highest (well/bg)
+   *     > surface (base app)
+   * I nuovi componenti del refactor (TrainDetailDrawer, CommandPalette,
+   * Dashboard, TrainSearchPage) devono consumare questi token. */
+  --color-surface: #FAF8FF;                      /* app base */
+  --color-surface-container-low: #F2F3FF;        /* wells / side panels */
+  --color-surface-container: #E9ECFB;            /* chip bg, quiet blocks */
+  --color-surface-container-high: #DFE3F7;       /* hover, inputs focus */
+  --color-surface-container-highest: #D3DBF0;    /* active workspaces */
+  --color-surface-container-lowest: #FFFFFF;     /* cards/tables (top) */
+
+  /* ── 3. Ink tonale (gerarchia testo) ── */
+  --color-on-surface: #0B1C30;
+  --color-on-surface-strong: #0A1322;
+  --color-on-surface-muted: #5A6478;
+  --color-on-surface-quiet: #8992A6;
+  --color-on-surface-disabled: #B3B9C8;
+
+  /* ── 4. Ghost border (solo fallback a11y per tabelle dense).
+   * NON usare per sezionare layout — usa invece tonal shift. */
+  --color-ghost: rgb(15 23 42 / 0.08);
+  --color-ghost-strong: rgb(15 23 42 / 0.14);
+
+  /* ── 5. Shadows tinted (su on-surface, non grigio) ── */
+  --shadow-sm: 0 1px 2px rgb(11 28 48 / 0.04);
+  --shadow-md: 0 4px 12px rgb(11 28 48 / 0.06);
+  --shadow-lg: 0 12px 40px rgb(11 28 48 / 0.08);
+
+  /* ── 6. Gradient CTA (Kinetic, 135° primary → primary-container) ── */
+  --gradient-primary: linear-gradient(135deg, #004B9F 0%, #0062CC 100%);
+
+  /* ── 7. Semantic (estesi con _container per bg soft) ── */
   --color-destructive: #EF4444;
-  --color-destructive-foreground: #ffffff;
+  --color-destructive-foreground: #FFFFFF;
+  --color-destructive-container: rgb(220 38 38 / 0.09);
   --color-success: #16A34A;
   --color-success-muted: #16a34a12;
+  --color-success-container: rgb(34 197 94 / 0.12);
   --color-warning: #EA580C;
   --color-warning-muted: #ea580c10;
+  --color-warning-container: rgb(234 88 12 / 0.10);
   --color-info: #0284C7;
   --color-info-muted: #0284c710;
   --color-cta: #16A34A;
 
-  /* Sidebar */
+  /* ── 8. Sidebar (legacy) ── */
   --color-sidebar: #FFFFFF;
   --color-sidebar-foreground: #0F172A;
   --color-sidebar-accent: #F1F5F9;
   --color-sidebar-muted: #94A3B8;
   --color-sidebar-border: #E2E8F0;
 
-  /* Radii */
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
+  /* ── 9. Radii ── */
+  --radius-sm: 0.375rem;   /* 6px */
+  --radius-md: 0.5rem;     /* 8px */
+  --radius-lg: 0.75rem;    /* 12px */
+  --radius-xl: 1rem;       /* 16px */
 
+  /* ── Typography ──
+   * --font-display: headlines (Exo 2, sempre self-hosted)
+   * --font-sans:    body (oggi Exo 2 per backward-compat; quando
+   *                 aggiungeremo Inter.woff2 diventera' Inter)
+   * --font-mono:    orari HH:MM, numeri treno, codici duty.
+   *                 Fallback a SF Mono/Menlo finché JetBrainsMono
+   *                 non è self-hosted. */
   --font-sans: "Exo 2", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Exo 2", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Menlo", monospace;
 }
 
 @layer base {
