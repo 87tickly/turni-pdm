@@ -261,6 +261,15 @@ function DayCard({ day }: { day: PdcDay }) {
                   startTime={day.start_time}
                   endTime={day.end_time}
                   label={`g${day.day_number} ${day.periodicita}`}
+                  // PdcPage e' sola lettura: UX semplificata — single-click
+                  // su un blocco apre direttamente la modal dettaglio
+                  // (bypassa l'action bar con 8 icone, utile solo in
+                  // builder/depot dove edit/move/duplicate/delete sono
+                  // attive). Qui detail/warn/history sono le uniche azioni
+                  // sensate, quindi ci arriviamo in un click.
+                  onBlockClick={(block, idx) => {
+                    setDetailModal({ block, index: idx, mode: "detail" })
+                  }}
                   onAction={(act, block, idx) => {
                     if (act === "detail" || act === "warn") {
                       setDetailModal({ block, index: idx, mode: act })
