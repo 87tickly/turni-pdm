@@ -21,7 +21,9 @@ import sys
 from collections import defaultdict, OrderedDict
 
 PDF_PATH = sys.argv[1] if len(sys.argv) > 1 else 'C:/Users/studio54/Downloads/Vuoto 50 (1).pdf'
-OUTPUT_PATH = 'C:/Users/studio54/Desktop/COLAZIONE/turno_materiale_treni.json'
+# OUTPUT_PATH: secondo argomento CLI, oppure fallback a turno_materiale_treni.json
+# nella working directory corrente (cross-platform).
+OUTPUT_PATH = sys.argv[2] if len(sys.argv) > 2 else 'turno_materiale_treni.json'
 
 # ============================================================
 # EXTRACT ALL ROWS (bottom-to-top per page)
@@ -51,9 +53,20 @@ print(f"Righe totali estratte: {len(all_rows)}")
 # ============================================================
 # SPLIT INTO TURNO SECTIONS
 # ============================================================
-# Match turno headers including suffixes like "1191A"
-turno_header_re = re.compile(r'Turno\s+Validit[^\s]*\s+[^)]*\)\s*(\d{4,5}[A-Z]?)')
-turno_detail_re = re.compile(r'^Turno\s+(\d{4,5}[A-Z]?)$')
+# Match turno headers (include suffissi tipo "1191A").
+# Il PDF Trenord ha due formati distinti:
+#   A) Header pagina indice:  "Turno 1100 Validità P)"        (num PRIMA di Validita)
+#   B) Header legacy/altro:   "Turno Validit... ) 1100"       (num DOPO la parentesi)
+# Supportiamo entrambi con alternanze regex.
+#
+# Il dettaglio interno della pagina (estratto char-by-char) puo' essere
+# concatenato senza spazi (es. "Turno1100"); per questo usiamo \s* (0..n spazi).
+turno_header_re = re.compile(
+    r'(?:Turno\s+(\d{4,5}[A-Z]?)\s+Validit'                 # formato A
+    r'|Turno\s+Validit[^\s]*\s+[^)]*\)\s*(\d{4,5}[A-Z]?))', # formato B
+    re.IGNORECASE,
+)
+turno_detail_re = re.compile(r'^Turno\s*(\d{4,5}[A-Z]?)$', re.IGNORECASE)
 
 current_turno = None
 turno_lines = OrderedDict()
@@ -61,7 +74,8 @@ turno_lines = OrderedDict()
 for text in all_rows:
     m = turno_header_re.search(text)
     if m:
-        current_turno = m.group(1)
+        # Il regex ha due alternative; prendi il primo gruppo non-None
+        current_turno = m.group(1) or m.group(2)
         if current_turno not in turno_lines:
             turno_lines[current_turno] = []
         continue

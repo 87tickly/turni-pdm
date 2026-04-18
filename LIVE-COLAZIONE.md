@@ -4,6 +4,75 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-18 — Parser turno materiale: fix regex + diagnosi formato PDF cambiato
+
+Sessione di analisi del parser `parse_turno_materiale.py` sul PDF reale
+`uploads/Turno Materiale Trenord dal 2_3_26.pdf` (353 pagine).
+
+### Fix applicati
+
+**Bug A — OUTPUT_PATH hardcoded Windows**:
+```python
+OUTPUT_PATH = 'C:/Users/studio54/Desktop/COLAZIONE/turno_materiale_treni.json'
+```
+→ crash su macOS. Fix: accetta secondo arg CLI, fallback a
+`turno_materiale_treni.json` nella cwd.
+
+**Bug B — regex header non matchava formato attuale**:
+- Il parser cercava `Turno Validit... ) 1100` (numero dopo parentesi)
+- Il PDF attuale ha `Turno 1100 Validità P)` (numero prima di "Validità")
+- Il dettaglio char-by-char produce `Turno1100` (concatenato, zero spazi)
+
+Fix: regex a due alternative + `\s*` (0..n spazi).
+
+**Risultato commit**: da 0 turni a 54 turni identificati (coerente con
+indice PDF pag 1 e con JSON storico).
+
+### Root cause NON risolto (refactor necessario)
+
+I **numeri treno sono estratti soltanto 31/2884 (1%)**. Causa:
+**il PDF ha cambiato formato** tra `Vuoto 50 (1).pdf` (storico) e
+`Turno Materiale Trenord dal 2_3_26.pdf` (attuale).
+
+Nel nuovo PDF i numeri treno sono scritti **VERTICALMENTE** sopra le
+barre del Gantt (una cifra per riga Y). Esempio turno 1100:
+```
+y=434  "1111"   ← 1a cifra dei 4 treni (tutti "1")
+y=440  "0000"   ← 2a cifra (tutti "0")
+y=445  "6666"   ← 3a cifra (tutti "6")
+y=450  "0010"   ← 4a cifra (0,0,1,0)
+y=456  "6309"   ← 5a cifra (6,3,0,9)
+```
+
+Leggendo per COLONNA X (top→bottom) si ricompongono: `10603, 10606,
+10609, 10610` → matcha JSON storico.
+
+Il parser attuale legge per **RIGA Y** (bottom-to-top sort char-by-char
++ concat), quindi vede stringhe tipo `"1111"` invece di cifre da
+ricomporre in colonna. Era scritto per il formato storico (numeri
+treno orizzontali).
+
+### Refactor necessario (sessione dedicata)
+
+Per supportare il nuovo formato:
+1. Raggruppare char per X (colonne) nella zona "numeri treno" del Gantt
+2. Ordinare ogni colonna per Y decrescente (top=prima cifra)
+3. Concatenare cifre per ricomporre il numero treno
+4. Distinguere char verticali (`upright=False`) da orizzontali via
+   `pdfplumber` attr → solo quelli ruotati sono cifre treno
+5. Stesso approccio per i minuti sotto le barre (probabilmente anche
+   loro ora verticali)
+
+### Stato dati
+
+Il file `turno_materiale_treni.json` nel repo (2884 treni regolari,
+413 vuote, 54 turni) **non e' stato toccato** — contiene l'estrazione
+dal PDF storico e continua a funzionare come fonte dati per builder e
+Gantt. Il nuovo parser **non e' in grado di rigenerare** questo JSON
+dal PDF attuale finche' non si fa il refactor.
+
+---
+
 ## 2026-04-18 — Diagnosi parser PdC + campo minuti_accessori (sessione di ricerca)
 
 Sessione di diagnostica approfondita del `turno_pdc_parser.py` sul PDF
