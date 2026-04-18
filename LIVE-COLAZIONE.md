@@ -4,6 +4,102 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-18 — UI Refresh Fase 1 + Fase 2 P0 (design Claude Design → produzione)
+
+Prima implementazione reale del refresh UI basato sull'handoff ricevuto
+da Claude Design. Commit sequenziali seguono la roadmap di
+`docs/HANDOFF-claude-design.md`.
+
+### Fase 1 — Tokens @theme estesi (commit cfff63c)
+
+`frontend/src/index.css` esteso con il design system "Kinetic Conductor":
+
+- **Surface hierarchy** 6 livelli (No-Line rule): `--color-surface`,
+  `--color-surface-container-{low,default,high,highest,lowest}`
+- **Ink tonale**: `--color-on-surface`, `-strong`, `-muted`, `-quiet`,
+  `-disabled`
+- **Ghost borders**: `--color-ghost` (8%), `--color-ghost-strong` (14%)
+- **Shadows tinted**: `--shadow-{sm,md,lg}` su on-surface, non grigio
+- **Gradient CTA**: `--gradient-primary` 135° `#004B9F` → `#0062CC`
+- **Semantic container**: `_container` varianti soft per destructive/
+  success/warning
+- **Typography stack esteso**: `--font-display` (Exo 2), `--font-mono`
+  (JetBrains Mono + fallback SF Mono/Menlo — font file self-host
+  rimandato)
+
+**Token legacy 100% preservati** — zero regressione su pagine/componenti
+esistenti. Build OK: 62 → 65 KB CSS (+3 KB per nuovi token).
+
+Aggiunto materiale in `docs/`:
+- `HANDOFF-claude-design.md` (piano implementativo completo, checklist)
+- `REFERENCE-claude-design-styles.css` (tokens sorgente Claude Design)
+- `REFERENCE-claude-design-screens.css` (component styles)
+- `REFERENCE-screen-{editor,palette,dashboard}.html`
+
+### Fase 2 P0 — TrainDetailDrawer (commit in arrivo)
+
+Nuovo componente `frontend/src/components/TrainDetailDrawer.tsx`
+(~420 righe, slide-in destro 440px) che sostituisce `BlockDetailModal`
+(modal centrato).
+
+**Novità rispetto al modal**:
+- Drawer laterale destro con slide-in 220ms + backdrop blur 8%
+- **Chain pills cliccabili**: click su un numero treno nella chain
+  ricarica il drawer con quel treno come focus (navigazione cross-treno
+  senza chiudere)
+- **Header "← torna a X"** quando si è navigati via chain
+- **Handoff indicator**: chip verde `Handoff OK → PVOR_C` quando
+  `prev.arr_time === next.dep_time` tra due PdC consecutivi (es. il
+  caso reale 10581: ALOR_C g1 → PVOR_C g21 alle 16:19)
+- **Sezioni DS-compliant**: No-Line tramite tonal shift
+  (`surface-container-low` → `surface-container-high` hover), nessun
+  border 1px
+- **Font mono** per orari e numeri treno come da design system
+- **Esc + click-outside** per chiudere
+
+**Stessa signature di BlockDetailModal** (`block`, `index`, `mode`,
+`onClose`) → swap drop-in via alias `import { TrainDetailDrawer as
+BlockDetailModal }` in 3 pagine:
+- `pages/PdcPage.tsx`
+- `pages/PdcBuilderPage.tsx`
+- `pages/PdcDepotPage.tsx`
+
+Logica API (trainCheck + trainCrossRef in parallelo) preservata 1:1 —
+cambia solo il wrapper UX.
+
+Il file originale `components/BlockDetailModal.tsx` NON viene rimosso in
+questo commit (cleanup in commit successivo dopo verifica utente).
+
+Build OK: 65 → 65 KB CSS, 438 → 439 KB JS (componente drawer compila
+pulito).
+
+### Pain point risolto
+
+Prima: click su treno → modal centrato che nasconde la timeline sotto,
+utente non riesce a confrontare con altri blocchi.
+
+Dopo: click su treno → drawer destro 440px, timeline sempre visibile a
+sinistra, utente può **navigare tra treni della chain** con un click
+sul pill corrispondente, **vedere gli handoff** tra turni PdC con
+evidenza verde.
+
+### Prossimi step (P0 → P1 → P2 → P3 per handoff)
+
+- P0 **✓** Drawer + integrazione in 3 pagine
+- P1 CommandPalette (⌘K) — 1 giornata
+- P1 TrainSearchPage side panel cross-ref — 1 giornata
+- P2 Dashboard KPI + ActivityFeed + oggi-in-servizio — 1.5 gg
+  (richiede 3 endpoint backend nuovi: `/activity/recent`,
+  `/linea/attiva`, `/dashboard/kpi`)
+- P2 Refactor Gantt styling no-line — 0.5 gg
+- P3 Apply No-Line rule a liste esistenti — 1 gg
+
+Il blocco rimane l'utente: deve provare la Fase 2 P0 in produzione
+(Railway deploy `railway up` da locale), confermare che la UX è quella
+attesa, poi decidiamo se procedere con P1.
+
+---
+
 ## 2026-04-18 — Design pipeline Stitch → Claude Design (UI refresh pianificato)
 
 Sessione di pianificazione del refresh visivo del frontend React. Dopo

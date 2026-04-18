@@ -21,7 +21,8 @@ import {
   X,
 } from "lucide-react"
 import { PdcGanttV2 as PdcGantt } from "@/components/PdcGanttV2"
-import { BlockDetailModal } from "@/components/BlockDetailModal"
+import { TrainDetailDrawer as BlockDetailModal } from "@/components/TrainDetailDrawer"
+// Alias drop-in: drawer destro al posto del modal centrato.
 import {
   listPdcTurns,
   getPdcTurn,

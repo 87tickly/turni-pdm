@@ -19,7 +19,9 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PdcGanttV2 } from "@/components/PdcGanttV2"
-import { BlockDetailModal } from "@/components/BlockDetailModal"
+import { TrainDetailDrawer as BlockDetailModal } from "@/components/TrainDetailDrawer"
+// Alias: stesso signature, swap drop-in dal modal centrato al drawer destro
+// (refactor handoff Claude Design, vedi docs/HANDOFF-claude-design.md §01).
 import {
   getPdcStats,
   listPdcTurns,

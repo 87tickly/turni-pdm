@@ -16,7 +16,8 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PdcGanttV2 as PdcGantt, type CrossDayDragPayload } from "@/components/PdcGanttV2"
-import { BlockDetailModal } from "@/components/BlockDetailModal"
+import { TrainDetailDrawer as BlockDetailModal } from "@/components/TrainDetailDrawer"
+// Alias drop-in: drawer destro al posto del modal centrato.
 import {
   createPdcTurn,
   updatePdcTurn,
