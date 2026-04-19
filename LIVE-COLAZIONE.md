@@ -4,6 +4,105 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-19 — Gestione PdC redesign completo (Stitch source of truth)
+
+Utente ha fornito export Stitch completo in `docs/stitch-mockups/`
+(commit `72b38ed`). Claude Design rate-limited → Stitch diventa source
+of truth diretta. Refactor dell'area "gestione" (PdcPage) in 3 step.
+
+### Contesto
+
+Screenshot utente mostrava:
+- Gantt con blocchi alti 22px, praticamente invisibili
+- Station capolinea ("ALESSANDRIA", "PV") fluttuanti sopra l'asse
+- Toggle Gantt/Lista con emoji kitsch
+- Top bar editor assente (nessun contesto visuale del turno)
+- Drawer con "Percorso" layout a righe, poco gerarchico
+
+Target: `docs/stitch-mockups/editor_turno_pdc_arturo_accessibility_refined/`
+con top bar + giornate canvas + drawer + footer + legenda.
+
+### Step 1/3 — Gantt + DayCard (commit `1d8c22c`)
+
+PdcGanttV2:
+- Prop nuovo `hideActionBar` (action bar 8-icone nascosta in PdcPage)
+- BLOCK_H 22 → 34 per ospitare tag + meta stacked
+- Treno: rect brand gradient + border-l 2.5px brand-deep + highlight
+  top 1/3 glass + tag (train_id mono) sopra, meta (FROM-TO sigla
+  2 char) sotto, entrambi centrati
+- Vuota: solid slate (#E2E8F0) + border-l slate-500, tag "VUOTA {id}"
+  centrato (era dashed con label fluttuante)
+- Meal: tag "REFEZ" centrato in success container rounded rx=4
+- S.Comp: tag in warning container, border-l arancio
+- Station capolinea: font piu piccolo, troncate 3 char uppercase se
+  lunghe, Y al centro del nuovo blocco (era fluttuante alto)
+
+DayCard:
+- Header stile Stitch: chevron + title "Giornata {N} · {periodicita}"
+  + subtitle ("Servizio feriale/festivo/ordinario" · orario) +
+  metrics strip (Cct/Km/Rip) + "DURATA TOTALE" mono + menu ⋮
+- Derive subtitle intelligente da day state
+- Toggle Gantt/Lista con lucide BarChart3/List (no emoji)
+
+### Step 2/3 — TrainDetailDrawer (commit `73ec185`)
+
+Sezione Origine/Destinazione:
+- Sostituisce "Percorso" a righe
+- Card tonal surface-container-low con inset ghost border
+- Layout Stitch: ORIGINE eyebrow + station bold + time mono a sx,
+  arrow brand nel mezzo, DESTINAZIONE + station + time a dx
+- Chip sotto divisore ghost: Vettura/Accessori/min. accessori
+
+Sezione Giro Materiale (MaterialCard ridisegnato):
+- Da compact mono row a button-card grande con:
+  - Label "PRECEDENTE"/"SUCCESSIVO" uppercase brand
+  - train_id mono bold 13px
+  - handoffLabel "Arr./Part. {stazione} {orario}"
+- Hover: inset ring brand 40%
+
+Sezione Altri Turni Associati:
+- Rename da "Guidato da turni PdC"
+- Row con kinetic dot verde sul primo (attivo) + halo box-shadow
+- "Turno PdC:" + codice mono + g{N} + periodicita compact
+- Chip "→ {next}" handoff success-container
+
+### Step 3/3 — Editor shell (questo commit)
+
+TurnDetail ristrutturato come shell Stitch:
+
+Top bar sticky (top-0 z-10):
+- Eyebrow "EDITOR TURNO" brand + codice mono 18px extrabold
+- Separator vertical ghost
+- Metadata columns (3): Impianto (Building2) | Profilo | Data Validità (Calendar, mono)
+- Bottone "Vista deposito" brand subtle a destra
+
+Canvas (flex-1 overflow-y-auto):
+- Title "Giornate Turno" display 20px + chip "Attivo" brand + chip "{N} blocchi" success
+- Day cards list (spacing 3)
+- Note periodicita in sezione collapsed sotto, con tonal container
+
+Footer sticky (bottom-0 z-10):
+- Sinistra: bottone "Elimina" destructive (minimal hover)
+- Centro: Legenda 4 swatches (Guida brand, Vuota slate, Refez verde, S.Comp arancio)
+- Destra: CTA primaria "MODIFICA TURNO" gradient-primary uppercase
+
+Container PdcPage detail panel: overflow-hidden + flex-col per permettere
+al canvas interno di scrollare senza spingere fuori top bar/footer.
+
+Componenti helper inline (stessi file): TopBarField, StatusChip,
+LegendSwatch, MetricInline, ViewToggle.
+
+Tutte le funzionalita preservate:
+- Click blocco → drawer (con richer content Step 2)
+- Drag/resize/cross-day drop (PdcGanttV2 interno)
+- Elimina turno (footer), Modifica turno (footer → navigate /pdc/edit)
+- Vista deposito (top bar → navigate /pdc/depot/{impianto})
+- Note periodicita espandibili (details/summary)
+
+Build: JS 471 → 477 KB (+6 KB per shell), CSS 61 KB stabile.
+
+---
+
 ## 2026-04-19 — DS copertura completa: Login + Settings + PdcBuilder + PdcDepot + Builder
 
 Estesa la coverage del design system alle 5 pagine ancora sullo stile

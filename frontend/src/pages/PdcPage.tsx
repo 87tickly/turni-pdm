@@ -491,139 +491,312 @@ function TurnDetail({
   onDepotView: () => void
 }) {
   const t = detail.turn
+  const totalBlocks = detail.days.reduce((acc, d) => acc + (d.blocks?.length || 0), 0)
+
   return (
-    <div>
-      {/* Header */}
+    <div className="flex flex-col h-full">
+      {/* ── TOP BAR Editor (stile Stitch header) ─────────────── */}
       <div
-        className="mb-4 pb-3"
-        style={{ boxShadow: "inset 0 -1px 0 var(--color-ghost)" }}
+        className="sticky top-0 z-10 flex items-center flex-wrap gap-x-6 gap-y-2 px-5 py-3"
+        style={{
+          backgroundColor: "var(--color-surface-container-lowest)",
+          boxShadow: "0 1px 0 var(--color-ghost)",
+        }}
       >
-        <div
-          className="text-[10px] font-bold uppercase mb-1"
-          style={{
-            color: "var(--color-on-surface-quiet)",
-            letterSpacing: "0.12em",
-          }}
-        >
-          Turno PdC
-        </div>
-        <div className="flex items-center gap-2 mb-1 flex-wrap">
-          <h3
-            className="text-lg font-bold"
+        <div className="flex flex-col">
+          <span
+            className="text-[10px] font-bold uppercase"
+            style={{
+              color: "var(--color-brand)",
+              letterSpacing: "0.12em",
+            }}
+          >
+            Editor Turno
+          </span>
+          <span
+            className="font-extrabold tracking-tight"
             style={{
               fontFamily: "var(--font-mono)",
+              fontSize: "18px",
               color: "var(--color-on-surface-strong)",
             }}
           >
             {t.codice}
-          </h3>
-          <span
-            className="text-[11px]"
-            style={{
-              fontFamily: "var(--font-mono)",
-              color: "var(--color-on-surface-muted)",
-            }}
-          >
-            [{t.planning}]
           </span>
-          <span
-            className="text-[11px] px-2 py-0.5 rounded font-semibold"
+        </div>
+        <div
+          className="h-8 w-px hidden sm:block"
+          style={{ backgroundColor: "var(--color-ghost)" }}
+        />
+        <TopBarField label="Impianto" value={t.impianto} icon={Building2} />
+        <TopBarField label="Profilo" value={t.profilo} />
+        <TopBarField
+          label="Data Validità"
+          value={`${t.valid_from} → ${t.valid_to}`}
+          icon={Calendar}
+          mono
+        />
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={onDepotView}
+            className="text-[11.5px] font-bold px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors"
             style={{
               backgroundColor: "rgba(0, 98, 204, 0.10)",
               color: "var(--color-brand)",
             }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.backgroundColor =
+                "rgba(0, 98, 204, 0.18)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.backgroundColor =
+                "rgba(0, 98, 204, 0.10)")
+            }
+            title="Vista completa del deposito (tutti i turni + Gantt editabili)"
           >
-            {t.profilo}
-          </span>
-          <div className="ml-auto flex items-center gap-1">
-            <button
-              onClick={onDepotView}
-              className="text-[11px] px-2 py-1 rounded border border-primary/30 text-primary hover:bg-primary/10 flex items-center gap-1"
-              title="Vista completa del deposito (tutti i turni + Gantt editabili)"
-            >
-              <LayoutGrid size={11} /> Vista deposito
-            </button>
-            <button
-              onClick={onEdit}
-              className="text-[11px] px-2 py-1 rounded border border-border hover:bg-muted flex items-center gap-1"
-              title="Modifica turno"
-            >
-              <Edit size={11} /> Modifica
-            </button>
-            <button
-              onClick={onDelete}
-              className="text-[11px] px-2 py-1 rounded border border-destructive/30 text-destructive hover:bg-destructive/10 flex items-center gap-1"
-              title="Elimina turno"
-            >
-              <Trash2 size={11} /> Elimina
-            </button>
-          </div>
-        </div>
-        <div className="flex items-center gap-4 text-[12px] text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <Building2 size={12} />
-            {t.impianto}
-          </span>
-          <span className="flex items-center gap-1">
-            <Calendar size={12} />
-            {t.valid_from} → {t.valid_to}
-          </span>
+            <LayoutGrid size={12} strokeWidth={2} />
+            Vista deposito
+          </button>
         </div>
       </div>
 
-      {/* Giornate */}
-      <div className="mb-6">
-        <h4 className="text-[13px] font-semibold mb-2">
-          Giornate ({detail.days.length})
-        </h4>
-        <div className="space-y-2">
+      {/* ── CANVAS scrollable con Giornate Turno ──────────────── */}
+      <div className="flex-1 overflow-y-auto px-5 py-5">
+        <div className="flex items-center justify-between mb-5">
+          <h2
+            className="font-bold tracking-tight"
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: "20px",
+              letterSpacing: "-0.02em",
+              color: "var(--color-on-surface-strong)",
+            }}
+          >
+            Giornate Turno
+          </h2>
+          <div className="flex items-center gap-2">
+            <StatusChip
+              tone="brand"
+              label="Attivo"
+            />
+            <StatusChip
+              tone="success"
+              label={`${totalBlocks} blocchi`}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-3">
           {detail.days.map((d, i) => (
             <DayCard key={`${d.id}-${i}`} day={d} />
           ))}
         </div>
+
+        {/* Note periodicita — collassabile */}
+        {detail.notes.length > 0 && (
+          <div className="mt-6">
+            <h4
+              className="font-semibold mb-2"
+              style={{
+                fontFamily: "var(--font-display)",
+                fontSize: "13px",
+                color: "var(--color-on-surface-strong)",
+              }}
+            >
+              Note periodicità treni
+              <span
+                className="ml-2 text-[11px] font-normal"
+                style={{ color: "var(--color-on-surface-muted)" }}
+              >
+                ({detail.notes.length})
+              </span>
+            </h4>
+            <div
+              className="space-y-0.5 max-h-80 overflow-y-auto rounded-lg p-2"
+              style={{ backgroundColor: "var(--color-surface-container-low)" }}
+            >
+              {detail.notes.map((n) => (
+                <details
+                  key={n.id}
+                  className="text-[11px] rounded p-1.5 transition-colors hover:bg-[var(--color-surface-container-lowest)]"
+                >
+                  <summary className="cursor-pointer flex items-center gap-2">
+                    <span
+                      className="font-bold"
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        color: "var(--color-brand)",
+                      }}
+                    >
+                      Treno {n.train_id}
+                    </span>
+                    <span
+                      className="truncate flex-1"
+                      style={{ color: "var(--color-on-surface-muted)" }}
+                    >
+                      {n.periodicita_text}
+                    </span>
+                  </summary>
+                  <div className="mt-1 pl-4 text-[10px] font-mono">
+                    {n.non_circola_dates.length > 0 && (
+                      <p>
+                        <span style={{ color: "var(--color-destructive)" }}>
+                          Non circola:
+                        </span>{" "}
+                        {n.non_circola_dates.join(", ")}
+                      </p>
+                    )}
+                    {n.circola_extra_dates.length > 0 && (
+                      <p>
+                        <span style={{ color: "var(--color-success)" }}>
+                          Circola extra:
+                        </span>{" "}
+                        {n.circola_extra_dates.join(", ")}
+                      </p>
+                    )}
+                  </div>
+                </details>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Note periodicità */}
-      {detail.notes.length > 0 && (
-        <div>
-          <h4 className="text-[13px] font-semibold mb-2">
-            Note periodicità treni ({detail.notes.length})
-          </h4>
-          <div
-            className="space-y-0.5 max-h-96 overflow-y-auto rounded-lg p-2"
-            style={{ backgroundColor: "var(--color-surface-container-low)" }}
+      {/* ── FOOTER sticky (stile Stitch) ───────────────────────── */}
+      <div
+        className="sticky bottom-0 z-10 flex items-center justify-between gap-4 px-5 py-3"
+        style={{
+          backgroundColor: "var(--color-surface-container-lowest)",
+          boxShadow: "0 -1px 0 var(--color-ghost)",
+        }}
+      >
+        <div className="flex items-center gap-4">
+          <button
+            onClick={onDelete}
+            className="text-[12px] font-semibold px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors"
+            style={{ color: "var(--color-destructive)" }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.backgroundColor =
+                "var(--color-destructive-container)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.backgroundColor = "transparent")
+            }
+            title="Elimina questo turno"
           >
-            {detail.notes.map((n) => (
-              <details
-                key={n.id}
-                className="text-[11px] rounded p-1.5 transition-colors hover:bg-[var(--color-surface-container-lowest)]"
-              >
-                <summary className="cursor-pointer flex items-center gap-2">
-                  <span className="font-mono font-semibold">Treno {n.train_id}</span>
-                  <span className="text-muted-foreground truncate flex-1">
-                    {n.periodicita_text}
-                  </span>
-                </summary>
-                <div className="mt-1 pl-4 text-[10px] font-mono">
-                  {n.non_circola_dates.length > 0 && (
-                    <p>
-                      <span className="text-red-600">Non circola:</span>{" "}
-                      {n.non_circola_dates.join(", ")}
-                    </p>
-                  )}
-                  {n.circola_extra_dates.length > 0 && (
-                    <p>
-                      <span className="text-emerald-600">Circola extra:</span>{" "}
-                      {n.circola_extra_dates.join(", ")}
-                    </p>
-                  )}
-                </div>
-              </details>
-            ))}
-          </div>
+            <Trash2 size={12} strokeWidth={2} />
+            Elimina
+          </button>
         </div>
-      )}
+        <div className="flex items-center gap-4">
+          {/* Legenda colori */}
+          <div
+            className="hidden md:flex items-center gap-3 text-[10px] font-semibold"
+            style={{ color: "var(--color-on-surface-muted)" }}
+          >
+            <LegendSwatch color="var(--color-brand)" label="Guida" />
+            <LegendSwatch color="#E2E8F0" label="Vuota" />
+            <LegendSwatch color="#DCFCE7" label="Refez" />
+            <LegendSwatch color="#FFEDD5" label="S.Comp" />
+          </div>
+          {/* CTA primaria: Modifica turno */}
+          <button
+            onClick={onEdit}
+            className="text-[12px] font-bold px-5 py-2 rounded-md text-white uppercase transition-opacity hover:opacity-90 flex items-center gap-1.5"
+            style={{
+              background: "var(--gradient-primary)",
+              boxShadow: "var(--shadow-sm)",
+              letterSpacing: "0.05em",
+            }}
+            title="Modifica le giornate del turno"
+          >
+            <Edit size={12} strokeWidth={2} />
+            Modifica turno
+          </button>
+        </div>
+      </div>
     </div>
+  )
+}
+
+function TopBarField({
+  label,
+  value,
+  icon: Icon,
+  mono,
+}: {
+  label: string
+  value: string
+  icon?: typeof Building2
+  mono?: boolean
+}) {
+  return (
+    <div className="flex flex-col">
+      <span
+        className="text-[10px] font-semibold uppercase flex items-center gap-1"
+        style={{
+          color: "var(--color-on-surface-muted)",
+          letterSpacing: "0.08em",
+        }}
+      >
+        {Icon && <Icon size={10} strokeWidth={2} />}
+        {label}
+      </span>
+      <span
+        className="font-semibold"
+        style={{
+          fontSize: "13px",
+          color: "var(--color-on-surface-strong)",
+          fontFamily: mono ? "var(--font-mono)" : undefined,
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  )
+}
+
+function StatusChip({
+  tone,
+  label,
+}: {
+  tone: "brand" | "success"
+  label: string
+}) {
+  const map = {
+    brand: {
+      bg: "rgba(0, 98, 204, 0.10)",
+      fg: "var(--color-brand)",
+    },
+    success: {
+      bg: "var(--color-success-container)",
+      fg: "var(--color-success)",
+    },
+  }[tone]
+  return (
+    <span
+      className="px-2.5 py-1 text-[10px] font-bold uppercase rounded-full"
+      style={{
+        backgroundColor: map.bg,
+        color: map.fg,
+        letterSpacing: "0.08em",
+      }}
+    >
+      {label}
+    </span>
+  )
+}
+
+function LegendSwatch({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        aria-hidden="true"
+        className="w-2.5 h-2.5 rounded-sm"
+        style={{ backgroundColor: color }}
+      />
+      {label}
+    </span>
   )
 }
 
@@ -821,14 +994,16 @@ export function PdcPage() {
           />
         </div>
         <div
-          className="rounded-lg p-5 overflow-y-auto"
+          className="rounded-lg overflow-hidden flex flex-col"
           style={{
             backgroundColor: "var(--color-surface-container-lowest)",
             boxShadow: "var(--shadow-sm)",
           }}
         >
           {loadingDetail ? (
-            <p className="text-[12px] text-muted-foreground">Caricamento...</p>
+            <div className="flex items-center justify-center flex-1 p-5">
+              <p className="text-[12px] text-muted-foreground">Caricamento...</p>
+            </div>
           ) : detail ? (
             <TurnDetail
               detail={detail}
@@ -839,7 +1014,7 @@ export function PdcPage() {
               }
             />
           ) : (
-            <div className="h-full flex items-center justify-center text-center">
+            <div className="h-full flex items-center justify-center text-center p-5">
               <div>
                 <Train size={40} className="mx-auto text-muted-foreground/40 mb-2" />
                 <p className="text-[13px] text-muted-foreground">
