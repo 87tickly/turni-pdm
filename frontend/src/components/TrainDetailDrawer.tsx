@@ -190,32 +190,122 @@ export function TrainDetailDrawer({ block, mode, onClose }: Props) {
 
         {/* ── Body scrollable ── */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {/* ── 2. Trip (solo per treni con dati) ── */}
+          {/* ── 2. Origine/Destinazione card (stile Stitch) ── */}
           {block.block_type === "train" && !isNavigating && (
-            <Section title="Percorso" accent="muted">
-              {(block.from_station || block.to_station) && (
-                <Row
-                  k="Tratta"
-                  v={`${block.from_station || "—"} → ${block.to_station || "—"}`}
-                  mono
+            <div
+              className="rounded-md p-4"
+              style={{
+                backgroundColor: "var(--color-surface-container-low)",
+                boxShadow: "inset 0 0 0 1px var(--color-ghost)",
+              }}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div
+                    className="text-[10px] font-bold uppercase mb-0.5"
+                    style={{
+                      color: "var(--color-on-surface-muted)",
+                      letterSpacing: "0.1em",
+                    }}
+                  >
+                    Origine
+                  </div>
+                  <div
+                    className="font-bold truncate"
+                    style={{
+                      fontSize: "13px",
+                      color: "var(--color-on-surface-strong)",
+                    }}
+                  >
+                    {block.from_station || "—"}
+                  </div>
+                  <div
+                    className="text-[11px] mt-0.5"
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      color: "var(--color-on-surface-muted)",
+                    }}
+                  >
+                    {block.start_time || "—"}
+                  </div>
+                </div>
+                <ArrowRight
+                  size={18}
+                  strokeWidth={2}
+                  style={{ color: "var(--color-brand)" }}
+                  className="shrink-0"
                 />
+                <div className="min-w-0 text-right">
+                  <div
+                    className="text-[10px] font-bold uppercase mb-0.5"
+                    style={{
+                      color: "var(--color-on-surface-muted)",
+                      letterSpacing: "0.1em",
+                    }}
+                  >
+                    Destinazione
+                  </div>
+                  <div
+                    className="font-bold truncate"
+                    style={{
+                      fontSize: "13px",
+                      color: "var(--color-on-surface-strong)",
+                    }}
+                  >
+                    {block.to_station || "—"}
+                  </div>
+                  <div
+                    className="text-[11px] mt-0.5"
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      color: "var(--color-on-surface-muted)",
+                    }}
+                  >
+                    {block.end_time || "—"}
+                  </div>
+                </div>
+              </div>
+              {/* Chip info aggiuntive */}
+              {(block.vettura_id ||
+                block.accessori_maggiorati === 1 ||
+                block.minuti_accessori) && (
+                <div className="flex flex-wrap gap-1.5 mt-3 pt-3" style={{ borderTop: "1px solid var(--color-ghost)" }}>
+                  {block.vettura_id && (
+                    <span
+                      className="text-[10px] px-2 py-0.5 rounded font-mono"
+                      style={{
+                        backgroundColor: "var(--color-surface-container)",
+                        color: "var(--color-on-surface-muted)",
+                      }}
+                    >
+                      Vettura {block.vettura_id}
+                    </span>
+                  )}
+                  {block.accessori_maggiorati === 1 && (
+                    <span
+                      className="text-[10px] px-2 py-0.5 rounded font-semibold"
+                      style={{
+                        backgroundColor: "var(--color-warning-container)",
+                        color: "var(--color-warning)",
+                      }}
+                    >
+                      Accessori maggiorati
+                    </span>
+                  )}
+                  {block.minuti_accessori && (
+                    <span
+                      className="text-[10px] px-2 py-0.5 rounded font-mono"
+                      style={{
+                        backgroundColor: "var(--color-surface-container)",
+                        color: "var(--color-on-surface-muted)",
+                      }}
+                    >
+                      {block.minuti_accessori} min acc.
+                    </span>
+                  )}
+                </div>
               )}
-              <Row
-                k="Orario"
-                v={`${block.start_time || "—"} → ${block.end_time || "—"}`}
-                mono
-              />
-              {block.vettura_id && <Row k="Vettura" v={block.vettura_id} mono />}
-              {block.accessori_maggiorati === 1 && (
-                <Row k="Accessori" v="Maggiorati (preriscaldo)" warn />
-              )}
-              {block.minuti_accessori && (
-                <Row k="Min. accessori" v={block.minuti_accessori} mono />
-              )}
-              {block.fonte_orario && (
-                <Row k="Fonte orario" v={block.fonte_orario} mono />
-              )}
-            </Section>
+            </div>
           )}
 
           {/* ── Discrepanze warn ── */}
@@ -311,14 +401,14 @@ export function TrainDetailDrawer({ block, mode, onClose }: Props) {
                 </Section>
               )}
 
-              {/* ── 4. PdC Carriers con handoff indicator ── */}
+              {/* ── 4. Altri Turni Associati (Stitch: "GUIDATO DA TURNI PDC") ── */}
               {crossRef && crossRef.pdc_carriers.length > 0 && (
                 <Section
-                  title={`Guidato da turni PdC (${crossRef.pdc_carriers.length})`}
-                  accent="blue"
+                  title={`Altri turni associati (${crossRef.pdc_carriers.length})`}
+                  accent="muted"
                   icon={<Link2 size={12} />}
                 >
-                  <div className="max-h-40 overflow-y-auto space-y-1 text-[11px]">
+                  <div className="max-h-48 overflow-y-auto space-y-1.5">
                     {crossRef.pdc_carriers.map((c, i) => {
                       const next = crossRef.pdc_carriers[i + 1]
                       const isHandoff =
@@ -328,6 +418,7 @@ export function TrainDetailDrawer({ block, mode, onClose }: Props) {
                           key={i}
                           carrier={c}
                           handoffNext={isHandoff ? next.codice : undefined}
+                          isFirst={i === 0}
                         />
                       )
                     })}
@@ -450,34 +541,72 @@ function MaterialCard({
   onClick: () => void
 }) {
   const isPrev = direction === "prev"
+  // Stitch: button-card con label direzionale uppercase + train_id mono bold
+  // + stazione di handoff (arrivo per prev, partenza per next)
+  const handoffLabel = isPrev
+    ? `Arr. ${train.to_station || "?"} ${train.arr_time || ""}`
+    : `Part. ${train.from_station || "?"} ${train.dep_time || ""}`
   return (
     <button
       onClick={onClick}
-      className={cn(
-        "w-full flex items-center gap-2 text-[11px] font-mono",
-        "py-1.5 px-2 rounded-md",
-        "bg-[var(--color-surface-container-low)]",
-        "hover:bg-[var(--color-surface-container-high)]",
-        "transition-colors text-left"
-      )}
+      className="w-full p-3 rounded-md transition-all text-left flex items-center gap-3"
+      style={{
+        backgroundColor: "var(--color-surface-container-lowest)",
+        boxShadow: "inset 0 0 0 1px var(--color-ghost)",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.boxShadow =
+          "inset 0 0 0 1px rgba(0, 98, 204, 0.4)"
+        e.currentTarget.style.backgroundColor =
+          "var(--color-surface-container-low)"
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.boxShadow = "inset 0 0 0 1px var(--color-ghost)"
+        e.currentTarget.style.backgroundColor =
+          "var(--color-surface-container-lowest)"
+      }}
       title={`Apri dettaglio ${train.train_id}`}
     >
-      {isPrev ? (
-        <ArrowLeft size={11} className="text-emerald-700 shrink-0" />
-      ) : (
-        <ArrowRight size={11} className="text-emerald-700 shrink-0" />
+      {isPrev && (
+        <ArrowLeft
+          size={14}
+          style={{ color: "var(--color-on-surface-muted)" }}
+          className="shrink-0"
+        />
       )}
-      <span className="font-bold text-[var(--color-on-surface)]">
-        {train.train_id}
-      </span>
-      <span className="text-[var(--color-on-surface-muted)]">
-        {train.from_station || "?"} → {train.to_station || "?"}
-      </span>
-      {train.dep_time && (
-        <span className="text-[var(--color-on-surface-muted)] ml-auto">
-          {train.dep_time}
-          {train.arr_time && ` → ${train.arr_time}`}
-        </span>
+      <div className={cn("flex-1 min-w-0", !isPrev && "text-right")}>
+        <div
+          className="text-[10px] font-bold uppercase"
+          style={{
+            color: "var(--color-brand)",
+            letterSpacing: "0.1em",
+          }}
+        >
+          {isPrev ? "Precedente" : "Successivo"}
+        </div>
+        <div
+          className="font-bold truncate"
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "13px",
+            color: "var(--color-on-surface-strong)",
+          }}
+        >
+          {train.train_id}
+        </div>
+        <div
+          className="text-[10.5px] truncate mt-0.5"
+          style={{ color: "var(--color-on-surface-muted)" }}
+        >
+          {handoffLabel}
+        </div>
+      </div>
+      {!isPrev && (
+        <ArrowRight
+          size={14}
+          style={{ color: "var(--color-on-surface-muted)" }}
+          className="shrink-0"
+        />
       )}
     </button>
   )
@@ -486,42 +615,89 @@ function MaterialCard({
 function PdcCarrierRow({
   carrier,
   handoffNext,
+  isFirst,
 }: {
   carrier: TrainCrossRef["pdc_carriers"][number]
   handoffNext: string | undefined
+  isFirst?: boolean
 }) {
+  // Stitch "Altri Turni Associati": dot verde sul primo (attivo), grigio sugli altri
   return (
     <div
-      className={cn(
-        "py-1 px-2 rounded-md font-mono",
-        "bg-[var(--color-surface-container-low)]"
-      )}
+      className="flex items-center justify-between py-2 px-2.5 rounded-md transition-colors"
+      style={{
+        backgroundColor: "var(--color-surface-container-low)",
+      }}
+      onMouseEnter={(e) =>
+        (e.currentTarget.style.backgroundColor =
+          "var(--color-surface-container)")
+      }
+      onMouseLeave={(e) =>
+        (e.currentTarget.style.backgroundColor =
+          "var(--color-surface-container-low)")
+      }
     >
-      <div className="grid grid-cols-[auto_auto_1fr_auto] gap-2 items-center">
-        <span className="font-bold text-[var(--color-on-surface)]">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <span
+          className="w-2 h-2 rounded-full shrink-0"
+          style={{
+            backgroundColor: isFirst
+              ? "var(--color-dot)"
+              : "var(--color-on-surface-quiet)",
+            boxShadow: isFirst ? "0 0 0 3px rgba(34, 197, 94, 0.18)" : "none",
+          }}
+        />
+        <span
+          className="text-[12px] font-medium"
+          style={{ color: "var(--color-on-surface-strong)" }}
+        >
+          Turno PdC:
+        </span>
+        <span
+          className="font-bold"
+          style={{
+            fontFamily: "var(--font-mono)",
+            color: "var(--color-on-surface-strong)",
+            fontSize: "12px",
+          }}
+        >
           {carrier.codice}
         </span>
-        <span className="text-[var(--color-on-surface-muted)]">
-          g{carrier.day_number ?? "?"} {carrier.periodicita}
-        </span>
-        <span className="truncate text-[var(--color-on-surface-muted)]">
-          {carrier.from_station || "?"} → {carrier.to_station || "?"}
-        </span>
-        <span className="text-[var(--color-on-surface-muted)]">
-          {carrier.block_start || "--:--"}→{carrier.block_end || "--:--"}
+        <span
+          className="text-[10px] font-mono"
+          style={{ color: "var(--color-on-surface-muted)" }}
+        >
+          g{carrier.day_number ?? "?"} · {carrier.periodicita}
         </span>
       </div>
-      {handoffNext && (
-        <div
-          className={cn(
-            "mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px]",
-            "bg-[var(--color-success-container)] text-[var(--color-success)]"
-          )}
+      <div className="flex items-center gap-1.5 shrink-0">
+        {handoffNext && (
+          <span
+            className="text-[9.5px] px-1.5 py-0.5 rounded font-semibold"
+            style={{
+              backgroundColor: "var(--color-success-container)",
+              color: "var(--color-success)",
+            }}
+            title={`Handoff pulito verso ${handoffNext}`}
+          >
+            → {handoffNext}
+          </span>
+        )}
+        <span
+          className="text-[10px] font-bold uppercase"
+          style={{
+            color: "var(--color-on-surface-muted)",
+            letterSpacing: "0.05em",
+          }}
         >
-          <CheckCircle2 size={10} />
-          Handoff OK → {handoffNext}
-        </div>
-      )}
+          {carrier.impianto || carrier.to_station || ""}
+        </span>
+      </div>
+      {/* Hidden legacy nodes (backward compat riferimenti orari block_start/end) */}
+      <span className="hidden">
+        {carrier.from_station} {carrier.to_station}
+        {carrier.block_start || "--:--"}→{carrier.block_end || "--:--"}
+      </span>
     </div>
   )
 }
