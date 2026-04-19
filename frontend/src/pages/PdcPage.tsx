@@ -9,13 +9,15 @@ import {
   Coffee,
   Pause,
   Moon,
-  ChevronRight,
   ChevronDown,
   Info,
   Plus,
   Edit,
   Trash2,
   LayoutGrid,
+  BarChart3,
+  List as ListIcon,
+  MoreVertical,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PdcGanttV2 } from "@/components/PdcGanttV2"
@@ -218,100 +220,173 @@ function BlocksList({ blocks }: { blocks: PdcBlock[] }) {
   )
 }
 
-// ── Sottocomponente: giornata espandibile ───────────────────────
+// ── Sottocomponente: giornata espandibile (stile Stitch editor) ──
 
-function DayCard({ day }: { day: PdcDay }) {
-  const [open, setOpen] = useState(false)
+function dayTitleSubtitle(day: PdcDay): { title: string; subtitle: string } {
+  const periodBadge = day.periodicita ? ` · ${day.periodicita}` : ""
+  const title = `Giornata ${day.day_number}${periodBadge}`
+
+  if (day.is_disponibile === 1) {
+    return { title, subtitle: "Giornata di disponibilità · riposo" }
+  }
+  if (day.notturno === 1) {
+    return {
+      title,
+      subtitle: `Turno notturno · ${day.start_time || "—"} – ${day.end_time || "—"}`,
+    }
+  }
+  const p = day.periodicita || ""
+  let kind = "Servizio ordinario"
+  if (p === "S" || p === "SD") kind = "Servizio festivo ridotto"
+  else if (p === "D") kind = "Servizio domenica / festività"
+  else if (p.includes("L") || p.includes("M") || p.includes("V")) kind = "Servizio feriale"
+  return {
+    title,
+    subtitle: `${kind} · ${day.start_time || "—"} – ${day.end_time || "—"}`,
+  }
+}
+
+function DayCard({ day, open: externalOpen, onToggle }: {
+  day: PdcDay
+  open?: boolean
+  onToggle?: () => void
+}) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = externalOpen ?? internalOpen
+  const toggle = onToggle ?? (() => setInternalOpen((o) => !o))
   const [viewMode, setViewMode] = useState<"gantt-v2" | "list">("gantt-v2")
   const [detailModal, setDetailModal] = useState<{
     block: PdcBlock
     index: number
     mode: "detail" | "warn"
   } | null>(null)
+
+  const { title, subtitle } = dayTitleSubtitle(day)
+  const durata = day.is_disponibile === 1 ? "—" : fmtHm(day.lavoro_min)
+
   return (
     <div
-      className="rounded-lg overflow-hidden"
+      className="rounded-lg overflow-hidden transition-shadow"
       style={{
         backgroundColor: "var(--color-surface-container-lowest)",
         boxShadow: "var(--shadow-sm)",
       }}
     >
       <button
-        className="w-full flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-[var(--color-surface-container-low)]"
-        onClick={() => setOpen(!open)}
+        type="button"
+        className="w-full flex items-center gap-4 px-4 py-3 transition-colors hover:bg-[var(--color-surface-container-low)] text-left"
+        onClick={toggle}
       >
-        {open ? (
-          <ChevronDown size={14} className="text-muted-foreground" />
-        ) : (
-          <ChevronRight size={14} className="text-muted-foreground" />
-        )}
-        <span className="font-mono font-bold text-[13px] w-8">g{day.day_number}</span>
-        <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground">
-          {day.periodicita}
+        {/* Chevron expand */}
+        <span
+          className="shrink-0 transition-transform"
+          style={{
+            color: "var(--color-on-surface-muted)",
+            transform: open ? "rotate(0deg)" : "rotate(-90deg)",
+          }}
+        >
+          <ChevronDown size={16} strokeWidth={2} />
         </span>
-        {day.is_disponibile === 1 ? (
-          <span className="text-[11px] text-slate-500 italic">Disponibile</span>
-        ) : (
-          <span className="text-[11px] font-mono">
-            {day.start_time || "—"} – {day.end_time || "—"}
-          </span>
-        )}
-        <div className="ml-auto flex items-center gap-3 text-[11px] font-mono">
-          <span title="Lavoro">
-            <span className="text-muted-foreground">Lav</span> {fmtHm(day.lavoro_min)}
-          </span>
-          <span title="Condotta">
-            <span className="text-muted-foreground">Cct</span> {fmtHm(day.condotta_min)}
-          </span>
-          <span title="Km">
-            <span className="text-muted-foreground">Km</span> {day.km}
-          </span>
-          {day.notturno === 1 && (
-            <span title="Notturno" className="text-indigo-600">
-              <Moon size={11} className="inline" />
-            </span>
-          )}
-          <span title="Riposo successivo">
-            <span className="text-muted-foreground">Rip</span> {fmtHm(day.riposo_min)}
-          </span>
+
+        {/* Title + subtitle (stile Stitch) */}
+        <div className="min-w-0 flex-1">
+          <div
+            className="font-bold truncate"
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: "14px",
+              color: "var(--color-on-surface-strong)",
+              letterSpacing: "-0.01em",
+            }}
+          >
+            {title}
+            {day.notturno === 1 && (
+              <Moon
+                size={12}
+                className="inline-block ml-2 -mt-0.5"
+                style={{ color: "var(--color-brand)" }}
+              />
+            )}
+          </div>
+          <div
+            className="text-[11px] truncate mt-0.5"
+            style={{ color: "var(--color-on-surface-muted)" }}
+          >
+            {subtitle}
+          </div>
         </div>
+
+        {/* Metrics strip (dispatcher data) */}
+        {day.is_disponibile !== 1 && (
+          <div className="shrink-0 hidden md:flex items-center gap-4 text-[11px]">
+            <MetricInline label="Cct" value={fmtHm(day.condotta_min)} />
+            <MetricInline label="Km" value={day.km ? String(day.km) : "—"} />
+            <MetricInline label="Rip" value={fmtHm(day.riposo_min)} />
+          </div>
+        )}
+
+        {/* Durata totale (Stitch style) */}
+        <div className="shrink-0 text-right">
+          <div
+            className="text-[9.5px] font-bold uppercase"
+            style={{
+              color: "var(--color-on-surface-quiet)",
+              letterSpacing: "0.12em",
+            }}
+          >
+            Durata totale
+          </div>
+          <div
+            className="font-bold"
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "15px",
+              color: "var(--color-on-surface-strong)",
+            }}
+          >
+            {durata}
+          </div>
+        </div>
+
+        {/* Menu ⋮ (rimpiazza l'action bar 8-icone del Gantt) */}
+        <span
+          className="p-1 rounded hover:bg-[var(--color-surface-container)]"
+          style={{ color: "var(--color-on-surface-quiet)" }}
+          onClick={(e) => e.stopPropagation()}
+          title="Opzioni giornata"
+        >
+          <MoreVertical size={15} />
+        </span>
       </button>
+
       {open && (
         <div
-          className="px-3 pb-3 pt-3"
+          className="px-4 pb-4 pt-3"
           style={{ backgroundColor: "var(--color-surface-container-low)" }}
         >
           {day.is_disponibile === 1 ? (
-            <p className="text-[11px] text-muted-foreground italic text-center py-2">
-              Giornata disponibile (riposo / disponibilità)
-            </p>
+            <div
+              className="text-[12px] italic text-center py-4"
+              style={{ color: "var(--color-on-surface-muted)" }}
+            >
+              Giornata di disponibilità — nessun servizio programmato
+            </div>
           ) : (
             <>
-              {/* Toggle vista */}
-              <div className="flex items-center justify-end gap-1 mb-2">
-                <button
-                  className={cn(
-                    "text-[10px] px-2 py-0.5 rounded",
-                    viewMode === "gantt-v2"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
-                  )}
+              {/* Toggle vista (icone lucide al posto degli emoji) */}
+              <div className="flex items-center justify-end gap-1 mb-3">
+                <ViewToggle
+                  active={viewMode === "gantt-v2"}
                   onClick={() => setViewMode("gantt-v2")}
-                  title="Gantt (MDL-PdC v1.0)"
-                >
-                  📊 Gantt
-                </button>
-                <button
-                  className={cn(
-                    "text-[10px] px-2 py-0.5 rounded",
-                    viewMode === "list"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
-                  )}
+                  icon={BarChart3}
+                  label="Gantt"
+                />
+                <ViewToggle
+                  active={viewMode === "list"}
                   onClick={() => setViewMode("list")}
-                >
-                  📋 Lista
-                </button>
+                  icon={ListIcon}
+                  label="Lista"
+                />
               </div>
               {viewMode === "gantt-v2" ? (
                 <PdcGanttV2
@@ -319,12 +394,7 @@ function DayCard({ day }: { day: PdcDay }) {
                   startTime={day.start_time}
                   endTime={day.end_time}
                   label={`g${day.day_number} ${day.periodicita}`}
-                  // PdcPage e' sola lettura: UX semplificata — single-click
-                  // su un blocco apre direttamente la modal dettaglio
-                  // (bypassa l'action bar con 8 icone, utile solo in
-                  // builder/depot dove edit/move/duplicate/delete sono
-                  // attive). Qui detail/warn/history sono le uniche azioni
-                  // sensate, quindi ci arriviamo in un click.
+                  hideActionBar
                   onBlockClick={(block, idx) => {
                     setDetailModal({ block, index: idx, mode: "detail" })
                   }}
@@ -332,13 +402,8 @@ function DayCard({ day }: { day: PdcDay }) {
                     if (act === "detail" || act === "warn") {
                       setDetailModal({ block, index: idx, mode: act })
                     } else if (act === "history") {
-                      // Storico ritardi: usa il modale detail che gia' mostra
-                      // dati ARTURO Live (delay, stato corrente). In futuro
-                      // separeremo un modale dedicato al grafico 30gg.
                       setDetailModal({ block, index: idx, mode: "detail" })
                     }
-                    // PdcPage e' sola lettura: edit/delete/duplicate/move/link
-                    // non disponibili qui (vedi builder/depot).
                   }}
                 />
               ) : (
@@ -358,6 +423,57 @@ function DayCard({ day }: { day: PdcDay }) {
         />
       )}
     </div>
+  )
+}
+
+function MetricInline({ label, value }: { label: string; value: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1"
+      style={{ fontFamily: "var(--font-mono)" }}
+    >
+      <span
+        className="text-[9.5px] font-bold uppercase"
+        style={{
+          color: "var(--color-on-surface-quiet)",
+          letterSpacing: "0.08em",
+        }}
+      >
+        {label}
+      </span>
+      <span style={{ color: "var(--color-on-surface-strong)", fontWeight: 600 }}>
+        {value}
+      </span>
+    </span>
+  )
+}
+
+function ViewToggle({
+  active,
+  onClick,
+  icon: Icon,
+  label,
+}: {
+  active: boolean
+  onClick: () => void
+  icon: typeof BarChart3
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded transition-colors"
+      style={{
+        backgroundColor: active
+          ? "var(--color-brand)"
+          : "var(--color-surface-container)",
+        color: active ? "#ffffff" : "var(--color-on-surface-muted)",
+      }}
+    >
+      <Icon size={11} strokeWidth={2} />
+      {label}
+    </button>
   )
 }
 

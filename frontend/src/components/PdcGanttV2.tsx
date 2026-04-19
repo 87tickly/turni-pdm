@@ -100,6 +100,13 @@ interface PdcGanttV2Props {
   snapMinutes?: number
   dragThresholdPx?: number
   debug?: boolean
+  /**
+   * Nasconde l'action bar 8-icone che appare sopra il blocco selezionato.
+   * Utile in PdcPage (sola lettura): l'unica azione sensata e' "detail",
+   * raggiunta direttamente via single-click → drawer. In PdcBuilderPage e
+   * PdcDepotPage l'action bar resta visibile (edit/move/duplicate/delete).
+   */
+  hideActionBar?: boolean
 }
 
 // ============================================================
@@ -134,13 +141,13 @@ const ORIGIN_X = 30
 const AXIS_WIDTH = SPAN_HOURS * PX_PER_HOUR
 const TOTAL_WIDTH = ORIGIN_X + AXIS_WIDTH + ORIGIN_X
 
-// Y layout
+// Y layout (aggiornato per blocchi piu alti secondo design Stitch)
 const AXIS_Y = 130
-const BLOCK_Y = 95
-const BLOCK_H = 22
-const CHIP_Y_A = 78
-const CHIP_Y_B = 54
-const CHIP_Y_C = 30
+const BLOCK_Y = 88   // era 95, alzato per accogliere BLOCK_H=34
+const BLOCK_H = 34   // era 22 — Stitch mostra blocchi alti con tag+meta stacked
+const CHIP_Y_A = 72  // era 78 — rialzato di 6px per non sovrapporsi ai blocchi piu alti
+const CHIP_Y_B = 48
+const CHIP_Y_C = 24
 const MINUTES_MAIN_Y = 160
 const MINUTES_AUX_Y = 175  // riga accessori (minuti PDF ausiliari: 5/27/10)
 
@@ -337,6 +344,7 @@ export function PdcGanttV2({
   snapMinutes = 5,
   dragThresholdPx = 4,
   debug = false,
+  hideActionBar = false,
 }: PdcGanttV2Props) {
   const crossDayEnabled = !!ganttId && (!!onCrossDayDrop || !!onCrossDayRemove || !!onCrossDayDragStart)
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
@@ -815,20 +823,24 @@ export function PdcGanttV2({
 
         {leftStation && Number.isFinite(minStart) && (
           <text
-            x={minToX(minStart) - 10} y={BLOCK_Y + 16}
-            textAnchor="end" fontSize={11} fontWeight={700}
-            fill="#353a42" letterSpacing="0.04em" pointerEvents="none"
+            x={minToX(minStart) - 10} y={BLOCK_Y + BLOCK_H / 2 + 4}
+            textAnchor="end" fontSize={10} fontWeight={600}
+            fill="var(--color-on-surface-muted)" letterSpacing="0.04em"
+            fontFamily="ui-monospace, Menlo, monospace"
+            pointerEvents="none"
           >
-            {leftStation}
+            {leftStation.length > 10 ? leftStation.slice(0, 3).toUpperCase() : leftStation}
           </text>
         )}
         {rightStation && Number.isFinite(maxEnd) && (
           <text
-            x={minToX(maxEnd) + 10} y={BLOCK_Y + 16}
-            textAnchor="start" fontSize={11} fontWeight={700}
-            fill="#353a42" letterSpacing="0.04em" pointerEvents="none"
+            x={minToX(maxEnd) + 10} y={BLOCK_Y + BLOCK_H / 2 + 4}
+            textAnchor="start" fontSize={10} fontWeight={600}
+            fill="var(--color-on-surface-muted)" letterSpacing="0.04em"
+            fontFamily="ui-monospace, Menlo, monospace"
+            pointerEvents="none"
           >
-            {rightStation}
+            {rightStation.length > 10 ? rightStation.slice(0, 3).toUpperCase() : rightStation}
           </text>
         )}
 
@@ -851,12 +863,20 @@ export function PdcGanttV2({
           }
 
           if (b.block_type === "train") {
-            const showDest = w >= 85 && b.to_station
+            // Stitch: tag (train_id) + meta (from-to) stacked dentro al blocco
+            const showMeta = w >= 48 && (b.from_station || b.to_station)
+            const metaText = (() => {
+              if (!b.from_station && !b.to_station) return ""
+              const from = (b.from_station || "").slice(0, 2).toUpperCase()
+              const to = (b.to_station || "").slice(0, 2).toUpperCase()
+              if (from && to) return `${from}-${to}`
+              return from || to
+            })()
             return (
               <g key={idx}>
                 {/* Visual rect (NO listeners → eventi su foreignObject sotto) */}
                 <rect
-                  x={x} y={BLOCK_Y} width={w} height={BLOCK_H} rx={3}
+                  x={x} y={BLOCK_Y} width={w} height={BLOCK_H} rx={4}
                   fill="url(#pdcGanttV2-trainGradient)"
                   stroke={isSel ? DS.selectionDot : "rgba(255,255,255,0.18)"}
                   strokeWidth={isSel ? 2 : 0.5}
@@ -865,26 +885,48 @@ export function PdcGanttV2({
                     : "drop-shadow(0 1px 2px rgba(0,75,159,0.18))"}
                   pointerEvents="none"
                 />
+                {/* Border-l brand piu scuro (accento verticale Stitch) */}
                 <rect
-                  x={x} y={BLOCK_Y} width={w} height={BLOCK_H / 2} rx={3}
-                  fill="#ffffff" fillOpacity={0.08} pointerEvents="none"
+                  x={x} y={BLOCK_Y} width={2.5} height={BLOCK_H} rx={1}
+                  fill={DS.brandDeep} pointerEvents="none"
                 />
-                <text
-                  x={showDest ? x + 6 : x + w / 2} y={BLOCK_Y + 14}
-                  textAnchor={showDest ? "start" : "middle"}
-                  fontFamily="ui-monospace, Menlo, monospace"
-                  fontSize={w < 40 ? 9 : 10.5} fontWeight={700}
-                  fill="#ffffff" pointerEvents="none"
-                >
-                  {b.train_id}
-                </text>
-                {showDest && (
+                {/* Highlight top 1/3 per effetto glass */}
+                <rect
+                  x={x} y={BLOCK_Y} width={w} height={BLOCK_H / 3} rx={4}
+                  fill="#ffffff" fillOpacity={0.10} pointerEvents="none"
+                />
+                {/* Tag (train_id) + meta (from-to) stacked */}
+                {showMeta ? (
+                  <>
+                    <text
+                      x={x + w / 2} y={BLOCK_Y + 13}
+                      textAnchor="middle"
+                      fontFamily="ui-monospace, Menlo, monospace"
+                      fontSize={w < 55 ? 9.5 : 10.5} fontWeight={700}
+                      fill="#ffffff" pointerEvents="none"
+                    >
+                      {b.train_id}
+                    </text>
+                    <text
+                      x={x + w / 2} y={BLOCK_Y + 25}
+                      textAnchor="middle"
+                      fontFamily="ui-monospace, Menlo, monospace"
+                      fontSize={8.5} fontWeight={500}
+                      fill="rgba(255,255,255,0.82)" pointerEvents="none"
+                      letterSpacing="0.05em"
+                    >
+                      {metaText}
+                    </text>
+                  </>
+                ) : (
                   <text
-                    x={x + w - 6} y={BLOCK_Y + 14} textAnchor="end"
-                    fontFamily="system-ui, sans-serif" fontSize={8.5}
-                    fontWeight={500} fill="rgba(255,255,255,0.7)" pointerEvents="none"
+                    x={x + w / 2} y={BLOCK_Y + BLOCK_H / 2 + 4}
+                    textAnchor="middle"
+                    fontFamily="ui-monospace, Menlo, monospace"
+                    fontSize={w < 30 ? 8.5 : 10} fontWeight={700}
+                    fill="#ffffff" pointerEvents="none"
                   >
-                    → {b.to_station}
+                    {b.train_id}
                   </text>
                 )}
                 {b.accessori_maggiorati ? (
@@ -976,28 +1018,26 @@ export function PdcGanttV2({
           }
 
           if (b.block_type === "coach_transfer") {
+            // Stitch "VUOTA": solid slate-200, border-l-2 slate-500, tag centrato
+            const vuotaId = b.vettura_id || b.train_id
             return (
               <g key={idx}>
-                <rect x={x} y={BLOCK_Y + 6} width={w} height={BLOCK_H - 12}
-                      fill={DS.vettBg} rx={2} pointerEvents="none" />
-                <rect x={x} y={BLOCK_Y + 6} width={w} height={BLOCK_H - 12}
-                      fill="none" stroke={isSel ? DS.brandRing : DS.vettStroke}
-                      strokeWidth={isSel ? 1.8 : 1.2} strokeDasharray="3 2" rx={2}
+                <rect x={x} y={BLOCK_Y} width={w} height={BLOCK_H} rx={4}
+                      fill="#E2E8F0"
+                      stroke={isSel ? DS.brandRing : "none"}
+                      strokeWidth={isSel ? 1.8 : 0}
                       style={{ cursor: draggable ? "grab" : "pointer" }}
                       {...baseHandlers}
                       onMouseDown={(e) => draggable && startDrag(e, idx, "move")} />
-                <line x1={x + w / 2} y1={chipY + 4} x2={x + w / 2} y2={BLOCK_Y + 5}
-                      stroke={DS.vettStroke} strokeWidth={0.8} strokeDasharray="1 1.5"
-                      pointerEvents="none" />
-                <text x={x + w / 2} y={chipY} textAnchor="middle"
-                      fontFamily="ui-monospace, Menlo, monospace" fontSize={9.5}
-                      fontWeight={500} fontStyle="italic" fill={DS.vettFg}
+                {/* Border-l slate-500 accento verticale */}
+                <rect x={x} y={BLOCK_Y} width={2.5} height={BLOCK_H} rx={1}
+                      fill="#64748B" pointerEvents="none" />
+                <text x={x + w / 2} y={BLOCK_Y + BLOCK_H / 2 + 4}
+                      textAnchor="middle"
+                      fontFamily="ui-monospace, Menlo, monospace" fontSize={10}
+                      fontWeight={700} fill="#334155" letterSpacing="0.05em"
                       pointerEvents="none">
-                  ({b.vettura_id || b.train_id}
-                  {b.to_station && (
-                    <tspan fill={DS.vettFg} fillOpacity={0.7} fontSize={8.5}
-                           fontWeight={400} dx="3">{b.to_station}</tspan>
-                  )}
+                  {w >= 55 && vuotaId ? `VUOTA ${vuotaId}` : "VUOTA"}
                 </text>
                 <text x={x} y={MINUTES_MAIN_Y} textAnchor="middle"
                       fontFamily="ui-monospace, Menlo, monospace" fontSize={9.5}
@@ -1023,25 +1063,26 @@ export function PdcGanttV2({
           }
 
           if (b.block_type === "meal") {
+            // Stitch: bg success-container (verde soft), tag REFEZ centrato,
+            // border-l emerald per accento verticale
             return (
               <g key={idx}>
-                <rect x={x} y={BLOCK_Y + 6} width={w} height={BLOCK_H - 12}
-                      fill={DS.mealBg} stroke={isSel ? DS.brandRing : DS.mealStroke}
-                      strokeWidth={isSel ? 1.8 : 1.2} rx={2}
+                <rect x={x} y={BLOCK_Y} width={w} height={BLOCK_H} rx={4}
+                      fill={DS.mealBg}
+                      stroke={isSel ? DS.brandRing : "none"}
+                      strokeWidth={isSel ? 1.8 : 0}
                       style={{ cursor: draggable ? "grab" : "pointer" }}
                       {...baseHandlers}
                       onMouseDown={(e) => draggable && startDrag(e, idx, "move")} />
-                <line x1={x + w / 2} y1={chipY + 4} x2={x + w / 2} y2={BLOCK_Y + 5}
-                      stroke={DS.mealFg} strokeWidth={0.8} strokeDasharray="1 1.5"
-                      pointerEvents="none" />
-                <text x={x + w / 2} y={chipY} textAnchor="middle"
-                      fontFamily="ui-monospace, Menlo, monospace" fontSize={9.5}
-                      fontWeight={700} fill={DS.mealFg} pointerEvents="none">
+                {/* Border-l verde accento verticale */}
+                <rect x={x} y={BLOCK_Y} width={2.5} height={BLOCK_H} rx={1}
+                      fill={DS.mealStroke} pointerEvents="none" />
+                <text x={x + w / 2} y={BLOCK_Y + BLOCK_H / 2 + 4}
+                      textAnchor="middle"
+                      fontFamily="ui-monospace, Menlo, monospace" fontSize={10}
+                      fontWeight={700} fill={DS.mealFg} letterSpacing="0.05em"
+                      pointerEvents="none">
                   REFEZ
-                  {b.from_station && (
-                    <tspan fill={DS.mealFg} fillOpacity={0.7} fontSize={8.5}
-                           fontWeight={400} dx="3">{b.from_station}</tspan>
-                  )}
                 </text>
                 <text x={x} y={MINUTES_MAIN_Y} textAnchor="middle"
                       fontFamily="ui-monospace, Menlo, monospace" fontSize={9.5}
@@ -1108,18 +1149,21 @@ export function PdcGanttV2({
           if (b.block_type === "scomp") {
             return (
               <g key={idx}>
-                <rect x={x} y={BLOCK_Y + 4} width={w} height={BLOCK_H - 8}
-                      fill={DS.scompBg} fillOpacity={0.85}
-                      stroke={isSel ? DS.brandRing : DS.scompStroke}
-                      strokeWidth={isSel ? 1.6 : 1} strokeDasharray="3 2" rx={3}
+                <rect x={x} y={BLOCK_Y} width={w} height={BLOCK_H} rx={4}
+                      fill={DS.scompBg}
+                      stroke={isSel ? DS.brandRing : "none"}
+                      strokeWidth={isSel ? 1.8 : 0}
                       style={{ cursor: draggable ? "grab" : "pointer" }}
                       {...baseHandlers}
                       onMouseDown={(e) => draggable && startDrag(e, idx, "move")} />
+                {/* Border-l warning accento verticale */}
+                <rect x={x} y={BLOCK_Y} width={2.5} height={BLOCK_H} rx={1}
+                      fill={DS.scompStroke} pointerEvents="none" />
                 <text x={x + w / 2} y={BLOCK_Y + BLOCK_H / 2 + 4} textAnchor="middle"
                       fontFamily="ui-monospace, Menlo, monospace" fontSize={10}
-                      fontWeight={700} fill={DS.scompFg} letterSpacing="0.06em"
+                      fontWeight={700} fill={DS.scompFg} letterSpacing="0.05em"
                       pointerEvents="none">
-                  S.COMP {b.from_station || ""}
+                  {w >= 60 && b.from_station ? `S.COMP ${b.from_station}` : "S.COMP"}
                 </text>
                 <text x={x} y={MINUTES_MAIN_Y} textAnchor="middle"
                       fontFamily="ui-monospace, Menlo, monospace" fontSize={9.5}
@@ -1159,7 +1203,7 @@ export function PdcGanttV2({
             Posizionata dinamicamente sopra il blocco, clampata
             ai bordi del viewBox. 8 icone + 3 separatori.
             =================================================== */}
-        {selectedIdx !== null && blocks[selectedIdx] && (() => {
+        {!hideActionBar && selectedIdx !== null && blocks[selectedIdx] && (() => {
           const b = blocks[selectedIdx]
           const sm = hhmmToMinutesRel(b.start_time || "")
           if (sm === null) return null
