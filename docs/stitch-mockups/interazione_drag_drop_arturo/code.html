@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+
+<html class="light" lang="it"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700;800;900&amp;family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary": "#0062CC",
+                        "background": "#F7F8FA",
+                        "surface": "#FFFFFF",
+                        "border": "#E2E8F0",
+                        "text-main": "#1E293B",
+                        "text-muted": "#64748B",
+                        "success": "#16A34A",
+                        "success-dot": "#22C55E",
+                        "warning": "#EAB308",
+                        "error": "#DC2626",
+                        "active-bg": "rgba(0, 98, 204, 0.08)"
+                    },
+                    "borderRadius": {
+                        "sm": "6px",
+                        "md": "8px",
+                        "lg": "10px",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "sans": ["Exo 2", "Inter", "sans-serif"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    },
+                    "fontSize": {
+                        "xs": ["11px", "1.4"],
+                        "sm": ["13px", "1.5"],
+                        "base": ["14px", "1.5"],
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+        }
+        body { 
+            font-family: 'Exo 2', sans-serif;
+            background-color: #F7F8FA;
+            font-size: 13px;
+        }
+        .mono-font { font-family: 'JetBrains Mono', monospace; }
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(8px);
+        }
+        .custom-shadow {
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+        }
+        .sidebar-item-active {
+            background-color: rgba(0, 98, 204, 0.08);
+            color: #0062CC;
+        }
+    </style>
+</head>
+<body class="text-text-main flex h-screen overflow-hidden">
+<!-- SideNavBar: Width 224px -->
+<aside class="h-screen w-[224px] fixed left-0 top-0 bg-surface border-r border-border flex flex-col py-6 z-50">
+<div class="px-6 mb-8">
+<div class="flex items-center gap-2">
+<span class="text-xl font-black tracking-tighter text-primary">ARTURO<span class="text-success-dot">·</span></span>
+</div>
+<p class="text-xs text-text-muted font-semibold mt-1 uppercase tracking-wider">Gestione Turni</p>
+</div>
+<nav class="flex-1 px-3 space-y-1">
+<a class="flex items-center gap-3 px-4 py-2.5 text-text-muted hover:bg-gray-50 transition-all rounded-md" href="#">
+<span class="material-symbols-outlined">map</span>
+<span class="font-medium">Mappa Live</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2.5 sidebar-item-active font-semibold rounded-md" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">calendar_today</span>
+<span class="font-medium">Turno PdC</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2.5 text-text-muted hover:bg-gray-50 transition-all rounded-md" href="#">
+<span class="material-symbols-outlined">group</span>
+<span class="font-medium">Giornata</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2.5 text-text-muted hover:bg-gray-50 transition-all rounded-md" href="#">
+<span class="material-symbols-outlined">train</span>
+<span class="font-medium">Giro materiale</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2.5 text-text-muted hover:bg-gray-50 transition-all rounded-md" href="#">
+<span class="material-symbols-outlined">history</span>
+<span class="font-medium">Archivio</span>
+</a>
+</nav>
+<div class="px-3 mt-auto space-y-1 pt-6 border-t border-border">
+<a class="flex items-center gap-3 px-4 py-2.5 text-text-muted hover:bg-gray-50 transition-all rounded-md" href="#">
+<span class="material-symbols-outlined">help</span>
+<span class="font-medium">Supporto</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2.5 text-text-muted hover:bg-gray-50 transition-all rounded-md" href="#">
+<span class="material-symbols-outlined">logout</span>
+<span class="font-medium">Logout</span>
+</a>
+</div>
+</aside>
+<!-- Main Content -->
+<main class="ml-[224px] flex-1 flex flex-col h-screen relative bg-background overflow-hidden">
+<!-- TopAppBar -->
+<header class="w-full h-14 sticky top-0 z-40 bg-surface flex justify-between items-center px-6 border-b border-border">
+<div class="flex items-center gap-8">
+<h2 class="text-base font-bold text-text-main">The Precision Conductor</h2>
+<nav class="hidden lg:flex items-center gap-6">
+<a class="text-text-muted font-medium hover:text-primary transition-colors" href="#">CVp/CVa</a>
+<a class="text-primary border-b-2 border-primary h-14 flex items-center px-1 font-bold" href="#">Orari</a>
+<a class="text-text-muted font-medium hover:text-primary transition-colors" href="#">ACCp/ACCa</a>
+<a class="text-text-muted font-medium hover:text-primary transition-colors" href="#">Analisi</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="relative">
+<input class="bg-background border border-border rounded-md px-4 py-1.5 text-sm w-56 focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all" placeholder="Cerca ID treno..." type="text"/>
+<span class="material-symbols-outlined absolute right-3 top-2 text-text-muted text-lg">search</span>
+</div>
+<button class="p-1.5 text-text-muted hover:bg-gray-100 rounded-md">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<div class="h-8 w-8 rounded-full bg-gray-200 overflow-hidden ml-2 border border-border">
+<img alt="Profilo" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCiF2eF2i0-b95h0xY-xWt-v3CsrCgoe1obI5JDRwgeVACcgZEcDmE6qFULLUMYBMHqDkqze5sQ2jK8zksXy75z1MacBhg6yFnXPxXr_480Wqqkivxf68DqcfcZW4SK9YazpLE130DkIXqcFT8CkZvdzd4unSo9Pwhya7sJW0AVZJ8UeRNoAMon5Wmr2VMACMQsztdmQYvlPJ5fmNFfjWQQ53Lm1ZM4YXqr2otE0mN4vxoiGHcaWK918qqyZ2cekZvY44e_e7VdS-E"/>
+</div>
+</div>
+</header>
+<!-- Workspace -->
+<div class="flex-1 flex overflow-hidden p-4 gap-4">
+<!-- Central Viewport -->
+<div class="flex-1 flex flex-col bg-surface border border-border rounded-md overflow-hidden custom-shadow">
+<!-- Header -->
+<div class="px-5 py-3 flex items-center justify-between border-b border-border bg-gray-50/50">
+<div class="flex items-center gap-4">
+<h3 class="text-base font-bold">Lunedì - LMXGV</h3>
+<div class="flex bg-gray-200/50 p-0.5 rounded-sm">
+<button class="px-3 py-1 text-xs font-bold bg-white rounded shadow-sm">Timeline</button>
+<button class="px-3 py-1 text-xs font-medium text-text-muted">Griglia</button>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<span class="text-xs font-bold text-text-muted uppercase tracking-wider">Zoom</span>
+<div class="flex items-center gap-2 bg-white px-2 py-1 border border-border rounded-sm">
+<button class="text-text-muted hover:text-primary"><span class="material-symbols-outlined text-sm">remove</span></button>
+<span class="text-xs font-mono font-bold w-10 text-center">100%</span>
+<button class="text-text-muted hover:text-primary"><span class="material-symbols-outlined text-sm">add</span></button>
+</div>
+</div>
+</div>
+<!-- Gantt -->
+<div class="flex-1 relative overflow-auto bg-[#F8FAFC]">
+<!-- Ruler -->
+<div class="sticky top-0 z-20 flex bg-white border-b border-border">
+<div class="w-28 flex-shrink-0 bg-gray-50 border-r border-border p-3 text-xs font-bold text-text-muted uppercase">Locomotive</div>
+<div class="flex-1 flex font-mono text-xs">
+<div class="w-1/6 border-r border-border/50 p-2 text-center text-text-muted opacity-60">07:00</div>
+<div class="w-1/6 border-r border-border/50 p-2 text-center text-text-muted opacity-60">08:00</div>
+<div class="w-1/6 border-r border-border/50 p-2 text-center font-bold text-primary">09:00</div>
+<div class="w-1/6 border-r border-border/50 p-2 text-center text-text-muted opacity-60">10:00</div>
+<div class="w-1/6 border-r border-border/50 p-2 text-center text-text-muted opacity-60">11:00</div>
+<div class="w-1/6 border-r border-border/50 p-2 text-center text-text-muted opacity-60">12:00</div>
+</div>
+</div>
+<!-- Content Rows -->
+<div class="relative">
+<!-- Grid Lines -->
+<div class="absolute inset-0 pointer-events-none flex z-10">
+<div class="w-28 flex-shrink-0"></div>
+<div class="flex-1 flex relative">
+<div class="absolute h-full border-l border-dashed border-primary/20" style="left: 25.5%;"></div>
+<div class="absolute h-full border-l border-dashed border-primary/20" style="left: 54.5%;"></div>
+</div>
+</div>
+<!-- Row 1 -->
+<div class="flex min-h-[64px] border-b border-border bg-white">
+<div class="w-28 flex-shrink-0 flex items-center px-4 bg-gray-50/50 border-r border-border">
+<span class="text-xs font-mono font-bold">E464.234</span>
+</div>
+<div class="flex-1 relative p-2">
+<!-- Target Ghost -->
+<div class="absolute h-9 border border-dashed border-primary/40 rounded-sm bg-primary/5" style="left: 25.5%; width: 29%; top: 12px;"></div>
+<!-- DRAGGING BLOCK -->
+<div class="absolute h-9 bg-primary text-white px-3 flex items-center rounded-sm z-30 shadow-lg cursor-grabbing border border-primary/50" style="left: 31%; width: 29%; top: 8px; transform: translateX(12px);">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'FILL' 1;">train</span>
+<span class="text-xs font-mono font-bold">REG 2304</span>
+</div>
+<!-- Drag Feedback -->
+<div class="absolute -top-10 left-1/2 -translate-x-1/2 bg-text-main text-white px-2 py-1 rounded text-[10px] font-mono whitespace-nowrap shadow-xl">
+                                    08:30 — 10:15
+                                    <div class="absolute -bottom-1 left-1/2 -translate-x-1/2 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-text-main"></div>
+</div>
+</div>
+<div class="absolute h-9 bg-primary/10 border border-primary/20 text-primary px-3 flex items-center rounded-sm" style="left: 60%; width: 15%; top: 12px;">
+<span class="text-xs font-mono font-bold">RE 3021</span>
+</div>
+</div>
+</div>
+<!-- Row 2 -->
+<div class="flex min-h-[64px] border-b border-border bg-white/50">
+<div class="w-28 flex-shrink-0 flex items-center px-4 bg-gray-50/50 border-r border-border">
+<span class="text-xs font-mono font-bold text-text-muted">E402B.102</span>
+</div>
+<div class="flex-1 relative p-2">
+<div class="absolute h-9 bg-success/10 border border-success/30 text-success px-3 flex items-center rounded-sm" style="left: 10%; width: 20%; top: 12px;">
+<span class="text-xs font-mono font-bold">RV 2100</span>
+</div>
+<div class="absolute h-9 bg-warning/10 border border-warning/30 text-warning px-3 flex items-center rounded-sm" style="left: 35%; width: 40%; top: 12px;">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">engineering</span>
+<span class="text-xs font-bold uppercase tracking-tight">Manutenzione</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Row 3 -->
+<div class="flex min-h-[64px] border-b border-border bg-white">
+<div class="w-28 flex-shrink-0 flex items-center px-4 bg-gray-50/50 border-r border-border">
+<span class="text-xs font-mono font-bold">E464.088</span>
+</div>
+<div class="flex-1 relative p-2">
+<div class="absolute h-9 bg-gray-100 border border-border text-text-muted px-3 flex items-center rounded-sm" style="left: 5%; width: 35%; top: 12px;">
+<span class="text-xs font-mono font-bold">REG 2306</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer Stats -->
+<div class="h-8 bg-surface border-t border-border flex items-center px-4 gap-6">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-error"></div>
+<span class="text-xs font-bold text-text-muted uppercase">Conflitti: 0</span>
+</div>
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-primary"></div>
+<span class="text-xs font-bold text-text-muted uppercase">Assegnati: 42</span>
+</div>
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-gray-300"></div>
+<span class="text-xs font-bold text-text-muted uppercase">Vuota: 5</span>
+</div>
+</div>
+</div>
+<!-- Right Panel -->
+<aside class="w-[320px] flex flex-col gap-4">
+<div class="bg-surface border border-border rounded-md p-5 custom-shadow flex flex-col">
+<div class="flex items-center justify-between mb-6">
+<h4 class="text-xs font-bold text-text-muted uppercase tracking-widest">Dettagli Treno</h4>
+<button class="text-text-muted"><span class="material-symbols-outlined">more_horiz</span></button>
+</div>
+<div class="space-y-5">
+<div class="bg-primary/5 p-4 rounded-md border border-primary/20">
+<div class="flex items-center gap-3 mb-4">
+<div class="w-9 h-9 bg-primary/10 rounded-md flex items-center justify-center">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">drag_indicator</span>
+</div>
+<div>
+<div class="text-[10px] font-bold text-primary uppercase">Spostamento Attivo</div>
+<div class="font-mono font-bold text-sm">REG 2304</div>
+</div>
+</div>
+<div class="space-y-3">
+<div class="flex justify-between items-center text-sm">
+<span class="text-text-muted">Nuovo Orario</span>
+<span class="font-mono font-bold text-primary">08:30 - 10:15</span>
+</div>
+<div class="flex justify-between items-center text-sm">
+<span class="text-text-muted">Durata</span>
+<span class="font-mono font-bold">01:45</span>
+</div>
+</div>
+</div>
+<div class="p-3 bg-gray-50 border border-border rounded-md flex gap-3">
+<span class="material-symbols-outlined text-text-muted text-lg">info</span>
+<p class="text-xs leading-normal text-text-muted font-medium">
+                            Rilascia il blocco per confermare il nuovo orario. Le tracce successive saranno ricalcolate.
+                        </p>
+</div>
+<div class="grid grid-cols-2 gap-3 pt-2">
+<button class="py-2 rounded-sm border border-border bg-white text-xs font-bold text-text-main hover:bg-gray-50">Annulla</button>
+<button class="py-2 rounded-sm bg-primary text-white text-xs font-bold hover:bg-blue-700">Salva</button>
+</div>
+</div>
+</div>
+<div class="bg-surface border border-border rounded-md p-5 custom-shadow flex-1">
+<h4 class="text-xs font-bold text-text-muted uppercase tracking-widest mb-4">Avvisi</h4>
+<div class="flex gap-3 items-start p-3 bg-success/5 border border-success/10 rounded-md">
+<span class="material-symbols-outlined text-success text-lg" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<div>
+<div class="text-xs font-bold text-success">Compatibilità OK</div>
+<p class="text-xs text-text-muted mt-0.5 leading-snug">La traccia non presenta conflitti con i binari di stazione previsti.</p>
+</div>
+</div>
+</div>
+</aside>
+</div>
+<!-- Contextual FAB -->
+<button class="absolute bottom-6 right-6 w-12 h-12 bg-primary text-white rounded-full shadow-lg flex items-center justify-center hover:scale-105 transition-transform z-50">
+<span class="material-symbols-outlined text-2xl">add</span>
+</button>
+</main>
+</body></html>

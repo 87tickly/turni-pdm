@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+
+<html class="light" lang="it"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@600;700&amp;family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "tertiary": "#005b25",
+                    "surface-variant": "#dae2fd",
+                    "secondary-container": "#6ab6ff",
+                    "outline": "#727784",
+                    "on-surface-variant": "#424753",
+                    "on-error-container": "#93000a",
+                    "surface-bright": "#faf8ff",
+                    "primary-fixed-dim": "#acc7ff",
+                    "on-secondary": "#ffffff",
+                    "inverse-surface": "#283044",
+                    "secondary": "#00629f",
+                    "inverse-primary": "#acc7ff",
+                    "secondary-fixed": "#d0e4ff",
+                    "surface-tint": "#005bbf",
+                    "primary-fixed": "#d7e2ff",
+                    "on-secondary-container": "#004674",
+                    "on-background": "#131b2e",
+                    "on-tertiary-container": "#78ff96",
+                    "on-surface": "#131b2e",
+                    "surface": "#faf8ff",
+                    "surface-container-lowest": "#ffffff",
+                    "background": "#faf8ff",
+                    "surface-container-low": "#f2f3ff",
+                    "on-secondary-fixed-variant": "#004a79",
+                    "on-tertiary-fixed": "#002109",
+                    "on-primary-container": "#d9e4ff",
+                    "outline-variant": "#c2c6d5",
+                    "on-primary-fixed": "#001a40",
+                    "tertiary-fixed-dim": "#4ae176",
+                    "tertiary-fixed": "#6bff8f",
+                    "error": "#ba1a1a",
+                    "surface-container-high": "#e2e7ff",
+                    "on-secondary-fixed": "#001d34",
+                    "surface-dim": "#d2d9f4",
+                    "secondary-fixed-dim": "#9bcbff",
+                    "on-tertiary-fixed-variant": "#005321",
+                    "surface-container-highest": "#dae2fd",
+                    "on-primary-fixed-variant": "#004492",
+                    "error-container": "#ffdad6",
+                    "tertiary-container": "#007633",
+                    "primary-container": "#0062cc",
+                    "on-tertiary": "#ffffff",
+                    "on-error": "#ffffff",
+                    "surface-container": "#eaedff",
+                    "primary": "#004b9f",
+                    "on-primary": "#ffffff",
+                    "inverse-on-surface": "#eef0ff"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "fontFamily": {
+                    "headline": ["Exo 2", "sans-serif"],
+                    "body": ["Inter", "sans-serif"],
+                    "label": ["Inter", "sans-serif"],
+                    "mono": ["JetBrains Mono", "monospace"]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+            font-size: 18px;
+        }
+        .kinetic-dot { background-color: #22C55E; }
+        .mono-numeric { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+        .glass-panel { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(12px); }
+    </style>
+</head>
+<body class="bg-surface text-on-surface font-body selection:bg-primary-container selection:text-white">
+<!-- Top Navigation Shell -->
+<header class="fixed top-0 right-0 left-[224px] z-40 flex justify-between items-center px-6 h-14 glass-panel border-b border-outline-variant/15">
+<div class="flex items-center gap-6">
+<div class="flex flex-col">
+<span class="font-headline text-lg font-bold text-primary leading-none tracking-tight">RT-992</span>
+<span class="text-[10px] uppercase tracking-widest text-on-surface-variant font-semibold">Impianto Milano Smistamento</span>
+</div>
+<div class="h-6 w-px bg-outline-variant/30"></div>
+<nav class="flex gap-4 items-center">
+<span class="text-xs font-mono bg-surface-container-high px-2 py-1 rounded text-primary font-bold">22 OTT - 28 OTT</span>
+<div class="flex gap-1">
+<span class="w-6 h-6 flex items-center justify-center rounded bg-primary text-white text-[10px] font-bold">L</span>
+<span class="w-6 h-6 flex items-center justify-center rounded bg-primary text-white text-[10px] font-bold">M</span>
+<span class="w-6 h-6 flex items-center justify-center rounded bg-primary text-white text-[10px] font-bold">X</span>
+<span class="w-6 h-6 flex items-center justify-center rounded bg-primary text-white text-[10px] font-bold">G</span>
+<span class="w-6 h-6 flex items-center justify-center rounded bg-primary text-white text-[10px] font-bold">V</span>
+<span class="w-6 h-6 flex items-center justify-center rounded bg-surface-variant text-on-surface-variant text-[10px] font-bold">S</span>
+<span class="w-6 h-6 flex items-center justify-center rounded bg-surface-variant text-on-surface-variant text-[10px] font-bold">D</span>
+</div>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2 text-tertiary">
+<span class="material-symbols-outlined text-[16px]">check_circle</span>
+<span class="text-xs font-medium">Salvato</span>
+</div>
+<div class="flex gap-2">
+<button class="p-2 hover:bg-surface-container-low rounded-lg text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="p-2 hover:bg-surface-container-low rounded-lg text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined">help_outline</span>
+</button>
+</div>
+<div class="flex items-center gap-3 pl-2">
+<div class="text-right">
+<p class="text-xs font-bold leading-tight">Marco Rossi</p>
+<p class="text-[10px] text-on-surface-variant">Capotreno Senior</p>
+</div>
+<img alt="User Profile" class="w-8 h-8 rounded-full object-cover ring-2 ring-primary/10" data-alt="Professional portrait of a middle-aged man with short hair and friendly expression, clean corporate lighting, neutral background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCKs-wfodJZUjzLY9EPnNXwyxWrRaHX-iDX6Rq_iCaWp7kBNDU3OS4_j4H0Xfvl9Izxo4YObi-HzPdgDq43nKT3jEpDvYdVI2pa8c4onxRyvq3IrP7gUNjVCHvO-x0LXcxHyj6YlYVWd0EN5eud_-MPNk4kRn5rK_BNkn67G9Z65PUrQJoOoX6YOJq9X3OuLteaOr_1Y4qRgZStEhmRJFk4KlS3doKCuCQ3c5B7zEOlubMXSPEsdrdKdzJwp5i8ZUoBRxv1hsTxqns"/>
+</div>
+</div>
+</header>
+<!-- Sidebar Shell -->
+<aside class="fixed left-0 top-0 h-full w-[224px] flex flex-col pt-6 pb-4 bg-surface border-r border-outline-variant/15 z-50">
+<div class="px-6 mb-8">
+<h1 class="font-headline text-xl font-bold tracking-tighter text-primary">ARTURO·</h1>
+<p class="text-[10px] font-medium text-on-surface-variant uppercase tracking-widest mt-0.5">Railway Conductor</p>
+</div>
+<nav class="flex-1 px-3 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low transition-all" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="text-sm font-semibold">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low transition-all" href="#">
+<span class="material-symbols-outlined">search</span>
+<span class="text-sm font-semibold">Cerca treni</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low transition-all" href="#">
+<span class="material-symbols-outlined">train</span>
+<span class="text-sm font-semibold">Turni Materiale</span>
+</a>
+<a class="relative flex items-center gap-3 px-3 py-2.5 rounded-lg bg-primary/10 text-primary font-bold before:absolute before:left-0 before:top-1/4 before:h-1/2 before:w-[3px] before:bg-[#22C55E] before:rounded-r-full" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">badge</span>
+<span class="text-sm">Turni PdC</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low transition-all" href="#">
+<span class="material-symbols-outlined">calendar_today</span>
+<span class="text-sm font-semibold">Calendario</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low transition-all" href="#">
+<span class="material-symbols-outlined">picture_as_pdf</span>
+<span class="text-sm font-semibold">Import PDF</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-low transition-all" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="text-sm font-semibold">Impostazioni</span>
+</a>
+</nav>
+</aside>
+<!-- Main Canvas -->
+<main class="pl-[224px] pt-14 min-h-screen">
+<div class="p-6">
+<div class="flex justify-between items-end mb-6">
+<div>
+<h2 class="font-headline text-2xl font-bold tracking-tight text-on-surface">Editor Turno</h2>
+<div class="flex items-center gap-2 mt-1">
+<span class="text-xs text-on-surface-variant">Modifica attiva su</span>
+<div class="inline-flex items-center border border-primary/30 rounded px-2 py-0.5 bg-primary/5">
+<input class="bg-transparent border-none p-0 text-xs font-bold text-primary focus:ring-0 w-28" type="text" value="Milano Centrale"/>
+<span class="material-symbols-outlined text-[14px] text-primary ml-1">edit</span>
+</div>
+</div>
+</div>
+<div class="flex gap-2">
+<button class="px-4 py-1.5 bg-surface-container-low text-on-surface text-xs font-bold rounded-lg border border-outline-variant/10 hover:bg-surface-container-high transition-colors">Esporta</button>
+<button class="px-4 py-1.5 bg-gradient-to-br from-primary to-primary-container text-white text-xs font-bold rounded-lg shadow-sm hover:opacity-90 transition-all">Pubblica Turno</button>
+</div>
+</div>
+<!-- Gantt Section -->
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant/15 overflow-hidden">
+<!-- Timeline Header -->
+<div class="grid grid-cols-[120px_1fr] border-b border-outline-variant/15">
+<div class="p-4 bg-surface-container-low border-r border-outline-variant/15">
+<span class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Attività</span>
+</div>
+<div class="flex relative">
+<div class="flex-1 flex justify-between px-2 py-3">
+<!-- Hours 0-24 -->
+<span class="text-[9px] font-mono text-on-surface-variant">00</span>
+<span class="text-[9px] font-mono text-on-surface-variant">02</span>
+<span class="text-[9px] font-mono text-on-surface-variant">04</span>
+<span class="text-[9px] font-mono text-on-surface-variant">06</span>
+<span class="text-[9px] font-mono text-on-surface-variant">08</span>
+<span class="text-[9px] font-mono text-on-surface-variant">10</span>
+<span class="text-[9px] font-mono text-on-surface-variant">12</span>
+<span class="text-[9px] font-mono text-on-surface-variant">14</span>
+<span class="text-[9px] font-mono text-on-surface-variant">16</span>
+<span class="text-[9px] font-mono text-on-surface-variant">18</span>
+<span class="text-[9px] font-mono text-on-surface-variant">20</span>
+<span class="text-[9px] font-mono text-on-surface-variant">22</span>
+<span class="text-[9px] font-mono text-on-surface-variant">24</span>
+</div>
+</div>
+</div>
+<!-- Gantt Rows -->
+<div class="relative min-h-[400px]">
+<!-- Hour Grid Lines -->
+<div class="absolute inset-0 grid grid-cols-[120px_repeat(24,1fr)] pointer-events-none">
+<div class="border-r border-outline-variant/15"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+<div class="border-r border-outline-variant/5"></div>
+</div>
+<!-- Row 1 -->
+<div class="grid grid-cols-[120px_1fr] border-b border-outline-variant/5 items-center min-h-[64px]">
+<div class="px-4 py-2 border-r border-outline-variant/15 h-full flex flex-col justify-center">
+<span class="text-xs font-bold">REG 2304</span>
+<span class="text-[9px] text-on-surface-variant font-mono">Turno A12</span>
+</div>
+<div class="relative h-full py-4 flex items-center">
+<!-- Block with Hover State & Tooltip -->
+<div class="absolute left-[25%] w-[15%] h-10 bg-primary/90 rounded-md border-2 border-primary-container shadow-[0_0_12px_rgba(0,75,159,0.3)] flex items-center px-3 cursor-pointer group z-10">
+<span class="text-[10px] text-white font-bold mono-numeric">REG 2304</span>
+<!-- Tooltip -->
+<div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-48 opacity-100 bg-inverse-surface text-inverse-on-surface p-3 rounded-lg shadow-xl z-50 pointer-events-none transition-all scale-100 origin-bottom">
+<div class="flex justify-between items-start mb-2">
+<span class="text-[10px] font-bold uppercase tracking-widest text-primary-fixed-dim">Dettagli Treno</span>
+<span class="material-symbols-outlined text-primary-fixed-dim text-[14px]">info</span>
+</div>
+<div class="space-y-1">
+<p class="text-xs font-bold">Regionale 2304</p>
+<div class="flex items-center gap-2 text-[10px]">
+<span class="mono-numeric">06:12</span>
+<span class="material-symbols-outlined text-[12px]">trending_flat</span>
+<span class="mono-numeric">07:45</span>
+</div>
+<p class="text-[10px] text-outline-variant">Milano C.le → Verona P.N.</p>
+</div>
+<div class="mt-2 pt-2 border-t border-outline/20 text-[9px] text-primary-fixed-dim flex justify-between">
+<span>Materiale: ETR 521</span>
+<span>Bin: 14</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Row 2 -->
+<div class="grid grid-cols-[120px_1fr] border-b border-outline-variant/5 items-center min-h-[64px]">
+<div class="px-4 py-2 border-r border-outline-variant/15 h-full flex flex-col justify-center">
+<span class="text-xs font-bold">FR 9611</span>
+<span class="text-[9px] text-on-surface-variant font-mono">Turno B04</span>
+</div>
+<div class="relative h-full py-4 flex items-center">
+<div class="absolute left-[45%] w-[20%] h-10 bg-secondary/80 rounded-md flex items-center px-3">
+<span class="text-[10px] text-white font-bold mono-numeric">FR 9611</span>
+</div>
+</div>
+</div>
+<!-- Row 3 -->
+<div class="grid grid-cols-[120px_1fr] border-b border-outline-variant/5 items-center min-h-[64px]">
+<div class="px-4 py-2 border-r border-outline-variant/15 h-full flex flex-col justify-center">
+<span class="text-xs font-bold">Sostituzioni</span>
+<span class="text-[9px] text-on-surface-variant font-mono">Emergenza</span>
+</div>
+<div class="relative h-full py-4 flex items-center">
+<div class="absolute left-[70%] w-[10%] h-10 bg-tertiary/60 rounded-md flex items-center px-3">
+<span class="text-[10px] text-white font-bold mono-numeric">RV 12</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Content Overlay (Drawer Active) -->
+<div class="fixed inset-0 bg-on-surface/35 z-[60] backdrop-blur-[2px]"></div>
+<!-- Details Side Drawer -->
+<aside class="fixed top-0 right-0 h-full w-[380px] bg-surface-container-lowest shadow-2xl z-[70] flex flex-col border-l border-outline-variant/15">
+<div class="p-6 border-b border-outline-variant/15 flex justify-between items-center">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary">train</span>
+<div>
+<h3 class="font-headline font-bold text-lg leading-tight">Dettaglio REG 2304</h3>
+<p class="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">Milano C.le - Verona P.N.</p>
+</div>
+</div>
+<button class="p-2 hover:bg-surface-container-low rounded-full transition-colors">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+<div class="flex-1 overflow-y-auto p-6 space-y-8">
+<!-- Giro Materiale Section -->
+<section>
+<div class="flex justify-between items-center mb-4">
+<h4 class="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant">Giro Materiale</h4>
+<div class="flex gap-1">
+<button class="p-1 hover:bg-surface-container-low rounded text-on-surface-variant">
+<span class="material-symbols-outlined text-[16px]">chevron_left</span>
+</button>
+<button class="p-1 hover:bg-surface-container-low rounded text-on-surface-variant">
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+</button>
+</div>
+</div>
+<div class="bg-surface-container-low rounded-xl p-4 space-y-4">
+<div class="flex items-center justify-between">
+<div>
+<p class="text-[10px] text-on-surface-variant font-medium">Treno Precedente</p>
+<p class="text-xs font-bold mono-numeric">RV 2056</p>
+</div>
+<div class="text-right">
+<p class="text-[10px] text-on-surface-variant font-medium">Arrivo M.I.</p>
+<p class="text-xs font-bold mono-numeric">05:48</p>
+</div>
+</div>
+<div class="h-px bg-outline-variant/15"></div>
+<div class="flex items-center justify-between">
+<div>
+<p class="text-[10px] text-on-surface-variant font-medium">Treno Successivo</p>
+<p class="text-xs font-bold mono-numeric">REG 2315</p>
+</div>
+<div class="text-right">
+<p class="text-[10px] text-on-surface-variant font-medium">Partenza VR</p>
+<p class="text-xs font-bold mono-numeric">08:12</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Guidato da altri turni -->
+<section>
+<h4 class="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-4">Guidato da altri turni</h4>
+<div class="space-y-3">
+<div class="flex items-center gap-3 p-3 rounded-lg border border-outline-variant/10 hover:border-primary/30 transition-colors cursor-pointer group">
+<div class="w-8 h-8 rounded-lg bg-surface-container-high flex items-center justify-center text-primary font-bold text-xs">A</div>
+<div class="flex-1">
+<p class="text-xs font-bold">Turno Verona 012</p>
+<p class="text-[10px] text-on-surface-variant">Personale di condotta</p>
+</div>
+<span class="material-symbols-outlined text-[16px] text-outline opacity-0 group-hover:opacity-100 transition-opacity">open_in_new</span>
+</div>
+<div class="flex items-center gap-3 p-3 rounded-lg border border-outline-variant/10 hover:border-primary/30 transition-colors cursor-pointer group">
+<div class="w-8 h-8 rounded-lg bg-surface-container-high flex items-center justify-center text-primary font-bold text-xs">B</div>
+<div class="flex-1">
+<p class="text-xs font-bold">Turno Brescia 004</p>
+<p class="text-[10px] text-on-surface-variant">Supporto manovra</p>
+</div>
+<span class="material-symbols-outlined text-[16px] text-outline opacity-0 group-hover:opacity-100 transition-opacity">open_in_new</span>
+</div>
+</div>
+</section>
+<!-- Metadata -->
+<section class="pt-4 border-t border-outline-variant/15">
+<div class="grid grid-cols-2 gap-4">
+<div>
+<p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-tighter">Codice Duty</p>
+<p class="text-xs font-mono font-bold">MIL-2304-X</p>
+</div>
+<div>
+<p class="text-[10px] font-bold text-on-surface-variant uppercase tracking-tighter">Status</p>
+<div class="flex items-center gap-1.5 mt-1">
+<span class="w-1.5 h-1.5 rounded-full kinetic-dot"></span>
+<span class="text-[10px] font-bold text-tertiary">APPROVATO</span>
+</div>
+</div>
+</div>
+</section>
+</div>
+<div class="p-6 bg-surface-container-low border-t border-outline-variant/15 flex gap-3">
+<button class="flex-1 px-4 py-2 bg-white border border-outline-variant/20 rounded-lg text-xs font-bold hover:bg-surface-container-high transition-colors">Scarica Scheda</button>
+<button class="flex-1 px-4 py-2 bg-primary text-white rounded-lg text-xs font-bold hover:bg-primary/90 transition-colors">Modifica Blocco</button>
+</div>
+</aside>
+<!-- Command Palette Overlay -->
+<div class="fixed inset-0 z-[100] flex items-start justify-center pt-[153px]">
+<!-- Search Modal -->
+<div class="w-full max-w-xl glass-panel border border-outline-variant/30 rounded-xl shadow-[0_32px_64px_-12px_rgba(0,0,0,0.3)] overflow-hidden">
+<div class="p-4 flex items-center gap-4 border-b border-outline-variant/15">
+<span class="material-symbols-outlined text-primary">search</span>
+<input class="flex-1 bg-transparent border-none focus:ring-0 text-sm font-medium placeholder:text-on-surface-variant" placeholder="Scrivi un comando o cerca..." type="text"/>
+<kbd class="px-2 py-1 bg-surface-container-low rounded border border-outline-variant/15 text-[10px] font-mono text-on-surface-variant">ESC</kbd>
+</div>
+<div class="p-2">
+<div class="px-3 py-2">
+<span class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Azioni Recenti</span>
+</div>
+<div class="space-y-0.5">
+<div class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-primary/5 text-primary group cursor-pointer">
+<span class="material-symbols-outlined text-[18px]">calendar_view_day</span>
+<div class="flex-1 flex items-center justify-between">
+<span class="text-xs font-bold">Vai a turno...</span>
+<span class="text-[10px] opacity-60">RT-993, RT-982</span>
+</div>
+</div>
+<div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-surface-container-low text-on-surface transition-colors cursor-pointer">
+<span class="material-symbols-outlined text-[18px]">travel_explore</span>
+<span class="text-xs font-medium">Trova treno per numero...</span>
+</div>
+<div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-surface-container-low text-on-surface transition-colors cursor-pointer">
+<span class="material-symbols-outlined text-[18px]">history</span>
+<span class="text-xs font-medium">Cronologia modifiche</span>
+</div>
+</div>
+<div class="px-3 py-2 mt-2">
+<span class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Vista</span>
+</div>
+<div class="space-y-0.5">
+<div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-surface-container-low text-on-surface transition-colors cursor-pointer">
+<span class="material-symbols-outlined text-[18px]">dark_mode</span>
+<span class="text-xs font-medium">Attiva Modalità Notturna</span>
+</div>
+</div>
+</div>
+<div class="px-4 py-2.5 bg-surface-container-low flex justify-between items-center text-[10px] font-medium text-on-surface-variant">
+<div class="flex gap-4">
+<span class="flex items-center gap-1"><kbd class="bg-surface px-1.5 py-0.5 rounded border border-outline-variant/15">↑↓</kbd> Naviga</span>
+<span class="flex items-center gap-1"><kbd class="bg-surface px-1.5 py-0.5 rounded border border-outline-variant/15">⏎</kbd> Seleziona</span>
+</div>
+<span class="text-[9px] uppercase tracking-tighter">Scorciatoia: <kbd class="bg-surface px-1.5 py-0.5 rounded border border-outline-variant/15">⌘ K</kbd></span>
+</div>
+</div>
+</div>
+</body></html>

@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+
+<html class="light" lang="it"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700;800;900&amp;family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                "primary": "#0062CC",
+                "success": "#16A34A",
+                "background": "#F7F8FA",
+                "border-light": "#E2E8F0",
+                "text-standard": "#1E293B",
+                "text-muted": "#64748B"
+            },
+            "borderRadius": {
+                "sm": "6px",
+                "md": "8px",
+                "lg": "8px"
+            },
+            "fontFamily": {
+                "sans": ["Exo 2", "Inter", "sans-serif"],
+                "mono": ["JetBrains Mono", "monospace"]
+            },
+            "fontSize": {
+                "std": "13px",
+                "lbl": "11px"
+            }
+          }
+        }
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body { 
+            font-family: 'Exo 2', sans-serif; 
+            font-size: 13px;
+            background-color: #F7F8FA;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .sidebar-active {
+            background-color: rgba(0, 98, 204, 0.08);
+            color: #0062CC;
+        }
+    </style>
+</head>
+<body class="text-text-standard antialiased">
+<aside class="h-screen w-[224px] fixed left-0 top-0 bg-white border-r border-border-light flex flex-col p-4 gap-2 z-50">
+<div class="mb-8 px-2 flex items-center">
+<h1 class="text-xl font-black tracking-tight text-primary">ARTURO<span class="text-[#22C55E]">·</span></h1>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 text-text-muted hover:bg-slate-50 rounded-md transition-all font-medium" href="#">
+<span class="material-symbols-outlined text-[20px]">dashboard</span>
+<span class="text-std">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-text-muted hover:bg-slate-50 rounded-md transition-all font-medium" href="#">
+<span class="material-symbols-outlined text-[20px]">train</span>
+<span class="text-std">Cerca treni</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-text-muted hover:bg-slate-50 rounded-md transition-all font-medium" href="#">
+<span class="material-symbols-outlined text-[20px]">inventory_2</span>
+<span class="text-std">Giro materiale</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-text-muted hover:bg-slate-50 rounded-md transition-all font-medium" href="#">
+<span class="material-symbols-outlined text-[20px]">groups</span>
+<span class="text-std">Turni PdC</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 sidebar-active rounded-md font-semibold" href="#">
+<span class="material-symbols-outlined text-[20px]">calendar_month</span>
+<span class="text-std">Calendario</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-text-muted hover:bg-slate-50 rounded-md transition-all font-medium" href="#">
+<span class="material-symbols-outlined text-[20px]">picture_as_pdf</span>
+<span class="text-std">Import PDF</span>
+</a>
+</nav>
+<div class="mt-auto pt-4 space-y-1 border-t border-border-light">
+<a class="flex items-center gap-3 px-3 py-2 text-text-muted hover:bg-slate-50 rounded-md transition-all font-medium" href="#">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+<span class="text-std">Impostazioni</span>
+</a>
+<div class="flex items-center gap-3 px-3 py-3 mt-2 rounded-md bg-slate-50">
+<div class="w-8 h-8 rounded-full overflow-hidden bg-slate-200">
+<img alt="User Profile" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAioDvWIRrIWGElJj3DNq9pd0Z5_33B7gspDYN4WrdVr1DNC5eaUFmgMQf3OGKsaUR1e-H0rajhRXjdhV5eXifMnzR_X0EcmtztMXRBux6OEaHliu2DeKzniK_JaXr9c1XGKDcQy9lcf8Mgq5E83fLWHcBDdMW0OalF0gn4hK7gg7wFnPT_GoQiS6AG9bXyWIurzxF94RKqK5ZTSlbBqvOXr1Om14MQ7tm4kbwlx36AGoK77jkYrTorO5-coa4VA_Fl38vAZkYbCno"/>
+</div>
+<div class="flex-1 min-w-0">
+<p class="text-std font-bold truncate leading-tight">M. Rossi</p>
+<p class="text-lbl text-text-muted truncate">Capotreno Senior</p>
+</div>
+</div>
+</div>
+</aside>
+<main class="ml-[224px] min-h-screen flex flex-col">
+<header class="flex justify-between items-center px-6 py-4 w-full bg-white border-b border-border-light sticky top-0 z-40">
+<div class="flex items-center gap-4">
+<h2 class="text-lg font-bold tracking-tight text-slate-800">Calendario PdC</h2>
+<div class="h-4 w-[1px] bg-border-light"></div>
+<div class="flex items-center gap-2">
+<button class="p-1 hover:bg-slate-100 rounded-sm transition-colors">
+<span class="material-symbols-outlined text-[18px]">chevron_left</span>
+</button>
+<span class="text-std font-semibold px-2">Ottobre 2023</span>
+<button class="p-1 hover:bg-slate-100 rounded-sm transition-colors">
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</button>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex bg-slate-100 rounded-sm p-0.5">
+<button class="px-4 py-1.5 text-lbl font-semibold text-text-muted hover:text-text-standard transition-colors">Giornata</button>
+<button class="px-4 py-1.5 text-lbl font-semibold text-text-muted hover:text-text-standard transition-colors">Settimana</button>
+<button class="px-4 py-1.5 text-lbl font-semibold bg-white shadow-sm rounded-sm text-primary">Mese</button>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-2 text-text-muted hover:bg-slate-100 transition-colors rounded-full">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="p-2 text-text-muted hover:bg-slate-100 transition-colors rounded-full">
+<span class="material-symbols-outlined">account_circle</span>
+</button>
+</div>
+</div>
+</header>
+<section class="flex-1 p-6">
+<div class="h-full flex flex-col bg-white rounded-md overflow-hidden border border-border-light shadow-sm">
+<div class="grid grid-cols-7 border-b border-border-light bg-slate-50/50">
+<div class="py-2.5 text-center text-lbl font-bold text-text-muted uppercase tracking-wider">Lunedì</div>
+<div class="py-2.5 text-center text-lbl font-bold text-text-muted uppercase tracking-wider">Martedì</div>
+<div class="py-2.5 text-center text-lbl font-bold text-text-muted uppercase tracking-wider">Mercoledì</div>
+<div class="py-2.5 text-center text-lbl font-bold text-text-muted uppercase tracking-wider">Giovedì</div>
+<div class="py-2.5 text-center text-lbl font-bold text-text-muted uppercase tracking-wider">Venerdì</div>
+<div class="py-2.5 text-center text-lbl font-bold text-text-muted uppercase tracking-wider">Sabato</div>
+<div class="py-2.5 text-center text-lbl font-bold text-text-muted uppercase tracking-wider">Domenica</div>
+</div>
+<div class="flex-1 grid grid-cols-7 grid-rows-5 min-h-[600px]">
+<!-- Row 1 -->
+<div class="p-2 bg-slate-50/30 border-r border-b border-border-light/50 text-text-muted/40 text-std font-medium">25</div>
+<div class="p-2 bg-slate-50/30 border-r border-b border-border-light/50 text-text-muted/40 text-std font-medium">26</div>
+<div class="p-2 bg-slate-50/30 border-r border-b border-border-light/50 text-text-muted/40 text-std font-medium">27</div>
+<div class="p-2 bg-slate-50/30 border-r border-b border-border-light/50 text-text-muted/40 text-std font-medium">28</div>
+<div class="p-2 bg-slate-50/30 border-r border-b border-border-light/50 text-text-muted/40 text-std font-medium">29</div>
+<div class="p-2 bg-slate-50/30 border-r border-b border-border-light/50 text-text-muted/40 text-std font-medium">30</div>
+<div class="p-2 border-b border-border-light text-std font-medium">1</div>
+<!-- Row 2 -->
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors">
+<span class="text-std font-semibold mb-2 block">2</span>
+<div class="space-y-1">
+<div class="bg-primary/5 border-l-4 border-primary p-2 rounded-r-sm">
+<p class="text-lbl font-bold text-primary mono leading-tight">RT-992</p>
+<p class="text-[10px] text-primary/80 font-medium mono">06:12 - 14:30</p>
+</div>
+</div>
+</div>
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors">
+<span class="text-std font-semibold mb-2 block">3</span>
+<div class="space-y-1">
+<div class="bg-primary/5 border-l-4 border-primary p-2 rounded-r-sm">
+<p class="text-lbl font-bold text-primary mono leading-tight">RT-992</p>
+<p class="text-[10px] text-primary/80 font-medium mono">06:12 - 14:30</p>
+</div>
+</div>
+</div>
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors">
+<span class="text-std font-semibold mb-2 block">4</span>
+<div class="space-y-1">
+<div class="bg-amber-500/5 border-l-4 border-amber-500 p-2 rounded-r-sm">
+<p class="text-lbl font-bold text-amber-700 mono leading-tight">AX-221 (ST)</p>
+<p class="text-[10px] text-amber-600 font-medium mono">14:00 - 22:45</p>
+</div>
+</div>
+</div>
+<div class="p-2 border-r border-b border-border-light bg-slate-50/40 flex flex-col items-center justify-center">
+<span class="text-std font-bold text-text-muted/40 absolute top-2 left-2">5</span>
+<span class="material-symbols-outlined text-slate-300 mb-1">nightlight</span>
+<p class="text-lbl uppercase font-bold text-slate-400">Riposo</p>
+</div>
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors">
+<span class="text-std font-semibold mb-2 block">6</span>
+<div class="space-y-1">
+<div class="bg-primary/5 border-l-4 border-primary p-2 rounded-r-sm">
+<p class="text-lbl font-bold text-primary mono leading-tight">RT-445</p>
+<p class="text-[10px] text-primary/80 font-medium mono">21:30 - 05:15</p>
+</div>
+</div>
+</div>
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors">
+<span class="text-std font-semibold mb-2 block">7</span>
+</div>
+<div class="p-2 border-b border-border-light relative hover:bg-slate-50/50 transition-colors">
+<span class="text-std font-semibold mb-2 block">8</span>
+</div>
+<!-- Row 3 with Today Highlight -->
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors">
+<span class="text-std font-semibold mb-2 block">9</span>
+<div class="space-y-1">
+<div class="bg-primary/5 border-l-4 border-primary p-2 rounded-r-sm">
+<p class="text-lbl font-bold text-primary mono leading-tight">RT-992</p>
+</div>
+</div>
+</div>
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors">
+<span class="text-std font-semibold mb-2 block">10</span>
+</div>
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors ring-1 ring-primary/30 ring-inset bg-primary/5">
+<span class="w-6 h-6 flex items-center justify-center bg-primary text-white rounded-sm text-lbl font-bold mb-2">11</span>
+<div class="space-y-1">
+<div class="bg-success/5 border-l-4 border-success p-2 rounded-r-sm">
+<p class="text-lbl font-bold text-success mono leading-tight">ACCp/ACCa</p>
+<p class="text-[10px] text-success/80 font-medium mono">08:00 - 18:00</p>
+</div>
+</div>
+</div>
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors">
+<span class="text-std font-semibold mb-2 block">12</span>
+</div>
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors">
+<span class="text-std font-semibold mb-2 block">13</span>
+</div>
+<div class="p-2 border-r border-b border-border-light bg-slate-50/40">
+<span class="text-std font-bold text-text-muted/40 mb-2 block">14</span>
+</div>
+<div class="p-2 border-b border-border-light bg-slate-50/40">
+<span class="text-std font-bold text-text-muted/40 mb-2 block">15</span>
+</div>
+<!-- Rest of rows implicitly matching style -->
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors"><span class="text-std font-semibold mb-2 block">16</span></div>
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors"><span class="text-std font-semibold mb-2 block">17</span>
+<div class="bg-primary/5 border-l-4 border-primary p-2 rounded-r-sm"><p class="text-lbl font-bold text-primary mono">CVp/CVa</p></div>
+</div>
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors"><span class="text-std font-semibold mb-2 block">18</span></div>
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors"><span class="text-std font-semibold mb-2 block">19</span></div>
+<div class="p-2 border-r border-b border-border-light relative hover:bg-slate-50/50 transition-colors"><span class="text-std font-semibold mb-2 block">20</span></div>
+<div class="p-2 border-r border-b border-border-light bg-slate-50/40"><span class="text-std font-bold text-text-muted/40 mb-2 block">21</span></div>
+<div class="p-2 border-b border-border-light bg-slate-50/40"><span class="text-std font-bold text-text-muted/40 mb-2 block">22</span></div>
+<div class="p-2 border-r border-border-light relative hover:bg-slate-50/50 transition-colors"><span class="text-std font-semibold mb-2 block">23</span></div>
+<div class="p-2 border-r border-border-light relative hover:bg-slate-50/50 transition-colors"><span class="text-std font-semibold mb-2 block">24</span></div>
+<div class="p-2 border-r border-border-light relative hover:bg-slate-50/50 transition-colors"><span class="text-std font-semibold mb-2 block">25</span>
+<div class="bg-slate-100 border-l-4 border-slate-400 p-2 rounded-r-sm"><p class="text-lbl font-bold text-slate-600 mono">Vuota</p></div>
+</div>
+<div class="p-2 border-r border-border-light relative hover:bg-slate-50/50 transition-colors"><span class="text-std font-semibold mb-2 block">26</span></div>
+<div class="p-2 border-r border-border-light relative hover:bg-slate-50/50 transition-colors"><span class="text-std font-semibold mb-2 block">27</span></div>
+<div class="p-2 border-r border-border-light bg-slate-50/40"><span class="text-std font-bold text-text-muted/40 mb-2 block">28</span></div>
+<div class="p-2 border-border-light bg-slate-50/40"><span class="text-std font-bold text-text-muted/40 mb-2 block">29</span></div>
+</div>
+</div>
+<div class="mt-6 flex items-center justify-between">
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-2">
+<span class="w-3 h-3 rounded-sm bg-primary"></span>
+<span class="text-lbl font-bold uppercase tracking-wider text-text-muted">Turno Standard</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="w-3 h-3 rounded-sm bg-amber-500"></span>
+<span class="text-lbl font-bold uppercase tracking-wider text-text-muted">Straord.</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="w-3 h-3 rounded-sm bg-slate-400"></span>
+<span class="text-lbl font-bold uppercase tracking-wider text-text-muted">Riposo</span>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<p class="text-std font-medium text-text-muted">Totale ore mese: <span class="text-primary font-bold mono">142h 30m</span></p>
+</div>
+</div>
+</section>
+</main>
+<div class="fixed bottom-6 right-6 flex flex-col gap-3">
+<button class="flex items-center gap-2 bg-primary text-white px-5 py-3 rounded-md shadow-lg hover:brightness-110 transition-all font-bold text-std">
+<span class="material-symbols-outlined text-[20px]">add</span>
+<span>Nuovo Turno</span>
+</button>
+</div>
+</body></html>
