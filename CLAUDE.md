@@ -9,12 +9,22 @@
    - Fai `git commit` con messaggio descrittivo
    - Fai `git push`
 3. **Mai lavorare senza contesto**: se non hai letto LIVE-COLAZIONE.md, leggilo prima di fare qualsiasi cosa
-4. **Design UX/UI → SEMPRE via Claude Design** (claude.ai/design, by Anthropic Labs): quando la conversazione riguarda aspetto visivo, layout, interazioni, design system, nuove schermate, restyle di componenti, mockup, wireframe → NON iniziare a generare CSS/Tailwind inline o proporre markup a mano. Invece:
-   - Indirizzare l'utente a Claude Design per la generazione delle mockup
-   - Preparare il materiale di contesto (screenshot, token CSS, componenti di riferimento) e collegare il repo via GitHub
-   - Ricevere l'export di Claude Design (screenshot, codice, handoff bundle) e SOLO POI implementare in React
-   - Rispettare il design system "Kinetic Conductor" documentato in `~/Desktop/claude-design-upload/08-design-system-arturo.md` (no-line rule, tonal layering, kinetic dot `#22C55E`, Exo 2 + Inter + monospace per orari/numeri)
-   - **Motivo**: Claude Design ha Claude Opus 4.7 vision, legge il codebase via GitHub, esporta handoff diretto a Claude Code. Produce risultati migliori del disegnare ad-hoc in chat. Evitare scorciatoie: un'ora di prep con Claude Design = risparmio di 5-10h di iterazioni frustranti in CSS a mano.
+4. **Design UX/UI → SEMPRE via Claude Design** (claude.ai/design, by Anthropic Labs): quando la conversazione riguarda aspetto visivo, layout, interazioni, design system, nuove schermate, restyle di componenti, mockup, wireframe → NON iniziare a generare CSS/Tailwind inline o proporre markup a mano.
+
+   **PRECONDIZIONE — Claude Design conosce GIÀ questa cartella.** L'utente ha collegato su claude.ai/design sia il repo GitHub `87tickly/turni-pdm` sia la cartella locale `COLAZIONE` come contesto filesystem diretto. Claude Design può leggere componenti sorgente, token CSS (`frontend/src/index.css`), reference (`docs/REFERENCE-*.html`, `docs/HANDOFF-claude-design.md`), screenshot già salvati. **NON serve preparare bundle di upload** (zip, copie, cartelle materiale). Serve solo un **prompt mirato**.
+
+   **Workflow quando l'utente chiede "redesign X"**:
+   1. NON scrivere CSS/JSX
+   2. Scrivere un prompt mirato in `docs/PROMPT-claude-design-{feature}.md` che specifichi:
+      - **Cosa redesignare**: path file + nome componente (es. `frontend/src/components/PdcGanttV2.tsx`)
+      - **Cosa non va oggi**: riferimento a screenshot o descrizione del pain point
+      - **Vincoli funzionali da preservare**: props, interazioni (drag/resize/click), API consumate, callback
+      - **Principi DS applicabili**: link a `docs/HANDOFF-claude-design.md` (Claude Design lo legge da sé)
+      - **Deliverable atteso**: hi-fi mockup + handoff markdown pronto per Claude Code
+   3. L'utente copia il prompt su claude.ai/design, riceve l'handoff, me lo mostra
+   4. SOLO POI implemento il React
+
+   **Motivo**: Claude Design ha Claude Opus 4.7 vision + lettura codebase, produce risultati migliori del disegnare ad-hoc in chat. Un prompt mirato (30 sec) + 10 min in Claude Design = risparmio di 5-10h di iterazioni CSS frustranti.
 
 ## Scopo
 
