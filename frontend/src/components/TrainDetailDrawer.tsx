@@ -39,14 +39,41 @@ import {
 } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
+export interface TrainOccurrenceInTurn {
+  day_id: number
+  day_number: number
+  periodicita: string
+  block_start: string
+  block_end: string
+  from_station: string
+  to_station: string
+}
+
 interface Props {
   block: PdcBlock
   index: number
   mode: "detail" | "warn"
   onClose: () => void
+  /**
+   * Occorrenze dello stesso train_id in altre giornate del turno corrente
+   * (calcolato client-side da PdcPage filtrando detail.days). Null/[] se
+   * non disponibile o il blocco non e' un treno.
+   */
+  sameTurnOccurrences?: TrainOccurrenceInTurn[]
+  /**
+   * Callback quando l'utente clicca un'occurrence per saltare a quella
+   * giornata. Parent (PdcPage) gestisce lo scroll + apertura DayCard.
+   */
+  onJumpToDay?: (dayId: number) => void
 }
 
-export function TrainDetailDrawer({ block, mode, onClose }: Props) {
+export function TrainDetailDrawer({
+  block,
+  mode,
+  onClose,
+  sameTurnOccurrences,
+  onJumpToDay,
+}: Props) {
   // Stato locale: il block corrente può cambiare se l'utente naviga via
   // chain pills. `focusedTrainId` override il block.train_id originale.
   const [focusedTrainId, setFocusedTrainId] = useState<string>(
@@ -320,6 +347,90 @@ export function TrainDetailDrawer({ block, mode, onClose }: Props) {
               ))}
             </div>
           )}
+
+          {/* ── 3a. Questo treno anche in... (altre giornate dello stesso turno) ── */}
+          {block.block_type === "train" &&
+            !isNavigating &&
+            sameTurnOccurrences &&
+            sameTurnOccurrences.length > 0 && (
+              <Section
+                title={`Questo treno anche in (${sameTurnOccurrences.length})`}
+                accent="muted"
+                icon={<Train size={12} />}
+              >
+                <div className="flex flex-col gap-1.5">
+                  {sameTurnOccurrences.map((occ) => (
+                    <button
+                      key={`${occ.day_id}-${occ.block_start}`}
+                      type="button"
+                      onClick={() => {
+                        if (onJumpToDay) {
+                          onJumpToDay(occ.day_id)
+                          handleClose()
+                        }
+                      }}
+                      disabled={!onJumpToDay}
+                      className="w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-md text-left transition-colors"
+                      style={{
+                        backgroundColor: "var(--color-surface-container-lowest)",
+                        boxShadow: "inset 0 0 0 1px var(--color-ghost)",
+                        cursor: onJumpToDay ? "pointer" : "default",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!onJumpToDay) return
+                        e.currentTarget.style.boxShadow =
+                          "inset 0 0 0 1px rgba(0, 98, 204, 0.4)"
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.boxShadow =
+                          "inset 0 0 0 1px var(--color-ghost)"
+                      }}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="text-[10px] font-bold uppercase"
+                          style={{
+                            color: "var(--color-brand)",
+                            letterSpacing: "0.08em",
+                          }}
+                        >
+                          g{occ.day_number}
+                        </span>
+                        <span
+                          className="text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold"
+                          style={{
+                            backgroundColor: "var(--color-surface-container)",
+                            color: "var(--color-on-surface-muted)",
+                          }}
+                        >
+                          {occ.periodicita}
+                        </span>
+                        <span
+                          className="text-[11px] truncate"
+                          style={{
+                            fontFamily: "var(--font-mono)",
+                            color: "var(--color-on-surface-muted)",
+                          }}
+                        >
+                          {occ.from_station} → {occ.to_station}
+                        </span>
+                      </div>
+                      <span
+                        className="shrink-0"
+                        style={{
+                          fontFamily: "var(--font-mono)",
+                          fontSize: "11px",
+                          color: "var(--color-on-surface-strong)",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {occ.block_start}–{occ.block_end}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </Section>
+            )}
 
           {/* ── 3. Giro Materiale (prev/curr/next + chain) ── */}
           {block.block_type === "train" && focusedTrainId && (

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import {
   Train,
@@ -21,7 +21,10 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PdcGanttV2 } from "@/components/PdcGanttV2"
-import { TrainDetailDrawer as BlockDetailModal } from "@/components/TrainDetailDrawer"
+import {
+  TrainDetailDrawer as BlockDetailModal,
+  type TrainOccurrenceInTurn,
+} from "@/components/TrainDetailDrawer"
 // Alias: stesso signature, swap drop-in dal modal centrato al drawer destro
 // (refactor handoff Claude Design, vedi docs/HANDOFF-claude-design.md §01).
 import {
@@ -29,6 +32,7 @@ import {
   listPdcTurns,
   getPdcTurn,
   deletePdcTurn,
+  updatePdcTurn,
   type PdcStats,
   type PdcTurn,
   type PdcTurnDetail,
@@ -246,14 +250,87 @@ function dayTitleSubtitle(day: PdcDay): { title: string; subtitle: string } {
   }
 }
 
-function DayCard({ day, open: externalOpen, onToggle }: {
+function DayCard({
+  day,
+  open: externalOpen,
+  onToggle,
+  ganttId,
+  onBlocksChange,
+  onCrossDayDragStart,
+  onCrossDayDrop,
+  allDaysForOccurrences,
+  onJumpToDay,
+  forceOpenSignal,
+}: {
   day: PdcDay
   open?: boolean
   onToggle?: () => void
+  ganttId?: string
+  onBlocksChange?: (
+    changes: Record<number, { start_time?: string; end_time?: string }>,
+  ) => void
+  onCrossDayDragStart?: (payload: {
+    block: PdcBlock
+    index: number
+  }) => void
+  onCrossDayDrop?: (targetGanttId: string) => void
+  /**
+   * Elenco di tutte le giornate del turno corrente. Usato per calcolare,
+   * al momento del click su un blocco treno, le occurrences dello stesso
+   * train_id in altre giornate → passate al drawer.
+   */
+  allDaysForOccurrences?: PdcDay[]
+  /**
+   * Callback invocato dal drawer quando l'utente clicca "questo treno
+   * anche in → g{N}". PdcPage riceve il dayId target e fa scroll+expand.
+   */
+  onJumpToDay?: (dayId: number) => void
+  /**
+   * Signal esterno per forzare l'apertura della day card (es. dopo jumpTo).
+   * Quando cambia e non e' null e coincide con day.id, la card si apre.
+   */
+  forceOpenSignal?: number | null
 }) {
-  const [internalOpen, setInternalOpen] = useState(false)
+  // Default: espansa se la giornata NON e' disponibile (ha dati da mostrare)
+  const [internalOpen, setInternalOpen] = useState(day.is_disponibile !== 1)
   const open = externalOpen ?? internalOpen
   const toggle = onToggle ?? (() => setInternalOpen((o) => !o))
+  const cardRef = useRef<HTMLDivElement>(null)
+
+  // Reagisce al jump: apre la card e la scrolla in vista
+  useEffect(() => {
+    if (forceOpenSignal != null && forceOpenSignal === day.id) {
+      setInternalOpen(true)
+      // micro-delay per lasciare che il DOM si espanda prima dello scroll
+      const t = setTimeout(() => {
+        cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+      }, 60)
+      return () => clearTimeout(t)
+    }
+  }, [forceOpenSignal, day.id])
+
+  // Calcola occurrences dello stesso train_id in altre giornate
+  const computeOccurrences = (trainId: string): TrainOccurrenceInTurn[] => {
+    if (!allDaysForOccurrences || !trainId) return []
+    const occ: TrainOccurrenceInTurn[] = []
+    for (const d of allDaysForOccurrences) {
+      if (d.id === day.id) continue // escludi la giornata corrente
+      for (const b of d.blocks) {
+        if (b.block_type === "train" && b.train_id === trainId) {
+          occ.push({
+            day_id: d.id,
+            day_number: d.day_number,
+            periodicita: d.periodicita || "",
+            block_start: b.start_time || "—",
+            block_end: b.end_time || "—",
+            from_station: b.from_station || "—",
+            to_station: b.to_station || "—",
+          })
+        }
+      }
+    }
+    return occ
+  }
   const [viewMode, setViewMode] = useState<"gantt-v2" | "list">("gantt-v2")
   const [detailModal, setDetailModal] = useState<{
     block: PdcBlock
@@ -266,7 +343,9 @@ function DayCard({ day, open: externalOpen, onToggle }: {
 
   return (
     <div
-      className="rounded-lg overflow-hidden transition-shadow"
+      ref={cardRef}
+      data-day-id={day.id}
+      className="rounded-lg overflow-hidden transition-shadow scroll-mt-24"
       style={{
         backgroundColor: "var(--color-surface-container-lowest)",
         boxShadow: "var(--shadow-sm)",
@@ -395,6 +474,24 @@ function DayCard({ day, open: externalOpen, onToggle }: {
                   endTime={day.end_time}
                   label={`g${day.day_number} ${day.periodicita}`}
                   hideActionBar
+                  autoFit
+                  ganttId={ganttId}
+                  onBlocksChange={onBlocksChange}
+                  onCrossDayDragStart={
+                    onCrossDayDragStart
+                      ? (payload) =>
+                          onCrossDayDragStart({
+                            block: payload.block,
+                            index: payload.index,
+                          })
+                      : undefined
+                  }
+                  onCrossDayDrop={
+                    onCrossDayDrop
+                      ? (_payload, targetGanttId) =>
+                          onCrossDayDrop(targetGanttId)
+                      : undefined
+                  }
                   onBlockClick={(block, idx) => {
                     setDetailModal({ block, index: idx, mode: "detail" })
                   }}
@@ -420,6 +517,12 @@ function DayCard({ day, open: externalOpen, onToggle }: {
           index={detailModal.index}
           mode={detailModal.mode}
           onClose={() => setDetailModal(null)}
+          sameTurnOccurrences={
+            detailModal.block.block_type === "train"
+              ? computeOccurrences(detailModal.block.train_id || "")
+              : undefined
+          }
+          onJumpToDay={onJumpToDay}
         />
       )}
     </div>
@@ -484,14 +587,122 @@ function TurnDetail({
   onEdit,
   onDelete,
   onDepotView,
+  onDetailChange,
+  saving,
+  dirty,
 }: {
   detail: PdcTurnDetail
   onEdit: () => void
   onDelete: () => void
   onDepotView: () => void
+  onDetailChange?: (next: PdcTurnDetail) => void
+  saving?: boolean
+  dirty?: boolean
 }) {
   const t = detail.turn
   const totalBlocks = detail.days.reduce((acc, d) => acc + (d.blocks?.length || 0), 0)
+
+  // State per cross-day move (drag da giornata A verso giornata B)
+  const [moveState, setMoveState] = useState<{
+    sourceDayId: number
+    blockIndex: number
+    block: PdcBlock
+  } | null>(null)
+
+  // In-day drag/resize: aggiorna solo gli orari di blocchi esistenti
+  const updateDayBlocks = useCallback(
+    (dayId: number, changes: Record<number, { start_time?: string; end_time?: string }>) => {
+      if (!onDetailChange) return
+      const nextDetail: PdcTurnDetail = {
+        ...detail,
+        days: detail.days.map((d) => {
+          if (d.id !== dayId) return d
+          const newBlocks = [...d.blocks]
+          for (const [idxStr, patch] of Object.entries(changes)) {
+            const idx = parseInt(idxStr)
+            newBlocks[idx] = { ...newBlocks[idx], ...patch } as PdcBlock
+          }
+          return { ...d, blocks: newBlocks }
+        }),
+      }
+      onDetailChange(nextDetail)
+    },
+    [detail, onDetailChange],
+  )
+
+  // Cross-day drop: sposta il blocco (+ CVp/CVa agganciati se treno) dalla
+  // giornata sorgente alla giornata target
+  const completeMove = useCallback(
+    (targetDayId: number) => {
+      if (!moveState || !onDetailChange) {
+        setMoveState(null)
+        return
+      }
+      if (moveState.sourceDayId === targetDayId) {
+        setMoveState(null)
+        return
+      }
+
+      const src = detail.days.find((d) => d.id === moveState.sourceDayId)
+      if (!src) {
+        setMoveState(null)
+        return
+      }
+
+      // Identifica blocchi da spostare (treno + CVp/CVa agganciati)
+      const toMoveIdxs = new Set<number>([moveState.blockIndex])
+      const b = src.blocks[moveState.blockIndex]
+      if (b?.block_type === "train") {
+        const p = src.blocks[moveState.blockIndex - 1]
+        const n = src.blocks[moveState.blockIndex + 1]
+        if (p?.block_type === "cv_partenza") toMoveIdxs.add(moveState.blockIndex - 1)
+        if (n?.block_type === "cv_arrivo") toMoveIdxs.add(moveState.blockIndex + 1)
+      }
+      const movedBlocks = Array.from(toMoveIdxs)
+        .sort((a, b) => a - b)
+        .map((i) => src.blocks[i])
+
+      const nextDetail: PdcTurnDetail = {
+        ...detail,
+        days: detail.days.map((d) => {
+          if (d.id === moveState.sourceDayId) {
+            return {
+              ...d,
+              blocks: d.blocks
+                .filter((_, i) => !toMoveIdxs.has(i))
+                .map((bb, i) => ({ ...bb, seq: i })),
+            }
+          }
+          if (d.id === targetDayId) {
+            const combined = [...d.blocks, ...movedBlocks]
+            combined.sort((a, b) => {
+              const sa = (a.start_time || "99:99")
+              const sb = (b.start_time || "99:99")
+              return sa.localeCompare(sb)
+            })
+            return {
+              ...d,
+              blocks: combined.map((bb, i) => ({ ...bb, seq: i })),
+            }
+          }
+          return d
+        }),
+      }
+      onDetailChange(nextDetail)
+      setMoveState(null)
+    },
+    [detail, moveState, onDetailChange],
+  )
+
+  const canEdit = !!onDetailChange
+
+  // Jump-to-day signal: quando cambia, la day card target si apre + scrolla
+  const [jumpSignal, setJumpSignal] = useState<number | null>(null)
+  const handleJumpToDay = useCallback((dayId: number) => {
+    // Change signal a un nuovo valore (usa dayId, ma anche lo stesso signal
+    // ripetuto deve ri-triggerare → useEffect depende da forceOpenSignal+day.id)
+    setJumpSignal(dayId)
+  }, [])
 
   return (
     <div className="flex flex-col h-full">
@@ -575,20 +786,76 @@ function TurnDetail({
             Giornate Turno
           </h2>
           <div className="flex items-center gap-2">
-            <StatusChip
-              tone="brand"
-              label="Attivo"
-            />
-            <StatusChip
-              tone="success"
-              label={`${totalBlocks} blocchi`}
-            />
+            {saving ? (
+              <StatusChip tone="brand" label="Salvataggio…" />
+            ) : dirty ? (
+              <StatusChip tone="brand" label="Modificato" />
+            ) : (
+              <StatusChip tone="success" label="Sincronizzato" />
+            )}
+            <StatusChip tone="brand" label={`${totalBlocks} blocchi`} />
           </div>
         </div>
 
+        {/* Hint drag cross-day (visible solo durante un drag attivo) */}
+        {moveState && (
+          <div
+            className="mb-3 px-3 py-2 rounded-md flex items-center gap-3 text-[11.5px]"
+            style={{
+              backgroundColor: "rgba(0, 98, 204, 0.10)",
+              color: "var(--color-brand)",
+            }}
+          >
+            <span className="font-bold uppercase" style={{ letterSpacing: "0.08em" }}>
+              Sposta in corso
+            </span>
+            <span>
+              Rilascia il blocco{" "}
+              <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700 }}>
+                {moveState.block.train_id || moveState.block.vettura_id || "?"}
+              </span>{" "}
+              su un'altra giornata del turno
+            </span>
+            <button
+              onClick={() => setMoveState(null)}
+              className="ml-auto text-[10px] px-2 py-0.5 rounded hover:bg-[rgba(0,98,204,0.18)]"
+            >
+              Annulla
+            </button>
+          </div>
+        )}
+
         <div className="space-y-3">
           {detail.days.map((d, i) => (
-            <DayCard key={`${d.id}-${i}`} day={d} />
+            <DayCard
+              key={`${d.id}-${i}`}
+              day={d}
+              ganttId={canEdit ? String(d.id) : undefined}
+              onBlocksChange={
+                canEdit ? (changes) => updateDayBlocks(d.id, changes) : undefined
+              }
+              onCrossDayDragStart={
+                canEdit
+                  ? (payload) =>
+                      setMoveState({
+                        sourceDayId: d.id,
+                        blockIndex: payload.index,
+                        block: payload.block,
+                      })
+                  : undefined
+              }
+              onCrossDayDrop={
+                canEdit
+                  ? (targetGanttId) => {
+                      const targetDayId = parseInt(targetGanttId)
+                      if (Number.isFinite(targetDayId)) completeMove(targetDayId)
+                    }
+                  : undefined
+              }
+              allDaysForOccurrences={detail.days}
+              onJumpToDay={handleJumpToDay}
+              forceOpenSignal={jumpSignal}
+            />
           ))}
         </div>
 
@@ -812,6 +1079,85 @@ export function PdcPage() {
   const [detail, setDetail] = useState<PdcTurnDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [error, setError] = useState("")
+  // Stato salvataggio in-line (auto-save debounced)
+  const [saving, setSaving] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  const saveTimerRef = useRef<number | null>(null)
+
+  // Persiste il detail corrente sul backend tramite updatePdcTurn
+  const persistDetail = useCallback(async (d: PdcTurnDetail) => {
+    setSaving(true)
+    try {
+      await updatePdcTurn(d.turn.id, {
+        codice: d.turn.codice,
+        planning: d.turn.planning,
+        impianto: d.turn.impianto,
+        profilo: d.turn.profilo as "Condotta" | "Scorta",
+        valid_from: d.turn.valid_from,
+        valid_to: d.turn.valid_to,
+        days: d.days.map((day) => ({
+          day_number: day.day_number,
+          periodicita: day.periodicita,
+          start_time: day.start_time,
+          end_time: day.end_time,
+          lavoro_min: day.lavoro_min,
+          condotta_min: day.condotta_min,
+          km: day.km,
+          notturno: day.notturno === 1,
+          riposo_min: day.riposo_min,
+          is_disponibile: day.is_disponibile === 1,
+          blocks: day.blocks.map((b) => ({
+            seq: b.seq,
+            block_type: b.block_type,
+            train_id: b.train_id,
+            vettura_id: b.vettura_id,
+            from_station: b.from_station,
+            to_station: b.to_station,
+            start_time: b.start_time,
+            end_time: b.end_time,
+            accessori_maggiorati: b.accessori_maggiorati === 1,
+          })),
+        })),
+        notes: d.notes.map((n) => ({
+          train_id: n.train_id,
+          periodicita_text: n.periodicita_text,
+          non_circola_dates: n.non_circola_dates,
+          circola_extra_dates: n.circola_extra_dates,
+        })),
+      })
+      setDirty(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Errore salvataggio")
+    } finally {
+      setSaving(false)
+    }
+  }, [])
+
+  // Debounced detail change handler — UI optimistic, backend 1.5s dopo
+  const handleDetailChange = useCallback(
+    (next: PdcTurnDetail) => {
+      setDetail(next)
+      setDirty(true)
+      if (saveTimerRef.current != null) {
+        window.clearTimeout(saveTimerRef.current)
+      }
+      saveTimerRef.current = window.setTimeout(() => {
+        saveTimerRef.current = null
+        persistDetail(next)
+      }, 1500)
+    },
+    [persistDetail],
+  )
+
+  // Cleanup timer on unmount
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current != null) {
+        window.clearTimeout(saveTimerRef.current)
+      }
+    },
+    [],
+  )
 
   const loadTurns = useCallback(async (impianto: string) => {
     try {
@@ -1012,6 +1358,9 @@ export function PdcPage() {
               onDepotView={() =>
                 navigate(`/pdc/depot/${encodeURIComponent(detail.turn.impianto)}`)
               }
+              onDetailChange={handleDetailChange}
+              saving={saving}
+              dirty={dirty}
             />
           ) : (
             <div className="h-full flex items-center justify-center text-center p-5">

@@ -107,6 +107,13 @@ interface PdcGanttV2Props {
    * PdcDepotPage l'action bar resta visibile (edit/move/duplicate/delete).
    */
   hideActionBar?: boolean
+  /**
+   * Auto-fit dell'asse visivo al range dei blocchi (+ 30min padding, min 4h).
+   * Default false = asse fisso 3h-3h (24h), utile in Vista Deposito per
+   * confrontare giornate in scala comune. In PdcPage default true: blocchi
+   * di 5h non devono schiacciarsi in 1/5 della larghezza disponibile.
+   */
+  autoFit?: boolean
 }
 
 // ============================================================
@@ -345,6 +352,7 @@ export function PdcGanttV2({
   dragThresholdPx = 4,
   debug = false,
   hideActionBar = false,
+  autoFit = false,
 }: PdcGanttV2Props) {
   const crossDayEnabled = !!ganttId && (!!onCrossDayDrop || !!onCrossDayRemove || !!onCrossDayDragStart)
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
@@ -380,6 +388,76 @@ export function PdcGanttV2({
     return leftStation
   }, [blocks, leftStation])
 
+  // ── Scala visiva (autoFit vs 24h fisso) ─────────────────────
+  // In autoFit, viewStartMin/viewSpanMin si adattano al range reale dei
+  // blocchi + 30min padding, rounded all'ora, min 4h per leggibilita.
+  // viewPxPerMin scala la larghezza AXIS_WIDTH al range visibile.
+  //
+  // Quando autoFit=false (default): viewStartMin=0, viewSpanMin=24*60,
+  // viewPxPerMin = PX_PER_HOUR/60 (52/60) → identico al comportamento
+  // originale del componente.
+  const { viewStartMin, viewSpanMin, viewPxPerMin, hourTicks } = useMemo(() => {
+    // Fallback 24h fisso
+    const fallback = {
+      viewStartMin: 0,
+      viewSpanMin: SPAN_HOURS * 60,
+      viewPxPerMin: PX_PER_HOUR / 60,
+      hourTicks: TICK_HOURS.map((h, i) => ({ h, offsetMin: i * 60 })),
+    }
+    if (!autoFit) return fallback
+
+    // Raccogli tutti i tempi dai blocchi (encoded minRel)
+    const times: number[] = []
+    for (const b of blocks) {
+      const s = hhmmToMinutesRel(b.start_time || "")
+      const e = hhmmToMinutesRel(b.end_time || b.start_time || "")
+      if (s !== null) times.push(s)
+      if (e !== null) times.push(e)
+    }
+    if (times.length === 0) return fallback
+
+    const minBlock = Math.min(...times)
+    const maxBlock = Math.max(...times)
+
+    // Pad 30min su ogni lato, arrotonda all'ora piena
+    const paddedStart = Math.max(0, Math.floor((minBlock - 30) / 60) * 60)
+    const paddedEnd = Math.min(
+      SPAN_HOURS * 60,
+      Math.ceil((maxBlock + 30) / 60) * 60,
+    )
+    // Min 4h di span per leggibilita (giornate molto corte non diventano
+    // chirurgiche al millisecondo)
+    let startMin = paddedStart
+    let spanMin = Math.max(240, paddedEnd - paddedStart)
+    // Se l'espansione per il minimo sfora il limite destro, tira indietro
+    if (startMin + spanMin > SPAN_HOURS * 60) {
+      startMin = Math.max(0, SPAN_HOURS * 60 - spanMin)
+      spanMin = SPAN_HOURS * 60 - startMin
+    }
+
+    const pxPerMin = AXIS_WIDTH / spanMin
+
+    // Genera hourTicks ogni ora entro il range visibile
+    const ticks: Array<{ h: number; offsetMin: number }> = []
+    for (let m = startMin; m <= startMin + spanMin; m += 60) {
+      const absH = ((ORIGIN_HOUR * 60 + m) / 60) % 24
+      ticks.push({ h: Math.round(absH), offsetMin: m - startMin })
+    }
+
+    return {
+      viewStartMin: startMin,
+      viewSpanMin: spanMin,
+      viewPxPerMin: pxPerMin,
+      hourTicks: ticks,
+    }
+  }, [blocks, autoFit])
+
+  // Helper scoped: minRel encoded → X visivo (usa la scala view-fit)
+  const minToX = useCallback(
+    (minRel: number) => ORIGIN_X + (minRel - viewStartMin) * viewPxPerMin,
+    [viewStartMin, viewPxPerMin],
+  )
+
   // Client X → viewBox X
   const clientXToSvgX = useCallback((clientX: number): number => {
     const svg = svgRef.current
@@ -388,10 +466,12 @@ export function PdcGanttV2({
     return ((clientX - rect.left) / rect.width) * TOTAL_WIDTH
   }, [])
 
-  // viewBox X → minuti rel
-  const svgXToMinRel = useCallback((svgX: number): number => {
-    return ((svgX - ORIGIN_X) / PX_PER_HOUR) * 60
-  }, [])
+  // viewBox X → minuti rel (encoded, usa la scala view-fit)
+  const svgXToMinRel = useCallback(
+    (svgX: number): number =>
+      viewStartMin + (svgX - ORIGIN_X) / viewPxPerMin,
+    [viewStartMin, viewPxPerMin],
+  )
 
   // ── Drag start ──────────────────────────────────────────────
   const startDrag = useCallback(
@@ -454,7 +534,8 @@ export function PdcGanttV2({
 
       const dxSvg =
         clientXToSvgX(e.clientX) - clientXToSvgX(dragState.initialMouseX)
-      const deltaMinRaw = (dxSvg / PX_PER_HOUR) * 60
+      // dxSvg (unita viewBox) → minuti usando la scala view-fit corrente
+      const deltaMinRaw = dxSvg / viewPxPerMin
       const deltaMin = Math.round(deltaMinRaw / snapMinutes) * snapMinutes
       const maxMin = SPAN_HOURS * 60
 
@@ -541,7 +622,7 @@ export function PdcGanttV2({
       window.removeEventListener("mousemove", handleMove)
       window.removeEventListener("mouseup", handleUp)
     }
-  }, [dragState, overrides, clientXToSvgX, snapMinutes, dragThresholdPx, blocks, onBlocksChange])
+  }, [dragState, overrides, clientXToSvgX, snapMinutes, dragThresholdPx, blocks, onBlocksChange, viewPxPerMin])
 
   // ── Click handlers ──────────────────────────────────────────
   const handleTimelineBgClick = useCallback(
@@ -773,16 +854,28 @@ export function PdcGanttV2({
           />
         )}
 
-        {/* Fascia notte */}
-        <rect
-          x={ORIGIN_X + 21 * PX_PER_HOUR}
-          y={AXIS_Y - 10}
-          width={3 * PX_PER_HOUR}
-          height={20}
-          fill="#0b0d10"
-          fillOpacity={0.03}
-          pointerEvents="none"
-        />
+        {/* Fascia notte (21:00-24:00) — solo se visibile nel range corrente */}
+        {(() => {
+          // 21:00 in minRel = (21 - ORIGIN_HOUR) * 60 = 1080
+          const nightStartMin = (21 - ORIGIN_HOUR) * 60
+          const nightEndMin = (24 - ORIGIN_HOUR) * 60
+          const viewEnd = viewStartMin + viewSpanMin
+          // Visibile se interseca [viewStartMin, viewEnd]
+          if (nightEndMin <= viewStartMin || nightStartMin >= viewEnd) return null
+          const visStart = Math.max(nightStartMin, viewStartMin)
+          const visEnd = Math.min(nightEndMin, viewEnd)
+          return (
+            <rect
+              x={minToX(visStart)}
+              y={AXIS_Y - 10}
+              width={(visEnd - visStart) * viewPxPerMin}
+              height={20}
+              fill="#0b0d10"
+              fillOpacity={0.03}
+              pointerEvents="none"
+            />
+          )
+        })()}
 
         {/* Asse */}
         <line
@@ -795,9 +888,11 @@ export function PdcGanttV2({
           pointerEvents="none"
         />
 
-        {TICK_HOURS.map((h, i) => {
-          const x = ORIGIN_X + i * PX_PER_HOUR
-          const isMajor = MAJOR_TICKS.has(h) && (i === 0 || i === TICK_HOURS.length - 1 || h === 12 || h === 24)
+        {hourTicks.map((tick, i) => {
+          const x = ORIGIN_X + tick.offsetMin * viewPxPerMin
+          const isMajor =
+            MAJOR_TICKS.has(tick.h) &&
+            (i === 0 || i === hourTicks.length - 1 || tick.h === 12 || tick.h === 24)
           const tickH = isMajor ? 10 : 6
           return (
             <g key={i} pointerEvents="none">
@@ -815,7 +910,7 @@ export function PdcGanttV2({
                 fontWeight={isMajor ? 700 : 500}
                 fill={isMajor ? "#353a42" : "#6b7280"}
               >
-                {h}
+                {tick.h.toString().padStart(2, "0")}
               </text>
             </g>
           )

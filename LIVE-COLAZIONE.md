@@ -4,6 +4,91 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-19 — Gestione PdC: fluidity sblocco (axis auto-fit + cross-day drag + jump-to-day)
+
+Feedback utente: "il turno non viene letto correttamente" (visivo) e
+"spostare un treno tra giornate è troppo macchinoso" (funzionale).
+
+Analisi:
+- Parser OK (155 blocchi per ALOR_C correttamente letti)
+- Problema 1: asse Gantt hard-coded 3→3 (24h). Una giornata di 5h13
+  occupa ~22% della larghezza, schiaccia i blocchi a fettina invisibile
+- Problema 2: per spostare un treno bisognava uscire da PdcPage, aprire
+  Vista Deposito, drag cross-day lì, tornare. Troppi click
+- Problema 3: nel drawer non c'è modo di vedere/saltare alle altre
+  giornate dello stesso turno dove lo stesso treno appare
+
+### Fix 1 — PdcGanttV2 autoFit prop
+
+Nuovo prop `autoFit?: boolean` (default false).
+- Quando true: calcola `viewStartMin`/`viewSpanMin` dai min/max dei
+  blocchi (+ 30min padding, arrotondato all'ora, min 4h per leggibilita)
+- `viewPxPerMin` = AXIS_WIDTH / viewSpanMin → i blocchi riempiono sempre
+  la larghezza disponibile
+- `hourTicks` generati dinamicamente nel range visibile
+- Fascia notte (21-24) disegnata solo se visibile nel range corrente
+- Drag delta calcolato con `dxSvg / viewPxPerMin` (non piu PX_PER_HOUR fisso)
+
+Quando false (Vista Deposito): comportamento originale 3h-3h 24h
+preservato per confrontare giornate in scala comune.
+
+Attivato in PdcPage DayCard → ora una giornata di 5h13 si vede da
+10:00 a 18:00 piena, con tag+meta dei blocchi ben leggibili.
+
+### Fix 2 — Tutte le giornate espanse di default
+
+PdcPage.DayCard: `useState(day.is_disponibile !== 1)` al posto di
+`useState(false)`. Vedi subito tutti i Gantt stacked, zero click per
+aprire ciascuna.
+
+### Fix 3 — Cross-day drag in PdcPage
+
+Replicato il pattern PdcDepotPage direttamente in PdcPage:
+- `updateDayBlocks(dayId, changes)` — aggiorna orari blocchi in-day
+- `completeMove(targetDayId)` — sposta blocco + CVp/CVa agganciati
+  da giornata sorgente a target (via dedup state.days)
+- `persistDetail(d)` — POST/PUT `/pdc-turn/{id}` con l'intero detail
+- `handleDetailChange(next)` — setDetail + dirty + debounce 1.5s → save
+- DayCard riceve `ganttId={day.id}`, `onBlocksChange`, `onCrossDayDragStart`,
+  `onCrossDayDrop` e li passa a PdcGanttV2 (già supportati dal componente)
+- StatusChip nel top-bar canvas mostra "Sincronizzato" / "Modificato" /
+  "Salvataggio..." secondo stato dirty+saving
+
+Hint visivo "Sposta in corso — rilascia il blocco X su un'altra giornata"
+appare sopra la lista day cards durante drag cross-day.
+
+### Fix 4 — Drawer "Questo treno anche in..."
+
+Nuova sezione nel TrainDetailDrawer (dopo Origine/Destinazione, prima
+di Giro Materiale):
+- Lista occurrences dello stesso train_id in altre giornate dello stesso
+  turno (calcolate client-side in DayCard via `computeOccurrences`
+  filtrando `allDaysForOccurrences`)
+- Row con: g{N} eyebrow brand + LMXGV chip mono + from→to + orario mono
+- Click row → `onJumpToDay(dayId)` → chiude drawer, apre la day card
+  target, scrolla smooth-in-view
+- Implementato via `forceOpenSignal` prop + `useEffect` che setta
+  `internalOpen=true` e chiama `scrollIntoView` con micro-delay
+
+Nuovo export `TrainOccurrenceInTurn` dal TrainDetailDrawer.
+
+### Preservato
+
+- PdcGanttV2 API invariata a parte i due nuovi prop opzionali
+- Click blocco → drawer con richer content (Origine/Dest, Giro Materiale,
+  Altri Turni Associati)
+- Azioni Modifica/Vista deposito/Elimina turno
+- Note periodicità collapsabili
+- PdcDepotPage: uso `autoFit=false` implicito (default), comportamento
+  invariato
+
+### Build
+
+JS 477 → 484 KB (+7 KB: scale dinamica + move/save logic + occurrences
+calc). CSS 61 KB stabile.
+
+---
+
 ## 2026-04-19 — Gestione PdC redesign completo (Stitch source of truth)
 
 Utente ha fornito export Stitch completo in `docs/stitch-mockups/`
