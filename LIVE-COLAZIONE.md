@@ -4,6 +4,104 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-20 — Parser MATERIALE: diagnosi + re-import (bug grave sbloccato)
+
+Dopo il re-import PdC, diagnosi del **parser turno materiale** e del DB.
+
+### Scoperta: DB materiale completamente corrotto
+
+Dump di un sample da `train_segment`:
+```
+id=1 train_id='10603' from_station='' dep_time=''
+       to_station='' arr_time=''  raw_text='from_turno_materiale_pdf'
+```
+
+Tutti gli 11306 segmenti con `from_station/to_station/dep_time/arr_time=''`
+(1 sola stazione "distinct": la stringa vuota). Il `raw_text` suggerisce
+che erano stati importati da un JSON intermedio (`turno_materiale_treni.json`)
+che aveva perso i campi critici.
+
+**Effetto pratico:** l'auto-builder (`src/turn_builder/auto_builder.py`)
+non poteva funzionare:
+- `AutoBuilder(db, deposito='MI.P.GARIBALDI')._reachable` → 1 stazione
+  (solo il deposito stesso)
+- La query `get_reachable_stations()` cerca segmenti con
+  `UPPER(from_station) = deposito`, ma tutte le `from_station` erano `''`
+- Zero catene possibili → build_schedule non produceva niente
+
+### Fix: wipe + re-import dal PDF
+
+1. `DELETE FROM train_segment, material_turn, day_variant` (nessuna FK
+   da altre tabelle utente)
+2. `PDFImporter('uploads/Turno Materiale Trenord dal 2_3_26.pdf', db).run_import()`
+
+**Risultato:**
+- 5281 segmenti estratti (prima 11306 di spazzatura)
+- **100% con stazione partenza e arrivo** identificate
+- 2635 treni unici
+- 50 turni materiale (7 identificati dall'header, altri estratti dalle
+  pagine dati)
+- 802 day variants salvate
+- Confidence alta (≥0.8): 4936 segmenti (93%); media: 343 (6.5%); bassa: 2
+
+### Verifica reachability post-fix
+
+```
+Stazioni distinte in train_segment: 104 (era 1)
+Reachable da 'MI.P.GARIBALDI': 34 stazioni (era 1)
+Reachable da 'MILANO CENTRALE': 24
+Reachable da 'CREMONA': 14
+Reachable da 'ALESSANDRIA': 6
+Reachable da 'BRESCIA': 18
+```
+
+### Bug minori confermati nel parser materiale (edge cases, ~2%)
+
+Distribuzione lunghezza train_id:
+- 4 cifre: 870 (16.5%)
+- 5 cifre: 2784 (52.7%) — treni commerciali normali
+- 6 cifre: 1527 (28.9%) — treni materiale vuoto (9XXXXX) legittimi
+- 7+ cifre: ~100 (2%) — **alcuni sospetti**
+
+Casi ambigui:
+- `271020` e `504342` (6 cifre, km vuoto): potrebbero essere parsing
+  errors da clustering x_tol
+- `90191/901917`: parser ha letto lo stesso set di digit vertical 2
+  volte con y-gap diverso → merged con "/". Fix: quando le due stringhe
+  sono prefix/superset l'una dell'altra, tenere la piu' lunga
+
+### Effetto su auto-builder
+
+Auto-builder ora ha dati utilizzabili:
+- Init AutoBuilder con MI.P.GARIBALDI → 34 stazioni reachable
+- `build_schedule(n_workdays=1, day_type='LV')` entra in Fase 2
+  (Multi-restart, 25 tentativi). **Gira ma e' lento** — va testato con
+  output reale per vedere la qualita' delle catene generate
+
+### Residui per prossime sessioni
+
+1. **Test auto-builder completo**: `build_schedule(n_workdays=5)` con
+   output + tempo + qualita' catene. Se gira bene, e' la base della
+   pipeline auto-generazione PdC (punto centrale del prodotto)
+2. **Fix parser train_id 6+ cifre sospetti**: quando 2 letture vertical
+   per stesso x si merge-ano con "/", scegliere il piu' lungo
+3. **Parser PdC off-by-ipotizzato**: chiarito essere un non-bug (vedi
+   entry precedente); CVa 13:28 e' geometricamente corretto
+4. **`mark_superseded_turns`**: gestire `import_id IS NULL` (bug noto
+   che ha richiesto migrazione manuale al re-import PdC)
+5. **Propagazione a Railway** (PostgreSQL): upload entrambi i PDF via
+   UI `/import` o import SQL diretto
+
+### File modificati
+
+- `turni.db` (DB locale: wipe + re-import materiale)
+- `LIVE-COLAZIONE.md` (questa entry)
+
+Zero modifiche al codice sorgente — il parser funziona bene su PDF
+reale, il bug era solo nel DB storico.
+
+---
+
 ## 2026-04-20 — Parser PdC: diagnosi + re-import PDF ALOR_C g1
 
 Feedback utente (grave): "il turno non viene letto bene, vedi ALOR_C g1".
