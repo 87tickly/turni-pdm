@@ -62,8 +62,8 @@ export function AutoBuilderPage() {
       setError("Seleziona un deposito")
       return
     }
-    if (!Number.isFinite(days) || days < 1 || days > 14) {
-      setError("Numero giornate non valido (1–14)")
+    if (!Number.isFinite(days) || days < 1 || days > 60) {
+      setError("Numero giornate non valido (1–60)")
       return
     }
     setLoading(true)
@@ -179,7 +179,7 @@ export function AutoBuilderPage() {
             <input
               type="number"
               min={1}
-              max={14}
+              max={60}
               value={days}
               onChange={(e) => {
                 const n = parseInt(e.target.value, 10)
