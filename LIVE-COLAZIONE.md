@@ -4,6 +4,103 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-20 — Parser PdC: diagnosi + re-import PDF ALOR_C g1
+
+Feedback utente (grave): "il turno non viene letto bene, vedi ALOR_C g1".
+Screenshot mostra blocchi in ordine invertito + orari `--:--` su 3/5
+blocchi. Correzione terminologica importante: "pausa a PV" = **sosta**
+(non rientro in vettura). Il rientro in vettura e' quando un turno
+finisce fuori deposito → si propone via ARTURO Live un treno
+commerciale per far tornare il PdC come passeggero.
+
+### Diagnosi (prima di toccare codice)
+
+Fatto studio di `src/importer/turno_pdc_parser.py` + dump comparativo
+PDF vs DB per ALOR_C g1 LMXGV:
+
+**Parser corrente (run su PDF oggi):**
+```
+[0] train      10574 →PV 11:41-12:55  (riga PDF: "47501 41 55")
+[1] cv_arrivo  10678 →PV 13:28         (riga PDF: "87601aVC 28 33")
+[2] cv_partenza 10677 →PV 14:38        (riga PDF: "77601pVC 38 05 27")
+[3] train      10581 →AL 15:05-16:19   (riga PDF: "18501 19")
+[4] cv_arrivo  10584 →AL 16:34         (riga PDF: "48501aVC AL 34 15")
+```
+→ ordine corretto, orari **quasi** giusti.
+
+**DB pre-reimport (stato visto dall'utente):**
+```
+[0] train      10574 →PV 11:26-12:40  ← -15 min rispetto a parser oggi
+[1] cv_arrivo  10678 →PV 13:13        ← -15 min rispetto a parser oggi
+[2-4] identici al parser corrente
+```
+→ DB popolato con versione parser piu' vecchia, da tempo non rifatto
+l'import. Due bug risolti nel parser tra quell'import e oggi hanno
+rifatto 11:41 e 13:28 (erano 11:26 e 13:13).
+
+**Unico residuo parser (da fixare):** `CVa 10678` a `13:28` **dovrebbe
+essere `12:28`** (off by 1h — arrivo del materiale a PV subito dopo
+10574 che finisce alle 12:55, non 33 min dopo). Root cause in
+`_x_to_hour_for_minute`: quando il minuto cade geometricamente vicino
+al confine di 2 ore, la scelta dell'ora non e' vincolata dall'orario
+del blocco precedente. Fix: aggiungere vincolo "ora CVa >= ora del
+treno precedente".
+
+### Ordine blocchi "invertito" in UI
+
+Nello screenshot utente, i 5 blocchi apparivano nell'ordine:
+`CVp 10677 → 10581 → CVa 10584 → 10574 → CVa 10678` (ritorno PRIMA di
+andata). Ma sia il parser sia il DB hanno ordine corretto (andata,
+ritorno). Probabile causa: l'utente aveva interagito col PdcBuilderPage
+(drag, modifica) e il save aveva persistito stato riordinato, oppure
+era uno stato di rendering effimero. Post-reimport, se l'effetto si
+ripresenta e' un bug separato da investigare.
+
+### Fix applicato: re-import PDF + migrazione pre-versioning
+
+1. `parse_pdc_pdf('uploads/Turni PdC rete RFI dal 23 Febbraio 2026.pdf')`
+   → 26 turni, 1344 giornate, 6925 blocchi, 2901 notes
+2. `save_parsed_turns_as_import()` → import_id=6 creato, 25 turni
+   marcati superseded
+3. **Migrazione one-time** necessaria: il vecchio ALOR_C aveva
+   `import_id=NULL` (pre-sistema versioning). `mark_superseded_turns()`
+   usa `import_id <> ?` che in SQL non matcha NULL → l'orfano rimaneva
+   attivo. Corretto manualmente marcando come superseded tutti i turni
+   `import_id IS NULL` con stesso (codice, impianto) del nuovo import.
+4. Post-fix: 26 turni attivi, zero duplicati; ALOR_C attivo e' id=153
+   con orari corretti (11:41-12:55 al posto di 11:26-12:40).
+
+### Effetto su produzione (Railway)
+
+**ATTENZIONE:** il re-import e' stato fatto sul DB **locale** SQLite
+(`turni.db`). La produzione Railway usa PostgreSQL via `DATABASE_URL`.
+Per propagare il fix in produzione serve:
+- Upload del PDF via pagina `/import` in produzione, oppure
+- Esecuzione dello script di re-import sul server Railway
+
+La UI in produzione mostrera' ancora i dati vecchi finche' questo
+upload non viene fatto.
+
+### Residui per le prossime sessioni
+
+1. **Fix parser off-by-1h** in `_x_to_hour_for_minute` per CVa/CVp
+   vicini ai confini d'ora (vincolo: start_time CVa >= end_time treno
+   precedente)
+2. **Versioning import_id=NULL**: modificare `mark_superseded_turns()`
+   per gestire `import_id IS NULL` via `COALESCE` o `IS DISTINCT FROM`
+   (evita che il bug si ripresenti al prossimo import)
+3. **Rientro in vettura** — feature da costruire:
+   - Rileva: `day.last_block.to_station` ≠ `turno.impianto` (deposito)
+   - Query ARTURO Live: treni commerciali da `to_station` →
+     `impianto` partendo dopo `last_block.end_time`
+   - Propone lista al utente, selezione → insert `coach_transfer`
+     block con ruolo "vettura_rientro"
+4. **Parser PDF turno materiale** (`Turno Materiale Trenord dal
+   2_3_26.pdf`): non ancora diagnosticato. E' l'input del prossimo step
+   della pipeline (materiale → auto-generazione PdC)
+
+---
+
 ## 2026-04-19 — Gestione PdC: fluidity sblocco (axis auto-fit + cross-day drag + jump-to-day)
 
 Feedback utente: "il turno non viene letto correttamente" (visivo) e
