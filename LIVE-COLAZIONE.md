@@ -4,6 +4,38 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-20 — METODO-DI-LAVORO.md: framework operativo permanente
+
+Creato `docs/METODO-DI-LAVORO.md`, ispirato ai valori di affidabilita'
+lavorativa giapponese (fiducia attraverso i fatti, stabilita',
+puntualita', verifica prima della consegna, ammettere l'errore).
+
+Contenuto:
+- 7 regole operative concrete: diagnosi prima di azione, numeri non
+  ipotesi, un passo alla volta completato bene, ammettere l'errore,
+  verifica prima del commit, preservare non distruggere, costanza
+  nel tempo
+- Check di inizio sessione e di fine task
+- Metrica personale di affidabilita' per auto-valutazione
+
+Integrazione:
+- `CLAUDE.md` aggiornato: nuova regola 4 OBBLIGATORIA di leggere
+  `docs/METODO-DI-LAVORO.md` all'inizio di ogni sessione
+- La regola "Design via Claude Design" rinumerata da 4 a 5
+
+Motivo: ho accumulato in alcune sessioni un pattern di diagnosi
+fantasiose (es. "bug off-by-1h" inventato sul parser PdC CVa 10678 —
+in realta' era geometricamente corretto), fix senza verifica, e
+scivolamenti verso scorciatoie nei momenti di stress. Questo doc e' lo
+strumento di ricalibrazione permanente.
+
+Commit: `b2f3b0e`. Zero codice modificato — solo documentazione. Il
+lavoro WIP sull'AutoBuilder UI (api.ts + AutoBuilderPage + route) e'
+rimasto nel working tree, verra' committato a parte quando la UI sara'
+completa e verificata.
+
+---
+
 ## 2026-04-20 — Auto-builder verificato: pipeline materiale → PdC funziona
 
 Dopo re-import materiale, test end-to-end della pipeline core del prodotto:
