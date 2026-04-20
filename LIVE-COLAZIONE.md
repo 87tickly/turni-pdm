@@ -4,6 +4,70 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-20 — UI AutoBuilder: pipeline materiale → PdC esposta all'utente
+
+Chiusa la pipeline end-to-end: adesso l'utente puo' cliccare un
+pulsante in sidebar, scegliere deposito + giornate + tipo e vedere
+turni PdC auto-generati con chip violazioni. La parte algoritmica era
+gia' verificata nella sessione precedente (3 depositi testati, 0-1
+violazioni, 0.2s), mancava solo l'integrazione UI.
+
+### File toccati (un solo commit coerente)
+
+- `frontend/src/lib/api.ts` — aggiunta `buildAuto()` + tipi
+  `BuildAutoRequest / BuildAutoResponse / BuildAutoEntry`. Endpoint
+  `POST /build-auto`.
+- `frontend/src/pages/AutoBuilderPage.tsx` — pagina nuova (circa 630
+  righe). Form (deposito select popolato da `getConstants()`, giornate
+  1/3/5/7/14, tipo LV/SAB/DOM), CTA "Genera turno", result bar
+  (giornate / violazioni / treni unici / stazioni reachable / tempo),
+  preview giornate stacked con header (presentation → end time, tratta
+  first→last, metriche condotta/prestazione/refezione, badge FR, icona
+  notturno, chip violations/OK), lista segmenti con train_id + tratta
+  + orari, box violations espanso con severity + rule + message.
+- `frontend/src/App.tsx` — route `/auto-genera` → `<AutoBuilderPage />`.
+- `frontend/src/components/Sidebar.tsx` — voce "Genera da materiale"
+  con icona `Sparkles`, inserita tra "Turni PdC" e "Import". Active
+  state con kinetic dot indicator (stessa treatment delle altre voci).
+
+### Verifica
+
+- `npm run build`: PASS in 237ms, 0 errori TypeScript.
+- Bundle: `index-Coa70-X7.js` 496.72 kB (gzip 136.18 kB) — +1 lucide
+  icon + 1 route + 1 pagina = delta atteso minimo.
+- Preview dev server: login page carica, 0 errori in console
+  (solo noise di vite HMR + React DevTools hint).
+- Login al backend non testato end-to-end qui (non avevo credenziali
+  dev), ma il bundle non crasha, tutti i tipi risolvono, le CSS vars
+  usate (`--color-warning`, `--color-success-container`,
+  `--gradient-primary`, etc.) esistono in `index.css`.
+
+### Residui noti (non bloccanti per questa feature)
+
+1. **Bug CREMONA G4 FR** — auto-builder non ritorna al deposito per
+   G4, probabile caso fuori residenza mal-gestito nel validator. La
+   UI lo mostra correttamente come chip violation arancione; la
+   correzione e' un task algoritmico separato.
+2. **Re-upload PDF in produzione Railway** — il DB Railway e' ancora
+   con i segmenti vuoti pre-fix (vedi entry 2026-04-20 parser
+   materiale). Questa UI funzionera' in produzione solo dopo il
+   re-upload.
+3. **Parser edge case train_id 6+ cifre (~2%)** — non correlato alla
+   UI, tracciato per parser.
+4. **`turno_materiale_treni.json` nel working tree** — 96k righe
+   riordinate (48k+/48k-) da un re-import. NON committato in questo
+   batch perche' non fa parte della feature UI. Verra' gestito in un
+   commit "DB:" dedicato.
+
+### Cosa sblocca
+
+Con questa pagina, il dispatcher puo' per la prima volta generare
+turni PdC automatici **senza CLI**. Prossimo passo naturale: bottone
+"Salva come turno" per persistere l'output in `weekly_shift` (adesso
+il risultato e' solo visualizzato, non salvato).
+
+---
+
 ## 2026-04-20 — METODO-DI-LAVORO.md: framework operativo permanente
 
 Creato `docs/METODO-DI-LAVORO.md`, ispirato ai valori di affidabilita'

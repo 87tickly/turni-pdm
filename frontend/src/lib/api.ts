@@ -1008,3 +1008,59 @@ export async function getLineaAttiva() {
     note: string | null
   }>(`/api/linea/attiva`)
 }
+
+// ────────────────────────────────────────────────────────────────
+// Auto-builder (pipeline materiale → PdC auto-generato)
+// ────────────────────────────────────────────────────────────────
+
+export interface BuildAutoRequest {
+  deposito: string
+  days: number // numero giornate lavorative
+  day_type: "LV" | "SAB" | "DOM"
+  accessory_type?: string
+}
+
+export interface BuildAutoEntry {
+  type: "TURN" | "REST"
+  day: number | null
+  summary?: {
+    prestazione: string
+    prestazione_min: number
+    condotta: string
+    condotta_min: number
+    accessori_min: number
+    tempi_medi_min: number
+    extra_min: number
+    meal_min: number
+    meal_start: string
+    meal_end: string
+    presentation_time: string
+    end_time: string
+    day_type: string
+    night_minutes: number
+    is_fr: boolean
+    last_station: string
+    segments_count: number
+    segments: TrainSegment[]
+    timeline: TimelineBlock[]
+    violations: Array<{ rule: string; message: string; severity: string }>
+  }
+}
+
+export interface BuildAutoResponse {
+  workdays_requested: number
+  calendar: BuildAutoEntry[]
+  deposito: string
+  reachable_stations: string[]
+  total_violations: number
+  train_dedup: {
+    total_trains: number
+    unique_trains: number
+    duplicates: Record<string, number>
+    clean: boolean
+  }
+}
+
+export async function buildAuto(req: BuildAutoRequest) {
+  return api.post<BuildAutoResponse>(`/build-auto`, req)
+}
