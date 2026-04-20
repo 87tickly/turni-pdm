@@ -9,7 +9,8 @@
    - Fai `git commit` con messaggio descrittivo
    - Fai `git push`
 3. **Mai lavorare senza contesto**: se non hai letto LIVE-COLAZIONE.md, leggilo prima di fare qualsiasi cosa
-4. **Design UX/UI → SEMPRE via Claude Design** (claude.ai/design, by Anthropic Labs): quando la conversazione riguarda aspetto visivo, layout, interazioni, design system, nuove schermate, restyle di componenti, mockup, wireframe → NON iniziare a generare CSS/Tailwind inline o proporre markup a mano.
+4. **Leggi `docs/METODO-DI-LAVORO.md`** all'inizio di ogni sessione (subito dopo `LIVE-COLAZIONE.md`). È il framework di comportamento ispirato all'affidabilità lavorativa giapponese — fiducia attraverso i fatti, diagnosi prima di azione, un passo alla volta completato bene, ammettere l'errore, verifica prima del commit, preservare non distruggere, costanza nel tempo. NON È opzionale. Nei momenti di fretta o frustrazione è proprio quando serve fermarsi e ri-consultarlo.
+5. **Design UX/UI → SEMPRE via Claude Design** (claude.ai/design, by Anthropic Labs): quando la conversazione riguarda aspetto visivo, layout, interazioni, design system, nuove schermate, restyle di componenti, mockup, wireframe → NON iniziare a generare CSS/Tailwind inline o proporre markup a mano.
 
    **PRECONDIZIONE — Claude Design conosce GIÀ questa cartella.** L'utente ha collegato su claude.ai/design sia il repo GitHub `87tickly/turni-pdm` sia la cartella locale `COLAZIONE` come contesto filesystem diretto. Claude Design può leggere componenti sorgente, token CSS (`frontend/src/index.css`), reference (`docs/REFERENCE-*.html`, `docs/HANDOFF-claude-design.md`), screenshot già salvati. **NON serve preparare bundle di upload** (zip, copie, cartelle materiale). Serve solo un **prompt mirato**.
 
