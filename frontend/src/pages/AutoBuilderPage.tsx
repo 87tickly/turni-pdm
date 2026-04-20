@@ -26,7 +26,6 @@ import {
   Play,
   Building2,
   Calendar,
-  Activity,
 } from "lucide-react"
 import {
   buildAuto,
@@ -36,18 +35,11 @@ import {
   type AppConstants,
 } from "@/lib/api"
 
-const DAY_TYPE_LABELS: Record<string, string> = {
-  LV: "Feriale (Lun–Ven)",
-  SAB: "Sabato",
-  DOM: "Domenica / Festivo",
-}
-
 export function AutoBuilderPage() {
   const navigate = useNavigate()
   const [constants, setConstants] = useState<AppConstants | null>(null)
   const [deposito, setDeposito] = useState<string>("")
   const [days, setDays] = useState<number>(5)
-  const [dayType, setDayType] = useState<"LV" | "SAB" | "DOM">("LV")
   const [loading, setLoading] = useState(false)
   const [elapsed, setElapsed] = useState<number | null>(null)
   const [result, setResult] = useState<BuildAutoResponse | null>(null)
@@ -70,12 +62,18 @@ export function AutoBuilderPage() {
       setError("Seleziona un deposito")
       return
     }
+    if (!Number.isFinite(days) || days < 1 || days > 14) {
+      setError("Numero giornate non valido (1–14)")
+      return
+    }
     setLoading(true)
     setError("")
     setResult(null)
     const t0 = performance.now()
     try {
-      const res = await buildAuto({ deposito, days, day_type: dayType })
+      // day_type omesso: il backend usa il default e in futuro lo dedurra'
+      // automaticamente dal calendario interno + giro materiale.
+      const res = await buildAuto({ deposito, days })
       setResult(res)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -132,7 +130,7 @@ export function AutoBuilderPage() {
           boxShadow: "var(--shadow-sm)",
         }}
       >
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_160px_200px_auto] gap-3 items-end">
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_160px_auto] gap-3 items-end">
           {/* Deposito */}
           <label className="flex flex-col gap-1.5">
             <span
@@ -148,6 +146,7 @@ export function AutoBuilderPage() {
             <select
               value={deposito}
               onChange={(e) => setDeposito(e.target.value)}
+              disabled={!constants}
               className="px-3 py-2 rounded-md text-[13px] outline-none"
               style={{
                 backgroundColor: "var(--color-surface-container-low)",
@@ -156,7 +155,7 @@ export function AutoBuilderPage() {
                 fontFamily: "var(--font-sans)",
               }}
             >
-              <option value="">—</option>
+              {!constants && <option value="">Caricamento…</option>}
               {constants?.DEPOSITI.map((d) => (
                 <option key={d} value={d}>
                   {d}
@@ -165,7 +164,7 @@ export function AutoBuilderPage() {
             </select>
           </label>
 
-          {/* Giornate */}
+          {/* Giornate (input libero 1-14) */}
           <label className="flex flex-col gap-1.5">
             <span
               className="text-[10px] font-bold uppercase flex items-center gap-1"
@@ -177,9 +176,15 @@ export function AutoBuilderPage() {
               <Calendar size={10} />
               Giornate
             </span>
-            <select
+            <input
+              type="number"
+              min={1}
+              max={14}
               value={days}
-              onChange={(e) => setDays(parseInt(e.target.value))}
+              onChange={(e) => {
+                const n = parseInt(e.target.value, 10)
+                setDays(Number.isFinite(n) ? n : 0)
+              }}
               className="px-3 py-2 rounded-md text-[13px] outline-none"
               style={{
                 backgroundColor: "var(--color-surface-container-low)",
@@ -187,43 +192,7 @@ export function AutoBuilderPage() {
                 boxShadow: "inset 0 0 0 1px var(--color-ghost)",
                 fontFamily: "var(--font-mono)",
               }}
-            >
-              {[1, 3, 5, 7, 14].map((n) => (
-                <option key={n} value={n}>
-                  {n} giorni
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {/* Day type */}
-          <label className="flex flex-col gap-1.5">
-            <span
-              className="text-[10px] font-bold uppercase flex items-center gap-1"
-              style={{
-                color: "var(--color-on-surface-muted)",
-                letterSpacing: "0.08em",
-              }}
-            >
-              <Activity size={10} />
-              Tipo giornata
-            </span>
-            <select
-              value={dayType}
-              onChange={(e) => setDayType(e.target.value as "LV" | "SAB" | "DOM")}
-              className="px-3 py-2 rounded-md text-[13px] outline-none"
-              style={{
-                backgroundColor: "var(--color-surface-container-low)",
-                color: "var(--color-on-surface-strong)",
-                boxShadow: "inset 0 0 0 1px var(--color-ghost)",
-              }}
-            >
-              {Object.entries(DAY_TYPE_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v}
-                </option>
-              ))}
-            </select>
+            />
           </label>
 
           {/* Generate CTA */}

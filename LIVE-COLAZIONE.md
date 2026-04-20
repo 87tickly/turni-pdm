@@ -4,6 +4,48 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-20 — UI AutoBuilder: fix form (feedback utente in produzione)
+
+Test in produzione (Railway) ha rivelato 3 micro-bug nel form:
+
+1. **Deposito mostrava "—" come default** invece di pre-selezionare il
+   primo. Causa: `<option value="">—</option>` come placeholder. Fix:
+   rimossa opzione vuota; durante il caricamento mostra "Caricamento…"
+   e disabilita il select; appena `getConstants()` ritorna, il primo
+   dei 25 depositi (ALESSANDRIA) viene auto-selezionato.
+
+2. **Tipo giornata (LV/SAB/DOM) era una scelta utente** ma per un
+   auto-builder di un giro materiale non ha senso chiederlo all'utente:
+   il sistema deve dedurlo dal calendario interno. Fix: select rimosso
+   dalla UI; il backend usa il default `LV` invariato. Il vero
+   auto-detection per-giornata richiede modifica algoritmica del
+   builder (tracciato come residuo).
+
+3. **Giornate vincolate ai preset 1/3/5/7/14** invece di input libero.
+   Fix: `<select>` -> `<input type="number" min=1 max=14>`, validazione
+   client-side prima della chiamata.
+
+Effetti collaterali: layout grid passato da
+`md:grid-cols-[1fr_160px_200px_auto]` a `md:grid-cols-[1fr_160px_auto]`
+(rimossa colonna Tipo giornata). `BuildAutoRequest.day_type` reso
+opzionale in `frontend/src/lib/api.ts` (era required). Import lucide
+`Activity` rimosso (era usato solo per icona Tipo giornata).
+
+Build: PASS in 189ms, 0 errori TS. Bundle 496.06 kB (gzip 136.07 kB,
+delta -110 byte vs commit precedente).
+
+### Residuo nuovo
+
+**Auto-detection day_type per giornata** — al momento tutto il calendar
+parte come `LV`. Per un'esperienza veramente "non chiedo nulla
+all'utente" il `AutoBuilder.build_schedule()` dovrebbe ricevere una
+data di partenza (oggi default), iterare sui giorni, mappare ciascuno
+a LV/SAB/DOM in base al giorno della settimana + festivita', e
+combinare con `VALIDITY_MAP` per filtrare i treni circolanti. Modifica
+non triviale ma chiara.
+
+---
+
 ## 2026-04-20 — UI AutoBuilder: pipeline materiale → PdC esposta all'utente
 
 Chiusa la pipeline end-to-end: adesso l'utente puo' cliccare un

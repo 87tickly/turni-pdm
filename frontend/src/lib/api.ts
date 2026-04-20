@@ -1016,7 +1016,7 @@ export async function getLineaAttiva() {
 export interface BuildAutoRequest {
   deposito: string
   days: number // numero giornate lavorative
-  day_type: "LV" | "SAB" | "DOM"
+  day_type?: "LV" | "SAB" | "DOM" // backend default "LV"; in futuro auto dal calendario
   accessory_type?: string
 }
 
