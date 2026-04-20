@@ -4,6 +4,76 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-20 — Abilitazioni deposito (Commit 1/3): schema DB + helpers
+
+Primo step del fix algoritmico richiesto dall'utente: l'auto-builder
+deve poter usare treni di **altre linee** per il rientro (in condotta o
+in vettura), filtrato dalle abilitazioni del deposito.
+
+L'utente ha scelto:
+- **Linea = coppia di stazioni estremi** del giro materiale (opzione B)
+- **Abilitazioni per deposito** (non per singolo PdC)
+- **NO seed automatico**: si parte da zero, l'utente abilita
+  manualmente. Motivo dell'utente: "se no fai due volte il lavoro"
+- Materiale rotabile: gia' presente in DB (`material_turn.material_type`)
+- Contratto: in condotta = condotta+prestazione, in vettura =
+  prestazione ma NON condotta (gia' supportato via `is_deadhead`)
+
+### Cosa contiene questo commit (solo schema + helpers, NO UI, NO builder)
+
+`src/database/db.py`:
+
+- 2 tabelle nuove (CREATE TABLE IF NOT EXISTS, idempotenti):
+  - `depot_enabled_line(deposito, station_a, station_b)` con UNIQUE
+    su tripla. Coppie normalizzate alfabeticamente (a <= b)
+  - `depot_enabled_material(deposito, material_type)` con UNIQUE
+- Indici su `deposito` per entrambe
+- Helpers CRUD: `add/remove/get_enabled_line(s)`,
+  `add/remove/get_enabled_material(s)`
+- `_normalize_line_pair()`: maiuscolo + ordine alfabetico
+- `get_material_turn_endpoints(mat_turn_id)`: estremi normalizzati di
+  un giro. Gestisce roundtrip (from == to) usando la stazione non-base
+  piu' frequente nei segmenti intermedi
+- `is_segment_enabled(deposito, segment)`: True se BOTH linea AND
+  materiale del segmento sono abilitati per il deposito. Se nessuna
+  abilitazione configurata -> False (volutamente bloccante per Commit 3)
+- `get_available_lines_for_depot(deposito)`: linee derivate dai giri
+  che toccano il deposito (per UI)
+- `get_available_materials_for_depot(deposito)`: idem per materiali
+
+### Verifica con numeri reali (turni.db locale)
+
+ALESSANDRIA:
+- Linee disponibili: 3
+  - ALESSANDRIA <-> PAVIA (1 giro)
+  - BERGAMO <-> MILANO ROGOREDO (1 giro che passa per Alessandria)
+  - MI.P.GARIBALDI <-> MILANO ROGOREDO (idem)
+- Materiali disponibili: 1 (E464N)
+
+Insight: i 2 giri "esterni" che passano per Alessandria sono
+esattamente quelli che il builder potrebbe usare per il rientro
+(Commit 3). Modello conferma il caso d'uso che hai descritto.
+
+Test add/get/remove tutti PASS, normalizzazione coppia funziona
+(`add('PAVIA','ALESSANDRIA')` rifiutata come duplicato di
+`('ALESSANDRIA','PAVIA')`).
+
+### Compatibilita'
+
+- SQLite + PostgreSQL (usa `_q()` placeholder normalizer)
+- Schema additivo: zero impatto su DB esistente, builder corrente
+  funziona ancora come prima
+
+### Prossimi commit
+
+- **Commit 2**: endpoint REST `/abilitazioni/linee` `/abilitazioni/materiali` + UI in `/impostazioni`
+- **Commit 3**: integrazione builder. `is_segment_enabled` come filtro
+  su treni produttivi e candidati rientro. Logica rientro:
+  prima in condotta (abilitato), fallback in vettura (`is_deadhead=True`).
+  Test ALESSANDRIA 20 giorni: 11 violazioni -> 0 attese
+
+---
+
 ## 2026-04-20 — UI AutoBuilder: fix form (feedback utente in produzione)
 
 Test in produzione (Railway) ha rivelato 3 micro-bug nel form:

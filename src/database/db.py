@@ -356,6 +356,31 @@ class Database:
             )
         """)
 
+        # ── Abilitazioni per deposito (PdC) ──
+        # Linea: coppia di stazioni estremi del giro materiale,
+        # normalizzata alfabeticamente (station_a < station_b).
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS depot_enabled_line (
+                id {pk},
+                deposito TEXT NOT NULL,
+                station_a TEXT NOT NULL,
+                station_b TEXT NOT NULL,
+                UNIQUE(deposito, station_a, station_b)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_depot_enabled_line_depot ON depot_enabled_line(deposito)")
+
+        # Materiale rotabile abilitato per deposito (es. E464N, ATR220, TSR).
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS depot_enabled_material (
+                id {pk},
+                deposito TEXT NOT NULL,
+                material_type TEXT NOT NULL,
+                UNIQUE(deposito, material_type)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_depot_enabled_material_depot ON depot_enabled_material(deposito)")
+
         self.conn.commit()
 
         # ── Migrazioni per colonne aggiunte dopo la prima release ──
@@ -812,6 +837,230 @@ class Database:
         """)
         rows = cur.fetchall()
         return [r["station"] if isinstance(r, dict) else r[0] for r in rows]
+
+    # ------------------------------------------------------------------
+    # DEPOT ABILITAZIONI (linee + materiale rotabile per deposito)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _normalize_line_pair(station_a: str, station_b: str) -> tuple[str, str]:
+        """Maiuscolo + ordine alfabetico (a <= b)."""
+        a = (station_a or "").upper().strip()
+        b = (station_b or "").upper().strip()
+        return (a, b) if a <= b else (b, a)
+
+    def get_material_turn_endpoints(self, material_turn_id: int) -> Optional[tuple[str, str]]:
+        """
+        Estremi (normalizzati alfabeticamente) di un giro materiale:
+        coppia (first_segment.from_station, last_segment.to_station).
+        Se roundtrip (from == to), usa la stazione non-base piu' frequente
+        tra i segmenti intermedi.
+        """
+        cur = self._cursor()
+        cur.execute(self._q(
+            "SELECT from_station, to_station, seq FROM train_segment "
+            "WHERE material_turn_id = ? ORDER BY seq ASC, id ASC"
+        ), (material_turn_id,))
+        rows = cur.fetchall()
+        segs = [self._dict(r) for r in rows]
+        if not segs:
+            return None
+        first_from = (segs[0]["from_station"] or "").upper().strip()
+        last_to = (segs[-1]["to_station"] or "").upper().strip()
+        if first_from and last_to and first_from != last_to:
+            return self._normalize_line_pair(first_from, last_to)
+        # Roundtrip: stazione non-base piu' frequente
+        base = first_from or last_to
+        if not base:
+            return None
+        counts: dict[str, int] = {}
+        for s in segs:
+            for st in (s["from_station"], s["to_station"]):
+                st = (st or "").upper().strip()
+                if st and st != base:
+                    counts[st] = counts.get(st, 0) + 1
+        if not counts:
+            return None
+        farthest = max(counts.items(), key=lambda x: x[1])[0]
+        return self._normalize_line_pair(base, farthest)
+
+    def add_enabled_line(self, deposito: str, station_a: str, station_b: str) -> bool:
+        """Aggiunge abilitazione linea. True se inserita, False se gia' presente."""
+        dep = (deposito or "").upper().strip()
+        a, b = self._normalize_line_pair(station_a, station_b)
+        if not dep or not a or not b:
+            return False
+        cur = self._cursor()
+        try:
+            cur.execute(self._q(
+                "INSERT INTO depot_enabled_line (deposito, station_a, station_b) "
+                "VALUES (?, ?, ?)"
+            ), (dep, a, b))
+            self.conn.commit()
+            return True
+        except Exception:
+            if self.is_pg:
+                self.conn.rollback()
+            return False
+
+    def remove_enabled_line(self, deposito: str, station_a: str, station_b: str) -> int:
+        """Rimuove abilitazione linea. Ritorna numero righe eliminate."""
+        dep = (deposito or "").upper().strip()
+        a, b = self._normalize_line_pair(station_a, station_b)
+        cur = self._cursor()
+        cur.execute(self._q(
+            "DELETE FROM depot_enabled_line "
+            "WHERE deposito = ? AND station_a = ? AND station_b = ?"
+        ), (dep, a, b))
+        self.conn.commit()
+        return cur.rowcount
+
+    def get_enabled_lines(self, deposito: str) -> list[tuple[str, str]]:
+        """Lista coppie (station_a, station_b) abilitate per un deposito."""
+        dep = (deposito or "").upper().strip()
+        cur = self._cursor()
+        cur.execute(self._q(
+            "SELECT station_a, station_b FROM depot_enabled_line "
+            "WHERE deposito = ? ORDER BY station_a, station_b"
+        ), (dep,))
+        rows = cur.fetchall()
+        out: list[tuple[str, str]] = []
+        for r in rows:
+            d = self._dict(r)
+            out.append((d["station_a"], d["station_b"]))
+        return out
+
+    def add_enabled_material(self, deposito: str, material_type: str) -> bool:
+        dep = (deposito or "").upper().strip()
+        mat = (material_type or "").upper().strip()
+        if not dep or not mat:
+            return False
+        cur = self._cursor()
+        try:
+            cur.execute(self._q(
+                "INSERT INTO depot_enabled_material (deposito, material_type) VALUES (?, ?)"
+            ), (dep, mat))
+            self.conn.commit()
+            return True
+        except Exception:
+            if self.is_pg:
+                self.conn.rollback()
+            return False
+
+    def remove_enabled_material(self, deposito: str, material_type: str) -> int:
+        dep = (deposito or "").upper().strip()
+        mat = (material_type or "").upper().strip()
+        cur = self._cursor()
+        cur.execute(self._q(
+            "DELETE FROM depot_enabled_material "
+            "WHERE deposito = ? AND material_type = ?"
+        ), (dep, mat))
+        self.conn.commit()
+        return cur.rowcount
+
+    def get_enabled_materials(self, deposito: str) -> list[str]:
+        dep = (deposito or "").upper().strip()
+        cur = self._cursor()
+        cur.execute(self._q(
+            "SELECT material_type FROM depot_enabled_material "
+            "WHERE deposito = ? ORDER BY material_type"
+        ), (dep,))
+        rows = cur.fetchall()
+        return [self._dict(r)["material_type"] for r in rows]
+
+    def is_segment_enabled(self, deposito: str, segment: dict) -> bool:
+        """
+        Un segmento e' abilitato per un deposito se BOTH:
+          - linea (estremi del suo material_turn) abilitata, AND
+          - materiale del suo material_turn abilitato.
+        Se il deposito non ha alcuna abilitazione, ritorna False
+        (builder non produce turni finche' l'utente non configura).
+        """
+        dep = (deposito or "").upper().strip()
+        mat_turn_id = segment.get("material_turn_id") if isinstance(segment, dict) else getattr(segment, "material_turn_id", None)
+        if not mat_turn_id:
+            return False
+        endpoints = self.get_material_turn_endpoints(mat_turn_id)
+        if not endpoints:
+            return False
+        if endpoints not in set(self.get_enabled_lines(dep)):
+            return False
+        cur = self._cursor()
+        cur.execute(self._q(
+            "SELECT material_type FROM material_turn WHERE id = ?"
+        ), (mat_turn_id,))
+        row = cur.fetchone()
+        if not row:
+            return False
+        mat = (self._dict(row).get("material_type") or "").upper().strip()
+        if not mat:
+            return False
+        return mat in set(self.get_enabled_materials(dep))
+
+    def get_available_lines_for_depot(self, deposito: str) -> list[dict]:
+        """
+        Elenca le linee (coppie estremi) potenzialmente disponibili per un
+        deposito, derivate dai giri materiale che toccano il deposito.
+        Utile per pre-riempire la UI di configurazione abilitazioni.
+        Ritorna [{'station_a', 'station_b', 'material_turn_count', 'enabled'}].
+        """
+        dep = (deposito or "").upper().strip()
+        cur = self._cursor()
+        cur.execute(self._q("""
+            SELECT DISTINCT material_turn_id
+            FROM train_segment
+            WHERE material_turn_id IS NOT NULL
+              AND (UPPER(from_station) = ? OR UPPER(to_station) = ?)
+        """), (dep, dep))
+        rows = cur.fetchall()
+        turn_ids = [self._dict(r)["material_turn_id"] for r in rows]
+        enabled_set = set(self.get_enabled_lines(dep))
+        counts: dict[tuple[str, str], int] = {}
+        for tid in turn_ids:
+            ep = self.get_material_turn_endpoints(tid)
+            if not ep:
+                continue
+            counts[ep] = counts.get(ep, 0) + 1
+        out = []
+        for (a, b), n in sorted(counts.items()):
+            out.append({
+                "station_a": a,
+                "station_b": b,
+                "material_turn_count": n,
+                "enabled": (a, b) in enabled_set,
+            })
+        return out
+
+    def get_available_materials_for_depot(self, deposito: str) -> list[dict]:
+        """
+        Materiali rotabili presenti nei giri che toccano il deposito.
+        Ritorna [{'material_type', 'material_turn_count', 'enabled'}].
+        """
+        dep = (deposito or "").upper().strip()
+        cur = self._cursor()
+        cur.execute(self._q("""
+            SELECT mt.material_type, COUNT(DISTINCT mt.id) AS n
+            FROM material_turn mt
+            WHERE mt.id IN (
+                SELECT DISTINCT material_turn_id FROM train_segment
+                WHERE material_turn_id IS NOT NULL
+                  AND (UPPER(from_station) = ? OR UPPER(to_station) = ?)
+            )
+            AND mt.material_type IS NOT NULL AND mt.material_type != ''
+            GROUP BY mt.material_type
+            ORDER BY mt.material_type
+        """), (dep, dep))
+        rows = cur.fetchall()
+        enabled_set = set(self.get_enabled_materials(dep))
+        out = []
+        for r in rows:
+            d = self._dict(r)
+            mat = d["material_type"].upper().strip()
+            out.append({
+                "material_type": mat,
+                "material_turn_count": d["n"],
+                "enabled": mat in enabled_set,
+            })
+        return out
 
     # ------------------------------------------------------------------
     # DAY VARIANT
