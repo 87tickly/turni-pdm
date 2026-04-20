@@ -4,6 +4,78 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-21 — Abilitazioni deposito (Commit 2/3): REST + UI
+
+Secondo step. Adesso l'utente puo' configurare le abilitazioni dal
+browser, voce sidebar dedicata "Abilitazioni" (icona ShieldCheck).
+
+### Backend
+
+`api/abilitazioni.py` (nuovo):
+- `GET  /abilitazioni/{deposito}` — pubblico, ritorna stato + candidati
+  (`enabled_lines`, `enabled_materials`, `available_lines`,
+  `available_materials`)
+- `POST/DELETE /abilitazioni/{deposito}/linee` — body `{station_a, station_b}`,
+  richiede auth JWT
+- `POST/DELETE /abilitazioni/{deposito}/materiali` — body `{material_type}`,
+  richiede auth JWT
+
+Router registrato in `server.py` (after dashboard_router).
+
+### Frontend
+
+`frontend/src/lib/api.ts`:
+- `api.delete()` esteso per accettare body opzionale (serve per i DELETE
+  con coppia/material in payload)
+- Tipi nuovi: `EnabledLine`, `AvailableLine`, `AvailableMaterial`,
+  `AbilitazioniResponse`
+- Helpers: `getAbilitazioni()`, `addLinea()`, `removeLinea()`,
+  `addMateriale()`, `removeMateriale()`
+
+`frontend/src/pages/AbilitazioniPage.tsx` (nuovo, ~340 righe):
+- Selettore deposito (popolato da `getConstants()`, primo
+  pre-selezionato)
+- 2 sezioni stacked: "Linee disponibili" + "Materiale rotabile
+  disponibile"
+- Toggle row con checkbox stile shadcn — click istantaneo:
+  POST/DELETE -> reload stato. Nessun pulsante "Salva"
+- Stat header `enabled/available` per linee e materiali
+- Empty state se nessun giro tocca il deposito ("Importa un PDF
+  turno materiale e ricarica")
+- Verde quando abilitato (`var(--color-success-container)`),
+  neutro altrimenti
+
+`frontend/src/App.tsx`: route `/abilitazioni` -> `<AbilitazioniPage />`.
+
+`frontend/src/components/Sidebar.tsx`: voce "Abilitazioni" con icona
+`ShieldCheck`, posizione tra "Genera da materiale" e "Import".
+
+### Verifica
+
+- `npm run build`: PASS in 241ms, 0 errori TS. Bundle 503.27 kB
+  (gzip 137.16 kB, +7 kB vs commit precedente per la nuova pagina)
+- Vite warning chunk > 500 kB (informativo, non bloccante)
+- Preview dev: 0 errori console
+- Endpoint `GET /abilitazioni/ALESSANDRIA` ritorna struttura corretta
+- Endpoint `POST /abilitazioni/{dep}/linee` senza JWT -> 401
+  ("Token mancante") come atteso
+
+### Bundle dist
+
+Rebuiltato e committato (Railway serve pre-built).
+
+### Prossimo: Commit 3
+
+Integrazione `is_segment_enabled()` nel builder:
+- Filtro su catene candidate (treni produttivi)
+- Logica rientro: prima cerca treno cur_st -> deposito che il PdC puo'
+  guidare (in condotta), fallback in vettura (`is_deadhead=True`)
+- Test ALESSANDRIA 20 giorni: 11 violazioni -> 0 attese (purche'
+  l'utente abbia configurato almeno una linea utile, es.
+  ALESSANDRIA-PAVIA + materiale E464N)
+
+---
+
 ## 2026-04-20 — Abilitazioni deposito (Commit 1/3): schema DB + helpers
 
 Primo step del fix algoritmico richiesto dall'utente: l'auto-builder

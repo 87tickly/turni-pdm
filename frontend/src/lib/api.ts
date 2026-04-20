@@ -69,7 +69,11 @@ export const api = {
       body: body ? JSON.stringify(body) : undefined,
     }),
 
-  delete: <T>(url: string) => request<T>(url, { method: "DELETE" }),
+  delete: <T>(url: string, body?: unknown) =>
+    request<T>(url, {
+      method: "DELETE",
+      body: body ? JSON.stringify(body) : undefined,
+    }),
 }
 
 // ── Auth ──────────────────────────────────────────────────────────
@@ -1063,4 +1067,64 @@ export interface BuildAutoResponse {
 
 export async function buildAuto(req: BuildAutoRequest) {
   return api.post<BuildAutoResponse>(`/build-auto`, req)
+}
+
+// ────────────────────────────────────────────────────────────────
+// Abilitazioni deposito (linee + materiale rotabile)
+// ────────────────────────────────────────────────────────────────
+
+export interface EnabledLine {
+  station_a: string
+  station_b: string
+}
+
+export interface AvailableLine extends EnabledLine {
+  material_turn_count: number
+  enabled: boolean
+}
+
+export interface AvailableMaterial {
+  material_type: string
+  material_turn_count: number
+  enabled: boolean
+}
+
+export interface AbilitazioniResponse {
+  deposito: string
+  enabled_lines: EnabledLine[]
+  enabled_materials: string[]
+  available_lines: AvailableLine[]
+  available_materials: AvailableMaterial[]
+}
+
+export async function getAbilitazioni(deposito: string) {
+  return api.get<AbilitazioniResponse>(`/abilitazioni/${encodeURIComponent(deposito)}`)
+}
+
+export async function addLinea(deposito: string, station_a: string, station_b: string) {
+  return api.post<{ added: boolean }>(
+    `/abilitazioni/${encodeURIComponent(deposito)}/linee`,
+    { station_a, station_b },
+  )
+}
+
+export async function removeLinea(deposito: string, station_a: string, station_b: string) {
+  return api.delete<{ removed: number }>(
+    `/abilitazioni/${encodeURIComponent(deposito)}/linee`,
+    { station_a, station_b },
+  )
+}
+
+export async function addMateriale(deposito: string, material_type: string) {
+  return api.post<{ added: boolean }>(
+    `/abilitazioni/${encodeURIComponent(deposito)}/materiali`,
+    { material_type },
+  )
+}
+
+export async function removeMateriale(deposito: string, material_type: string) {
+  return api.delete<{ removed: number }>(
+    `/abilitazioni/${encodeURIComponent(deposito)}/materiali`,
+    { material_type },
+  )
 }

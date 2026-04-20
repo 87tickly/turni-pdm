@@ -10,6 +10,7 @@ import {
   Settings,
   LogOut,
   Sparkles,
+  ShieldCheck,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Logo } from "./Logo"
@@ -29,6 +30,7 @@ const navItems = [
   { to: "/calendario", icon: Calendar, label: "Calendario" },
   { to: "/pdc", icon: Train, label: "Turni PdC" },
   { to: "/auto-genera", icon: Sparkles, label: "Genera da materiale" },
+  { to: "/abilitazioni", icon: ShieldCheck, label: "Abilitazioni" },
   { to: "/import", icon: Upload, label: "Import" },
 ]
 
