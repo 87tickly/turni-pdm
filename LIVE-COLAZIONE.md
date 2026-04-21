@@ -4,6 +4,99 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-21 — Auto-builder: filtro abilitazioni + iniezione rientro (in condotta o vettura)
+
+Implementazione del fix algoritmico richiesto dall'utente. Il builder
+ora consulta le abilitazioni del deposito e prova ad iniettare un
+treno di rientro al deposito quando la catena chiude lontano.
+
+### Modifiche `src/database/db.py`
+
+`is_segment_enabled()`: rilassato il check materiale. Se
+`material_type=''` nel DB (33 giri su 50 per parser bug), considera
+wildcard sul materiale. Altrimenti il bug del parser azzererebbe il
+builder.
+
+### Modifiche `src/turn_builder/auto_builder.py`
+
+- `__init__`: cache `_enabled_lines` + `_enabled_materials` +
+  `_endpoint_cache` + `_material_cache`. Flag `_abilitazioni_active`
+  attivo solo se almeno 1 linea configurata
+- `_seg_abilitato(seg)`: check filtro O(1) con cache, wildcard se
+  abilitazioni inattive
+- `_filter_segments(...)`: nuovo flag `apply_zone_and_abilitazioni`
+  (default True). False per pool di candidati di rientro
+- `_try_return_segment(all_day_segments, cur_st, cur_arr, first_dep,
+  used, current_cond)`: cerca un treno cur_st -> deposito tra TUTTI i
+  segmenti del giorno. Se abilitato e condotta non sfora -> in
+  CONDOTTA. Altrimenti -> in VETTURA (`is_deadhead=True`). Vincoli:
+  gap min 5 min, gap max 300 min, span totale + overhead <= max
+  prestazione
+- `_build_chain_pool(...)`: accetta `all_day_segments` (pool completo
+  per ricerca rientro). Nei 2 punti dove la catena chiude lontana dal
+  deposito, chiama `_try_return_segment` e aggiunge al pool la catena
+  estesa
+- `_load_day_segments(...)`: flag `apply_zone_and_abilitazioni`
+  propagato
+- `_build_one_schedule(...)`: carica il pool unfiltered del giorno e
+  lo passa al builder. `_used_trains_global` skip dei segmenti
+  deadhead (il PdC e' passivo, il treno resta disponibile per altri
+  PdC come produttivo — coerente con contratto)
+
+### Test reale (turni.db locale)
+
+| Test | Linee abil. | Mat abil. | Giornate | Rientri | Deadhead | Violazioni | Tempo |
+|------|-------------|-----------|----------|---------|----------|------------|-------|
+| BRESCIA 5gg | 8/8 | 1/1 | 5/5 | **5/5** | 0 | **0** | 0.79s |
+| ALESSANDRIA 5gg | 3/3 | 1/1 | 5/5 | 2/5 | 0 | 3 (NO_RIENTRO) | 0.55s |
+
+Successo netto su BRESCIA (dataset ricco, 8 linee). Su ALESSANDRIA il
+fix non basta — il pool contiene 27 catene di rientro disponibili
+(verificato), ma lo scoring multi-day (`_score_schedule`) sceglie
+sub-ottimo lasciando G1/G4/G5 con 1 solo treno senza rientro.
+
+### Bug residui tracciati
+
+1. **Scoring multi-day sub-ottimo per dataset poveri**
+   (`_score_schedule`). Per ALESSANDRIA pool di 27 catene di rientro,
+   ma viene scelto layout 1-2-2-1-1 invece di 2-2-2-2-2. Da indagare
+   in sessione separata: probabilmente bilanciamento bonus/penalita'
+   tra "diversita' fasce orarie", "anti-starvation", "bilanciamento
+   std dev"
+2. **Parser PDF: `material_type` vuoto su 33 giri su 50**
+   (`extract_material_type` in `pdf_parser.py`). Workaround attuale:
+   wildcard. Da fixare in sessione parser
+3. **Treni con stesso train_id su rotte diverse** (es. 10024 va a
+   Milano Rogoredo, ma esiste un altro 10024 verso Mariano Comense
+   secondo l'utente). Da risolvere con cross-check live.arturo.travel
+
+### Compatibilita' retroattiva
+
+Builder funziona ANCHE quando l'utente non ha configurato
+abilitazioni (modalita' legacy: nessun filtro, comportamento
+identico a prima del fix). Solo se almeno 1 linea e' abilitata si
+attiva il filtro stretto.
+
+---
+
+## 2026-04-21 — UX: AbilitazioniPanel integrato in AutoBuilderPage
+
+Feedback utente: la pagina Abilitazioni separata era nel posto
+sbagliato — va dentro la pagina di generazione, come step
+preliminare nello stesso flusso.
+
+- `frontend/src/components/AbilitazioniPanel.tsx`: nuovo, pannello
+  collassabile, toggle linee + materiali con click istantaneo
+  (POST/DELETE), badge warning se non abilitazioni configurate
+- Integrato in AutoBuilderPage sopra il form, sincronizzato sul
+  deposito selezionato
+- Rimossi: `pages/AbilitazioniPage.tsx`, route `/abilitazioni`,
+  voce sidebar "Abilitazioni" (icona ShieldCheck)
+
+Backend invariato. Build PASS 237ms.
+
+---
+
 ## 2026-04-21 — Abilitazioni deposito (Commit 2/3): REST + UI
 
 Secondo step. Adesso l'utente puo' configurare le abilitazioni dal

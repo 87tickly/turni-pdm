@@ -86,7 +86,61 @@ class AutoBuilder:
         else:
             self._reachable = set()
 
+        # ── Cache abilitazioni del deposito ──
+        # Carico le abilitazioni una volta sola; il filtro
+        # is_segment_enabled() viene applicato solo se l'utente ha
+        # almeno 1 linea configurata. Senza configurazione il builder
+        # cade nel comportamento legacy (zero filtro abilitazioni).
+        self._enabled_lines: set[tuple[str, str]] = set()
+        self._enabled_materials: set[str] = set()
+        if self.deposito:
+            self._enabled_lines = set(self.db.get_enabled_lines(self.deposito))
+            self._enabled_materials = set(self.db.get_enabled_materials(self.deposito))
+        self._abilitazioni_active: bool = len(self._enabled_lines) > 0
+        # Cache per evitare N query: material_turn_id -> endpoints + material_type
+        self._endpoint_cache: dict = {}
+        self._material_cache: dict = {}
+
         self._overhead = self._compute_overhead()
+
+    # ═══════════════════════════════════════════════════════
+    #  ABILITAZIONI (filtro + cache)
+    # ═══════════════════════════════════════════════════════
+    def _seg_abilitato(self, seg: dict) -> bool:
+        """
+        True se il segmento e' abilitato per il deposito (linea +
+        materiale). Se l'utente non ha configurato abilitazioni,
+        ritorna sempre True (compat retroattivita').
+        Usa cache locale per evitare query ripetute.
+        """
+        if not self._abilitazioni_active:
+            return True
+        mat_turn_id = seg.get("material_turn_id") if isinstance(seg, dict) else getattr(seg, "material_turn_id", None)
+        if not mat_turn_id:
+            return False
+        # Endpoint cache
+        if mat_turn_id not in self._endpoint_cache:
+            self._endpoint_cache[mat_turn_id] = self.db.get_material_turn_endpoints(mat_turn_id)
+        ep = self._endpoint_cache[mat_turn_id]
+        if not ep or ep not in self._enabled_lines:
+            return False
+        # Material cache
+        if mat_turn_id not in self._material_cache:
+            cur = self.db._cursor()
+            cur.execute(self.db._q("SELECT material_type FROM material_turn WHERE id = ?"),
+                        (mat_turn_id,))
+            row = cur.fetchone()
+            mat = ""
+            if row:
+                d = self.db._dict(row)
+                mat = (d.get("material_type") or "").upper().strip()
+            self._material_cache[mat_turn_id] = mat
+        mat = self._material_cache[mat_turn_id]
+        if not mat:
+            # Wildcard sul materiale: parser bug, vedi
+            # Database.is_segment_enabled() per dettagli
+            return True
+        return mat in self._enabled_materials
 
     # ═══════════════════════════════════════════════════════
     #  UTILITÀ
@@ -159,7 +213,16 @@ class AutoBuilder:
     # ═══════════════════════════════════════════════════════
     #  FILTRO SEGMENTI
     # ═══════════════════════════════════════════════════════
-    def _filter_segments(self, segments: list, exclude_trains: set = None) -> list:
+    def _filter_segments(self, segments: list, exclude_trains: set = None,
+                         apply_zone_and_abilitazioni: bool = True) -> list:
+        """
+        Filtra segmenti per validita' generale (durata, ora, confidence)
+        e opzionalmente per zona reachable + abilitazioni del deposito.
+
+        apply_zone_and_abilitazioni=False usato per il pool di
+        candidati di rientro: anche treni di linee non abilitate o fuori
+        zona possono servire da rientro in vettura (deadhead).
+        """
         excl = (exclude_trains or set()) | self._used_trains_global
         good = []
         for seg in segments:
@@ -171,26 +234,91 @@ class AutoBuilder:
             dur = arr_m - dep_m
             if dur < MIN_SEG_DURATION or dur > MAX_SEG_DURATION: continue
             if dep_m // 60 < MIN_DEP_HOUR or dep_m // 60 >= MAX_DEP_HOUR: continue
-            if self._reachable:
-                if (seg.get("from_station", "").upper() not in self._reachable or
-                    seg.get("to_station", "").upper() not in self._reachable):
+            if apply_zone_and_abilitazioni:
+                if self._reachable:
+                    if (seg.get("from_station", "").upper() not in self._reachable or
+                        seg.get("to_station", "").upper() not in self._reachable):
+                        continue
+                if not self._seg_abilitato(seg):
                     continue
             good.append(seg)
         return good
 
     # ═══════════════════════════════════════════════════════
+    #  RIENTRO AL DEPOSITO (in condotta o in vettura)
+    # ═══════════════════════════════════════════════════════
+    def _try_return_segment(self, all_day_segments: list, cur_st: str,
+                             cur_arr: int, first_dep: int, used: set,
+                             current_cond: int):
+        """
+        Cerca un treno cur_st -> deposito tra TUTTI i segmenti del giorno
+        (non filtrati per zona/abilitazione). Se trovato e ammissibile:
+        - Se abilitato per il deposito -> ritorna in CONDOTTA (segmento
+          tale e quale, condotta contata)
+        - Se non abilitato (linea o materiale) -> ritorna in VETTURA
+          (copia del segmento marcata is_deadhead=True, condotta non
+          contata, treno non consumato come "produttivo")
+
+        Vincoli rientro:
+          - dep >= cur_arr + 5 min (cambio treno minimo)
+          - gap <= 300 min (5h finestra rientro, piu' larga del normale)
+          - span totale + overhead <= MAX_PRESTAZIONE_MIN
+          - condotta totale (se in condotta) <= MAX_CONDOTTA_MIN
+
+        Sceglie il primo per gap crescente.
+        """
+        if not self.deposito or not all_day_segments:
+            return None
+        MIN_CHANGE_MIN = 5
+        MAX_RETURN_GAP = 300
+        candidates = []
+        for seg in all_day_segments:
+            tid = seg.get("train_id", "")
+            if tid in used: continue
+            if seg.get("from_station", "").upper() != cur_st: continue
+            if seg.get("to_station", "").upper() != self.deposito: continue
+            dep_m = _time_to_min(seg["dep_time"])
+            if dep_m < cur_arr + MIN_CHANGE_MIN: continue
+            gap = dep_m - cur_arr
+            if gap > MAX_RETURN_GAP: continue
+            arr_m = _time_to_min(seg["arr_time"])
+            if arr_m < dep_m: arr_m += 1440
+            span = arr_m - first_dep
+            if span < 0: span += 1440
+            if (span + self._overhead) > MAX_PRESTAZIONE_MIN: continue
+            # In condotta solo se abilitato E condotta non sfora
+            is_enabled = self._seg_abilitato(seg)
+            seg_c = self._seg_condotta(seg)
+            if is_enabled and (current_cond + seg_c) <= MAX_CONDOTTA_MIN:
+                ret_seg = seg  # in condotta
+            else:
+                ret_seg = {**seg, "is_deadhead": True}  # in vettura
+            candidates.append((gap, ret_seg))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: x[0])
+        return candidates[0][1]
+
+    # ═══════════════════════════════════════════════════════
     #  FASE 1 · POOL — DFS BRANCHING
     # ═══════════════════════════════════════════════════════
     def _build_chain_pool(self, segments: list,
-                          min_start: int = 0) -> list[list[dict]]:
+                          min_start: int = 0,
+                          all_day_segments: list = None) -> list[list[dict]]:
         """
         Genera pool di catene candidate via DFS con branching.
         min_start: minuto minimo di partenza del primo treno.
+        all_day_segments: TUTTI i segmenti del giorno (non filtrati per
+            zona/abilitazione). Usato per cercare treni di rientro al
+            deposito anche su linee non-abilitate (in tal caso il
+            rientro viene marcato in vettura/deadhead).
         """
         if not self.deposito:
             return []
 
         deposito = self.deposito
+        if all_day_segments is None:
+            all_day_segments = segments
         departing = [s for s in segments
                      if (s.get("from_station", "").upper() == deposito
                          and _time_to_min(s["dep_time"]) >= min_start)]
@@ -222,6 +350,13 @@ class AutoBuilder:
                         pool.append(list(chain))
                         # CVL: cerca sotto-catene che passano per il deposito
                         if cur_st != deposito:
+                            # Iniezione rientro (in condotta o in vettura)
+                            ret = self._try_return_segment(
+                                all_day_segments, cur_st, cur_arr,
+                                first_dep, used, cur_cond,
+                            )
+                            if ret is not None:
+                                pool.append(list(chain) + [ret])
                             self._extract_cvl_subchains(chain, deposito, pool)
                     continue
 
@@ -252,6 +387,13 @@ class AutoBuilder:
                         # cerca un punto intermedio dove passa per il deposito
                         # e aggiungi anche la sotto-catena tagliata lì (cambio volante)
                         if cur_st != deposito:
+                            # Iniezione rientro (in condotta o in vettura)
+                            ret = self._try_return_segment(
+                                all_day_segments, cur_st, cur_arr,
+                                first_dep, used, cur_cond,
+                            )
+                            if ret is not None:
+                                pool.append(list(chain) + [ret])
                             self._extract_cvl_subchains(chain, deposito, pool)
                     continue
 
@@ -638,8 +780,20 @@ class AutoBuilder:
 
                 filtered = day_filtered
 
+                # Pool completo (no filtro zona/abilitazione) per cercare
+                # treni di rientro al deposito anche su linee non abilitate
+                # (in tal caso saranno marcati in vettura/deadhead).
+                day_unfiltered = self._load_day_segments(
+                    try_day, 0, available_days,
+                    apply_zone_and_abilitazioni=False,
+                )
+
                 # Genera pool catene
-                day_pool = self._build_chain_pool(day_filtered, min_start=earliest_start_min)
+                day_pool = self._build_chain_pool(
+                    day_filtered,
+                    min_start=earliest_start_min,
+                    all_day_segments=day_unfiltered,
+                )
                 if day_pool:
                     # Filtra catene con treni gia' usati
                     day_pool = [c for c in day_pool
@@ -680,9 +834,18 @@ class AutoBuilder:
 
             entry["summary"] = summary
 
-            # Registra treni usati e fine turno
+            # Registra treni usati e fine turno.
+            # IMPORTANTE: i segmenti deadhead (rientro in vettura) NON
+            # consumano il treno — il PdC e' passivo, quel treno ha il
+            # suo macchinista titolare e resta disponibile per altri PdC
+            # come treno produttivo.
             if summary.segments:
                 for seg in summary.segments:
+                    is_dh = (seg.get("is_deadhead", False)
+                             if isinstance(seg, dict)
+                             else getattr(seg, "is_deadhead", False))
+                    if is_dh:
+                        continue
                     tid = (seg.get("train_id", "")
                            if isinstance(seg, dict) else seg.train_id)
                     self._used_trains_global.add(tid)
@@ -1395,7 +1558,14 @@ class AutoBuilder:
     #  UTILITÀ LEGACY
     # ═══════════════════════════════════════════════════════
     def _load_day_segments(self, day_index: int, start_hour: int,
-                           alt_day_indices: list[int] = None) -> list:
+                           alt_day_indices: list[int] = None,
+                           apply_zone_and_abilitazioni: bool = True) -> list:
+        """
+        Carica i segmenti di un giorno applicando i filtri di base.
+        apply_zone_and_abilitazioni=False per ottenere il pool completo
+        (usato per la ricerca del rientro: anche treni di linee non
+        abilitate possono servire come rientro in vettura).
+        """
         indices = [day_index]
         if alt_day_indices:
             indices.extend(i for i in alt_day_indices if i != day_index)
@@ -1405,7 +1575,10 @@ class AutoBuilder:
                 all_segments = self.db.get_all_segments()
             if not all_segments:
                 continue
-            filtered = self._filter_segments(all_segments)
+            filtered = self._filter_segments(
+                all_segments,
+                apply_zone_and_abilitazioni=apply_zone_and_abilitazioni,
+            )
             filtered.sort(key=lambda s: _time_to_min(s["dep_time"]))
             if start_hour > 0:
                 filtered = [s for s in filtered

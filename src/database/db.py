@@ -969,10 +969,12 @@ class Database:
 
     def is_segment_enabled(self, deposito: str, segment: dict) -> bool:
         """
-        Un segmento e' abilitato per un deposito se BOTH:
+        Un segmento e' abilitato per un deposito se:
           - linea (estremi del suo material_turn) abilitata, AND
-          - materiale del suo material_turn abilitato.
-        Se il deposito non ha alcuna abilitazione, ritorna False
+          - materiale abilitato OPPURE material_type vuoto nel DB
+            (parser non l'ha estratto -> wildcard prudente per non
+            azzerare il builder a causa di un bug del parser).
+        Se il deposito non ha alcuna linea configurata, ritorna False
         (builder non produce turni finche' l'utente non configura).
         """
         dep = (deposito or "").upper().strip()
@@ -992,8 +994,12 @@ class Database:
         if not row:
             return False
         mat = (self._dict(row).get("material_type") or "").upper().strip()
+        # Wildcard sul materiale: se il parser non ha estratto material_type
+        # (33 giri su 50 in DB attuale), accetta comunque pur che la linea
+        # sia abilitata. Questo evita di bloccare il builder a causa di un
+        # bug del parser PDF (tracciato come issue separata).
         if not mat:
-            return False
+            return True
         return mat in set(self.get_enabled_materials(dep))
 
     def get_available_lines_for_depot(self, deposito: str) -> list[dict]:
