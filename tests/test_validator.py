@@ -133,13 +133,33 @@ def test_validate_day_condotta_exceeded():
 
 
 def test_validate_day_fr():
+    """FR valido: turno termina in serata in stazione FR autorizzata."""
+    v = TurnValidator(deposito="MILANO CENTRALE")
+    segments = [
+        # Fine 21:30 -> rientra in fascia FR (>= 17:00)
+        make_seg("100", "MILANO CENTRALE", "20:00", "BERGAMO", "21:30"),
+    ]
+    summary = v.validate_day(segments, deposito="MILANO CENTRALE")
+    assert summary.is_fr  # BERGAMO e' FR e fine serale
+    assert summary.last_station == "BERGAMO"
+
+
+def test_validate_day_fr_invalid_morning_end():
+    """FR INVALIDO: stazione FR ma fine mattutina -> NO_RIENTRO_BASE.
+
+    Un turno che finisce alle 07:30 a BERGAMO non e' davvero FR: il PdC
+    avrebbe tutto il giorno per tornare al deposito. Va contato come
+    mancato rientro, non come pernottamento fuori sede.
+    """
     v = TurnValidator(deposito="MILANO CENTRALE")
     segments = [
         make_seg("100", "MILANO CENTRALE", "06:00", "BERGAMO", "07:30"),
     ]
     summary = v.validate_day(segments, deposito="MILANO CENTRALE")
-    assert summary.is_fr  # Termina a BERGAMO, che è in FR stations
-    assert summary.last_station == "BERGAMO"
+    assert not summary.is_fr  # Fine 07:30 fuori finestra serale
+    no_rientro = [vv for vv in summary.violations if vv.rule == "NO_RIENTRO_BASE"]
+    assert len(no_rientro) == 1
+    assert "FR ammesso solo" in no_rientro[0].message
 
 
 def test_validate_day_no_rientro():

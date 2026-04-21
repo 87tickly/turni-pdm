@@ -4,6 +4,88 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-21 — Fix FR (orario serale) + linee granulari + materiali completi
+
+3 bug interconnessi segnalati dall'utente:
+
+### 1. FR (Fuori Residenza) sbloccato senza controllo orario
+
+**Bug**: `validator.validate_day` marcava `is_fr=True` se la stazione
+finale era in `fr_stations`, **senza guardare l'ora di fine turno**.
+Risultato: un turno che termina alle 06:17 a Milano Rogoredo veniva
+"FR valido" — assurdo, il PdC ha tutto il tempo per tornare al
+deposito.
+
+**Fix** (`src/validator/rules.py`): aggiunte costanti
+`FR_MIN_END_HOUR=17` e `FR_MAX_END_HOUR=4`. FR valido SOLO se
+`end_time >= 17:00` o `end_time <= 04:00` (fascia serale/notturna).
+Altrimenti la stazione FR autorizzata viene ignorata e si genera
+violazione `NO_RIENTRO_BASE` con messaggio esplicito sulla finestra.
+
+**Test**: nuovo `test_validate_day_fr_invalid_morning_end`. Test
+esistente `test_validate_day_fr` aggiornato per usare orari serali.
+
+### 2. Modello "linea" granulare (era endpoint, ora coppie segmenti)
+
+**Bug**: `get_material_turn_endpoints(turn_id)` restituiva solo
+1 coppia per giro (first_from + last_to). Per il turno 1101 (200+
+segmenti, tocca ALES/CREMONA/MORTARA/PAVIA/VERCELLI) restituiva
+solo `(ALESSANDRIA, PAVIA)`. Tutte le altre tratte venivano perse
+come "linee abilitabili".
+
+**Fix** (`src/database/db.py`): rinominato in
+`get_material_turn_lines(turn_id) -> set` che restituisce TUTTE
+le coppie distinte (from, to) dei segmenti del giro, normalizzate
+alfabeticamente. `is_segment_enabled` ora controlla la coppia
+del SEGMENTO STESSO (non quella del giro padre).
+`get_available_lines_for_depot` aggregato corrispondente.
+
+**Risultato**: ALESSANDRIA passa da **3 linee a 38 linee**
+abilitabili (tutte le coppie servite dai 3 giri che la toccano).
+Comprende ora tratte come MILANO ROGOREDO-MORTARA, MILANO CENTRALE-
+ASTI, BORGOMANERO-ISEO ecc. — esattamente quello che l'utente
+aveva indicato come mancante.
+
+### 3. Materiali con material_type vuoto
+
+**Bug**: `get_available_materials_for_depot` filtrava `WHERE
+material_type IS NOT NULL AND != ''`. I 33 giri su 50 con
+`material_type=''` per il bug parser non comparivano.
+
+**Fix**: include anche i materiali vuoti, mostrati come
+`(non specificato)`. `enabled=True` di default per la riga vuota
+(coerente con la logica wildcard del parser bug).
+
+### File toccati
+
+- `src/validator/rules.py`: regola FR con check orario
+- `src/database/db.py`: `get_material_turn_lines`,
+  `is_segment_enabled` rivisitato, `get_available_lines/
+  materials_for_depot` allineati
+- `src/turn_builder/auto_builder.py`: `_seg_abilitato` usa coppia
+  del segmento direttamente (no piu' `_endpoint_cache`)
+- `tests/test_validator.py`: test FR aggiornati + nuovo per il bug
+
+### Verifica
+
+- `pytest`: **112/112 PASS** (1 test FR aggiornato + 1 nuovo)
+- Frontend `npm run build`: PASS 228ms
+- Test integrato ALESSANDRIA 5gg: 5/5 prod, 5/5 rientri,
+  **0 violazioni**, 38 linee abilitate, 4.3s
+
+### Bug residui tracciati
+
+- **Resto regole contratto FR**: max 1 FR/settimana, max 3 FR/28gg,
+  riposo min 6h in FR, prestazione andata/rientro <= MAX. Costanti
+  esistono in config (FR_MAX_PER_WEEK, FR_MAX_PER_28_DAYS,
+  FR_MIN_RIPOSO_H, ecc.) ma non sono ancora applicate dal validator
+  ne' dal builder. Sessione dedicata
+- **Bug parser material_type vuoto** (33/50): workaround attuale
+  wildcard. Da indagare in sessione parser
+- **Nome alternativo a "Gantt"**: ancora in attesa preferenza utente
+
+---
+
 ## 2026-04-21 — FIX ROOT CAUSE: union day_indices nel builder (zero violazioni)
 
 Diagnosi profonda dopo feedback utente "G1/G4/G5 con 1 treno solo

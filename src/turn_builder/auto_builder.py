@@ -109,22 +109,24 @@ class AutoBuilder:
     def _seg_abilitato(self, seg: dict) -> bool:
         """
         True se il segmento e' abilitato per il deposito (linea +
-        materiale). Se l'utente non ha configurato abilitazioni,
-        ritorna sempre True (compat retroattivita').
-        Usa cache locale per evitare query ripetute.
+        materiale). Linea = coppia (from, to) normalizzata del segmento
+        stesso (granulare: ogni tratta del giro materiale e' una linea
+        a se'). Se l'utente non ha configurato abilitazioni, ritorna
+        sempre True (compat retroattivita').
         """
         if not self._abilitazioni_active:
             return True
+        from_st = (seg.get("from_station", "") if isinstance(seg, dict) else getattr(seg, "from_station", "")).upper().strip()
+        to_st = (seg.get("to_station", "") if isinstance(seg, dict) else getattr(seg, "to_station", "")).upper().strip()
+        if not from_st or not to_st or from_st == to_st:
+            return False
+        line = self.db._normalize_line_pair(from_st, to_st)
+        if line not in self._enabled_lines:
+            return False
+        # Materiale (cache via material_turn_id)
         mat_turn_id = seg.get("material_turn_id") if isinstance(seg, dict) else getattr(seg, "material_turn_id", None)
         if not mat_turn_id:
-            return False
-        # Endpoint cache
-        if mat_turn_id not in self._endpoint_cache:
-            self._endpoint_cache[mat_turn_id] = self.db.get_material_turn_endpoints(mat_turn_id)
-        ep = self._endpoint_cache[mat_turn_id]
-        if not ep or ep not in self._enabled_lines:
-            return False
-        # Material cache
+            return True
         if mat_turn_id not in self._material_cache:
             cur = self.db._cursor()
             cur.execute(self.db._q("SELECT material_type FROM material_turn WHERE id = ?"),
@@ -137,8 +139,7 @@ class AutoBuilder:
             self._material_cache[mat_turn_id] = mat
         mat = self._material_cache[mat_turn_id]
         if not mat:
-            # Wildcard sul materiale: parser bug, vedi
-            # Database.is_segment_enabled() per dettagli
+            # Wildcard sul materiale: parser bug
             return True
         return mat in self._enabled_materials
 

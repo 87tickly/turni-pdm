@@ -397,13 +397,39 @@ class TurnValidator:
         )
 
         # Fuori residenza
+        # Il FR ha senso SOLO se il turno termina in fascia serale/notturna
+        # (17:00 - 04:00 del giorno successivo). Un turno che termina alle
+        # 06:17 o alle 14:00 in stazione FR autorizzata NON e' FR: il PdC
+        # ha tempo per tornare al deposito, va contato come NO_RIENTRO.
+        FR_MIN_END_HOUR = 17  # Fine >= 17:00 OPPURE <= 04:00
+        FR_MAX_END_HOUR = 4
         is_fr = False
         if dep and last_station.upper() != dep:
+            # Verifica orario: end_time deve essere in fascia FR-valida
+            end_in_fr_window = False
+            if end_time:
+                end_hour = _time_to_min(end_time) / 60
+                end_in_fr_window = (end_hour >= FR_MIN_END_HOUR
+                                    or end_hour <= FR_MAX_END_HOUR)
             if is_fr_override:
                 # L'utente ha esplicitamente marcato come FR - nessuna violation
                 is_fr = True
-            elif last_station.upper() in [s.upper() for s in self.fr_stations]:
+            elif (last_station.upper() in [s.upper() for s in self.fr_stations]
+                  and end_in_fr_window):
                 is_fr = True
+            elif (last_station.upper() in [s.upper() for s in self.fr_stations]
+                  and not end_in_fr_window):
+                # Stazione e' FR autorizzata MA orario fuori finestra serale
+                # -> non e' FR vera, e' un mancato rientro
+                violations.append(
+                    Violation(
+                        "NO_RIENTRO_BASE",
+                        f"Turno termina a {last_station} alle {end_time}: "
+                        f"FR ammesso solo per turni serali/notturni "
+                        f"(fine >= {FR_MIN_END_HOUR}:00 o <= {FR_MAX_END_HOUR}:00). "
+                        f"Il PdC dovrebbe rientrare al deposito {dep}.",
+                    )
+                )
             else:
                 violations.append(
                     Violation(

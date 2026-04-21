@@ -848,40 +848,31 @@ class Database:
         b = (station_b or "").upper().strip()
         return (a, b) if a <= b else (b, a)
 
-    def get_material_turn_endpoints(self, material_turn_id: int) -> Optional[tuple[str, str]]:
+    def get_material_turn_lines(self, material_turn_id: int) -> set:
         """
-        Estremi (normalizzati alfabeticamente) di un giro materiale:
-        coppia (first_segment.from_station, last_segment.to_station).
-        Se roundtrip (from == to), usa la stazione non-base piu' frequente
-        tra i segmenti intermedi.
+        Restituisce l'insieme di tutte le coppie (station_a, station_b)
+        normalizzate alfabeticamente che compaiono nei segmenti del giro
+        materiale. Una "linea" corrisponde a un singolo collegamento
+        diretto tra due stazioni (from-to o to-from di un segmento).
+
+        Cosi' un giro come 1101 che tocca ALES/CREMONA/MORTARA/PAVIA/
+        VERCELLI viene scomposto in tutte le coppie effettivamente
+        servite dai treni del giro (es. ALES-PAVIA, PAVIA-VERCELLI,
+        MORTARA-VERCELLI, ecc.) — non solo gli estremi.
         """
         cur = self._cursor()
         cur.execute(self._q(
-            "SELECT from_station, to_station, seq FROM train_segment "
-            "WHERE material_turn_id = ? ORDER BY seq ASC, id ASC"
+            "SELECT DISTINCT from_station, to_station FROM train_segment "
+            "WHERE material_turn_id = ?"
         ), (material_turn_id,))
-        rows = cur.fetchall()
-        segs = [self._dict(r) for r in rows]
-        if not segs:
-            return None
-        first_from = (segs[0]["from_station"] or "").upper().strip()
-        last_to = (segs[-1]["to_station"] or "").upper().strip()
-        if first_from and last_to and first_from != last_to:
-            return self._normalize_line_pair(first_from, last_to)
-        # Roundtrip: stazione non-base piu' frequente
-        base = first_from or last_to
-        if not base:
-            return None
-        counts: dict[str, int] = {}
-        for s in segs:
-            for st in (s["from_station"], s["to_station"]):
-                st = (st or "").upper().strip()
-                if st and st != base:
-                    counts[st] = counts.get(st, 0) + 1
-        if not counts:
-            return None
-        farthest = max(counts.items(), key=lambda x: x[1])[0]
-        return self._normalize_line_pair(base, farthest)
+        out = set()
+        for r in cur.fetchall():
+            d = self._dict(r)
+            a = (d["from_station"] or "").upper().strip()
+            b = (d["to_station"] or "").upper().strip()
+            if a and b and a != b:
+                out.add(self._normalize_line_pair(a, b))
+        return out
 
     def add_enabled_line(self, deposito: str, station_a: str, station_b: str) -> bool:
         """Aggiunge abilitazione linea. True se inserita, False se gia' presente."""
@@ -970,43 +961,49 @@ class Database:
     def is_segment_enabled(self, deposito: str, segment: dict) -> bool:
         """
         Un segmento e' abilitato per un deposito se:
-          - linea (estremi del suo material_turn) abilitata, AND
-          - materiale abilitato OPPURE material_type vuoto nel DB
-            (parser non l'ha estratto -> wildcard prudente per non
-            azzerare il builder a causa di un bug del parser).
-        Se il deposito non ha alcuna linea configurata, ritorna False
-        (builder non produce turni finche' l'utente non configura).
+          - la sua coppia (from, to) normalizzata e' nelle linee
+            abilitate, AND
+          - il suo materiale e' abilitato OPPURE material_type vuoto
+            (wildcard prudente per il bug parser).
+        Se il deposito non ha nessuna linea configurata, ritorna False.
         """
         dep = (deposito or "").upper().strip()
+        # Linea = coppia normalizzata del segmento stesso
+        from_st = (segment.get("from_station", "") if isinstance(segment, dict) else getattr(segment, "from_station", "")).upper().strip()
+        to_st = (segment.get("to_station", "") if isinstance(segment, dict) else getattr(segment, "to_station", "")).upper().strip()
+        if not from_st or not to_st or from_st == to_st:
+            return False
+        line = self._normalize_line_pair(from_st, to_st)
+        if line not in set(self.get_enabled_lines(dep)):
+            return False
+        # Materiale del giro
         mat_turn_id = segment.get("material_turn_id") if isinstance(segment, dict) else getattr(segment, "material_turn_id", None)
         if not mat_turn_id:
-            return False
-        endpoints = self.get_material_turn_endpoints(mat_turn_id)
-        if not endpoints:
-            return False
-        if endpoints not in set(self.get_enabled_lines(dep)):
-            return False
+            # Segmento senza giro materiale: lo lasciamo passare se la
+            # linea e' abilitata (caso edge, raro)
+            return True
         cur = self._cursor()
         cur.execute(self._q(
             "SELECT material_type FROM material_turn WHERE id = ?"
         ), (mat_turn_id,))
         row = cur.fetchone()
         if not row:
-            return False
+            return True
         mat = (self._dict(row).get("material_type") or "").upper().strip()
         # Wildcard sul materiale: se il parser non ha estratto material_type
         # (33 giri su 50 in DB attuale), accetta comunque pur che la linea
-        # sia abilitata. Questo evita di bloccare il builder a causa di un
-        # bug del parser PDF (tracciato come issue separata).
+        # sia abilitata. Vedi LIVE-COLAZIONE bug parser.
         if not mat:
             return True
         return mat in set(self.get_enabled_materials(dep))
 
     def get_available_lines_for_depot(self, deposito: str) -> list[dict]:
         """
-        Elenca le linee (coppie estremi) potenzialmente disponibili per un
-        deposito, derivate dai giri materiale che toccano il deposito.
-        Utile per pre-riempire la UI di configurazione abilitazioni.
+        Elenca tutte le coppie (station_a, station_b) servite dai giri
+        materiale che toccano il deposito. Una coppia = un singolo
+        collegamento diretto tra due stazioni nei segmenti del giro.
+        Cosi' per ogni giro non vediamo solo gli estremi ma TUTTE le
+        tratte effettivamente percorse (utile a granularita' alta).
         Ritorna [{'station_a', 'station_b', 'material_turn_count', 'enabled'}].
         """
         dep = (deposito or "").upper().strip()
@@ -1020,12 +1017,10 @@ class Database:
         rows = cur.fetchall()
         turn_ids = [self._dict(r)["material_turn_id"] for r in rows]
         enabled_set = set(self.get_enabled_lines(dep))
-        counts: dict[tuple[str, str], int] = {}
+        counts: dict = {}
         for tid in turn_ids:
-            ep = self.get_material_turn_endpoints(tid)
-            if not ep:
-                continue
-            counts[ep] = counts.get(ep, 0) + 1
+            for line in self.get_material_turn_lines(tid):
+                counts[line] = counts.get(line, 0) + 1
         out = []
         for (a, b), n in sorted(counts.items()):
             out.append({
@@ -1039,6 +1034,9 @@ class Database:
     def get_available_materials_for_depot(self, deposito: str) -> list[dict]:
         """
         Materiali rotabili presenti nei giri che toccano il deposito.
+        Include anche i giri con material_type vuoto (parser bug noto):
+        vengono mostrati come '(non specificato)' e l'utente puo'
+        abilitarli esplicitamente per non escludere quei giri.
         Ritorna [{'material_type', 'material_turn_count', 'enabled'}].
         """
         dep = (deposito or "").upper().strip()
@@ -1051,7 +1049,6 @@ class Database:
                 WHERE material_turn_id IS NOT NULL
                   AND (UPPER(from_station) = ? OR UPPER(to_station) = ?)
             )
-            AND mt.material_type IS NOT NULL AND mt.material_type != ''
             GROUP BY mt.material_type
             ORDER BY mt.material_type
         """), (dep, dep))
@@ -1060,11 +1057,13 @@ class Database:
         out = []
         for r in rows:
             d = self._dict(r)
-            mat = d["material_type"].upper().strip()
+            raw = d["material_type"] or ""
+            mat = raw.upper().strip()
+            display = mat if mat else "(non specificato)"
             out.append({
-                "material_type": mat,
+                "material_type": display,
                 "material_turn_count": d["n"],
-                "enabled": mat in enabled_set,
+                "enabled": (mat in enabled_set) if mat else True,  # vuoto = wildcard, sempre on
             })
         return out
 
