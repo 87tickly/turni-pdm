@@ -4,6 +4,59 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-21 — Cache rotte treno via live.arturo.travel (Step 1/3)
+
+Strategia richiesta dall'utente per dare CERTEZZA al builder sui
+treni reali (rotta, orari, fermate intermedie). Disambiguazione
+train_id duplicati e correzione segmenti '???' del parser.
+
+Architettura: cache lazy. Prima chiamata = lenta (API), successive
+veloci (DB). Il DB si arricchisce nel tempo, il dato resta certo.
+
+### Schema DB
+
+`train_route_cache`:
+- (train_id, origine_hint) UNIQUE
+- fermate_json: lista completa fermate normalizzate
+- first/last_station: denormalizzati per query veloci
+- operatore, categoria, verified_at, api_status
+
+Migrazione idempotente, SQLite + PostgreSQL.
+
+### Helpers
+
+`Database.get_train_route_cached(train_id, origine_hint)`,
+`Database.upsert_train_route(...)`,
+`Database.count_cached_routes()`.
+
+### Service
+
+`services/train_route_cache.py`:
+- `get_or_fetch_train_route(db, train_id, origine_hint, force_refresh=False)`:
+  punto unico di accesso. Cache hit → return. Cache miss → API
+  call + save + return. 404 → cache come `not_found`. Errori
+  transient → NON cacheati (riprova al prossimo giro)
+- `fermate_passes_through(fermate, station)`: True se stazione
+  presente nel percorso
+- `fermate_segment(fermate, from, to)`: indici (from, to) se
+  sotto-percorso valido nell'ordine corretto
+
+### Test reale (turni.db locale)
+
+- 1a chiamata `treno 10050`: **675ms**, from_cache=False, status=ok
+  - Origine: MORTARA, Destinazione: MILANO ROGOREDO, 10 fermate
+  - Conferma esattamente il PDF turno 1125 (MI.ROG↔MORTARA)
+- 2a chiamata: **0ms**, from_cache=True
+- Treno fake 99999999: cached come `not_found`
+- pytest: 112/112 PASS
+
+### Stato
+
+Solo INFRASTRUTTURA. Builder ancora non usa la cache. Step 2
+prossimo: hook nel builder per arricchire/disambiguare.
+
+---
+
 ## 2026-04-21 — Fix FR (orario serale) + linee granulari + materiali completi
 
 3 bug interconnessi segnalati dall'utente:

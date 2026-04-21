@@ -381,6 +381,30 @@ class Database:
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_depot_enabled_material_depot ON depot_enabled_material(deposito)")
 
+        # ── Cache rotte treno verificate via live.arturo.travel ──
+        # Per ogni (train_id, origine_hint) salviamo le fermate reali
+        # cosi' arricchiamo il DB con dati certificati. La prima query e'
+        # lenta (chiamata API), le successive usano la cache.
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS train_route_cache (
+                id {pk},
+                train_id TEXT NOT NULL,
+                origine_hint TEXT NOT NULL DEFAULT '',
+                fermate_json TEXT NOT NULL,
+                first_station TEXT NOT NULL DEFAULT '',
+                last_station TEXT NOT NULL DEFAULT '',
+                n_stops INTEGER NOT NULL DEFAULT 0,
+                operatore TEXT NOT NULL DEFAULT '',
+                categoria TEXT NOT NULL DEFAULT '',
+                verified_at TEXT NOT NULL,
+                api_status TEXT NOT NULL DEFAULT 'ok',
+                UNIQUE(train_id, origine_hint)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_train_route_cache_train ON train_route_cache(train_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_train_route_cache_first ON train_route_cache(first_station)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_train_route_cache_last ON train_route_cache(last_station)")
+
         self.conn.commit()
 
         # ── Migrazioni per colonne aggiunte dopo la prima release ──
@@ -1066,6 +1090,86 @@ class Database:
                 "enabled": (mat in enabled_set) if mat else True,  # vuoto = wildcard, sempre on
             })
         return out
+
+    # ------------------------------------------------------------------
+    # TRAIN ROUTE CACHE (verifica via live.arturo.travel)
+    # ------------------------------------------------------------------
+    def get_train_route_cached(self, train_id: str,
+                                origine_hint: str = "") -> Optional[dict]:
+        """Restituisce la rotta cached di un treno se presente, altrimenti None.
+        Chiave: (train_id, origine_hint UPPER)."""
+        tid = (train_id or "").strip()
+        oh = (origine_hint or "").upper().strip()
+        if not tid:
+            return None
+        cur = self._cursor()
+        cur.execute(self._q(
+            "SELECT * FROM train_route_cache "
+            "WHERE train_id = ? AND origine_hint = ?"
+        ), (tid, oh))
+        row = cur.fetchone()
+        if not row:
+            return None
+        d = self._dict(row)
+        d["fermate"] = json.loads(d["fermate_json"]) if d.get("fermate_json") else []
+        return d
+
+    def upsert_train_route(self, train_id: str, origine_hint: str,
+                            fermate: list, operatore: str = "",
+                            categoria: str = "",
+                            api_status: str = "ok") -> int:
+        """Inserisce/aggiorna la rotta cached di un treno.
+        fermate: lista di dict {stazione_nome, programmato_arrivo,
+        programmato_partenza, progressivo, tipo_fermata, ...}."""
+        tid = (train_id or "").strip()
+        oh = (origine_hint or "").upper().strip()
+        if not tid:
+            return 0
+        first = ""
+        last = ""
+        n = 0
+        if fermate:
+            n = len(fermate)
+            first = (fermate[0].get("stazione_nome") or "").upper().strip()
+            last = (fermate[-1].get("stazione_nome") or "").upper().strip()
+        fermate_json = json.dumps(fermate, ensure_ascii=False)
+        verified_at = datetime.now().isoformat()
+        cur = self._cursor()
+        if self.is_pg:
+            cur.execute(self._q(
+                "INSERT INTO train_route_cache "
+                "(train_id, origine_hint, fermate_json, first_station, "
+                " last_station, n_stops, operatore, categoria, "
+                " verified_at, api_status) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT (train_id, origine_hint) DO UPDATE SET "
+                "  fermate_json = EXCLUDED.fermate_json, "
+                "  first_station = EXCLUDED.first_station, "
+                "  last_station = EXCLUDED.last_station, "
+                "  n_stops = EXCLUDED.n_stops, "
+                "  operatore = EXCLUDED.operatore, "
+                "  categoria = EXCLUDED.categoria, "
+                "  verified_at = EXCLUDED.verified_at, "
+                "  api_status = EXCLUDED.api_status"
+            ), (tid, oh, fermate_json, first, last, n,
+                operatore, categoria, verified_at, api_status))
+        else:
+            cur.execute(
+                "INSERT OR REPLACE INTO train_route_cache "
+                "(train_id, origine_hint, fermate_json, first_station, "
+                " last_station, n_stops, operatore, categoria, "
+                " verified_at, api_status) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (tid, oh, fermate_json, first, last, n,
+                 operatore, categoria, verified_at, api_status))
+        self.conn.commit()
+        return cur.rowcount or 1
+
+    def count_cached_routes(self) -> int:
+        cur = self._cursor()
+        cur.execute("SELECT COUNT(*) AS n FROM train_route_cache")
+        row = cur.fetchone()
+        return row["n"] if isinstance(row, dict) else row[0]
 
     # ------------------------------------------------------------------
     # DAY VARIANT
