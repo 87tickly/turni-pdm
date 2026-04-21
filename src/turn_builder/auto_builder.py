@@ -1340,6 +1340,21 @@ class AutoBuilder:
 
         print(f"  Violazioni totali: {len(all_violations)}\n")
 
+        # ── VERIFICA POST-GENERAZIONE via cache live.arturo.travel ──
+        # Per ogni segmento del turno finale, cerca conferma rotta reale
+        # (cache hit = istantaneo; miss = chiamata API ~600ms).
+        # Cresce il DB di rotte verificate. Aggiunge violazioni
+        # WARN_DATA_MISMATCH se segmento non corrisponde a rotta reale.
+        try:
+            api_stats = self._verify_turn_via_api(final_cal)
+            print(f"  API verify: {api_stats['ok']} ok, "
+                  f"{api_stats['cache_hit']} cache, "
+                  f"{api_stats['mismatch']} mismatch, "
+                  f"{api_stats['not_found']} not_found, "
+                  f"{api_stats['error']} errori")
+        except Exception as e:
+            print(f"  API verify saltato (errore: {e})")
+
         # Metadati
         if final_cal:
             final_cal[0]["_meta"] = {
@@ -1354,6 +1369,63 @@ class AutoBuilder:
             }
 
         return final_cal
+
+    def _verify_turn_via_api(self, calendar: list[dict]) -> dict:
+        """
+        Verifica i segmenti del turno generato chiamando live.arturo.travel
+        (cache lazy). Aggiunge WARN_DATA_MISMATCH se la rotta reale non
+        contiene il segmento (from -> to nell'ordine).
+        """
+        from services.train_route_cache import (
+            get_or_fetch_train_route, fermate_segment,
+        )
+        from src.validator.rules import Violation
+        stats = {"ok": 0, "cache_hit": 0, "mismatch": 0,
+                 "not_found": 0, "error": 0}
+        for entry in calendar:
+            if entry.get("type") != "TURN":
+                continue
+            s = entry.get("summary")
+            if not s or not s.segments:
+                continue
+            for seg in s.segments:
+                tid = (seg.get("train_id", "") if isinstance(seg, dict)
+                       else seg.train_id)
+                from_st = (seg.get("from_station", "") if isinstance(seg, dict)
+                           else seg.from_station)
+                to_st = (seg.get("to_station", "") if isinstance(seg, dict)
+                         else seg.to_station)
+                if not tid:
+                    continue
+                route = get_or_fetch_train_route(self.db, tid, origine_hint=from_st)
+                if route is None:
+                    continue
+                if route.get("from_cache"):
+                    stats["cache_hit"] += 1
+                status = route.get("api_status", "ok")
+                if status == "not_found":
+                    stats["not_found"] += 1
+                    continue
+                if status == "error_transient":
+                    stats["error"] += 1
+                    continue
+                ferm = route.get("fermate", [])
+                if not ferm:
+                    continue
+                check = fermate_segment(ferm, from_st, to_st)
+                if check is None:
+                    stats["mismatch"] += 1
+                    s.violations.append(Violation(
+                        "WARN_DATA_MISMATCH",
+                        f"Treno {tid}: segmento {from_st}->{to_st} non "
+                        f"corrisponde alla rotta reale "
+                        f"({route.get('origine','?')}->{route.get('destinazione','?')}). "
+                        f"Verifica via live.arturo.travel.",
+                        severity="warning",
+                    ))
+                else:
+                    stats["ok"] += 1
+        return stats
 
     # ═══════════════════════════════════════════════════════
     #  WEEKLY SCHEDULE (turno settimanale unificato)
