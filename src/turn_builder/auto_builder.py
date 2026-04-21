@@ -239,15 +239,21 @@ class AutoBuilder:
     #  FILTRO SEGMENTI
     # ═══════════════════════════════════════════════════════
     def _filter_segments(self, segments: list, exclude_trains: set = None,
-                         apply_zone_and_abilitazioni: bool = True) -> list:
+                         apply_zone_and_abilitazioni: bool = True,
+                         apply_zone: bool = None,
+                         apply_abilitazione: bool = None) -> list:
         """
         Filtra segmenti per validita' generale (durata, ora, confidence)
         e opzionalmente per zona reachable + abilitazioni del deposito.
 
-        apply_zone_and_abilitazioni=False usato per il pool di
-        candidati di rientro: anche treni di linee non abilitate o fuori
-        zona possono servire da rientro in vettura (deadhead).
+        apply_zone_and_abilitazioni (legacy): True applica entrambi.
+        apply_zone / apply_abilitazione: flag separati per v4. Se None,
+        prendono il valore di apply_zone_and_abilitazioni.
         """
+        if apply_zone is None:
+            apply_zone = apply_zone_and_abilitazioni
+        if apply_abilitazione is None:
+            apply_abilitazione = apply_zone_and_abilitazioni
         excl = (exclude_trains or set()) | self._used_trains_global
         good = []
         for seg in segments:
@@ -259,13 +265,12 @@ class AutoBuilder:
             dur = arr_m - dep_m
             if dur < MIN_SEG_DURATION or dur > MAX_SEG_DURATION: continue
             if dep_m // 60 < MIN_DEP_HOUR or dep_m // 60 >= MAX_DEP_HOUR: continue
-            if apply_zone_and_abilitazioni:
-                if self._reachable:
-                    if (seg.get("from_station", "").upper() not in self._reachable or
-                        seg.get("to_station", "").upper() not in self._reachable):
-                        continue
-                if not self._seg_abilitato(seg):
+            if apply_zone and self._reachable:
+                if (seg.get("from_station", "").upper() not in self._reachable or
+                    seg.get("to_station", "").upper() not in self._reachable):
                     continue
+            if apply_abilitazione and not self._seg_abilitato(seg):
+                continue
             good.append(seg)
         return good
 
