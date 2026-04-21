@@ -686,8 +686,12 @@ class AutoBuilder:
         # per premiare turni "funzionali" con mix di tratte invece di ripetere
         # sempre la stessa catena. Richiesta utente: "efficienza non e'
         # ripetitivita' ma funzionalita' nel complesso del turno".
+        # Tracciamo separatamente le linee di giornate che rientrano al
+        # deposito: il bonus diversita' si applica solo a quelle per non
+        # incentivare turni NO_RIENTRO solo per far crescere il count.
         from collections import Counter as _Counter
         line_usage: _Counter = _Counter()
+        line_usage_rientranti: set = set()
 
         prev_end = None
         for e in turns:
@@ -703,7 +707,8 @@ class AutoBuilder:
             last_seg = s.segments[-1]
             lt = (last_seg.get("to_station", "").upper()
                   if isinstance(last_seg, dict) else last_seg.to_station.upper())
-            if lt == self.deposito:
+            returns_depot_today = (lt == self.deposito)
+            if returns_depot_today:
                 depot_ret += 1
 
             # Raccogli linee usate in questa giornata
@@ -715,6 +720,8 @@ class AutoBuilder:
                 if frm and to and frm != to:
                     pair = tuple(sorted([frm, to]))
                     line_usage[pair] += 1
+                    if returns_depot_today:
+                        line_usage_rientranti.add(pair)
 
             # Fascia oraria partenza
             first_dep = (s.segments[0].get("dep_time", "06:00")
@@ -828,18 +835,22 @@ class AutoBuilder:
                     score -= (end_h - LAST_DAY_MAX_END_HOUR) * 1000
 
         # 13. DIVERSITA' LINEE (richiesta utente: "funzionalita' nel complesso")
-        # Un turno "funzionale" tocca piu' tratte invece di ripetere sempre
-        # la stessa catena. Bonus per ogni linea unica usata. Penalita'
-        # crescente quando una stessa coppia (from, to) si ripete piu' volte.
-        unique_lines = len(line_usage)
-        if unique_lines > 0:
-            # Bonus diversita': +120 per ogni linea distinta
-            score += unique_lines * 120
-            # Penalita' ripetizione: per ogni coppia usata k volte (k>1),
-            # penalita' -60 per ogni ripetizione oltre la prima
-            for pair, k in line_usage.items():
-                if k > 1:
-                    score -= (k - 1) * 60
+        # Bilanciamento: la diversita' premia l'uso di piu' tratte MA
+        # senza sopraffare il vincolo rientro al deposito (penalita'
+        # NO_RIENTRO_BASE = -250/violazione). Valori tarati:
+        #   bonus +200 per linea distinta (era +120 sfatto, +400 troppo)
+        #   penalita' ripetizione quadratica -60*(k-1)^2 per compensare
+        #   naturalmente l'aumento di catene ripetute
+        # Bonus applicato SOLO alle linee usate in giornate che rientrano
+        # al deposito: cosi' diversita' non incentiva turni NO_RIENTRO.
+        unique_lines_with_rientro = len({l for l in line_usage_rientranti})
+        if unique_lines_with_rientro > 0:
+            score += unique_lines_with_rientro * 200
+        # Penalita' ripetizione su TUTTE le linee (anche non rientranti)
+        for pair, k in line_usage.items():
+            if k > 1:
+                excess = k - 1
+                score -= 60 * excess * excess
 
         return score
 
