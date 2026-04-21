@@ -35,6 +35,7 @@ import {
   type AppConstants,
 } from "@/lib/api"
 import { AbilitazioniPanel } from "@/components/AbilitazioniPanel"
+import { AutoBuilderGantt } from "@/components/AutoBuilderGantt"
 
 export function AutoBuilderPage() {
   const navigate = useNavigate()
@@ -503,6 +504,17 @@ function DayPreview({ entry }: { entry: BuildAutoEntry }) {
             </span>
           )}
         </div>
+      </div>
+
+      {/* Gantt visuale */}
+      <div className="px-4 pt-3">
+        <AutoBuilderGantt
+          segments={segments}
+          presentationTime={s.presentation_time}
+          endTime={s.end_time}
+          mealStart={s.meal_start}
+          mealEnd={s.meal_end}
+        />
       </div>
 
       {/* Segments list */}
