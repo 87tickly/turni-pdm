@@ -73,11 +73,15 @@ SA_TEMP_END      = 10.0     # fase 4: temperatura finale
 class AutoBuilder:
     """Builder automatico AI Engine v3 per turni PDM."""
 
-    def __init__(self, db: Database, deposito: str = ""):
+    def __init__(self, db: Database, deposito: str = "",
+                 use_v4_assembler: bool = False):
         self.db = db
         self.deposito = deposito.upper().strip()
         self.validator = TurnValidator(deposito=self.deposito)
         self._used_trains_global: set[str] = set()
+        # v4: path architetturale nuovo (seed + position + assembler)
+        # Fallback default a v3 per sicurezza/retrocompatibilita'
+        self._use_v4_assembler = use_v4_assembler
 
         if self.deposito:
             self._reachable = set(
@@ -942,6 +946,85 @@ class AutoBuilder:
                 days_to_try = [db_day] + [d for d in available_days if d != db_day]
             else:
                 days_to_try = [db_day]
+
+            # ═════════════════════════════════════════════════════
+            #  PATH v4: seed produttivo + posizionamento + assembler
+            # ═════════════════════════════════════════════════════
+            if self._use_v4_assembler:
+                from . import seed_enumerator
+                from . import day_assembler
+                from src.constants import ALLOWED_FR_STATIONS_DEFAULT
+                fr_set = {s.upper() for s in ALLOWED_FR_STATIONS_DEFAULT}
+                # Carica segmenti: abilitati SI, zona NO (per FLOZ/MLCE ecc.)
+                raw_segs = self._load_day_segments(
+                    db_day, 0, available_days,
+                    apply_zone=False, apply_abilitazione=True,
+                    union_all_days=True,
+                )
+                # Escludi treni gia' usati + filtro orario minimo
+                raw_segs = [s for s in raw_segs
+                            if s.get("train_id", "") not in self._used_trains_global
+                            and _time_to_min(s["dep_time"]) >= earliest_start_min]
+                if is_last_day:
+                    max_arr = LAST_DAY_MAX_END_HOUR * 60 - 15
+                    raw_segs = [s for s in raw_segs
+                                if _time_to_min(s["arr_time"]) <= max_arr]
+                seeds = seed_enumerator.enumerate_seeds(raw_segs, max_seeds=50)
+                # Per assembler: serve anche pool unfiltered (per pos/return)
+                unf_segs = self._load_day_segments(
+                    db_day, 0, available_days,
+                    apply_zone=False, apply_abilitazione=False,
+                    union_all_days=True,
+                )
+                best_day = None
+                best_score = -1e9
+                for seed in seeds:
+                    seed_tids = {t.get("train_id", "") for t in seed["trains"]}
+                    if seed_tids & self._used_trains_global:
+                        continue
+                    assembled = day_assembler.assemble_day(
+                        seed, self.deposito, unf_segs,
+                        used_train_ids=self._used_trains_global,
+                        fr_stations=fr_set,
+                    )
+                    if assembled is None:
+                        continue
+                    if is_last_day:
+                        max_end = LAST_DAY_MAX_END_HOUR * 60
+                        acc_end = ACCESSORY_RULES.get("default_end", 8)
+                        if assembled["last_arr_min"] + acc_end + EXTRA_END_MIN > max_end:
+                            continue
+                    # Scoring day_assembler-level
+                    sc = 0.0
+                    sc += 1200 if assembled["returns_depot"] else -400
+                    sc -= abs(assembled["condotta_min"] - 180) * 2
+                    sc += assembled["n_positioning"] * 80  # bonus diversita'
+                    if sc > best_score:
+                        best_score = sc
+                        best_day = assembled
+                if best_day:
+                    summary = self.validator.validate_day(
+                        best_day["segments"], deposito=self.deposito)
+                    self._fix_meal_timing(summary)
+                    entry["summary"] = summary
+                    # Registra treni usati (no deadhead)
+                    for seg in summary.segments:
+                        is_dh = (seg.get("is_deadhead", False)
+                                 if isinstance(seg, dict)
+                                 else getattr(seg, "is_deadhead", False))
+                        if is_dh:
+                            continue
+                        tid = (seg.get("train_id", "")
+                               if isinstance(seg, dict) else seg.train_id)
+                        self._used_trains_global.add(tid)
+                    if summary.end_time:
+                        prev_end_min = _time_to_min(summary.end_time)
+                    else:
+                        prev_end_min = None
+                else:
+                    entry["summary"] = DaySummary(segments=[])
+                    prev_end_min = None
+                continue  # prossima giornata
 
             pool = []
             filtered = []
@@ -1907,7 +1990,9 @@ class AutoBuilder:
     def _load_day_segments(self, day_index: int, start_hour: int,
                            alt_day_indices: list[int] = None,
                            apply_zone_and_abilitazioni: bool = True,
-                           union_all_days: bool = False) -> list:
+                           union_all_days: bool = False,
+                           apply_zone: bool = None,
+                           apply_abilitazione: bool = None) -> list:
         """
         Carica i segmenti di un giorno applicando i filtri di base.
         apply_zone_and_abilitazioni=False per ottenere il pool completo
@@ -1936,6 +2021,8 @@ class AutoBuilder:
             filtered = self._filter_segments(
                 merged,
                 apply_zone_and_abilitazioni=apply_zone_and_abilitazioni,
+                apply_zone=apply_zone,
+                apply_abilitazione=apply_abilitazione,
             )
             filtered.sort(key=lambda s: _time_to_min(s["dep_time"]))
             if start_hour > 0:
@@ -1955,6 +2042,8 @@ class AutoBuilder:
             filtered = self._filter_segments(
                 all_segments,
                 apply_zone_and_abilitazioni=apply_zone_and_abilitazioni,
+                apply_zone=apply_zone,
+                apply_abilitazione=apply_abilitazione,
             )
             filtered.sort(key=lambda s: _time_to_min(s["dep_time"]))
             if start_hour > 0:
