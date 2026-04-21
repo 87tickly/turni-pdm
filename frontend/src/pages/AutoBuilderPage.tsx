@@ -34,6 +34,7 @@ import {
   type BuildAutoEntry,
   type AppConstants,
 } from "@/lib/api"
+import { AbilitazioniPanel } from "@/components/AbilitazioniPanel"
 
 export function AutoBuilderPage() {
   const navigate = useNavigate()
@@ -121,6 +122,9 @@ export function AutoBuilderPage() {
           </p>
         </div>
       </div>
+
+      {/* ── Step 0: Abilitazioni del deposito (collassabile) ── */}
+      {deposito && <AbilitazioniPanel deposito={deposito} />}
 
       {/* ── Form ── */}
       <div
