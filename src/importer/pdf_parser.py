@@ -624,6 +624,37 @@ def extract_turno_number(words: list[dict]) -> str:
     return ""
 
 
+def _strip_loco_decorations(s: str) -> str:
+    """Pulisce decorazioni intorno al codice locomotiva.
+    Es. '(ETR522)' -> 'ETR522', 'ETR522.' -> 'ETR522'.
+    Mantiene il codice intatto."""
+    return s.strip().strip("()[]{}.,;:").strip()
+
+
+def _try_match_loco(text: str) -> str:
+    """Prova a matchare RE_LOCO su 'text' o sue varianti pulite.
+    Returns codice trovato o '' se nessun match."""
+    if not text:
+        return ""
+    # Match diretto
+    m = RE_LOCO.match(text.strip())
+    if m:
+        return m.group(1)
+    # Strip decorazioni (parentesi, punteggiatura)
+    cleaned = _strip_loco_decorations(text)
+    m = RE_LOCO.match(cleaned)
+    if m:
+        return m.group(1)
+    # Cerca sub-pattern dentro stringhe "Caravaggio 5pz (ETR522) - m.137"
+    sub = re.search(
+        r"\b(E\d{3,4}[A-Z]?|ETR\d{2,4}|ALn?\d{2,4}|ALe\d{2,4}|TAF|TSR)\b",
+        text,
+    )
+    if sub:
+        return sub.group(1)
+    return ""
+
+
 def extract_material_type(words: list[dict]) -> str:
     """
     Extract the rolling-stock locomotive code from the header page.
@@ -637,9 +668,10 @@ def extract_material_type(words: list[dict]) -> str:
     Lowercase rows (npBDL, nBC-clim) are carriages; the uppercase row is the
     locomotive/self-propelled unit that identifies the material type of the
     giro. We return the first uppercase code matching RE_LOCO; if no anchor
-    is found we still fall back to searching the entire header region.
+    is found we still fall back to searching the entire header region,
+    including dentro parentesi (es. "Caravaggio 5pz (ETR522)").
 
-    Returns the locomotive code (e.g. "E464N") or "" if not found.
+    Returns the locomotive code (e.g. "E464N", "ETR522") or "" if not found.
     """
     if not words:
         return ""
@@ -656,16 +688,18 @@ def extract_material_type(words: list[dict]) -> str:
         y_end = y_start + 200  # generous window to cover the 3-4 row table
         for w in words:
             if y_start <= w["top"] <= y_end:
-                m = RE_LOCO.match(w["text"].strip())
-                if m:
-                    return m.group(1)
+                code = _try_match_loco(w["text"])
+                if code:
+                    return code
 
     # Strategy 2: fallback — scan the whole header area (above the Gantt grid).
+    # Include parole con decorazioni come "(ETR522)" o note tipo
+    # "Caravaggio 5pz (ETR522) - m.137".
     for w in words:
         if w["top"] < DATA_AREA_TOP_Y:
-            m = RE_LOCO.match(w["text"].strip())
-            if m:
-                return m.group(1)
+            code = _try_match_loco(w["text"])
+            if code:
+                return code
 
     return ""
 
