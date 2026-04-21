@@ -104,6 +104,30 @@ class AutoBuilder:
         self._overhead = self._compute_overhead()
 
     # ═══════════════════════════════════════════════════════
+    #  CICLO SETTIMANALE (5+2)
+    # ═══════════════════════════════════════════════════════
+    @staticmethod
+    def _compute_day_type_cycle(n_workdays: int, start: str = "LV") -> list[str]:
+        """
+        Genera ciclo di day_type per n giornate lavorative.
+
+        Ciclo standard 5+2: 5 LV + 1 SAB + 1 DOM, poi ripete.
+        - n <= 5: tutte LV
+        - n = 6: 5 LV + 1 SAB
+        - n = 7: 5 LV + 1 SAB + 1 DOM
+        - n = 8: 5 LV + 1 SAB + 1 DOM + 1 LV (seconda settimana)
+        - ecc.
+
+        start != 'LV' non e' ancora supportato (lascia 'LV' come default):
+        i turni Trenord girano ma per ora partiamo lun.
+        """
+        full_cycle = ["LV"] * 5 + ["SAB", "DOM"]
+        out = []
+        for i in range(max(1, n_workdays)):
+            out.append(full_cycle[i % 7])
+        return out
+
+    # ═══════════════════════════════════════════════════════
     #  ABILITAZIONI (filtro + cache)
     # ═══════════════════════════════════════════════════════
     def _seg_abilitato(self, seg: dict) -> bool:
@@ -658,6 +682,12 @@ class AutoBuilder:
         empty = 0
         rest_ok = 0
         rest_total = 0
+        # Diversita' linee: tracciamo le coppie (from, to) usate giornalmente
+        # per premiare turni "funzionali" con mix di tratte invece di ripetere
+        # sempre la stessa catena. Richiesta utente: "efficienza non e'
+        # ripetitivita' ma funzionalita' nel complesso del turno".
+        from collections import Counter as _Counter
+        line_usage: _Counter = _Counter()
 
         prev_end = None
         for e in turns:
@@ -675,6 +705,16 @@ class AutoBuilder:
                   if isinstance(last_seg, dict) else last_seg.to_station.upper())
             if lt == self.deposito:
                 depot_ret += 1
+
+            # Raccogli linee usate in questa giornata
+            for seg in s.segments:
+                frm = (seg.get("from_station", "") if isinstance(seg, dict)
+                       else seg.from_station).upper().strip()
+                to = (seg.get("to_station", "") if isinstance(seg, dict)
+                      else seg.to_station).upper().strip()
+                if frm and to and frm != to:
+                    pair = tuple(sorted([frm, to]))
+                    line_usage[pair] += 1
 
             # Fascia oraria partenza
             first_dep = (s.segments[0].get("dep_time", "06:00")
@@ -786,6 +826,20 @@ class AutoBuilder:
                 else:
                     # Penalita molto forte: -1000 per ora oltre le 15:00
                     score -= (end_h - LAST_DAY_MAX_END_HOUR) * 1000
+
+        # 13. DIVERSITA' LINEE (richiesta utente: "funzionalita' nel complesso")
+        # Un turno "funzionale" tocca piu' tratte invece di ripetere sempre
+        # la stessa catena. Bonus per ogni linea unica usata. Penalita'
+        # crescente quando una stessa coppia (from, to) si ripete piu' volte.
+        unique_lines = len(line_usage)
+        if unique_lines > 0:
+            # Bonus diversita': +120 per ogni linea distinta
+            score += unique_lines * 120
+            # Penalita' ripetizione: per ogni coppia usata k volte (k>1),
+            # penalita' -60 per ogni ripetizione oltre la prima
+            for pair, k in line_usage.items():
+                if k > 1:
+                    score -= (k - 1) * 60
 
         return score
 
@@ -1356,12 +1410,26 @@ class AutoBuilder:
 
         base_excluded = set(exclude_trains or [])
 
-        try:
-            available_days = self.db.get_day_indices_for_validity(day_type)
-        except Exception:
-            available_days = self.db.get_distinct_day_indices()
-        if not available_days:
-            available_days = [1]
+        # Ciclo settimanale 5+2: per N giornate lavorative genera
+        # un mix di day_type (LV / SAB / DOM) e unisce i day_index validi
+        # di tutti i tipi usati. Il builder non si limita a LV.
+        day_type_cycle = self._compute_day_type_cycle(n_workdays, start=day_type)
+        used_types = set(day_type_cycle)
+        available_days_set: set = set()
+        for dt in used_types:
+            try:
+                for idx in self.db.get_day_indices_for_validity(dt):
+                    available_days_set.add(idx)
+            except Exception:
+                pass
+        if not available_days_set:
+            try:
+                for idx in self.db.get_distinct_day_indices():
+                    available_days_set.add(idx)
+            except Exception:
+                pass
+        available_days = sorted(available_days_set) if available_days_set else [1]
+        print(f"  Day cycle: {day_type_cycle}  (union day_index: {len(available_days)})")
 
         # ── FASE 2: Multi-restart ──
         print(f"\n  FASE 2 · Multi-restart ({NUM_RESTARTS} tentativi)...")
@@ -1489,18 +1557,50 @@ class AutoBuilder:
 
         return final_cal
 
+    @staticmethod
+    def _api_time_to_local_hhmm(api_ts: str) -> str:
+        """Converte timestamp API (UTC, 'YYYY-MM-DDTHH:MM:SSZ') a HH:MM
+        in Europe/Rome (CET/CEST auto). '' se vuoto/invalido."""
+        if not api_ts:
+            return ""
+        try:
+            from datetime import datetime, timezone
+            try:
+                from zoneinfo import ZoneInfo
+                tz_rome = ZoneInfo("Europe/Rome")
+            except Exception:
+                # Fallback naif: assume CEST (+2) di aprile-ottobre
+                tz_rome = timezone.__class__.utc  # placeholder
+                tz_rome = None
+            s = api_ts.strip()
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            dt = datetime.fromisoformat(s)
+            if tz_rome is not None:
+                dt = dt.astimezone(tz_rome)
+            else:
+                # Fallback CEST
+                from datetime import timedelta
+                dt = dt + timedelta(hours=2)
+            return dt.strftime("%H:%M")
+        except Exception:
+            return ""
+
     def _verify_turn_via_api(self, calendar: list[dict]) -> dict:
         """
         Verifica i segmenti del turno generato chiamando live.arturo.travel
-        (cache lazy). Aggiunge WARN_DATA_MISMATCH se la rotta reale non
-        contiene il segmento (from -> to nell'ordine).
+        (cache lazy).
+          - WARN_DATA_MISMATCH: rotta reale non contiene (from -> to)
+          - WARN_TIME_MISMATCH: orari DB differiscono dai reali > 2 min
+            (convertiti da UTC API a Europe/Rome)
         """
         from services.train_route_cache import (
             get_or_fetch_train_route, fermate_segment,
         )
         from src.validator.rules import Violation
+        TOL_MIN = 2
         stats = {"ok": 0, "cache_hit": 0, "mismatch": 0,
-                 "not_found": 0, "error": 0}
+                 "not_found": 0, "error": 0, "time_mismatch": 0}
         for entry in calendar:
             if entry.get("type") != "TURN":
                 continue
@@ -1514,6 +1614,10 @@ class AutoBuilder:
                            else seg.from_station)
                 to_st = (seg.get("to_station", "") if isinstance(seg, dict)
                          else seg.to_station)
+                db_dep = (seg.get("dep_time", "") if isinstance(seg, dict)
+                          else seg.dep_time)
+                db_arr = (seg.get("arr_time", "") if isinstance(seg, dict)
+                          else seg.arr_time)
                 if not tid:
                     continue
                 route = get_or_fetch_train_route(self.db, tid, origine_hint=from_st)
@@ -1540,6 +1644,35 @@ class AutoBuilder:
                         f"corrisponde alla rotta reale "
                         f"({route.get('origine','?')}->{route.get('destinazione','?')}). "
                         f"Verifica via live.arturo.travel.",
+                        severity="warning",
+                    ))
+                    continue
+                # Verifica orari
+                idx_from, idx_to = check
+                f_from = ferm[idx_from]
+                f_to = ferm[idx_to]
+                api_dep = self._api_time_to_local_hhmm(
+                    f_from.get("programmato_partenza") or "")
+                api_arr = self._api_time_to_local_hhmm(
+                    f_to.get("programmato_arrivo") or "")
+                mismatches = []
+                if api_dep and db_dep:
+                    diff = abs(_time_to_min(api_dep) - _time_to_min(db_dep))
+                    if diff > 720:  # over midnight
+                        diff = 1440 - diff
+                    if diff > TOL_MIN:
+                        mismatches.append(f"dep DB {db_dep} vs reale {api_dep} (+{diff}min)")
+                if api_arr and db_arr:
+                    diff = abs(_time_to_min(api_arr) - _time_to_min(db_arr))
+                    if diff > 720:
+                        diff = 1440 - diff
+                    if diff > TOL_MIN:
+                        mismatches.append(f"arr DB {db_arr} vs reale {api_arr} (+{diff}min)")
+                if mismatches:
+                    stats["time_mismatch"] += 1
+                    s.violations.append(Violation(
+                        "WARN_TIME_MISMATCH",
+                        f"Treno {tid} {from_st}->{to_st}: " + "; ".join(mismatches),
                         severity="warning",
                     ))
                 else:

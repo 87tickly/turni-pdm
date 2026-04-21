@@ -311,12 +311,53 @@ export function AutoBuilderPage() {
         </div>
       )}
 
-      {/* ── Giornate preview ── */}
-      {result && turns.length > 0 && (
+      {/* ── Giornate preview (inclusi riposi) ── */}
+      {result && (turns.length > 0 || rests.length > 0) && (
         <div className="space-y-3">
-          {turns.map((entry) => (
-            <DayPreview key={`turn-${entry.day}`} entry={entry} />
-          ))}
+          {result.calendar.map((entry, i) => {
+            if (entry.type === "TURN") {
+              return <DayPreview key={`turn-${entry.day}-${i}`} entry={entry} />
+            }
+            // REST: riga sottile "Riposo" / "Intervallo"
+            const isIntervallo = (() => {
+              // primo REST dopo blocco lavoro = intervallo, secondo = riposo settimanale
+              let count = 0
+              for (let j = 0; j < i; j++) {
+                if (result.calendar[j].type === "REST") count++
+                if (result.calendar[j].type === "TURN" && count > 0) count = 0
+              }
+              return count === 0
+            })()
+            return (
+              <div
+                key={`rest-${i}`}
+                className="rounded-xl px-4 py-3 flex items-center gap-3"
+                style={{
+                  backgroundColor: "var(--color-surface-container-low)",
+                  opacity: 0.75,
+                }}
+              >
+                <span
+                  className="text-[10px] font-bold uppercase px-2 py-0.5 rounded"
+                  style={{
+                    backgroundColor: "var(--color-surface-container-high)",
+                    color: "var(--color-on-surface-muted)",
+                    letterSpacing: "0.1em",
+                  }}
+                >
+                  {isIntervallo ? "Intervallo" : "Riposo"}
+                </span>
+                <span
+                  className="text-[12.5px]"
+                  style={{ color: "var(--color-on-surface-muted)" }}
+                >
+                  {isIntervallo
+                    ? "Giornata di intervallo (no servizio)"
+                    : "Riposo settimanale (no servizio)"}
+                </span>
+              </div>
+            )
+          })}
         </div>
       )}
 
