@@ -381,6 +381,24 @@ class Database:
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_depot_enabled_material_depot ON depot_enabled_material(deposito)")
 
+        # ── Allocation globale treni per deposito ──
+        # Garantisce unicita' cross-deposito: se ALESSANDRIA usa il treno
+        # 10578 in un turno generato, PAVIA non puo' usarlo in nessuno dei
+        # suoi. Popolata dal builder al momento del save del turno.
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS train_allocation (
+                id {pk},
+                train_id TEXT NOT NULL,
+                deposito TEXT NOT NULL,
+                turno_name TEXT DEFAULT '',
+                day_index INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(train_id, day_index)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_train_allocation_train ON train_allocation(train_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_train_allocation_depot ON train_allocation(deposito)")
+
         # ── Cache rotte treno verificate via live.arturo.travel ──
         # Per ogni (train_id, origine_hint) salviamo le fermate reali
         # cosi' arricchiamo il DB con dati certificati. La prima query e'
@@ -1090,6 +1108,79 @@ class Database:
                 "enabled": (mat in enabled_set) if mat else True,  # vuoto = wildcard, sempre on
             })
         return out
+
+    # ------------------------------------------------------------------
+    # TRAIN ALLOCATION (unicita' cross-deposito dei treni usati)
+    # ------------------------------------------------------------------
+    def allocate_trains(self, train_ids: list, deposito: str,
+                         turno_name: str = "", day_index: int = 0) -> int:
+        """Blocca una lista di train_id per un deposito specifico (+day_index).
+        Skippa silenziosamente treni gia' allocati ad altri depositi."""
+        dep = (deposito or "").upper().strip()
+        if not dep or not train_ids:
+            return 0
+        now = datetime.now().isoformat()
+        cur = self._cursor()
+        inserted = 0
+        for tid in train_ids:
+            tid_clean = (tid or "").strip()
+            if not tid_clean:
+                continue
+            try:
+                if self.is_pg:
+                    cur.execute(self._q(
+                        "INSERT INTO train_allocation "
+                        "(train_id, deposito, turno_name, day_index, created_at) "
+                        "VALUES (?,?,?,?,?) "
+                        "ON CONFLICT (train_id, day_index) DO NOTHING"
+                    ), (tid_clean, dep, turno_name, day_index, now))
+                else:
+                    cur.execute(
+                        "INSERT OR IGNORE INTO train_allocation "
+                        "(train_id, deposito, turno_name, day_index, created_at) "
+                        "VALUES (?,?,?,?,?)",
+                        (tid_clean, dep, turno_name, day_index, now))
+                if cur.rowcount:
+                    inserted += 1
+            except Exception:
+                continue
+        self.conn.commit()
+        return inserted
+
+    def get_trains_allocated_to_others(self, deposito: str,
+                                        day_index: int = 0) -> set:
+        """Restituisce l'insieme di train_id gia' allocati ad altri depositi
+        per lo stesso day_index. Il builder li esclude a priori."""
+        dep = (deposito or "").upper().strip()
+        cur = self._cursor()
+        cur.execute(self._q(
+            "SELECT DISTINCT train_id FROM train_allocation "
+            "WHERE deposito != ? AND day_index = ?"
+        ), (dep, day_index))
+        rows = cur.fetchall()
+        return {self._dict(r)["train_id"] for r in rows if self._dict(r).get("train_id")}
+
+    def clear_train_allocation(self, deposito: str = "") -> int:
+        """Sblocca tutti i treni per un deposito (se dato) o tutti (se vuoto).
+        Usato quando si rigenera un turno."""
+        cur = self._cursor()
+        if deposito:
+            dep = deposito.upper().strip()
+            cur.execute(self._q("DELETE FROM train_allocation WHERE deposito = ?"), (dep,))
+        else:
+            cur.execute("DELETE FROM train_allocation")
+        self.conn.commit()
+        return cur.rowcount
+
+    def count_allocations(self, deposito: str = "") -> int:
+        cur = self._cursor()
+        if deposito:
+            cur.execute(self._q("SELECT COUNT(*) AS n FROM train_allocation WHERE deposito = ?"),
+                        (deposito.upper().strip(),))
+        else:
+            cur.execute("SELECT COUNT(*) AS n FROM train_allocation")
+        row = cur.fetchone()
+        return row["n"] if isinstance(row, dict) else row[0]
 
     # ------------------------------------------------------------------
     # TRAIN ROUTE CACHE (verifica via live.arturo.travel)
