@@ -301,6 +301,118 @@ class AutoBuilder:
         return candidates[0][1]
 
     # ═══════════════════════════════════════════════════════
+    #  TRENO DI POSIZIONAMENTO INIZIALE
+    # ═══════════════════════════════════════════════════════
+    def _add_positioning_chains(self, segments: list,
+                                 all_day_segments: list,
+                                 min_start: int,
+                                 pool: list) -> None:
+        """
+        Aggiunge al pool catene che iniziano con un deadhead deposito→X
+        (treno di posizionamento, in vettura), poi proseguono produttivo
+        da X. Permette al builder di usare linee abilitate che NON
+        partono fisicamente dal deposito.
+
+        Vincoli:
+          - dh: deposito -> X (X != deposito), dep >= min_start,
+            durata <= 120 min (max 2h in vettura)
+          - prod: X -> Y, dep >= dh.arr + 5 min, gap <= 120 min
+          - prod abilitato per il deposito (linea + materiale)
+          - condotta totale (solo prod, dh=0) >= MIN_COND_CHAIN
+          - prestazione totale + overhead <= MAX_PRESTAZIONE_MIN
+
+        Limite: max 30 catene di posizionamento per non esplodere.
+        """
+        if not self.deposito or not all_day_segments:
+            return
+        deposito = self.deposito
+        MIN_CHANGE_MIN = 5
+        MAX_DH_GAP = 120
+        MAX_DH_DURATION = 120
+        LIMIT = 30
+        added = 0
+
+        # Candidati deadhead: tutti i treni che partono dal deposito
+        pos_candidates = [s for s in all_day_segments
+                          if s.get("from_station", "").upper() == deposito
+                          and _time_to_min(s["dep_time"]) >= min_start]
+        # Sort per dep crescente, prendi solo i primi 10 candidati per
+        # contenere il branching
+        pos_candidates.sort(key=lambda s: _time_to_min(s["dep_time"]))
+        pos_candidates = pos_candidates[:10]
+
+        for dh_seg in pos_candidates:
+            if added >= LIMIT:
+                break
+            x = dh_seg.get("to_station", "").upper()
+            if not x or x == deposito:
+                continue
+            dh_dep = _time_to_min(dh_seg["dep_time"])
+            dh_arr = _time_to_min(dh_seg["arr_time"])
+            if dh_arr < dh_dep:
+                dh_arr += 1440
+            if (dh_arr - dh_dep) > MAX_DH_DURATION:
+                continue
+
+            # Treni produttivi che partono da X dopo dh_arr
+            prod_candidates = []
+            for prod in all_day_segments:
+                if added >= LIMIT:
+                    break
+                if prod.get("train_id", "") == dh_seg.get("train_id", ""):
+                    continue
+                if prod.get("from_station", "").upper() != x:
+                    continue
+                if not self._seg_abilitato(prod):
+                    continue
+                p_dep = _time_to_min(prod["dep_time"])
+                if p_dep < dh_arr + MIN_CHANGE_MIN:
+                    continue
+                gap = p_dep - dh_arr
+                if gap > MAX_DH_GAP:
+                    continue
+                prod_candidates.append((gap, prod))
+
+            prod_candidates.sort(key=lambda t: t[0])
+            for _, prod in prod_candidates[:3]:  # max 3 prod per dh
+                if added >= LIMIT:
+                    break
+                dh_marked = {**dh_seg, "is_deadhead": True}
+                chain = [dh_marked, prod]
+                cond = self._chain_condotta(chain)
+                if cond < MIN_COND_CHAIN:
+                    continue
+                # span totale
+                p_arr = _time_to_min(prod["arr_time"])
+                p_dep = _time_to_min(prod["dep_time"])
+                if p_arr < p_dep:
+                    p_arr += 1440
+                span = p_arr - dh_dep
+                if span < 0:
+                    span += 1440
+                if (span + self._overhead) > MAX_PRESTAZIONE_MIN:
+                    continue
+                p_to = prod.get("to_station", "").upper()
+                if p_to == deposito:
+                    pool.append(chain)
+                    added += 1
+                else:
+                    used = {dh_seg.get("train_id", ""),
+                            prod.get("train_id", "")}
+                    ret = self._try_return_segment(
+                        all_day_segments, p_to, p_arr,
+                        dh_dep, used, cond,
+                    )
+                    if ret is not None:
+                        pool.append(chain + [ret])
+                        added += 1
+                    else:
+                        # Catena "aperta": valida solo se FR (orario serale)
+                        # Lasciamo decidere al validator
+                        pool.append(chain)
+                        added += 1
+
+    # ═══════════════════════════════════════════════════════
     #  FASE 1 · POOL — DFS BRANCHING
     # ═══════════════════════════════════════════════════════
     def _build_chain_pool(self, segments: list,
@@ -327,6 +439,13 @@ class AutoBuilder:
             return []
 
         pool: list[list[dict]] = []
+
+        # ── TRENO DI POSIZIONAMENTO INIZIALE in vettura ──
+        # Genera catene aggiuntive che iniziano con un deadhead deposito→X
+        # (PdC sale passivo), poi proseguono con catena produttiva da X.
+        # Sblocca l'uso di linee abilitate che NON partono dal deposito
+        # (es. ALESSANDRIA -> Pavia in vettura -> Pavia-Vercelli in condotta).
+        self._add_positioning_chains(segments, all_day_segments, min_start, pool)
 
         for start_seg in departing:
             s_cond = self._seg_condotta(start_seg)

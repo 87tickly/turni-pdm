@@ -4,6 +4,51 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-21 — Treno di posizionamento iniziale in vettura (Step 3/3)
+
+Sblocca l'uso di linee abilitate che NON partono fisicamente dal
+deposito. Il PdC sale come passeggero su un treno deposito → X
+(deadhead, in vettura), poi inizia condotta produttiva da X.
+
+### Logica `_add_positioning_chains()` in `auto_builder.py`
+
+Per ogni candidato deadhead `deposito → X` (max 10 candidati per
+contenere branching):
+- X != deposito, durata <= 120 min
+- Cerca treni produttivi `X → Y` con dep >= dh.arr + 5 min, gap <= 120 min
+- Filtra per abilitazione (linea + materiale)
+- Verifica vincoli: condotta >= 60 min, prestazione + overhead <= MAX
+- Se Y == deposito: catena `[dh, prod]` chiude
+- Altrimenti tenta `_try_return_segment` per chiudere; se non trova,
+  catena resta "aperta" (validator decide se FR-ammissibile)
+- Limite: max 30 catene di posizionamento per pool
+
+### Test reale ALESSANDRIA
+
+| Test | Posizionamenti | Linee diverse | Note |
+|------|----------------|---------------|------|
+| 5gg (dataset basta diretto) | 0 | 1 (PAV) | scoring preferisce diretto |
+| 10gg (treni esauriti) | **2** | **3** (PAV, MI.ROG, CREMONA) | usa posizionamento + FR |
+
+Per dataset poveri come ALESSANDRIA il fix sblocca davvero la
+diversita' quando le opzioni dirette si esauriscono. Per dataset
+ricchi (BRESCIA, CREMONA, LECCO) non cambia nulla — stanno gia' bene.
+
+pytest: 112/112 PASS.
+
+### Tutti i 3 step della pipeline cache+verifica+posizionamento
+
+1. **Step 1** (commit 6fcdfa8): schema `train_route_cache` + service
+2. **Step 2** (commit 59a18cf): builder verifica turno via cache
+3. **Step 3** (questo): treno di posizionamento iniziale
+
+Fine epic. Bug residui:
+- Resto contratto FR (max/week, max/28gg) — sessione futura
+- Nome alternativo a "Gantt" — in attesa preferenza utente
+- Bug parser `material_type` vuoto (33/50) — sessione parser
+
+---
+
 ## 2026-04-21 — Cache rotte treno via live.arturo.travel (Step 1/3)
 
 Strategia richiesta dall'utente per dare CERTEZZA al builder sui
