@@ -27,6 +27,102 @@
 
    **Motivo**: Claude Design ha Claude Opus 4.7 vision + lettura codebase, produce risultati migliori del disegnare ad-hoc in chat. Un prompt mirato (30 sec) + 10 min in Claude Design = risparmio di 5-10h di iterazioni CSS frustranti.
 
+## STRUTTURA VERA di un turno PdC (memorizzato 21/04/2026)
+
+Referenza: **turno ALOR_C [65046]** impianto ALESSANDRIA, profilo Condotta,
+valido 23/02/2026 - 12/12/2026 (PDF "Turni PdC rete RFI dal 23 Febbraio 2026",
+pagine 386-387). Da studiare **prima di toccare l'algoritmo del builder**.
+
+### Un turno ha N giornate × M varianti calendario
+
+Il turno ALOR_C ha **5 giornate lavorative (1-5) + 2 riposi** (ciclo 5+2).
+Ogni giornata ha varianti per giorno settimana:
+- **LMXGV** = feriale (Lun Mar Mer Gio Ven)
+- **S** = Sabato
+- **D** = Domenica
+- **SD** = Sab/Dom combinata (quando uguali)
+- **F** = Festivo infrasettimanale (variante specifica)
+
+Stesse giornate ma **sequenze di treni COMPLETAMENTE DIVERSE** tra LMXGV e S
+e D. Domenica (D) spesso è `S.COMP AL` = disponibilita' a riposo.
+
+### Cct (condotta) reale: 2-3h, NON 4-5h
+
+Numeri letti dalle 5 giornate LMXGV del turno ALOR_C:
+- G1: Cct 02:28 (148 min), Lav 05:13 — **ratio 47%**
+- G2: Cct 02:53 (173 min), Lav 08:17 — **ratio 35%**
+- G3: Cct 03:33 (213 min), Lav 08:30 — **ratio 42%**
+- G4: Cct 02:16 (136 min), Lav 08:05 — **ratio 28%**
+- G5: Cct 01:45 (105 min), Lav 06:07 — **ratio 29%**
+
+**Media condotta: ~2h30-3h. Media prestazione: ~7h. Ratio medio: 35%.**
+
+Il mio scoring pre-esistente puntava a ratio 60-70% → **SBAGLIATO**.
+
+### Uso massiccio di VETTURA (posizionamento + rientro)
+
+Giornata 2 LMXGV (il caso da analizzare a fondo):
+```
+AL → (11055 VOGH)  [VETTURA 49' + 4']  Vogh
+   → 2316 Mlce     [CONDOTTA 55']      Milano Centrale
+   → U316 FlOz     [CONDOTTA 16' + 6'] Fiorenza
+   → (59AS Mlba)   [VETTURA 38' + 55'] Milano Bovisa
+   → (24135 Mlro)  [VETTURA 6' + 33']  Milano Rogoredo
+   → REFEZ Mlro    [PAUSA 30']         Mlro
+   → 10045 AL      [CONDOTTA 56' + 41'] Alessandria
+   → CVa 10062 AL  [CAMBIO VOLANTE ARRIVO] AL
+```
+
+**7 segmenti**: 4 VETTURA + 2 CONDOTTA + 1 REFEZIONE + 1 CVa. Solo 2
+treni guidati, gli altri tutti passivi per posizionarsi o rientrare.
+
+### Simboli nel PDF turno PdC
+
+- `(NUMERO STAZ` = treno in **vettura** (PdC passeggero)
+- `NUMERO STAZ` (barra continua nera) = treno in **condotta** (PdC guida)
+- `●NUMERO` = **preriscaldamento** (tempi maggiorati per preparare il mezzo)
+- `CVp NUMERO` = **Cambio Volante in Produzione** (PdC cambia treno guidando)
+- `CVa NUMERO` = **Cambio Volante in Arrivo** (altro tipo di cambio in arrivo)
+- `REFEZ STAZ` = **refezione** (pausa pasto) in stazione specifica
+- `(VOCTAXI` = **vettura occasionale in TAXI** (quando non c'e' treno)
+- `●10020 Tr 10020 tempi maggiorati per preriscaldo` = nota operativa
+
+### Pattern algoritmico corretto (per prossima iterazione builder)
+
+Il builder attuale cerca **catene di treni-condotta dal deposito**. Sbagliato.
+Il builder giusto deve partire dal **punto di condotta** e costruire:
+
+1. **STEP 1 - Seleziona il/i treno/i produttivo/i**: 1-2 treni che il PdC
+   guida, condotta totale target **2-3h** (non 4-5h)
+2. **STEP 2 - Posizionamento iniziale**: dal deposito alla stazione di
+   inizio condotta, tipicamente in **vettura** su 1-3 treni passivi
+3. **STEP 3 - Refezione**: 30 min in stazione compatibile, durante il gap
+   tra treni condotta o prima/dopo
+4. **STEP 4 - Rientro**: dal punto di fine condotta al deposito, in
+   vettura o condotta
+5. **STEP 5 - Valida**: prestazione ≤ 8h30, condotta ≤ 5h30, refezione in
+   finestra, riposo dopo turno
+
+**Il turno vero e' CENTRATO SULLA CONDOTTA, non sulla catena dal deposito.**
+
+### Non fossilizzarsi e NON gettare la spugna
+
+L'utente ha pazienza limitata (giustamente) per:
+- Risposte tipo "funziona cosi e cosi"
+- "Dataset povero quindi impossibile"
+- "E' un problema architetturale da fare in sessione futura"
+
+Tutti questi sono modi di gettare la spugna. Prima di dare una di queste
+risposte, rileggere `docs/METODO-DI-LAVORO.md` (regole 1, 3, 7):
+- **Diagnosi prima di azione**: quando il builder sceglie sempre Pavia,
+  verifica davvero qual e' lo score delle alternative, perche' vengono
+  scartate, cosa cambia aggiungendo bonus
+- **Un passo alla volta**: ogni fix testato con numeri, non "dovrebbe
+  funzionare"
+- **Costanza nel tempo**: il problema di Alessandria non si risolve "dopo"
+  o "in sessione dedicata" — si risolve ora con 2-3 ore di riprogettazione
+  algoritmica se serve
+
 ## Scopo
 
 Software gestionale per la pianificazione turni del personale di macchina ferroviario.
