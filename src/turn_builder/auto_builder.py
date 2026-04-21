@@ -756,9 +756,14 @@ class AutoBuilder:
             pool = []
             filtered = []
             for try_day in days_to_try:
-                # Carica segmenti
+                # Carica segmenti unendo TUTTI i day_index validi (LV/SAB/DOM)
+                # per dare al builder massima flessibilita': il deposito
+                # piccolo come ALESSANDRIA ha solo 3 segmenti per day_index,
+                # ma in union ne ha ~30, abbastanza per chiudere catene
+                # con rientro. _used_trains_global previene il riuso.
                 day_filtered = self._load_day_segments(
-                    try_day, earliest_start_min // 60, available_days
+                    try_day, earliest_start_min // 60, available_days,
+                    union_all_days=True,
                 )
                 if not day_filtered:
                     continue
@@ -786,6 +791,7 @@ class AutoBuilder:
                 day_unfiltered = self._load_day_segments(
                     try_day, 0, available_days,
                     apply_zone_and_abilitazioni=False,
+                    union_all_days=True,
                 )
 
                 # Genera pool catene
@@ -1559,13 +1565,43 @@ class AutoBuilder:
     # ═══════════════════════════════════════════════════════
     def _load_day_segments(self, day_index: int, start_hour: int,
                            alt_day_indices: list[int] = None,
-                           apply_zone_and_abilitazioni: bool = True) -> list:
+                           apply_zone_and_abilitazioni: bool = True,
+                           union_all_days: bool = False) -> list:
         """
         Carica i segmenti di un giorno applicando i filtri di base.
         apply_zone_and_abilitazioni=False per ottenere il pool completo
         (usato per la ricerca del rientro: anche treni di linee non
         abilitate possono servire come rientro in vettura).
+        union_all_days=True: carica e unisce i segmenti di TUTTI gli
+        alt_day_indices (massima flessibilita' per il builder, evita di
+        legare ogni giornata a un singolo day_index del materiale).
         """
+        if union_all_days and alt_day_indices:
+            # Union di tutti i day_index disponibili (deduplica via train_id+orario)
+            seen = set()
+            merged = []
+            for idx in alt_day_indices:
+                segs = self.db.get_all_segments(day_index=idx) or []
+                for s in segs:
+                    key = (s.get("train_id", ""), s.get("from_station", ""),
+                           s.get("dep_time", ""), s.get("to_station", ""),
+                           s.get("arr_time", ""))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    merged.append(s)
+            if not merged:
+                merged = self.db.get_all_segments() or []
+            filtered = self._filter_segments(
+                merged,
+                apply_zone_and_abilitazioni=apply_zone_and_abilitazioni,
+            )
+            filtered.sort(key=lambda s: _time_to_min(s["dep_time"]))
+            if start_hour > 0:
+                filtered = [s for s in filtered
+                            if _time_to_min(s["dep_time"]) >= start_hour * 60]
+            return filtered
+
         indices = [day_index]
         if alt_day_indices:
             indices.extend(i for i in alt_day_indices if i != day_index)

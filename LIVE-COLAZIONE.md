@@ -4,6 +4,71 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-21 — FIX ROOT CAUSE: union day_indices nel builder (zero violazioni)
+
+Diagnosi profonda dopo feedback utente "G1/G4/G5 con 1 treno solo
+NO_RIENTRO_BASE". Il bug NON era nello scoring ne' nel rientro
+in vettura: era nel CARICAMENTO SEGMENTI.
+
+### Bug
+
+`_build_one_schedule` cicla `day_idx_cycle` 0,1,2,3,4 e per ogni
+giornata caricava i segmenti di UN SOLO `day_index` del materiale
+(`available_days[cycle % len]`). Per depositi piccoli come
+ALESSANDRIA, ogni day_index ha solo 3 segmenti. Pool = 2 catene,
+0 con rientro -> NO_RIENTRO_BASE.
+
+Trace di prova: G1 con `_used_trains_global = []` aveva pool di 2
+catene, 0 con rientro. Eppure il test isolato di `_build_chain_pool`
+con union dei day_index produceva 38 catene, 27 con rientro.
+
+### Fix
+
+`_load_day_segments` nuovo flag `union_all_days`. Quando True:
+- Carica i segmenti di TUTTI gli `alt_day_indices` (LV/SAB/DOM
+  validi)
+- Deduplica via tupla (train_id, from, dep, to, arr)
+- Restituisce union filtrata
+
+`_build_one_schedule` chiama `_load_day_segments(...,
+union_all_days=True)` per il pool produttivo E per quello di
+rientro. `_used_trains_global` previene riuso treni cross-day.
+
+### Numeri reali (turni.db locale)
+
+| Deposito | Prima fix | Dopo fix |
+|----------|-----------|----------|
+| ALESSANDRIA 5gg | 2/5 rientri, 3 viol | **5/5 rientri, 0 viol** |
+| BRESCIA 5gg | 5/5, 0 viol | 5/5, 0 viol |
+| CREMONA 5gg | (non testato) | 5/5, 0 viol |
+| LECCO 5gg | (non testato) | 5/5, 0 viol |
+
+Tempo aumentato (~6s vs 0.5s precedenti) perche' pool ora ~10x piu'
+grande. Accettabile.
+
+### File modificato
+
+- `src/turn_builder/auto_builder.py`:
+  - `_load_day_segments(..., union_all_days=False)`: parametro nuovo
+  - `_build_one_schedule`: chiamate con `union_all_days=True` sia
+    per `day_filtered` (produttivi) che per `day_unfiltered` (rientro)
+
+### Implicazioni
+
+- I 4 commit precedenti su abilitazioni/rientro restano necessari
+  (filtro abilitazioni serve davvero, rientro in vettura idem),
+  ma SENZA questo fix non producevano risultati visibili
+- ALESSANDRIA (3 linee, dataset povero) ora chiude tutti i giri
+  IN CONDOTTA usando treni della stessa linea (pool 38 catene
+  visto prima). Rientro in vettura ancora a 0 deadhead — non serve
+  per questo deposito perche' la linea Pavia ha rientri produttivi
+  abbondanti
+- Il fix sblocca anche depositi medi/grandi che fino ad ora
+  avevano ad-hoc workaround di "ultimo giorno prova tutti i
+  day_index": ora vale per TUTTE le giornate
+
+---
+
 ## 2026-04-21 — Auto-builder: filtro abilitazioni + iniezione rientro (in condotta o vettura)
 
 Implementazione del fix algoritmico richiesto dall'utente. Il builder
