@@ -210,20 +210,21 @@ class AutoBuilder:
         Genera ciclo di day_type per n giornate lavorative.
 
         Ciclo standard 5+2: 5 LV + 1 SAB + 1 DOM, poi ripete.
-        - n <= 5: tutte LV
-        - n = 6: 5 LV + 1 SAB
-        - n = 7: 5 LV + 1 SAB + 1 DOM
-        - n = 8: 5 LV + 1 SAB + 1 DOM + 1 LV (seconda settimana)
-        - ecc.
+        - start="LV" (default): ciclo normale (LV LV LV LV LV SAB DOM ...)
+        - start="SAB": tutte SAB (usato da _find_day_variant per varianti S)
+        - start="DOM": tutte DOM (usato per varianti D)
 
-        start != 'LV' non e' ancora supportato (lascia 'LV' come default):
-        i turni Trenord girano ma per ora partiamo lun.
+        Il caso start != "LV" serve al builder quando deve generare SOLO
+        varianti sabato o domenica (chiamate ricorsive da
+        build_weekly_schedule via _find_day_variant).
         """
+        s = (start or "LV").upper().strip()
+        if s in ("SAB", "DOM"):
+            # Tutte le giornate del tipo richiesto (no cycle misto)
+            return [s] * max(1, n_workdays)
+        # Default: ciclo 5+2 LV-based
         full_cycle = ["LV"] * 5 + ["SAB", "DOM"]
-        out = []
-        for i in range(max(1, n_workdays)):
-            out.append(full_cycle[i % 7])
-        return out
+        return [full_cycle[i % 7] for i in range(max(1, n_workdays))]
 
     # ═══════════════════════════════════════════════════════
     #  ABILITAZIONI (filtro + cache)
@@ -2160,48 +2161,86 @@ class AutoBuilder:
 
         base_excluded = set(exclude_trains or [])
 
-        # Step 1: Genera LV
+        # Approccio BATCH: 3 chiamate build_schedule (LV, SAB, DOM) invece
+        # di 1 + N*2 ricorsive. Ogni chiamata genera TUTTE le giornate
+        # dello stesso tipo in un colpo solo.
         print(f"\n{'='*60}")
         print(f"WEEKLY BUILDER — {self.deposito}")
         print(f"{'='*60}")
-        print(f"\n  Step 1: Generazione LV ({n_workdays} giornate)...")
-        lv_cal = self.build_schedule(n_workdays, day_type="LV",
-                                     exclude_trains=list(base_excluded))
 
-        # Raccolta treni usati nel LV
+        def _summary_from_entry(e):
+            return e.get("summary") if isinstance(e, dict) else None
+
+        def _extract_turns(cal):
+            return [e for e in (cal or []) if e.get("type") == "TURN"]
+
+        # Step 1: LV completo (con verify ARTURO finale)
+        print(f"\n  Step 1/3: LV ({n_workdays} giornate, completo)...")
+        lv_cal = self.build_schedule(
+            n_workdays, day_type="LV",
+            exclude_trains=list(base_excluded),
+        )
+        lv_turns = _extract_turns(lv_cal)
+
+        # Raccolta treni usati nel LV (da escludere nelle varianti SAB/DOM)
         lv_used = set()
-        for entry in lv_cal:
-            if entry["type"] == "TURN" and entry.get("summary"):
-                for seg in entry["summary"].segments:
-                    tid = seg.get("train_id", "") if isinstance(seg, dict) else seg.train_id
-                    lv_used.add(tid)
-
-        # Step 2 & 3: Per ogni giornata LV, cerca varianti SAB e DOM
-        print(f"\n  Step 2-3: Ricerca varianti SAB/DOM...")
-        days = []
-        for entry in lv_cal:
-            if entry["type"] != "TURN":
-                continue
-
-            day_num = entry.get("day", 0)
-            s = entry.get("summary")
+        for e in lv_turns:
+            s = _summary_from_entry(e)
             if not s or not s.segments:
                 continue
-
-            # Fascia oraria di questa giornata LV
-            first_dep = s.segments[0].get("dep_time") if isinstance(s.segments[0], dict) else s.segments[0].dep_time
-            lv_start_min = _time_to_min(first_dep)
-
-            # Treni LV
-            lv_train_ids = []
             for seg in s.segments:
-                tid = seg.get("train_id", "") if isinstance(seg, dict) else seg.train_id
-                lv_train_ids.append(tid)
+                tid = (seg.get("train_id", "") if isinstance(seg, dict)
+                       else seg.train_id)
+                if tid:
+                    lv_used.add(tid)
 
+        # Step 2: SAB quick (5 restart, no genetic/SA, no verify ARTURO)
+        print(f"\n  Step 2/3: SAB ({n_workdays} giornate, quick)...")
+        # Reset _used_lines_global: il LV ha popolato la rotation lines.
+        # Se non resetto, il pool SAB vedra' solo linee diverse dal LV ma
+        # alcune possono essere legittime anche in SAB (es. stessa linea
+        # trenaggio). Per le varianti secondarie meno rigore.
+        prev_used_lines = self._used_lines_global
+        self._used_lines_global = Counter()
+        try:
+            sab_cal = self.build_schedule(
+                n_workdays, day_type="SAB",
+                exclude_trains=list(base_excluded | lv_used),
+                quick=True, skip_api_verify=True,
+            )
+        finally:
+            self._used_lines_global = prev_used_lines
+        sab_turns = _extract_turns(sab_cal)
+
+        # Step 3: DOM quick
+        print(f"\n  Step 3/3: DOM ({n_workdays} giornate, quick)...")
+        prev_used_lines = self._used_lines_global
+        self._used_lines_global = Counter()
+        try:
+            dom_cal = self.build_schedule(
+                n_workdays, day_type="DOM",
+                exclude_trains=list(base_excluded | lv_used),
+                quick=True, skip_api_verify=True,
+            )
+        finally:
+            self._used_lines_global = prev_used_lines
+        dom_turns = _extract_turns(dom_cal)
+
+        # Merge: per ogni giornata LV, pesca la corrispondente SAB e DOM
+        days = []
+        for i, lv_entry in enumerate(lv_turns):
+            s = _summary_from_entry(lv_entry)
+            if not s or not s.segments:
+                continue
+            day_num = lv_entry.get("day", i + 1)
+
+            # LV variant
+            lv_tids = [seg.get("train_id", "") if isinstance(seg, dict) else seg.train_id
+                       for seg in s.segments]
             lv_variant = {
                 "variant_type": "LMXGV",
                 "day_type": "LV",
-                "train_ids": lv_train_ids,
+                "train_ids": lv_tids,
                 "prestazione_min": s.prestazione_min,
                 "condotta_min": s.condotta_min,
                 "meal_min": s.meal_min,
@@ -2215,15 +2254,42 @@ class AutoBuilder:
                 "summary_obj": s,
             }
 
-            # Variante SAB: cerca treni SAB nella stessa fascia oraria
-            sab_variant = self._find_day_variant(
-                "SAB", lv_start_min, lv_used | base_excluded, s
-            )
+            def _build_variant(vtype, turn_entry):
+                s2 = _summary_from_entry(turn_entry)
+                if not s2 or not s2.segments:
+                    return {
+                        "variant_type": vtype,
+                        "day_type": "SAB" if vtype == "S" else "DOM",
+                        "train_ids": [],
+                        "prestazione_min": 0, "condotta_min": 0, "meal_min": 0,
+                        "is_fr": False, "is_scomp": True,
+                        "scomp_duration_min": SCOMP_DURATION_MIN,
+                        "last_station": self.deposito,
+                        "violations": [], "summary_obj": None,
+                    }
+                tids = [seg.get("train_id", "") if isinstance(seg, dict) else seg.train_id
+                        for seg in s2.segments]
+                return {
+                    "variant_type": vtype,
+                    "day_type": "SAB" if vtype == "S" else "DOM",
+                    "train_ids": tids,
+                    "prestazione_min": s2.prestazione_min,
+                    "condotta_min": s2.condotta_min,
+                    "meal_min": s2.meal_min,
+                    "is_fr": s2.is_fr,
+                    "is_scomp": False,
+                    "scomp_duration_min": 0,
+                    "last_station": s2.last_station,
+                    "violations": [{"rule": v.rule, "message": v.message,
+                                     "severity": getattr(v, "severity", "error")}
+                                   for v in s2.violations],
+                    "summary_obj": s2,
+                }
 
-            # Variante DOM: cerca treni DOM nella stessa fascia oraria
-            dom_variant = self._find_day_variant(
-                "DOM", lv_start_min, lv_used | base_excluded, s
-            )
+            sab_entry = sab_turns[i] if i < len(sab_turns) else None
+            dom_entry = dom_turns[i] if i < len(dom_turns) else None
+            sab_variant = _build_variant("S", sab_entry)
+            dom_variant = _build_variant("D", dom_entry)
 
             days.append({
                 "day_number": day_num,

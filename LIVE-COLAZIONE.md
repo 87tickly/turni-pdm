@@ -4,6 +4,68 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 12: fix BUG cycle SAB/DOM + batch 142s -> 12s
+
+### Feedback utente
+
+> "sicuro che non hai rotto qualcosa quando hai implementato il sabato
+> e domenica?"
+
+### Bug scoperto (critico)
+
+`_compute_day_type_cycle(n_workdays, start="DOM")` **ignorava** il
+parametro `start`. Per n=1, tornava sempre `["LV"]`. Quando
+`_find_day_variant("DOM")` chiamava `build_schedule(1, day_type="DOM")`,
+il cycle interno era LV, `_indices_per_type` conteneva solo LV day_index
+→ le "varianti SAB/DOM" pescavano in realtà segmenti **LV**.
+
+Risultato: le varianti sabato/domenica erano finte (erano cloni LV o
+quasi). L'utente aveva ragione: ho rotto il comportamento dichiarato.
+
+### Fix 1: rispetta `start`
+
+`_compute_day_type_cycle(..., start="SAB") -> ["SAB"] * n`
+`_compute_day_type_cycle(..., start="DOM") -> ["DOM"] * n`
+
+Per start="LV" resta il ciclo misto 5+2.
+
+### Fix 2: batch invece di ricorsive
+
+`build_weekly_schedule` prima faceva 1 + N*2 chiamate ricorsive
+(per n=5: 11 chiamate full pipeline). Rifactored: **3 chiamate batch**:
+- 1 LV completo (n giornate, con verify ARTURO)
+- 1 SAB quick (n giornate, no genetic/SA, no verify)
+- 1 DOM quick (n giornate, no genetic/SA, no verify)
+
+Poi merge: per ogni giornata i, pesca LV[i], SAB[i], DOM[i] come
+3 varianti.
+
+Tra chiamate resetto `_used_lines_global` (rotation linee) per non
+vincolare artificialmente le varianti SAB/DOM sulle stesse linee del LV.
+
+### Numeri reali
+
+| Step | ALE 5gg | Note |
+|------|---------|------|
+| Pre-fix (prima Step 11) | 142s | blocca frontend |
+| Step 11 (quick + skip_verify) | 36s | ma varianti SAB/DOM erano LV fake |
+| Step 12 (cycle fix + batch) | **12s** | SAB/DOM reali, frontend fluido |
+
+Output ALE 5gg: tutte G1-G5 con `LMXGV=2t, S=2t, D=SCOMP`. SAB ha treni
+DIVERSI dal LV (prima pescava gli stessi). DOM=SCOMP perche' pool DOM
+povero (4 day_index).
+
+### File modificati
+
+- `src/turn_builder/auto_builder.py`:
+  - `_compute_day_type_cycle` rispetta `start`
+  - `build_weekly_schedule` refactor batch (3 chiamate)
+- `frontend/dist` (rebuild)
+
+pytest 112/112. npm build 238ms.
+
+---
+
 ## 2026-04-22 — Step 11: fix performance build_weekly (142s -> 36s)
 
 ### Bug segnalato dall'utente
