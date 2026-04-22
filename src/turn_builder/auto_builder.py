@@ -1103,6 +1103,9 @@ class AutoBuilder:
                                 if self._day_type_cycle
                                 and day_idx_cycle < len(self._day_type_cycle)
                                 else "LV")
+            # Esponi il day_type (LV/SAB/DOM) nell'entry cosi' il frontend
+            # puo' distinguere visivamente le giornate di tipo diverso.
+            entry["week_day_type"] = current_day_type
             day_type_indices = self._indices_per_type.get(current_day_type) or []
             # Fallback se nessun day_index specifico per quel day_type (es. DOM
             # assente): usa l'union globale

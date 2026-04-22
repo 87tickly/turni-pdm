@@ -1027,6 +1027,7 @@ export interface BuildAutoRequest {
 export interface BuildAutoEntry {
   type: "TURN" | "REST"
   day: number | null
+  week_day_type?: string // "LV" | "SAB" | "DOM" (ciclo settimanale 5+2)
   summary?: {
     prestazione: string
     prestazione_min: number

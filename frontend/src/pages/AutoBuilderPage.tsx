@@ -485,6 +485,23 @@ function DayPreview({ entry }: { entry: BuildAutoEntry }) {
         >
           Giornata {entry.day}
         </div>
+        {entry.week_day_type && entry.week_day_type !== "LV" && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded font-bold"
+            style={{
+              backgroundColor:
+                entry.week_day_type === "SAB"
+                  ? "rgba(234, 88, 12, 0.14)"
+                  : "rgba(220, 38, 38, 0.14)",
+              color:
+                entry.week_day_type === "SAB" ? "#C2410C" : "#B91C1C",
+              fontFamily: "var(--font-mono)",
+            }}
+            title={`Giorno ciclo: ${entry.week_day_type}`}
+          >
+            {entry.week_day_type}
+          </span>
+        )}
         <div
           className="text-[11.5px]"
           style={{

@@ -104,7 +104,11 @@ def build_auto(req: BuildAutoRequest):
 
         result = []
         for entry in calendar:
-            item = {"type": entry["type"], "day": entry.get("day")}
+            item = {
+                "type": entry["type"],
+                "day": entry.get("day"),
+                "week_day_type": entry.get("week_day_type", ""),
+            }
             if entry.get("summary") and entry["summary"].segments:
                 item["summary"] = _serialize_summary(entry["summary"], req.deposito, db)
             result.append(item)

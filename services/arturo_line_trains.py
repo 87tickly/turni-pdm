@@ -200,9 +200,25 @@ def _estimate_duration_from_db(db: Database, from_st: str, to_st: str) -> int:
     return durs[len(durs) // 2]  # mediana
 
 
+def _load_material_train_ids(db: Database) -> set:
+    """Carica il set di train_id presenti nel DB material (parser PDF
+    Trenord). Usato per cross-check: ARTURO ritorna TUTTI i treni di una
+    tratta (Trenord, Trenitalia, Frecce, IC); solo quelli presenti nel
+    materiale Trenord sono validi per i turni PdC Trenord."""
+    cur = db._cursor()
+    try:
+        cur.execute("SELECT DISTINCT train_id FROM train_segment "
+                    "WHERE train_id IS NOT NULL AND train_id != ''")
+        return {(r["train_id"] if isinstance(r, dict) else r[0] or "").strip()
+                for r in cur.fetchall()}
+    except Exception:
+        return set()
+
+
 def enrich_pool_with_arturo(db: Database, deposito: str,
                              enabled_lines: set,
-                             complete_arr: bool = True) -> list[dict]:
+                             complete_arr: bool = True,
+                             restrict_to_trenord: bool = True) -> list[dict]:
     """
     Per ogni linea abilitata, chiama cerca_tratta in entrambe le direzioni e
     ritorna un pool flat di segmenti ARTURO pronti per essere mischiati ai
@@ -215,11 +231,19 @@ def enrich_pool_with_arturo(db: Database, deposito: str,
     tratta dal DB. Il builder vedra' segmenti completi. Falsi positivi
     possibili sulle durate, ma _verify_turn_via_api dopo la generazione
     ricarica gli orari veri via treno(numero).
+
+    restrict_to_trenord: se True (default), filtra i treni ARTURO
+    mantenendo solo quelli con train_id presente nel DB material (parser
+    PDF Trenord). Evita di assegnare al PdC Trenord treni di Trenitalia
+    o altri operatori (es. Freccia 2303 Milano-Salerno che passa per
+    Alessandria ma non e' Trenord).
     """
     out: list[dict] = []
     # Cache durate per evitare query ripetute
     dur_cache: dict = {}
     dep_upper = (deposito or "").upper().strip()
+    # Set train_id Trenord per cross-check
+    trenord_tids: set = _load_material_train_ids(db) if restrict_to_trenord else set()
 
     # ── 1) Linee abilitate: entrambe le direzioni ──
     tratte: set = set()
@@ -244,6 +268,19 @@ def enrich_pool_with_arturo(db: Database, deposito: str,
         treni = get_or_fetch_line(db, src, dst, "oggi")
         if not treni:
             continue
+        # Cross-check Trenord: i treni il cui train_id NON e' nel DB
+        # material (Trenitalia / Frecce / IC / regionali di altri operatori)
+        # vengono marcati is_deadhead=True. Il PdC Trenord puo' salirvi
+        # come passeggero (vettura passiva) per posizionamento o rientro,
+        # ma NON puo' guidarli (condotta produttiva -> solo Trenord).
+        if restrict_to_trenord and trenord_tids:
+            for t in treni:
+                tid = (t.get("train_id", "") or "").strip()
+                if tid not in trenord_tids:
+                    t["is_deadhead"] = True
+                    t["not_trenord"] = True
+                else:
+                    t["is_deadhead"] = False
         if complete_arr:
             key = (src, dst)
             if key not in dur_cache:

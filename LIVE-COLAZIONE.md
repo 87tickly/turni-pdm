@@ -4,6 +4,66 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 7: cross-check Trenord + SAB/DOM badge visibile
+
+### Feedback utente
+
+> "il treno 2303 è si un treno esistente e si fa milano centrale alessandria
+> ma non è un treno di trenord. ora come puoi confermarlo? facendo il
+> controllo incrociato con il turno materiale. successivamente mancano
+> ancora il sabato e la domenica, continui a non generarli."
+
+### Bug 1 — ARTURO restituiva treni non-Trenord
+
+`cerca_tratta("MILANO", "ALESSANDRIA")` ritorna TUTTI i treni reali sulla
+tratta: Trenord, Trenitalia, Frecce, IC, Intercity Notte. Il mio Step 6
+li pescava indiscriminatamente, assegnando al PdC Trenord treni di altri
+operatori (es. 2303 Milano-Salerno).
+
+**Fix**: cross-check con DB material (parser PDF Trenord):
+- `_load_material_train_ids(db)` = set di tutti i train_id distinct da
+  `train_segment` (gli unici treni Trenord noti)
+- `enrich_pool_with_arturo(..., restrict_to_trenord=True)` default:
+  - train_id in DB material -> `is_deadhead=False` (produttivo Trenord)
+  - train_id non in DB       -> `is_deadhead=True` + `not_trenord=True`
+    (vettura passiva ammessa, condotta vietata)
+
+Numeri ALE 7 linee abilitate:
+- Pool totale ARTURO: 137 treni
+- Prima (nessun filtro): tutti "produttivi", includendo 102 non-Trenord
+- Dopo: 35 produttivi Trenord + 102 marcati solo-vettura
+
+Cosi' il PdC puo' ancora salire come passeggero su un Freccia ALE-ASTI
+per posizionamento in vettura, ma non puo' guidarlo. Coerente col
+contratto (vettura/VOCTAXI).
+
+### Bug 2 — SAB/DOM generati ma invisibili in UI
+
+Il cycle `['LV','LV','LV','LV','LV','SAB','DOM']` FUNZIONA dal mio Step
+4. G6/G7 sono generate con day_index del gruppo SAB/DOM. MA il
+`DaySummary.day_type` e' DIURNA/NOTTURNA (alias del validator, non giorno
+settimana). Il frontend non mostrava nessun badge SAB/DOM → utente
+percepiva "non genera".
+
+**Fix**:
+- Builder: `entry["week_day_type"] = current_day_type` (LV/SAB/DOM)
+- API: serializza in `entry.week_day_type`
+- Frontend (AutoBuilderPage): badge arancione "SAB" / rosso "DOM" a
+  fianco del titolo "Giornata N", solo se !=LV
+
+### File modificati
+
+- `services/arturo_line_trains.py` (cross-check + is_deadhead marker)
+- `src/turn_builder/auto_builder.py` (entry.week_day_type)
+- `api/builder.py` (week_day_type serialization)
+- `frontend/src/lib/api.ts` (BuildAutoEntry.week_day_type)
+- `frontend/src/pages/AutoBuilderPage.tsx` (badge SAB/DOM visibile)
+- `frontend/dist` (rebuild per Railway)
+
+pytest: 112/112 PASS. npm run build: 239ms PASS.
+
+---
+
 ## 2026-04-22 — Step 6: ARTURO Live come fonte treni + greedy bypass fixato
 
 ### Feedback utente frustrato (giusto)
