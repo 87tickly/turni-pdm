@@ -1779,11 +1779,18 @@ class AutoBuilder:
 
     def _verify_turn_via_api(self, calendar: list[dict]) -> dict:
         """
-        Verifica i segmenti del turno generato chiamando live.arturo.travel
-        (cache lazy).
-          - WARN_DATA_MISMATCH: rotta reale non contiene (from -> to)
-          - WARN_TIME_MISMATCH: orari DB differiscono dai reali > 2 min
-            (convertiti da UTC API a Europe/Rome)
+        Verifica + CORREGGE i segmenti del turno generato chiamando
+        live.arturo.travel (cache lazy).
+          - WARN_DATA_MISMATCH: rotta reale non contiene (from -> to).
+            In questo caso il segmento resta invariato (non sappiamo cosa
+            correggere)
+          - FIXED_TIME_FROM_API (severity info): orari DB differivano >2min
+            dai reali; dep_time/arr_time SOVRASCRITTI con valori reali
+            ARTURO Live (convertiti da UTC API a Europe/Rome). La giornata
+            viene ri-validata per aggiornare condotta/prestazione.
+          - WARN_TIME_MISMATCH (fallback): se per qualche motivo la
+            correzione non si riesce ad applicare, il warning resta
+            come prima
         """
         from services.train_route_cache import (
             get_or_fetch_train_route, fermate_segment,
@@ -1791,7 +1798,9 @@ class AutoBuilder:
         from src.validator.rules import Violation
         TOL_MIN = 2
         stats = {"ok": 0, "cache_hit": 0, "mismatch": 0,
-                 "not_found": 0, "error": 0, "time_mismatch": 0}
+                 "not_found": 0, "error": 0, "time_mismatch": 0,
+                 "fixed": 0}
+        dirty_entries: list = []
         for entry in calendar:
             if entry.get("type") != "TURN":
                 continue
@@ -1846,28 +1855,54 @@ class AutoBuilder:
                     f_from.get("programmato_partenza") or "")
                 api_arr = self._api_time_to_local_hhmm(
                     f_to.get("programmato_arrivo") or "")
-                mismatches = []
+                fixed_parts = []
                 if api_dep and db_dep:
                     diff = abs(_time_to_min(api_dep) - _time_to_min(db_dep))
                     if diff > 720:  # over midnight
                         diff = 1440 - diff
                     if diff > TOL_MIN:
-                        mismatches.append(f"dep DB {db_dep} vs reale {api_dep} (+{diff}min)")
+                        if isinstance(seg, dict):
+                            seg["dep_time"] = api_dep
+                            fixed_parts.append(f"dep {db_dep}->{api_dep} ({diff}min)")
                 if api_arr and db_arr:
                     diff = abs(_time_to_min(api_arr) - _time_to_min(db_arr))
                     if diff > 720:
                         diff = 1440 - diff
                     if diff > TOL_MIN:
-                        mismatches.append(f"arr DB {db_arr} vs reale {api_arr} (+{diff}min)")
-                if mismatches:
+                        if isinstance(seg, dict):
+                            seg["arr_time"] = api_arr
+                            fixed_parts.append(f"arr {db_arr}->{api_arr} ({diff}min)")
+                if fixed_parts:
+                    stats["fixed"] += 1
                     stats["time_mismatch"] += 1
                     s.violations.append(Violation(
-                        "WARN_TIME_MISMATCH",
-                        f"Treno {tid} {from_st}->{to_st}: " + "; ".join(mismatches),
-                        severity="warning",
+                        "FIXED_TIME_FROM_API",
+                        f"Treno {tid} {from_st}->{to_st}: orario corretto da "
+                        f"live.arturo.travel — " + "; ".join(fixed_parts),
+                        severity="info",
                     ))
+                    if entry not in dirty_entries:
+                        dirty_entries.append(entry)
                 else:
                     stats["ok"] += 1
+
+        # Ricalcola i summary delle giornate con orari corretti
+        if dirty_entries:
+            for entry in dirty_entries:
+                old_s = entry.get("summary")
+                if not old_s or not old_s.segments:
+                    continue
+                # Preserva le violazioni API-verify (info/warning) gia' aggiunte
+                api_viols = [v for v in old_s.violations
+                             if v.rule in ("WARN_DATA_MISMATCH",
+                                           "WARN_TIME_MISMATCH",
+                                           "FIXED_TIME_FROM_API")]
+                new_s = self.validator.validate_day(
+                    old_s.segments, deposito=self.deposito,
+                )
+                new_s.violations.extend(api_viols)
+                self._fix_meal_timing(new_s)
+                entry["summary"] = new_s
         return stats
 
     # ═══════════════════════════════════════════════════════

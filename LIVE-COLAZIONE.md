@@ -4,6 +4,53 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 2: ARTURO Live auto-corregge orari (FIXED_TIME_FROM_API)
+
+### Problema
+
+`_verify_turn_via_api` in auto_builder rilevava mismatch orari DB vs
+live.arturo.travel (screenshot utente: treno 10569 PAV->ALE dep DB 08:05 vs
+reale 09:05 = +60min) ma aggiungeva solo `WARN_TIME_MISMATCH` senza correggere.
+Il turno veniva visualizzato con orari sbagliati, condotta e prestazione
+calcolate su basi sbagliate.
+
+### Fix
+
+Quando il verify trova mismatch > 2min E i dati API sono validi:
+- **Sovrascrive** `seg["dep_time"]` e/o `seg["arr_time"]` con i valori API
+- Genera violazione `FIXED_TIME_FROM_API` severity=info per trasparenza
+- Traccia la giornata come "dirty" per ricalcolo
+- Alla fine, ri-valida via `validator.validate_day(segments, deposito)`
+  e sovrascrive il summary preservando le violazioni API-verify
+
+Solo se la correzione non puo' applicarsi (api value assente) resta il
+vecchio `WARN_TIME_MISMATCH` come fallback.
+
+### Numeri reali — ALESSANDRIA 5gg LV
+
+| Treno | Tratta | DB | Reale | Correzione |
+|-------|--------|----|----|-----------|
+| 10569 (screenshot!) | PAV->ALE | 08:05 | 09:05 | +60min corretto |
+| 10585 | PAV->ALE | 16:05 | 17:05 | +60min corretto |
+| 10591 | PAV->ALE | 19:05 | 20:05 | +60min corretto |
+| 10581 | PAV->ALE | 14:05 | 15:05 | +60min corretto |
+
+4/5 giornate auto-corrette. 0 WARN_TIME_MISMATCH residui (tutti convertiti
+in FIXED). pytest 112/112 PASS.
+
+### Insight
+
+Il mismatch sulla tratta PAV->ALE e' sistematico: il DB ha dep di 60min
+anticipato. Parser timezone bug probabile. Con Step 2 il builder corregge
+automaticamente; la fix strutturale nel parser e' task separato.
+
+### File modificati
+
+- `src/turn_builder/auto_builder.py` (`_verify_turn_via_api`): correzione
+  + ricalcolo summary via `validator.validate_day`
+
+---
+
 ## 2026-04-22 — Step 1.5 + 1.6: target CCT 4h + unicita' cross-deposito wired
 
 ### Step 1.5 — Target condotta 3h -> 4h
