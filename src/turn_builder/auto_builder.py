@@ -561,12 +561,89 @@ class AutoBuilder:
                     if ret is not None:
                         pool.append(chain + [ret])
                         added += 1
-                    elif self._is_chain_fr_valid_end(chain):
-                        # Catena aperta ACCETTATA solo se FR serale/notturna.
-                        # Nei casi diurni non-FR, la catena "rotta" viene scartata
-                        # per non produrre turni con violazione NO_RIENTRO_BASE.
-                        pool.append(chain)
-                        added += 1
+                    else:
+                        # ── MULTI-HOP PRODUTTIVO: prod1 finisce in stazione
+                        # non-deposito e senza rientro diretto. Prova prod2
+                        # abilitato da p_to per arrivare a una stazione con
+                        # rientro al deposito. Esempio: ALE -> (vettura)
+                        # MI.CENTRALE -> (prod) ASTI -> (prod) MI.CENTRALE ->
+                        # (rientro) ALE. Senza questo, ASTI non e' mai usato.
+                        added_multi = self._try_multi_hop_positioning(
+                            all_day_segments, chain, used, cond, p_to, p_arr,
+                            dh_dep, pool,
+                        )
+                        if added_multi:
+                            added += 1
+                        elif self._is_chain_fr_valid_end(chain):
+                            # Catena aperta ACCETTATA solo se FR serale/notturna.
+                            # Nei casi diurni non-FR, la catena "rotta" viene scartata
+                            # per non produrre turni con violazione NO_RIENTRO_BASE.
+                            pool.append(chain)
+                            added += 1
+
+    def _try_multi_hop_positioning(self, all_day_segments: list,
+                                    base_chain: list, used_ids: set,
+                                    cond_so_far: int, cur_st: str,
+                                    cur_arr: int, first_dep: int,
+                                    pool: list) -> bool:
+        """
+        Dopo positioning dh+prod1 che finisce in cur_st (non deposito) e
+        senza rientro diretto disponibile, tenta 1-2 prod aggiuntivi per
+        raggiungere il deposito via rientro.
+
+        Vincoli identici al main DFS: gap <= MAX_DH_GAP (120), cambio >= 5min,
+        condotta totale <= MAX_CONDOTTA_MIN, span+overhead <= MAX_PRESTAZIONE.
+        Solo segmenti abilitati (come prod).
+
+        Ritorna True se aggiunge almeno una catena al pool.
+        """
+        deposito = self.deposito
+        MIN_CHANGE_MIN = 5
+        MAX_DH_GAP = 120
+        # Candidati prod2 da cur_st
+        cands2 = []
+        for seg in all_day_segments:
+            tid = seg.get("train_id", "")
+            if tid in used_ids:
+                continue
+            if seg.get("from_station", "").upper() != cur_st:
+                continue
+            if not self._seg_abilitato(seg):
+                continue
+            dep_m = _time_to_min(seg["dep_time"])
+            if dep_m < cur_arr + MIN_CHANGE_MIN:
+                continue
+            gap = dep_m - cur_arr
+            if gap > MAX_DH_GAP:
+                continue
+            s_cond = self._seg_condotta(seg)
+            if cond_so_far + s_cond > MAX_CONDOTTA_MIN:
+                continue
+            arr_m = _time_to_min(seg["arr_time"])
+            if arr_m < dep_m:
+                arr_m += 1440
+            span = arr_m - first_dep
+            if span < 0:
+                span += 1440
+            if (span + self._overhead) > MAX_PRESTAZIONE_MIN:
+                continue
+            cands2.append((gap, seg, s_cond, arr_m))
+        cands2.sort(key=lambda t: t[0])
+        for gap, prod2, s_cond, p2_arr in cands2[:3]:
+            p2_to = prod2.get("to_station", "").upper()
+            cond2 = cond_so_far + s_cond
+            used2 = used_ids | {prod2.get("train_id", "")}
+            if p2_to == deposito:
+                pool.append(base_chain + [prod2])
+                return True
+            ret = self._try_return_segment(
+                all_day_segments, p2_to, p2_arr,
+                first_dep, used2, cond2,
+            )
+            if ret is not None:
+                pool.append(base_chain + [prod2, ret])
+                return True
+        return False
 
     # ═══════════════════════════════════════════════════════
     #  FASE 1 · POOL — DFS BRANCHING
@@ -755,6 +832,20 @@ class AutoBuilder:
         # Penalità catene troppo corte (< 2h)
         if cond < 120:
             score -= (120 - cond) * 5
+
+        # ── FUNZIONALITA' MULTI-TRENO: premia catene con >=3 treni
+        # produttivi distinti (non deadhead). Feedback utente: "troppe
+        # volte ti limiti a fare solo a/r". Con bonus +350 per 3-treni e
+        # +600 per 4+ treni, le catene multi-linea battono le A/R brevi
+        # anche quando queste hanno cond ~208 vicina al target 240.
+        prod_count = sum(1 for s in chain if not s.get("is_deadhead", False))
+        if prod_count >= 4:
+            score += 600
+        elif prod_count == 3:
+            score += 350
+        elif prod_count == 2:
+            # A/R semplice: piccola penalita' per incentivare varieta'
+            score -= 100
 
         # MEAL-AWARE: bonus se c'è un gap valido per refezione
         meal_ok = self._has_valid_meal_gap(chain)

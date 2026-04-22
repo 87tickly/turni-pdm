@@ -4,6 +4,82 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 16: debito scoring — multi-hop positioning + bonus catene multi-treno
+
+### Diagnosi numerica (prima di ogni fix)
+
+Query DB ha rivelato **limite dataset materiale**, non solo scoring:
+
+- `_reachable('ALESSANDRIA')` = 6 stazioni (no ASTI)
+- Segmenti diretti **ALE<->ASTI = 0**
+- Segmenti **ALE<->MILANO CENTRALE = 0** (solo 1 MI.CENTRALE->ALE tardivo 21:25)
+- Segmenti **PAVIA<->MILANO CENTRALE = 0**
+- Segmenti **MILANO ROGOREDO<->MILANO CENTRALE = 0**
+- ASTI raggiungibile solo via MI.CENTRALE/MI.ROGOREDO/MI.CERTOSA
+- MI.CERTOSA->ASTI esiste ma gap 9h con ALE->MI.CERTOSA (incompatibile)
+
+Pool ALE 5gg LV (strict day_index 1-15, union_all_days):
+- 120 catene totali, 0 toccano ASTI
+- Distribuzione cond: picco 180-209min (43), pochi >=240min (13 di cui 3 rientrano)
+- Top scored = A/R PAV cond 208 (score 1938)
+
+### Fix A: multi-hop positioning (`_try_multi_hop_positioning`)
+
+`_add_positioning_chains` ora supporta catene dh+prod1+prod2+rientro.
+Prima fallback a FR, tenta prod2 abilitato da `p_to` per raggiungere stazione
+con rientro al deposito. Vincoli identici DFS: gap<=120min, cambio>=5min,
+condotta totale<=330min, span+overhead<=510min.
+
+Non risolve ASTI (dataset gap), ma utile in generale per turni cross-linea
+che non chiudono con 1 prod.
+
+### Fix B: bonus catene multi-treno in `_score_chain`
+
+Prima: A/R 2-treni cond 208 vinceva sempre (score 1938) su catena 3-treni
+cond 287 (score 1721).
+
+Dopo:
+- prod_count >= 4: `+600`
+- prod_count == 3: `+350`
+- prod_count == 2: `-100` (piccola penalita' A/R)
+
+Numeri post-fix, stesso pool:
+- Top = catena 3-prod cond 287 (score 2015) > A/R cond 208 (score 1838)
+- Feedback utente "troppe volte ti limiti a fare solo a/r" indirizzato
+
+### Numeri ALE 5gg build completo
+
+| Metrica | Prima Step 15 | Dopo Step 16 |
+|---------|---------------|--------------|
+| Ore settimana LV | 22.7h | **27.2h** (+4.5h / +20%) |
+| Cond media | 158min | 147min |
+| Linee usate | PAV 10 | PAV 6 + MI.CENTRALE 4 + MI.ROG 2 |
+| Giornate 3+ treni | 0 | 1 (G2: 4 segmenti) |
+| ASTI | 0 | 0 (dataset gap) |
+
+Ancora sotto target 33h di 5.8h. Pattern dominante: A/R PAV (cond 208) scelto
+in 3/5 giornate. Per spingere oltre serve **aumentare prestazione via vetture
+intermedie** (penalizza cond/span ratio).
+
+### Residui noti
+
+1. **ASTI irraggiungibile da ALE**: manca connettivita' fisica ALE<->MI.CENTRALE
+   nel dataset materiale. Fix = estendere dataset con turni materiali
+   aggiuntivi (Trenitalia Intercity 2xxx?) o accettare che ASTI non si usa.
+
+2. **Ore ancora a 27.2h < 33h target**: scoring da affinare ulteriormente.
+   Serve bonus prestazione totale settimana (non solo cond per giornata).
+
+### File modificati
+
+- `src/turn_builder/auto_builder.py` (+80 righe: multi-hop positioning + bonus n_prod)
+- `frontend/dist` (rebuild)
+- `LIVE-COLAZIONE.md`
+
+pytest 112/112. npm build OK.
+
+---
+
 ## 2026-04-22 — DEBITO TECNICO aperto per prossima sessione
 
 ### Tema: positioning ASTI + tuning scoring profondo
