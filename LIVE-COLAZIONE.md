@@ -4,6 +4,128 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — DEBITO TECNICO aperto per prossima sessione
+
+### Tema: positioning ASTI + tuning scoring profondo
+
+**Cosa manca dopo Step 15**:
+- ASTI linea abilitata ma MAI usata nei turni generati
+- ALE 5gg: 3/15 slot usano ALE-MI.CENTRALE, 12/15 ancora PAV (dominante)
+- Ore settimana ancora sotto target 33h (~26h)
+- Builder preferisce catene A/R brevi, non sfrutta tutto il pool
+
+**Root cause**:
+1. `_add_positioning_chains` in `auto_builder.py` ha vincoli stretti:
+   - `dh_dur <= 120 min`, `gap <= 120 min`, max 30 catene di positioning
+   - Per ALE-ASTI serve bridge via ARTURO pool (Trenitalia marcato vettura),
+     ma probabilmente il positioning non riesce a concatenare
+2. Scoring `_score_chain`:
+   - Condotta target 240min (4h) preferisce catene lunghe, ma A/R ALE-PAV
+     bastano con bonus efficiency (cond/span ratio) alto
+   - Target potrebbe essere alzato a 300min (5h) per incentivare catene
+     multi-linea come ALE→ASTI→MILANO→ALE
+3. `MAX_CHAINS=120` nel pool DFS potrebbe essere troppo basso per
+   permettere esplorazione di catene complesse
+
+**Opzioni da valutare**:
+- Alzare `TARGET_CONDOTTA_MIN` 240→300 (config)
+- Alzare `MAX_CHAINS` 120→300 + DFS_DEPTH 10→14
+- Rilassare vincoli positioning (`dh_dur` 120→180, `gap` 120→240)
+- Dare bonus esplicito a catene >= 4 treni distinti
+- Diagnosi: misurare quante catene con positioning ASTI il builder genera
+  (log `_add_positioning_chains` per capire se non trova o trova ma scarta)
+
+---
+
+## 2026-04-22 — Step 15: diversificazione linee via scoring (bonus×2 penalty×4)
+
+### Feedback utente
+
+> "ALE non è povera sei tu che sei pigro e non cerchi abbastanza"
+
+### Diagnosi
+
+Pool ALE ha 5 linee, 93 segmenti (non povero):
+- ALE↔PAV: 49 seg
+- ALE↔MI.ROG: 13
+- ALE↔MI.CENTRALE: 11
+- ASTI↔MI.CENTRALE: 10
+- ASTI↔MI.ROG: 10
+
+Il builder usava solo PAV perché lo scoring premiava la linea più frequente.
+
+### Fix
+
+- `_score_chain` rotation penalty: `50*k*(k+1)/2` → `200*k*(k+1)/2` (×4)
+- `_score_schedule` bonus linee distinte rientranti: `+200` → `+400` per linea
+- `_score_schedule` penalty ripetizione: `60*excess²` → `200*excess²` (×3.3)
+
+Rimosso anche un blocco duplicato di `_verify_turn_via_api(sab_cal)` che
+girava DOPO il merge (non serviva, quello PRIMA del merge aggiorna summary).
+
+### Numeri reali ALE 5gg
+
+| Slot | Prima Step 15 | Dopo |
+|------|---------------|------|
+| G1 LMXGV/S/D | 3×PAV | 3×PAV |
+| G2 LMXGV/S/D | 3×PAV | 3×PAV |
+| G3 LMXGV | PAV | **ALE-MI.CENTRALE** |
+| G3 S | PAV | PAV |
+| G3 D | PAV | **MI.CENTRALE-ALE** |
+| G4 LMXGV | PAV | **MI.CENTRALE-ALE** |
+| G4 S/D | 2×PAV | 2×PAV |
+| G5 LMXGV/S | 2×PAV | 2×PAV |
+| G5 D | PAV | SCOMP |
+
+**3 slot su 15** ora usano MI.CENTRALE. Miglioramento parziale. ASTI
+ancora non usato (richiede positioning funzionante).
+
+### File modificati
+
+- `src/turn_builder/auto_builder.py` (scoring + dedup verify)
+- `frontend/dist` (rebuild)
+
+pytest 112/112. npm build ok.
+
+---
+
+## 2026-04-22 — Step 14: fix orari SAB/DOM + ARTURO sempre attivo
+
+### Feedback utente
+
+> "orari sballati sono sempre e su alcuni treni non solo il SAB/DOM"
+
+### Bug 1 — ordine post-verify
+
+`_verify_turn_via_api(sab_cal)` in `build_weekly_schedule` girava DOPO
+aver estratto `summary_obj` per il merge. La variabile `s2` riferiva il
+DaySummary OLD (non verificato). Quando il verify corregge via
+`entry["summary"] = new_s`, la mia ref locale NON si aggiornava.
+Orari SAB rimanevano sbagliati nel merge.
+
+**Fix**: post-verify PRIMA del merge + reload `sab_turns = _extract_turns(sab_cal)`.
+
+### Bug 2 — ARTURO skippato per weekend
+
+Step 8 aveva settato `_current_day_is_weekend = True` per skippare il
+pool ARTURO in SAB/DOM. Limitava artificialmente il pool: ARTURO ha
+treni GG (generici, ogni giorno) che valgono anche sabato.
+
+**Fix**: merge sempre, `_filter_segments` gestira' i non-circolanti.
+
+### Numeri
+
+Test 10569 PAV→ALE in G5 LMXGV: orario `09:05 → 10:19` (era `08:05` DB,
+corretto +60min via ARTURO). Tutti i PAV→ALE del DB hanno parser bug
+sistematico -60min che ora viene corretto in LV, S, D.
+
+### Nota user: "0 extra" nei numeri treno (es. 100660)
+
+Non riproducibile in backend fresh. Era dato pre-deploy Step 12.
+Dopo redeploy Railway i train_id sono corretti (10066, 10069, ecc.).
+
+---
+
 ## 2026-04-22 — Step 13: verify ARTURO esteso a SAB/DOM (correzione orari)
 
 ### Feedback utente
