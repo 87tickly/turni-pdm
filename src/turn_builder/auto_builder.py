@@ -131,6 +131,31 @@ class AutoBuilder:
             except Exception:
                 self._cross_excluded_trains = set()
 
+        # ── ARTURO Live pool enrichment: treni reali su linee abilitate ──
+        # Richiesta utente 22/04/2026: il builder non puo' limitarsi ai segmenti
+        # del DB material (parser PDF) — molte linee abilitate dal deposito
+        # (es. ASTI-MILANO da ALESSANDRIA, MI.ROG-ALE per rientri) hanno treni
+        # reali che ARTURO Live conosce e il DB no. Carica cerca_tratta per
+        # ogni linea abilitata e aggiunge al pool.
+        # arr_time stimato tramite durata mediana DB; _verify_turn_via_api
+        # correggera' con orari reali dopo la generazione.
+        self._arturo_pool: list[dict] = []
+        if self.deposito and self._abilitazioni_active:
+            try:
+                from services.arturo_line_trains import enrich_pool_with_arturo
+                self._arturo_pool = enrich_pool_with_arturo(
+                    self.db, self.deposito, self._enabled_lines,
+                    complete_arr=True,
+                )
+                # Filtra treni gia' allocati ad altri depositi
+                if self._cross_excluded_trains:
+                    self._arturo_pool = [
+                        t for t in self._arturo_pool
+                        if t.get("train_id", "") not in self._cross_excluded_trains
+                    ]
+            except Exception:
+                self._arturo_pool = []
+
         self._overhead = self._compute_overhead()
 
     # ═══════════════════════════════════════════════════════
@@ -1267,12 +1292,17 @@ class AutoBuilder:
             if pool:
                 summary = self._select_from_pool(pool, randomize=randomize)
             else:
-                # Fallback greedy
+                # Fallback greedy. Rispetta lo stesso check FR/rientro del pool:
+                # meglio giornata vuota che turno con NO_RIENTRO_BASE.
                 sel = self._greedy_select(filtered)
-                if sel:
+                if sel and self._returns_depot(sel):
+                    summary = self.validator.validate_day(sel, deposito=self.deposito)
+                    self._fix_meal_timing(summary)
+                elif sel and self._is_chain_fr_valid_end(sel):
                     summary = self.validator.validate_day(sel, deposito=self.deposito)
                     self._fix_meal_timing(summary)
                 else:
+                    # Greedy produce una catena rotta: meglio vuota
                     summary = DaySummary(segments=[])
 
             entry["summary"] = summary
@@ -2287,6 +2317,19 @@ class AutoBuilder:
                     merged.append(s)
             if not merged:
                 merged = self.db.get_all_segments() or []
+            # ── ARTURO Live pool: treni reali su linee abilitate dal deposito ──
+            # Merge sempre: il pool arturo contiene solo linee abilitate
+            # (filtrate a monte da enrich_pool_with_arturo). Utili sia per
+            # produttivi che per rientri in vettura.
+            if self._arturo_pool:
+                for s in self._arturo_pool:
+                    key = (s.get("train_id", ""), s.get("from_station", ""),
+                           s.get("dep_time", ""), s.get("to_station", ""),
+                           s.get("arr_time", ""))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    merged.append(s)
             filtered = self._filter_segments(
                 merged,
                 apply_zone_and_abilitazioni=apply_zone_and_abilitazioni,

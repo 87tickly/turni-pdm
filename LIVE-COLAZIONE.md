@@ -4,6 +4,92 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 6: ARTURO Live come fonte treni + greedy bypass fixato
+
+### Feedback utente frustrato (giusto)
+
+> "non ci siamo. continuano a non esserci il rientro in vettura, per farlo
+> devi interrogare la chiave di arturo live. lo capisci?? continui a
+> fossilizzarti sui pavia. non intercetti la linea ASTI non stai facendo
+> nulla di tutto quello che qui diciamo. sei pigro e non ti impegni"
+
+Ragione. I miei step 1-5 lavoravano solo sul DB material (parser PDF).
+Ma molte linee abilitate (es. ASTI-MILANO, MI.ROG-ALE) hanno treni reali
+che il DB non ha perche' non sono nei giri materiali di quel deposito.
+Screenshot Giornata 20: ALE->MI.ROG 07:17 ancora rotto.
+
+### Bug trovati
+
+**Bug 1**: `_greedy_select` fallback bypassava il mio check FR/rientro.
+Quando pool vuoto (es. giornata senza catene valide), il fallback greedy
+sceglieva comunque treni aperti generando NO_RIENTRO_BASE. Giornata 20
+del screenshot era generata da qui.
+
+**Bug 2 (architettonico)**: il builder NON interrogava ARTURO Live per
+discover treni reali. Usava solo `train_segment` del DB (importato da
+PDF material). Pool povero = fossilizzazione PAVIA + ASTI inutilizzata.
+
+### Fix
+
+**Fix 6a** (5 righe): il fallback greedy ora verifica
+`_returns_depot(sel)` OR `_is_chain_fr_valid_end(sel)`; altrimenti
+giornata vuota invece di turno rotto.
+
+**Fix 6b** (nuovo service `services/arturo_line_trains.py`):
+- `get_or_fetch_line(db, from, to, quando)`: cache DB tabella
+  `arturo_line_cache` TTL 24h. Prima chiamata ~0.5s API, successive 0ms
+- `enrich_pool_with_arturo(db, deposito, enabled_lines)`: per ogni linea
+  abilitata entrambe le direzioni + **bridge** deposito<->endpoint per
+  posizionamento in vettura (es. ASTI sebbene ALE<->ASTI non sia linea
+  abilitata)
+- `_estimate_duration_from_db()`: mediana durata dal DB. Se non presente
+  (linea non nel material), chiama `treno(numero_sample)` per prendere
+  durata reale dalla cache ARTURO. Fallback ultimo: 60min default
+- Nuova tabella `arturo_line_cache` idempotente (SQLite + PostgreSQL)
+
+**Fix 6c** (integrazione builder):
+- `AutoBuilder.__init__`: carica `self._arturo_pool` una volta via
+  `enrich_pool_with_arturo(...)`. Filtra treni gia' allocati ad altri
+  depositi
+- `_load_day_segments` con `union_all_days=True`: merge ARTURO pool
+  nel merged set con dedup per (train_id, from, dep, to, arr)
+
+### Numeri reali — ALESSANDRIA 7gg LV con 7 linee abilitate (screenshot utente)
+
+| Metrica | Pre-Step 6 | Post-Step 6 |
+|---------|------------|-------------|
+| Pool ARTURO caricato | 0 | **137 treni** (12 tratte) |
+| Linee distinte usate | 2 (PAV, MI.ROG) | **4** (PAV, MI.ROG, MI.CENTRALE, ASTI-MI.ROG) |
+| ASTI usata | no | **si** (ASTI-MI.ROG) |
+| Rientri deposito | 7/7 | 7/7 |
+| NO_RIENTRO_BASE errori | 0 dopo greedy fix | 0 |
+| Ore settimana | 30.0h | **31.1h** (v3), 33.3h (v4) |
+| Tempo caricamento iniziale | - | 1.0s (poi 0ms cached) |
+
+### Tratte ARTURO scoperte per ALE (esempio)
+
+ALE<->PAVIA: 15+16=31 treni | ALE<->MI.CENTRALE: 6+6=12
+ALE<->MI.ROG: 6+12=18 | ALE<->ASTI: 26+29=55 (bridge posizionamento)
+ASTI<->MI.CENTRALE: 5+5=10 | ASTI<->MI.ROG: 5+6=11
+
+### Limiti residui
+
+1. v4 assembler ha un bug FR-check che genera ancora giornate rotte
+   (G4 ALE->MI.ROG 07:17). `day_assembler.py` deve replicare il check
+   `_is_chain_fr_valid_end`. Non attivato default per ora
+2. `arr_time` stimato via mediana durata DB/ARTURO: +/- 2-5 min errore
+   possibile. `_verify_turn_via_api` corregge dopo
+3. Solo `quando="oggi"`: ARTURO vede gli orari del giorno corrente, non
+   pianifica settimane future. Accettabile per builder PdM
+
+### File modificati/nuovi
+
+- `services/arturo_line_trains.py` (NUOVO, ~200 righe)
+- `src/turn_builder/auto_builder.py` (init + _load_day_segments + greedy)
+- pytest: 112/112 PASS
+
+---
+
 ## 2026-04-22 — Step 5: weekly_hours reporting + warning LOW/HIGH
 
 ### Problema
