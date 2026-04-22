@@ -39,6 +39,7 @@ from ..constants import (
     REST_STANDARD_H, REST_AFTER_001_0100_H, REST_AFTER_NIGHT_H,
     FR_MAX_PRESTAZIONE_RIENTRO_MIN,
     WEEKLY_REST_MIN_H,
+    WEEKLY_HOURS_MIN, WEEKLY_HOURS_MAX, WEEKLY_HOURS_TARGET,
 )
 
 # ── Vincoli turno ──
@@ -1826,6 +1827,47 @@ class AutoBuilder:
         except Exception as e:
             print(f"  API verify saltato (errore: {e})")
 
+        # ── METRICHE ORE SETTIMANALI ──
+        # Calcola ore totali della settimana e segnala se sotto target
+        # contrattuale (weekly_hours_min=33h default). Utile per l'utente
+        # per capire se il pool del deposito e' insufficiente.
+        weekly_prest_min_total = 0
+        n_days_with_work = 0
+        for e in final_cal:
+            if e.get("type") != "TURN":
+                continue
+            ss = e.get("summary")
+            if ss and ss.segments:
+                weekly_prest_min_total += ss.prestazione_min or 0
+                n_days_with_work += 1
+        weekly_hours_total = weekly_prest_min_total / 60
+        weekly_under_target = weekly_hours_total < (WEEKLY_HOURS_MIN / 60)
+        weekly_over_max = weekly_hours_total > (WEEKLY_HOURS_MAX / 60)
+        weekly_warning = ""
+        if n_days_with_work > 0:
+            from src.validator.rules import Violation
+            if weekly_under_target:
+                gap_h = (WEEKLY_HOURS_MIN / 60) - weekly_hours_total
+                weekly_warning = (f"Settimana a {weekly_hours_total:.1f}h, sotto "
+                                  f"min contratto {WEEKLY_HOURS_MIN/60:.0f}h di "
+                                  f"{gap_h:.1f}h. Pool {self.deposito} povero: "
+                                  f"abilita piu' linee.")
+                rule = "WEEKLY_HOURS_LOW"
+            elif weekly_over_max:
+                over_h = weekly_hours_total - (WEEKLY_HOURS_MAX / 60)
+                weekly_warning = (f"Settimana a {weekly_hours_total:.1f}h, sopra "
+                                  f"max contratto {WEEKLY_HOURS_MAX/60:.0f}h di "
+                                  f"+{over_h:.1f}h. Riduci giornate.")
+                rule = "WEEKLY_HOURS_HIGH"
+            if weekly_warning:
+                for e in final_cal:
+                    if e.get("type") == "TURN" and e.get("summary") and e["summary"].segments:
+                        e["summary"].violations.append(Violation(
+                            rule, weekly_warning, severity="warning",
+                        ))
+                        break
+                print(f"  ATTENZIONE: {weekly_warning}")
+
         # Metadati
         if final_cal:
             final_cal[0]["_meta"] = {
@@ -1837,6 +1879,13 @@ class AutoBuilder:
                 "ai_attempts": NUM_RESTARTS,
                 "ai_version": "v3",
                 "ai_phases": "restart+genetic+SA",
+                "weekly_hours_total": round(weekly_hours_total, 1),
+                "weekly_hours_min": WEEKLY_HOURS_MIN / 60,
+                "weekly_hours_target": WEEKLY_HOURS_TARGET / 60,
+                "weekly_hours_max": WEEKLY_HOURS_MAX / 60,
+                "weekly_under_target": weekly_under_target,
+                "weekly_over_max": weekly_over_max,
+                "weekly_warning": weekly_warning,
             }
 
         return final_cal

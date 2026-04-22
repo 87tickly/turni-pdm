@@ -160,6 +160,15 @@ def build_auto(req: BuildAutoRequest):
                 "duplicates": final_duplicates,
                 "clean": len(final_duplicates) == 0,
             },
+            "weekly": {
+                "hours_total": meta.get("weekly_hours_total", 0),
+                "hours_min": meta.get("weekly_hours_min", 33),
+                "hours_target": meta.get("weekly_hours_target", 35.5),
+                "hours_max": meta.get("weekly_hours_max", 38),
+                "under_target": meta.get("weekly_under_target", False),
+                "over_max": meta.get("weekly_over_max", False),
+                "warning": meta.get("weekly_warning", ""),
+            },
         }
     finally:
         db.close()

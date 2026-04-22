@@ -4,6 +4,72 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 5: weekly_hours reporting + warning LOW/HIGH
+
+### Problema
+
+Builder non esponeva ore settimanali totali. L'utente non vedeva se
+il turno generato era sotto o sopra i limiti contrattuali (33-38h).
+Aggiunto monitoring trasparente invece di un "riempimento fake" che
+avrebbe inventato dati.
+
+### Fix
+
+- `build_schedule`: dopo la generazione, somma `prestazione_min` di
+  tutte le giornate, calcola weekly hours totali
+- Se sotto `WEEKLY_HOURS_MIN` (33h): violation `WEEKLY_HOURS_LOW`
+- Se sopra `WEEKLY_HOURS_MAX` (38h): violation `WEEKLY_HOURS_HIGH`
+- `_meta` esposto al frontend via api/builder.py sotto `weekly`:
+  `hours_total`, `hours_min`, `hours_target`, `hours_max`,
+  `under_target`, `over_max`, `warning`
+
+### Numeri reali — 7gg LV (post Step 1-5)
+
+| Deposito | Ore settimana | Status | CCT media |
+|----------|---------------|--------|-----------|
+| ALESSANDRIA | 35.0h | **OK** (era 20h!) | 2.8h |
+| BRESCIA | 39.0h | ABOVE_MAX +1h | 3.6h |
+| CREMONA | 43.0h | ABOVE_MAX +5h | 4.1h |
+| MI.P.GARIBALDI | 48.5h | ABOVE_MAX +10.5h | 4.4h |
+
+ALESSANDRIA e' salita da 20h -> 35h nel corso dei 5 step = **+75%**.
+I depositi ricchi (CREMONA, MI.GAR) ora lavorano TROPPO: servira'
+uno step successivo per ridurre (catene piu' corte o meno giornate)
+ma per ora l'utente ha feedback trasparente.
+
+### File modificati
+
+- `src/turn_builder/auto_builder.py`
+- `api/builder.py`
+
+pytest: 112/112 PASS.
+
+---
+
+## Riepilogo sessione 2026-04-22
+
+| Step | Effetto | ALE 20h->X |
+|------|---------|------------|
+| Step 1a: MAX_HOP_WAIT parametrico | rientri serali/mattinali | 20h |
+| Step 1b: pool scarta catene rotte | no NO_RIENTRO_BASE spuri | **33h** |
+| Step 1.5: target CCT 3h->4h | pool preferisce 4h | 33h |
+| Step 1.6: unicita' cross-deposito | treni non duplicati ALE/PAV | 33h |
+| Step 2: ARTURO auto-fix orari | +60min PAV->ALE corretti | 33h |
+| Step 3: rotation linee cross-day | ALE sblocca MI.ROGOREDO | 35h |
+| Step 4: cycle LV/SAB/DOM per gg | G6=SAB, G7=DOM | 35h |
+| Step 5: weekly warning | monitoring | **35h OK** |
+
+Tutti i 7 sintomi dello screenshot utente risolti:
+1. NO_RIENTRO_BASE spurio -> filtrato dal pool
+2. Orari sballati -> auto-corretti
+3. Fossilizzazione Pavia -> rotation Counter + max_seeds 200
+4. No SAB/DOM -> cycle + groups per density
+5. CCT troppo bassa -> target 4h
+6. Treni condivisi tra depositi -> train_allocation
+7. Ore sotto-utilizzate -> da 20h a 35h OK
+
+---
+
 ## 2026-04-22 — Step 4: cycle LV/SAB/DOM applicato per giornata (finalmente)
 
 ### Problema
