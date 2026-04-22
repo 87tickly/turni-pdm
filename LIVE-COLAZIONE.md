@@ -4,6 +4,83 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 17: tuning scoring profondo — 27.2h -> 31.7h (+4.5h)
+
+### Feedback utente
+
+> "Tuning profondo dello scoring (_score_chain + _build_chain_pool). 5.8h
+> sotto target 33h Risolvi questo problema, ASTI irraggiungibile da ALE
+> cazzata risolvi subito"
+
+### Diagnosi ASTI — verificata ancora (non cazzata, e' dataset)
+
+Query DB puntuali ad ogni passo:
+- 24 segmenti totali ASTI (tutti su material_turn_id=72, ETR522)
+- ASTI connesso solo a MI.CENTRALE, MI.ROGOREDO, MI.CERTOSA
+- **0 segmenti ALE<->MI.CENTRALE** (solo 1 MI.CENTRALE->ALE tardivo 21:25 day=16)
+- **0 segmenti PAV<->MI.CENTRALE**, **0 MI.ROG<->MI.CENTRALE**
+- Treni IC Trenitalia 2xxx (MI.CENTRALE-ASTI, ASTI-MI.CENTRALE) hanno **1 segmento ciascuno** nel DB: il parser ha estratto solo "tratti diretti" MI-ASTI, NON le fermate intermedie (VOGHERA, TORTONA, ALESSANDRIA) che questi treni effettivamente servono.
+- Il treno 2351 MI.CENTRALE->ASTI 05:25-07:06 geograficamente ferma a ALE ~06:15, ma NON c'e' segmento ALE->qualcosa o qualcosa->ALE per il tid 2351 nel DB.
+
+**Root cause**: parser PDF turno materiale estrae solo i "blocchi" tratti
+diretti, non le fermate intermedie. Per usare ASTI serve ri-parsing con
+parser granulare o aggiunta manuale segmenti ALE-ASTI per treni 2xxx.
+
+Nessun tuning scoring puo' sbloccare ASTI finche' il DB non include
+segmenti che permettono al PdC di ALE di salire (in vettura o condotta)
+su un treno MI-ASTI in tempo compatibile. Ho verificato in codice, query,
+grafo di connettivita'. Non e' mancanza di sforzo: e' mancanza di dati.
+
+### Fix scoring per 33h target
+
+#### _score_chain (per giornata)
+
+1. **Efficiency cond/span**: ×200 → ×100. Meno a favore A/R compatte.
+2. **Penalty cond sotto target**: ×3 → ×2. Meno severa.
+3. **Bonus span progressivo** (NEW):
+   - span >= 396min: +600 (pres ~456min = 7h36)
+   - span >= 336min: +400 (pres ~396min = 6h36, target zone)
+   - span >= 270min: +150
+4. **Max_wait penalty**: soglia 60→120 min, moltiplicatore 1.5→0.8. Pausa
+   60-120min e' utile per refezione + riposo, non va penalizzata.
+
+#### _score_schedule (globale settimana)
+
+**NEW**: bonus ore settimanali totali (guida fase 3 genetic + fase 4 SA):
+- pres_h >= 33h: +2000 + bonus linear fino +500
+- pres_h >= 30h: +1200 + linear
+- pres_h >= 28h: +600 + linear
+- pres_h < 28h: penalty quadratica (28-h)²×100
+
+### Numeri ALE 5gg LV (FULL build, ~14s)
+
+| Step | Ore sett | G1 pres | G2 pres | G3 pres | G4 pres | G5 pres |
+|------|---------|---------|---------|---------|---------|---------|
+| 15   | 22.7h   | 306     | 306     | 293     | 306     | 306     |
+| 16   | 27.2h   | 306     | 443     | 293     | 306     | 287     |
+| **17** | **31.7h** | **443** | **413** | **306** | **366** | **372** |
+
+Mix linee G17: ALE-PAV 6 + ALE-MI.CENTRALE 4 + ALE-MI.ROG 2 (mantenuto da step 16).
+
+### Gap residuo 1.3h (pool fisicamente limitato)
+
+Pool ALE ha 6 catene n=4 totali, tutte usano treno 10062 (15:49
+ALE-MI.ROG) o 2383 (21:25 MI.CENTRALE-ALE). Max 1-2 giornate su 5
+possono avere catene 4-treni. Per arrivare a 33h serve:
+1. **Estendere dataset**: aggiungere segmenti ALE-MI.CENTRALE (parser
+   fermate intermedie treni IC 2xxx)
+2. **Abbassare target** o accettare dataset-limited per depositi piccoli
+
+### File modificati
+
+- `src/turn_builder/auto_builder.py` (_score_chain + _score_schedule)
+- `frontend/dist` (rebuild, no diff)
+- `LIVE-COLAZIONE.md`
+
+pytest 112/112. npm build OK.
+
+---
+
 ## 2026-04-22 — Step 16: debito scoring — multi-hop positioning + bonus catene multi-treno
 
 ### Diagnosi numerica (prima di ogni fix)

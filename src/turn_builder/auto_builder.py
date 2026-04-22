@@ -812,22 +812,36 @@ class AutoBuilder:
 
         score = 0.0
 
-        # Condotta: puntare al TARGET (180min = 3h), non massimizzare
-        # Parabola invertita centrata sul target: max score a 180min
+        # Condotta: puntare al TARGET (240min = 4h), non massimizzare
+        # Parabola invertita centrata sul target: max score al target.
+        # Penalty sotto target ammorbidita (3.0 -> 2.0) per lasciare spazio
+        # alle catene long-prestazione con cond media (es. cond 158 pres 440).
         diff = abs(cond - TARGET_CONDOTTA_MIN)
         if cond >= TARGET_CONDOTTA_MIN:
-            # Sopra target: penalità crescente ma meno severa (meglio avere di più che di meno)
             score += 500 - diff * 1.5
         else:
-            # Sotto target: penalità più forte
-            score += 500 - diff * 3.0
+            score += 500 - diff * 2.0
 
         # Rientro deposito: fondamentale (CVL — il turno DEVE finire al deposito)
         score += 1200 if ret else -800
 
-        # Efficienza: condotta / span — meno tempo morto = meglio
+        # Efficienza: condotta / span — ridotta (200 -> 100) per non
+        # penalizzare catene long-prestazione che includono vetture
+        # intermedie necessarie a raggiungere il target settimanale 33h.
         if span > 0:
-            score += (cond / span) * 200
+            score += (cond / span) * 100
+
+        # ── TARGET PRESTAZIONE SETTIMANALE: 33h/5gg = 6h36/giornata (396min)
+        # Bonus catene con span >= 336min (pres approx >=396min con overhead 60).
+        # Incentiva il builder a scegliere catene lunghe in almeno 3 giornate
+        # su 5 per raggiungere il target ore settimanali. Valori scalari per
+        # evitare overshot su singola giornata.
+        if span >= 396:
+            score += 600  # pres approx >= 456min (7h36, near max prestazione)
+        elif span >= 336:
+            score += 400  # pres approx 396-456min (6h36-7h36, target zone)
+        elif span >= 270:
+            score += 150  # pres approx 330-396min (5h30-6h36, borderline)
 
         # Penalità catene troppo corte (< 2h)
         if cond < 120:
@@ -851,10 +865,13 @@ class AutoBuilder:
         meal_ok = self._has_valid_meal_gap(chain)
         score += 200 if meal_ok else -100
 
-        # Penalizza catene con attese lunghe (> 60 min tra treni)
+        # Penalizza catene con attese lunghe (> 120 min tra treni).
+        # Soglia alzata da 60 a 120: 60-120min di pausa e' utile per
+        # refezione + riposo e contribuisce a prestazione settimanale.
+        # Penalty ridotta (1.5 -> 0.8) per non sopraffare bonus span.
         max_wait = self._max_wait_in_chain(chain)
-        if max_wait > 60:
-            score -= (max_wait - 60) * 1.5
+        if max_wait > 120:
+            score -= (max_wait - 120) * 0.8
 
         # ── ROTATION LINEE CROSS-DAY: penalizza catene che usano linee
         # gia' usate in giornate precedenti dello stesso build. Evita la
@@ -1042,6 +1059,25 @@ class AutoBuilder:
         unique_hours = len(set(start_hours_list))
 
         score = 0.0
+
+        # ── TARGET ORE SETTIMANALI (33h min = WEEKLY_HOURS_MIN)
+        # Guida la fase 3 (genetic crossover) e fase 4 (SA) a cercare
+        # permutazioni con prestazione totale alta. Senza questo bonus
+        # il builder sceglie catene A/R brevi che minimizzano pres
+        # settimanale. Ogni ora sopra 33h vale +500; sotto 28h pesa -200/h.
+        total_pres_min = sum(prest_list)
+        pres_h = total_pres_min / 60.0
+        if pres_h >= 33:
+            # Target raggiunto: bonus forte + incremento lineare
+            score += 2000 + min((pres_h - 33) * 150, 500)
+        elif pres_h >= 30:
+            score += 1200 + (pres_h - 30) * 250  # zona buona
+        elif pres_h >= 28:
+            score += 600 + (pres_h - 28) * 200
+        else:
+            # Sotto 28h: penalty quadratica per ora mancante
+            deficit = 28 - pres_h
+            score -= deficit * deficit * 100
 
         # 1. Condotta: puntare al target, non massimizzare
         # Bonus per media vicina al target (180min), penalità se troppo alta o bassa
