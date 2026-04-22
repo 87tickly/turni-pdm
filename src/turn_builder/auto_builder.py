@@ -105,7 +105,65 @@ class AutoBuilder:
         self._endpoint_cache: dict = {}
         self._material_cache: dict = {}
 
+        # ── Unicita' cross-deposito: treni gia' allocati ad altri depositi ──
+        # Richiesta utente 22/04/2026: se un treno e' in un turno di un
+        # deposito (es. PAVIA), ALESSANDRIA non puo' usarlo. Le allocazioni
+        # vivono nella tabella train_allocation, popolata da commit_allocations()
+        # al termine della generazione. day_index=0 = allocazione generica
+        # (tutti i giorni-variante del materiale).
+        self._cross_excluded_trains: set[str] = set()
+        if self.deposito:
+            try:
+                self._cross_excluded_trains = self.db.get_trains_allocated_to_others(
+                    self.deposito, day_index=0,
+                )
+            except Exception:
+                self._cross_excluded_trains = set()
+
         self._overhead = self._compute_overhead()
+
+    # ═══════════════════════════════════════════════════════
+    #  ALLOCAZIONE CROSS-DEPOSITO (unicita' treni)
+    # ═══════════════════════════════════════════════════════
+    def commit_allocations(self, calendar: list[dict]) -> int:
+        """
+        Estrae i train_id dei segmenti produttivi (no deadhead) dal calendario
+        generato e li blocca in train_allocation per il deposito corrente.
+        Gli altri depositi NON potranno usare questi treni al prossimo build.
+
+        Chiamare dopo build_schedule(). Se il deposito rigenera, il chiamante
+        (api/builder.py) deve prima fare db.clear_train_allocation(deposito)
+        per invalidare le allocazioni stale.
+
+        Ritorna il numero di train_id effettivamente bloccati.
+        """
+        if not self.deposito or not calendar:
+            return 0
+        train_ids: list[str] = []
+        for entry in calendar:
+            s = entry.get("summary") if isinstance(entry, dict) else None
+            if not s or not getattr(s, "segments", None):
+                continue
+            for seg in s.segments:
+                is_dh = (seg.get("is_deadhead", False)
+                         if isinstance(seg, dict)
+                         else getattr(seg, "is_deadhead", False))
+                if is_dh:
+                    continue  # vettura: treno NON consumato come produttivo
+                tid = (seg.get("train_id", "") if isinstance(seg, dict)
+                       else getattr(seg, "train_id", ""))
+                if tid:
+                    train_ids.append(tid)
+        if not train_ids:
+            return 0
+        try:
+            return self.db.allocate_trains(
+                train_ids=train_ids,
+                deposito=self.deposito,
+                day_index=0,
+            )
+        except Exception:
+            return 0
 
     # ═══════════════════════════════════════════════════════
     #  CICLO SETTIMANALE (5+2)
@@ -285,7 +343,7 @@ class AutoBuilder:
             apply_zone = apply_zone_and_abilitazioni
         if apply_abilitazione is None:
             apply_abilitazione = apply_zone_and_abilitazioni
-        excl = (exclude_trains or set()) | self._used_trains_global
+        excl = (exclude_trains or set()) | self._used_trains_global | self._cross_excluded_trains
         good = []
         for seg in segments:
             if seg.get("train_id", "") in excl: continue
@@ -1031,7 +1089,7 @@ class AutoBuilder:
                     # Scoring day_assembler-level
                     sc = 0.0
                     sc += 1200 if assembled["returns_depot"] else -400
-                    sc -= abs(assembled["condotta_min"] - 180) * 2
+                    sc -= abs(assembled["condotta_min"] - TARGET_CONDOTTA_MIN) * 2
                     sc += assembled["n_positioning"] * 80  # bonus diversita'
                     if sc > best_score:
                         best_score = sc

@@ -24,10 +24,10 @@ from __future__ import annotations
 from ..validator.rules import _time_to_min
 
 
-# Parametri seed (richiesta utente: condotta 2h min - 5h max)
+# Parametri seed (richiesta utente: condotta 2h min - 5h max, target 4h)
 SEED_MIN_CONDOTTA = 120  # 2h
 SEED_MAX_CONDOTTA = 300  # 5h
-SEED_TARGET_CONDOTTA = 180  # 3h (centro del range)
+SEED_TARGET_CONDOTTA = 240  # 4h (richiesta utente 22/04: "tranquillamente 4h, max 5h")
 SEED_MAX_GAP_MIN = 420  # max 7h tra primi treno e ultimo (per accogliere refezione lunga)
 SEED_MIN_GAP_INTER_MIN = 5  # 5 min min tra treno e treno del seed
 

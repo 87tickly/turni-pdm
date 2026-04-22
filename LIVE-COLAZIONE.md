@@ -4,6 +4,65 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 1.5 + 1.6: target CCT 4h + unicita' cross-deposito wired
+
+### Step 1.5 — Target condotta 3h -> 4h
+
+Richiesta utente: "possiamo arrivare tranquillamente anche a 4h oppure 5h max".
+
+- `config/schema.py`: `target_condotta_min = 240` (era 180)
+- `src/turn_builder/seed_enumerator.py`: `SEED_TARGET_CONDOTTA = 240`
+- `src/turn_builder/auto_builder.py`: riga 1034 (v4 assembler score) usa
+  `TARGET_CONDOTTA_MIN` dalla config invece di valore hardcoded 180
+
+Max contrattuale `MAX_CONDOTTA_MIN = 330` (5h30) invariato.
+
+### Step 1.6 — Wire allocation_manager nel builder
+
+Il modulo `services/allocation_manager.py` + `db.allocate_trains()` esistevano
+dal commit 48aa4de (v4 Step 1) ma NESSUN flusso li chiamava. Conseguenza:
+due depositi potevano assegnare lo stesso treno allo stesso giorno.
+
+- `AutoBuilder.__init__`: carica `self._cross_excluded_trains` via
+  `db.get_trains_allocated_to_others(deposito, day_index=0)`
+- `_filter_segments`: aggiunge `| self._cross_excluded_trains` all'excl set
+- Nuovo metodo `commit_allocations(calendar)`: estrae train_id produttivi
+  (no deadhead) e chiama `db.allocate_trains(...)`
+- `api/builder.py`:
+  - `/build-auto`: `db.clear_train_allocation(deposito)` prima del builder,
+    `builder.commit_allocations(calendar)` dopo
+  - `/build-auto-all`: clear globale iniziale + commit in sequenza per
+    ogni deposito
+
+### Numeri reali — ALESSANDRIA + PAVIA 5gg LV
+
+| Deposito | Treni usati | Overlap con prec. | CCT media |
+|----------|-------------|-------------------|-----------|
+| ALE (da 0) | 10 treni | n/a | 2.8h |
+| PAV (dopo ALE) | 16 treni | **0** | 4.1h |
+| ALE2 (clear ALE, rigenero) | 10 treni | **0 con PAV** | 2.8h |
+
+Altri test 7gg LV con target 4h su depositi ricchi:
+- MI.P.GARIBALDI 3.9h/gg, 7/7 rientri, 0 err
+- BRESCIA 4.0h/gg, 7/7, 0 err
+- CREMONA 4.2h/gg, 7/7, 0 err
+
+ALESSANDRIA resta 2.8h: dataset povero, nessuna catena da 4h disponibile
+nel pool (condotta + rientro sforerebbe MAX_PRESTAZIONE=8h30). Per salire
+serve o un turno multi-treno con refezione tra i 2 blocchi, oppure
+dataset piu' ricco. Da affrontare in Step 3 (rotation linee + pool larger).
+
+pytest: 112/112 PASS.
+
+### File modificati
+
+- `config/schema.py`
+- `src/turn_builder/seed_enumerator.py`
+- `src/turn_builder/auto_builder.py`
+- `api/builder.py`
+
+---
+
 ## 2026-04-22 — Fix Step 1: pool v3 scarta catene aperte non-FR + MAX_HOP_WAIT parametrico
 
 Risolve i sintomi piu' gravi dello screenshot utente (Giornata 9 ALE->MI.ROG

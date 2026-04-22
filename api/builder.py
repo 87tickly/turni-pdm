@@ -23,6 +23,11 @@ class BuildAutoRequest(BaseModel):
     days: int = 5
     day_type: str = "LV"
     accessory_type: str = "standard"
+    # Builder v4: architettura centrata sulla condotta (seed + posizionamento
+    # in vettura + rientro). Genera turni ALOR_C-like con piu' linee diverse
+    # e posizionamenti reali, ma puo' lasciare giornate vuote se il dataset
+    # non e' sufficiente. Default False (usa v3 piu' tollerante).
+    use_v4: bool = False
 
 
 class BuildAutoAllRequest(BaseModel):
@@ -76,13 +81,26 @@ def _serialize_summary(s, deposito, db):
 def build_auto(req: BuildAutoRequest):
     db = get_db()
     try:
-        builder = AutoBuilder(db, deposito=req.deposito)
+        # ── Unicita' cross-deposito: pulisci allocazioni stale del deposito ──
+        # cosi' alla rigenerazione il builder vede solo i treni bloccati da ALTRI.
+        if req.deposito:
+            try:
+                db.clear_train_allocation(req.deposito)
+            except Exception:
+                pass
+        builder = AutoBuilder(db, deposito=req.deposito,
+                              use_v4_assembler=req.use_v4)
         used = db.get_used_train_ids(day_type=req.day_type)
         calendar = builder.build_schedule(
             n_workdays=req.days,
             day_type=req.day_type,
             exclude_trains=used,
         )
+        # Registra i treni usati nel turno come "allocati" a questo deposito
+        try:
+            builder.commit_allocations(calendar)
+        except Exception:
+            pass
 
         result = []
         for entry in calendar:
@@ -149,9 +167,19 @@ def build_auto(req: BuildAutoRequest):
 
 @router.post("/build-auto-all")
 def build_auto_all(req: BuildAutoAllRequest):
-    """Genera turni automatici per TUTTI i 19 impianti."""
+    """Genera turni automatici per TUTTI i 19 impianti.
+
+    Nota unicita' cross-deposito: genera IN SEQUENZA (non in parallelo).
+    Ogni deposito rispetta i treni gia' allocati dai precedenti. All'avvio
+    la tabella train_allocation viene pulita totalmente per ripartire da zero.
+    """
     db = get_db()
     try:
+        # Pulizia globale: al prossimo build_auto_all si riparte da zero
+        try:
+            db.clear_train_allocation()
+        except Exception:
+            pass
         results = {}
         for deposito in DEPOSITI:
             try:
@@ -162,6 +190,11 @@ def build_auto_all(req: BuildAutoAllRequest):
                     day_type=req.day_type,
                     exclude_trains=used,
                 )
+                # Blocca i treni usati prima di passare al prossimo deposito
+                try:
+                    builder.commit_allocations(calendar)
+                except Exception:
+                    pass
 
                 cal_items = []
                 total_days_ok = 0

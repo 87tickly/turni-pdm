@@ -95,7 +95,10 @@ class CompanyConfig:
     rest_block: int = 2
 
     # ── Condotta target ───────────────────────────────────────────
-    target_condotta_min: int = 180       # 3 ore media giornaliera
+    # 4h di condotta media giornaliera: feedback utente 22/04/2026
+    # "possiamo arrivare tranquillamente anche a 4h oppure 5h max".
+    # Max contrattuale resta 5h30' (max_condotta_min=330).
+    target_condotta_min: int = 240       # 4h
 
     # ── Turno settimanale ─────────────────────────────────────────
     weekly_hours_min: int = 33 * 60      # 1980 min
