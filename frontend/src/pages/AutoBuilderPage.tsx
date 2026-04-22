@@ -72,8 +72,9 @@ export function AutoBuilderPage() {
       return
     }
     const t0 = performance.now()
-    // Tempo atteso ~30s per 5 gg * 3 varianti. Scala con nDays.
-    const expectedMs = Math.max(15000, nDays * 6000)
+    // Tempo atteso ~35-40s per 5 gg * 3 varianti (1 chiamata LV completa
+    // + N chiamate SAB/DOM quick). Scala con nDays.
+    const expectedMs = Math.max(20000, nDays * 8000)
     const phases: Array<{ at: number; label: string }> = [
       { at: 0, label: "Caricamento pool ARTURO + DB material" },
       { at: 0.15, label: "Fase 2 · Multi-restart (25 tentativi)" },

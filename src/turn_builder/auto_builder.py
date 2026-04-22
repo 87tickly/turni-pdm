@@ -1695,7 +1695,9 @@ class AutoBuilder:
     #  BUILD SCHEDULE — ORCHESTRATORE PRINCIPALE
     # ═══════════════════════════════════════════════════════
     def build_schedule(self, n_workdays: int, day_type: str = "LV",
-                       exclude_trains: list[str] = None) -> list[dict]:
+                       exclude_trains: list[str] = None,
+                       quick: bool = False,
+                       skip_api_verify: bool = False) -> list[dict]:
         """
         Orchestratore AI a 4 fasi.
 
@@ -1703,6 +1705,12 @@ class AutoBuilder:
         FASE 2 · Multi-restart: genera NUM_RESTARTS turni completi
         FASE 3 · Genetic crossover: incrocia i migliori turni
         FASE 4 · Simulated annealing: ottimizza localmente il vincitore
+
+        quick=True: fase 2 con 5 restart (invece di 25), fase 3/4 saltate.
+          Usato da _find_day_variant per generare varianti SAB/DOM senza
+          spendere 25s a variante.
+        skip_api_verify=True: salta la verifica cache ARTURO post-generazione.
+          Usato per varianti SAB/DOM; verify fatto solo sul turno finale LV.
         """
         print(f"\n{'='*60}")
         print(f"AI ENGINE v3 — {self.deposito or 'N/D'}")
@@ -1770,10 +1778,15 @@ class AutoBuilder:
               f"per-type: {{ {', '.join(f'{k}:{len(v)}' for k,v in indices_per_type.items())} }})")
 
         # ── FASE 2: Multi-restart ──
-        print(f"\n  FASE 2 · Multi-restart ({NUM_RESTARTS} tentativi)...")
+        # quick=True riduce drasticamente il lavoro: 5 restart invece di 25,
+        # salta fase 3 (genetic) e fase 4 (SA). Usato per varianti SAB/DOM
+        # che non richiedono lo stesso rigore del turno principale LV.
+        effective_restarts = 5 if quick else NUM_RESTARTS
+        print(f"\n  FASE 2 · Multi-restart ({effective_restarts} tentativi)"
+              f"{' [quick]' if quick else ''}...")
         population: list[tuple[float, list[dict]]] = []
 
-        for attempt in range(NUM_RESTARTS):
+        for attempt in range(effective_restarts):
             randomize = (attempt > 0)
             cal = self._build_one_schedule(
                 n_workdays, day_type, base_excluded,
@@ -1785,22 +1798,26 @@ class AutoBuilder:
         population.sort(key=lambda x: -x[0])
         print(f"    Top score: {population[0][0]:.0f}")
 
-        # ── FASE 3: Genetic crossover ──
-        print(f"  FASE 3 · Genetic crossover ({CROSSOVER_ROUNDS} round)...")
-        top_pop = population[:POPULATION_SIZE]
-        evolved = self._genetic_crossover(
-            top_pop, n_workdays, base_excluded, available_days
-        )
-        print(f"    Top score dopo crossover: {evolved[0][0]:.0f}")
+        if quick:
+            best_score, best_cal = population[0]
+            refined_cal, refined_score = best_cal, best_score
+        else:
+            # ── FASE 3: Genetic crossover ──
+            print(f"  FASE 3 · Genetic crossover ({CROSSOVER_ROUNDS} round)...")
+            top_pop = population[:POPULATION_SIZE]
+            evolved = self._genetic_crossover(
+                top_pop, n_workdays, base_excluded, available_days
+            )
+            print(f"    Top score dopo crossover: {evolved[0][0]:.0f}")
 
-        # ── FASE 4: Simulated annealing ──
-        print(f"  FASE 4 · Simulated annealing ({SA_ITERATIONS} iterazioni)...")
-        best_score, best_cal = evolved[0]
-        refined_cal, refined_score = self._simulated_annealing(
-            best_cal, best_score, base_excluded, available_days
-        )
-        print(f"    Score finale: {refined_score:.0f} "
-              f"({'migliorato!' if refined_score > best_score else 'invariato'})")
+            # ── FASE 4: Simulated annealing ──
+            print(f"  FASE 4 · Simulated annealing ({SA_ITERATIONS} iterazioni)...")
+            best_score, best_cal = evolved[0]
+            refined_cal, refined_score = self._simulated_annealing(
+                best_cal, best_score, base_excluded, available_days
+            )
+            print(f"    Score finale: {refined_score:.0f} "
+                  f"({'migliorato!' if refined_score > best_score else 'invariato'})")
 
         final_cal = refined_cal if refined_score >= best_score else best_cal
         final_score = max(refined_score, best_score)
@@ -1868,15 +1885,18 @@ class AutoBuilder:
         # ── VERIFICA POST-GENERAZIONE via cache live.arturo.travel ──
         # Per ogni segmento del turno finale, cerca conferma rotta reale
         # (cache hit = istantaneo; miss = chiamata API ~600ms).
-        # Cresce il DB di rotte verificate. Aggiunge violazioni
-        # WARN_DATA_MISMATCH se segmento non corrisponde a rotta reale.
+        # Skip se skip_api_verify=True (chiamate ricorsive da _find_day_variant).
         try:
-            api_stats = self._verify_turn_via_api(final_cal)
-            print(f"  API verify: {api_stats['ok']} ok, "
-                  f"{api_stats['cache_hit']} cache, "
-                  f"{api_stats['mismatch']} mismatch, "
-                  f"{api_stats['not_found']} not_found, "
-                  f"{api_stats['error']} errori")
+            if skip_api_verify:
+                api_stats = {}
+                print(f"  API verify: SKIP (skip_api_verify=True)")
+            else:
+                api_stats = self._verify_turn_via_api(final_cal)
+                print(f"  API verify: {api_stats['ok']} ok, "
+                      f"{api_stats['cache_hit']} cache, "
+                      f"{api_stats['mismatch']} mismatch, "
+                      f"{api_stats['not_found']} not_found, "
+                      f"{api_stats['error']} errori")
         except Exception as e:
             print(f"  API verify saltato (errore: {e})")
 
@@ -2257,10 +2277,16 @@ class AutoBuilder:
             window_start = max(0, lv_start_min - 120)
             window_end = lv_start_min + 120
 
-            # Genera un piccolo turno per questo tipo giorno
+            # Genera un piccolo turno per questo tipo giorno.
+            # quick=True + skip_api_verify=True: 5 restart, no genetic/SA,
+            # no verifica live.arturo.travel. Da 15s a 1-2s per variante.
+            # La verifica completa viene fatta una sola volta al termine
+            # di build_weekly_schedule sul turno principale LV.
             mini_cal = self.build_schedule(
                 1, day_type=day_type,
                 exclude_trains=list(exclude_trains),
+                quick=True,
+                skip_api_verify=True,
             )
 
             # SENZA filtro fascia: anche se la variante SAB/DOM ha un orario

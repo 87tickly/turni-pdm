@@ -4,6 +4,58 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 11: fix performance build_weekly (142s -> 36s)
+
+### Bug segnalato dall'utente
+
+Generazione bloccata al 97% "VERIFICA ORARI VIA LIVE.ARTURO.TRAVEL".
+Il frontend timeouttava e la barra restava asymptotic.
+
+### Diagnosi
+
+`build_weekly_schedule` esegue:
+- 1 `build_schedule` completo per LV (5 giornate)
+- **Per ogni giornata LV**, chiama `_find_day_variant` 2 volte (SAB + DOM)
+- `_find_day_variant` a sua volta chiama `build_schedule(1, day_type=...)`
+  CON TUTTA la pipeline: 25 restart + 15 genetic + 40 SA + API verify
+
+Risultato: **10 chiamate ricorsive** full-pipeline = **142s** su ALE.
+
+### Fix
+
+Nuovi flag in `build_schedule`:
+- `quick=True`: 5 restart invece di 25, salta fase 3 (genetic) e 4 (SA).
+  Da ~15s a ~1-2s per chiamata
+- `skip_api_verify=True`: salta `_verify_turn_via_api` (cache ARTURO),
+  evita 30-50 chiamate API per variante
+
+`_find_day_variant` passa entrambi i flag: le varianti SAB/DOM ora
+vengono generate con greedy + basic scoring. La verifica orari ARTURO
+resta attiva UNA SOLA VOLTA sul turno LV principale.
+
+### Numeri reali
+
+| Scenario | Prima | Dopo |
+|----------|-------|------|
+| build_weekly ALE 5gg | 142s | **36s** (**4x**) |
+| Timeout frontend | bloccato 97% | completato prima del timeout |
+
+### Frontend barra progresso
+
+- `expectedMs = max(20000, nDays * 8000)` (era nDays*6000)
+  calibrato sul nuovo tempo reale ~35-40s per 5gg
+
+### File modificati
+
+- `src/turn_builder/auto_builder.py` (build_schedule quick + skip flags,
+  _find_day_variant usa entrambi)
+- `frontend/src/pages/AutoBuilderPage.tsx` (expectedMs ricalibrato)
+- `frontend/dist` (rebuild)
+
+pytest 112/112. npm build 239ms. Preview: 0 errori.
+
+---
+
 ## 2026-04-22 — Step 10: barra di progresso simulata durante generazione
 
 ### Feedback utente
