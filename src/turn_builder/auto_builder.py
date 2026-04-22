@@ -2189,7 +2189,10 @@ class AutoBuilder:
                 "is_scomp": False,
                 "scomp_duration_min": 0,
                 "last_station": s.last_station,
-                "violations": [{"rule": v.rule, "message": v.message} for v in s.violations],
+                "violations": [{"rule": v.rule, "message": v.message,
+                                 "severity": getattr(v, "severity", "error")}
+                               for v in s.violations],
+                "summary_obj": s,
             }
 
             # Variante SAB: cerca treni SAB nella stessa fascia oraria
@@ -2260,34 +2263,35 @@ class AutoBuilder:
                 exclude_trains=list(exclude_trains),
             )
 
+            # SENZA filtro fascia: anche se la variante SAB/DOM ha un orario
+            # molto diverso da LV, e' comunque una variante valida del turno
+            # materiale. Prima filtravamo a tolleranza 2h ma per l'utente
+            # "ogni giornata ha anche sabato e domenica" = accetta comunque.
             for entry in mini_cal:
                 if entry["type"] != "TURN":
                     continue
                 s = entry.get("summary")
                 if s and s.segments:
-                    first_dep = s.segments[0].get("dep_time") if isinstance(s.segments[0], dict) else s.segments[0].dep_time
-                    start_m = _time_to_min(first_dep)
-
-                    # Check se è nella fascia oraria giusta (tolleranza 2h)
-                    if abs(start_m - lv_start_min) <= 120:
-                        train_ids = []
-                        for seg in s.segments:
-                            tid = seg.get("train_id", "") if isinstance(seg, dict) else seg.train_id
-                            train_ids.append(tid)
-                        return {
-                            "variant_type": vtype,
-                            "day_type": day_type,
-                            "train_ids": train_ids,
-                            "prestazione_min": s.prestazione_min,
-                            "condotta_min": s.condotta_min,
-                            "meal_min": s.meal_min,
-                            "is_fr": s.is_fr,
-                            "is_scomp": False,
-                            "scomp_duration_min": 0,
-                            "last_station": s.last_station,
-                            "violations": [{"rule": v.rule, "message": v.message}
-                                          for v in s.violations],
-                        }
+                    train_ids = []
+                    for seg in s.segments:
+                        tid = seg.get("train_id", "") if isinstance(seg, dict) else seg.train_id
+                        train_ids.append(tid)
+                    return {
+                        "variant_type": vtype,
+                        "day_type": day_type,
+                        "train_ids": train_ids,
+                        "prestazione_min": s.prestazione_min,
+                        "condotta_min": s.condotta_min,
+                        "meal_min": s.meal_min,
+                        "is_fr": s.is_fr,
+                        "is_scomp": False,
+                        "scomp_duration_min": 0,
+                        "last_station": s.last_station,
+                        "violations": [{"rule": v.rule, "message": v.message,
+                                         "severity": getattr(v, "severity", "error")}
+                                       for v in s.violations],
+                        "summary_obj": s,  # DaySummary completo per serializzazione
+                    }
         except Exception as e:
             print(f"    Variante {vtype}: errore ricerca — {e}")
 
@@ -2304,6 +2308,7 @@ class AutoBuilder:
             "scomp_duration_min": SCOMP_DURATION_MIN,
             "last_station": self.deposito,
             "violations": [],
+            "summary_obj": None,
         }
 
     # ═══════════════════════════════════════════════════════

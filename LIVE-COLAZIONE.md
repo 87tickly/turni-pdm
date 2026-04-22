@@ -4,6 +4,71 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 9: turno = N giornate materiale × 3 varianti LMXGV/S/D
+
+### Feedback utente (svolta architetturale)
+
+> "stai continuando ancora a dedicare solo due giornate al sabato e
+> domenica e non funziona come intendo io. lo vedi che ogni giornata
+> ha la sua giornata anche il sabato e la domenica???? noi le mettiamo
+> solo nella giornata 13 e 14."
+
+### Modello corretto (dal PDF originale)
+
+Ogni **giornata del turno materiale** (1, 2, 3, ..., N) ha **3 varianti**:
+- **LMXGV** (feriale Lun-Ven): quasi sempre presente
+- **S** (Sabato): a volte treni, a volte S.COMP
+- **D** (Domenica): a volte treni, a volte S.COMP
+
+Esempio dal PDF [ALOR_C 65046]:
+- Giornata 5 LMXGV [04:09-10:16]: 10020, 3017, 11060
+- Giornata 5 S [04:09-10:18]: 10020, 10027, 11257 (treni diversi!)
+- Giornata 5 D [04:09-10:20]: S.COMP
+
+Prima generavo 14 giornate sequenziali con SAB/DOM solo nelle posizioni
+6/7/13/14 del ciclo. Modello sbagliato.
+
+### Fix
+
+**Backend**:
+- Nuovo endpoint `POST /build-auto-weekly` (in `api/builder.py`):
+  usa `AutoBuilder.build_weekly_schedule` e serializza ogni variante
+  con full `summary` (segments, timeline, violations)
+- `AutoBuilder._find_day_variant`: rimosso filtro tolleranza 2h — ogni
+  variante SAB/DOM trovata e' valida. Campo `summary_obj` aggiunto al
+  return per poterla serializzare
+- Response: `{days: [{day_number, variants: [LMXGV, S, D]}], weekly_stats}`
+
+**Frontend** (`AutoBuilderPage.tsx`):
+- `buildAutoWeekly` chiamato di default (sostituisce `buildAuto`)
+- Nuovo tipo `BuildAutoWeeklyDay` + `AutoWeeklyVariant` con `summary`
+- `DayBlock` component: header "Giornata N" una volta + 3 `VariantRow`
+  impilate (LMXGV blu, S arancione, D rosso)
+- `VariantRow` mostra gantt, lista treni, violations per ogni variante
+- S.COMP rendered come riga condensata "Disponibilita' 6h"
+
+### Struttura UI finale (match PDF)
+
+```
+┌─ Giornata 5 ─────────────────────── 3 varianti ─┐
+│ [LMXGV] Feriale  04:09→10:16  2 treni  OK      │
+│ [S]     Sabato   04:09→10:18  3 treni  OK      │
+│ [D]     Domenica S.COMP (6h)                   │
+└────────────────────────────────────────────────┘
+```
+
+### File modificati
+
+- `src/turn_builder/auto_builder.py` (_find_day_variant, LV variant obj)
+- `api/builder.py` (nuovo endpoint build_auto_weekly + serializer)
+- `frontend/src/lib/api.ts` (BuildAutoWeekly types)
+- `frontend/src/pages/AutoBuilderPage.tsx` (DayBlock + VariantRow)
+- `frontend/dist` (rebuild per Railway)
+
+pytest: 112/112. npm build: 234ms, bundle 508kB. Preview render OK.
+
+---
+
 ## 2026-04-22 — Step 8: classify_validity robusto per SAB/DOM reali
 
 ### Feedback utente

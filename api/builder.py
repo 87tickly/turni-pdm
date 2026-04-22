@@ -283,3 +283,63 @@ def build_weekly(req: BuildWeeklyRequest):
         raise HTTPException(500, detail=str(e))
     finally:
         db.close()
+
+
+@router.post("/build-auto-weekly")
+def build_auto_weekly(req: BuildAutoRequest):
+    """
+    Versione di /build-auto che per ogni giornata del turno materiale
+    produce 3 varianti (LMXGV, S, D) come nel PDF originale Trenord.
+    Esempio di output per giornata:
+      {
+        "day_number": 5,
+        "variants": [
+          {"variant_type": "LMXGV", "summary": {...full...}, "is_scomp": false},
+          {"variant_type": "S", "summary": {...}, "is_scomp": false},
+          {"variant_type": "D", "is_scomp": true, "scomp_duration_min": 360},
+        ]
+      }
+    """
+    db = get_db()
+    try:
+        if req.deposito:
+            try:
+                db.clear_train_allocation(req.deposito)
+            except Exception:
+                pass
+        builder = AutoBuilder(db, deposito=req.deposito,
+                              use_v4_assembler=req.use_v4)
+        result = builder.build_weekly_schedule(
+            n_workdays=req.days,
+            exclude_trains=[],
+        )
+        # Serializza ogni variante con full summary (segments, timeline, viol)
+        out_days = []
+        for day in result.get("days", []):
+            out_variants = []
+            for v in day.get("variants", []):
+                entry = {
+                    "variant_type": v.get("variant_type", ""),
+                    "day_type": v.get("day_type", ""),
+                    "is_scomp": v.get("is_scomp", False),
+                    "scomp_duration_min": v.get("scomp_duration_min", 0),
+                }
+                s_obj = v.get("summary_obj")
+                if s_obj and not v.get("is_scomp"):
+                    entry["summary"] = _serialize_summary(s_obj, req.deposito, db)
+                else:
+                    entry["summary"] = None
+                    entry["last_station"] = v.get("last_station", "")
+                out_variants.append(entry)
+            out_days.append({
+                "day_number": day.get("day_number"),
+                "variants": out_variants,
+            })
+        return {
+            "workdays_requested": req.days,
+            "deposito": req.deposito,
+            "days": out_days,
+            "weekly_stats": result.get("weekly_stats", {}),
+        }
+    finally:
+        db.close()

@@ -1071,6 +1071,63 @@ export async function buildAuto(req: BuildAutoRequest) {
 }
 
 // ────────────────────────────────────────────────────────────────
+// build-auto-weekly: per ogni giornata del turno materiale ritorna
+// 3 varianti (LMXGV / S / D) come nel PDF originale Trenord
+// ────────────────────────────────────────────────────────────────
+
+export interface DayVariantSummary {
+  prestazione: string
+  prestazione_min: number
+  condotta: string
+  condotta_min: number
+  meal_min: number
+  meal_start: string
+  meal_end: string
+  presentation_time: string
+  end_time: string
+  day_type: string
+  night_minutes: number
+  is_fr: boolean
+  last_station: string
+  segments_count: number
+  segments: TrainSegment[]
+  timeline: TimelineBlock[]
+  violations: Array<{ rule: string; message: string; severity: string }>
+}
+
+export interface AutoWeeklyVariant {
+  variant_type: "LMXGV" | "S" | "D" | string
+  day_type: string
+  is_scomp: boolean
+  scomp_duration_min: number
+  summary: DayVariantSummary | null
+  last_station?: string
+}
+
+export interface BuildAutoWeeklyDay {
+  day_number: number
+  variants: AutoWeeklyVariant[]
+}
+
+export interface BuildAutoWeeklyResponse {
+  workdays_requested: number
+  deposito: string
+  days: BuildAutoWeeklyDay[]
+  weekly_stats: {
+    total_weighted_pres_min?: number
+    weighted_hours_per_day?: number
+    weekly_hours?: number
+    in_range?: boolean
+    target_min?: number
+    target_max?: number
+  }
+}
+
+export async function buildAutoWeekly(req: BuildAutoRequest) {
+  return api.post<BuildAutoWeeklyResponse>(`/build-auto-weekly`, req)
+}
+
+// ────────────────────────────────────────────────────────────────
 // Abilitazioni deposito (linee + materiale rotabile)
 // ────────────────────────────────────────────────────────────────
 
