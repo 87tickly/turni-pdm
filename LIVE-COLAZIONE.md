@@ -4,6 +4,99 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 19: enrichment full-PDF + 7 nuove linee ALE abilitate
+
+### Feedback utente (correzione del mio errore)
+
+> "ma perche tu stai cercando solo sul turno 1125 e invece devi espandere
+> la ricerca a tutto il pdf e' questo l errore che fai ti fossilizzi solo
+> sul 1125, quando cerchi un treno, quando fai il controllo incrociato tu
+> devi ricercare sul tutto il pdf. tu lo fai ora? e se non lo fai .... fallo"
+
+> "dovresti anche trovare 10020, 10024, 10026, 10028, 10061, 10065, 10069,
+> 10073 e includere anche nell algoritmo di ricerca anche qui treni che
+> potrebbero avvicinarsi o stare sulla stessa tratta di AL, TIPO 10061,
+> 10060, 10050, 10033 ecc ecc"
+
+### Nuovo script `scripts/enrich_db_from_arturo.py`
+
+Sostituisce `enrich_db_asti_from_arturo.py`. Approccio robusto:
+
+**Step 1 — Discovery multi-pivot**: cerca_tratta da N pivot (ALE +
+intermediate VOGHERA/TORTONA/MORTARA/VIGEVANO/PAVIA/ASTI) verso 16
+destinazioni. 400 chiamate ARTURO → **150 numeri treno scoperti**.
+
+**Expand ±4**: per ogni numero, aggiunge +1..+4 e -1..-4 per probing
+treni vicini (andata-ritorno stessa linea). 150 → **492 candidati**.
+
+**Step 2 — Fetch fermate**: per ogni candidato, ARTURO `/treno/{num}`.
+Filtra solo quelli con fermata a ALESSANDRIA. → **96 treni confermati**.
+
+**Step 3 — Incrocio full-PDF**: cerca ogni treno in **tutti i 54 giri**
+del JSON (non solo nel 1125). Trova (giro, day_index, material_turn_id).
+Inserisce segmenti con `raw_text='ARTURO-enriched'`.
+→ **24 treni incrociati**, **73 nuovi segmenti aggiunti**.
+
+Il resto (72 treni) confermati ARTURO ma NON nel JSON: sono probabilmente
+treni di altri operatori (Trenitalia IC puri non in PDF Trenord) o
+giri non estratti dal parser.
+
+### Cache persistente
+
+`scripts/arturo_cache.json` salva le fermate di ogni treno per re-run
+idempotenti. Durante la prima run, saving ogni 50 chiamate per
+robustezza a interruzioni.
+
+### Stazioni canoniche aggiunte (STATION_MAP)
+
+VOGHERA, TORTONA, NOVI LIGURE, VALENZA, MORTARA, VIGEVANO, ABBIATEGRASSO,
+ALBAIRATE, ARQUATA SCRIVIA, SERRAVALLE SCRIVIA, CODOGNO, CASALPUSTERLENGO,
+LODI, CREMONA, PIACENZA, MI.LAMBRATE, MI.S.CRISTOFORO.
+
+### Nuove linee abilitate ALE (7 nuove)
+
+ALE-VOGHERA, ALE-TORTONA, ALE-MI.LAMBRATE, ALE-VALENZA, ALE-MORTARA,
+ALE-ABBIATEGRASSO, ALE-VIGEVANO. Totale linee ALE: 8 → **15**.
+
+Linee del PO (ALE-VALENZA-MORTARA-VIGEVANO-ABBIATEGRASSO-MI.ROG) e linea
+diretta (ALE-TORTONA-VOGHERA-PAVIA-MI) ora **entrambe** nel pool.
+
+### Numeri ALE 5gg LV FULL build
+
+| Metrica | Step 17 | Step 18 | **Step 19** |
+|---------|---------|---------|-------------|
+| Pres sett | 31.7h | 31.0h | **29.7h** (regressione lieve per pool disperso) |
+| ASTI cond | 0 | 2 | 1 (G4: MI.CENTRALE->ASTI + rientro vett) |
+| Linee usate | 3 | 4 | **7** (PAV/MI.CENTRALE/MI.ROG/VALENZA/MORTARA/ASTI/ASTI-MI) |
+| Segmenti pool ALE | 108 | 108 | **181** |
+
+Esempio giornata complessa (G5): `ALE>VALENZA VALENZA>ALE ALE>VALENZA
+VALENZA>ALE(V) ALE>MORTARA MORTARA>ALE(V) MILANO>ALE(V)` — 7 segmenti!
+Linea del Po attivata.
+
+### Residui noti
+
+1. Regressione ore -2h (31.7h → 29.7h): il pool raddoppiato (181 vs 108)
+   ha disperso la ricerca. Da compensare con aumento NUM_RESTARTS o
+   population_size.
+
+2. ASTI in condotta da 2 → 1 giornata. Il builder ancora preferisce
+   catene A/R semplici. Necessario tuning penalty deadhead ratio.
+
+3. 72 treni ARTURO-confermati ma NON nel JSON PDF: servirebbe estensione
+   parser o turno materiale Trenitalia aggiuntivo per includerli.
+
+### File modificati
+
+- `scripts/enrich_db_from_arturo.py` (NEW, 300 righe)
+- `scripts/arturo_cache.json` (NEW, cache)
+- `turni.db` (+73 segmenti + 7 linee abilitate)
+- `LIVE-COLAZIONE.md`
+
+pytest 112/112. npm build non richiesto (solo DB changes).
+
+---
+
 ## 2026-04-22 — Step 18: ASTI raggiunto via ARTURO — arricchimento DB + fix abilit
 
 ### Feedback utente (brutale ma utile)

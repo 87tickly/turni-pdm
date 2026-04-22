@@ -1,0 +1,3796 @@
+{
+  "10012": null,
+  "10013": null,
+  "10014": null,
+  "10015": null,
+  "10016": null,
+  "10017": null,
+  "10018": null,
+  "10019": null,
+  "10020": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "05:19",
+      "dep": "05:19",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "05:34",
+      "dep": "05:35",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "MORTARA",
+      "arr": "06:02",
+      "dep": "06:03",
+      "progressivo": 10,
+      "tipo": "F"
+    },
+    {
+      "station": "VIGEVANO",
+      "arr": "06:14",
+      "dep": "06:15",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ABBIATEGRASSO",
+      "arr": "06:23",
+      "dep": "06:24",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "07:04",
+      "dep": "07:04",
+      "progressivo": 25,
+      "tipo": "A"
+    }
+  ],
+  "10021": null,
+  "10022": null,
+  "10023": null,
+  "10024": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:19",
+      "dep": "06:19",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "06:34",
+      "dep": "06:35",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "MORTARA",
+      "arr": "07:02",
+      "dep": "07:03",
+      "progressivo": 10,
+      "tipo": "F"
+    },
+    {
+      "station": "VIGEVANO",
+      "arr": "07:14",
+      "dep": "07:15",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ABBIATEGRASSO",
+      "arr": "07:23",
+      "dep": "07:24",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "08:04",
+      "dep": "08:04",
+      "progressivo": 25,
+      "tipo": "A"
+    }
+  ],
+  "10025": null,
+  "10026": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:49",
+      "dep": "06:49",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "07:04",
+      "dep": "07:05",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "MORTARA",
+      "arr": "07:32",
+      "dep": "07:33",
+      "progressivo": 10,
+      "tipo": "F"
+    },
+    {
+      "station": "VIGEVANO",
+      "arr": "07:44",
+      "dep": "07:45",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ABBIATEGRASSO",
+      "arr": "07:53",
+      "dep": "07:54",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "08:34",
+      "dep": "08:34",
+      "progressivo": 25,
+      "tipo": "A"
+    }
+  ],
+  "10027": null,
+  "10028": null,
+  "10029": null,
+  "10030": null,
+  "10031": null,
+  "10032": null,
+  "10033": null,
+  "10034": null,
+  "10041": null,
+  "10042": null,
+  "10043": null,
+  "10044": null,
+  "10045": null,
+  "10046": null,
+  "10047": null,
+  "10048": null,
+  "10049": null,
+  "10069": [
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "18:56",
+      "dep": "18:56",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ABBIATEGRASSO",
+      "arr": "19:34",
+      "dep": "19:35",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "VIGEVANO",
+      "arr": "19:44",
+      "dep": "19:45",
+      "progressivo": 14,
+      "tipo": "F"
+    },
+    {
+      "station": "MORTARA",
+      "arr": "19:57",
+      "dep": "19:58",
+      "progressivo": 16,
+      "tipo": "F"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "20:24",
+      "dep": "20:25",
+      "progressivo": 21,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "20:41",
+      "dep": "20:41",
+      "progressivo": 25,
+      "tipo": "A"
+    }
+  ],
+  "10070": null,
+  "10071": null,
+  "10072": null,
+  "10073": null,
+  "10074": null,
+  "10075": null,
+  "10076": null,
+  "10077": null,
+  "10078": null,
+  "10079": null,
+  "10080": null,
+  "10081": null,
+  "10082": null,
+  "10083": null,
+  "10084": null,
+  "10085": null,
+  "10086": null,
+  "10087": null,
+  "10088": null,
+  "10089": null,
+  "10090": null,
+  "10091": null,
+  "10092": null,
+  "10093": null,
+  "10094": null,
+  "10446": null,
+  "10447": null,
+  "10448": null,
+  "10449": null,
+  "10450": null,
+  "10451": null,
+  "10452": null,
+  "10453": null,
+  "10454": null,
+  "10455": null,
+  "10456": null,
+  "10457": null,
+  "10458": null,
+  "10459": null,
+  "10460": null,
+  "10461": null,
+  "10557": null,
+  "10558": null,
+  "10559": null,
+  "10560": null,
+  "10561": [
+    {
+      "station": "PAVIA",
+      "arr": "05:05",
+      "dep": "05:05",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "06:03",
+      "dep": "06:04",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:19",
+      "dep": "06:19",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "10562": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:00",
+      "dep": "06:00",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "06:15",
+      "dep": "06:16",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "07:20",
+      "dep": "07:20",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "10563": [
+    {
+      "station": "PAVIA",
+      "arr": "06:05",
+      "dep": "06:05",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "07:03",
+      "dep": "07:04",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:19",
+      "dep": "07:19",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "10564": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:41",
+      "dep": "06:41",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "06:54",
+      "dep": "06:55",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "07:55",
+      "dep": "07:55",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "10565": [
+    {
+      "station": "PAVIA",
+      "arr": "07:05",
+      "dep": "07:05",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "08:03",
+      "dep": "08:04",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "08:19",
+      "dep": "08:19",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "10566": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:35",
+      "dep": "07:35",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "07:50",
+      "dep": "07:51",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "08:55",
+      "dep": "08:55",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "10567": [
+    {
+      "station": "PAVIA",
+      "arr": "08:05",
+      "dep": "08:05",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "09:03",
+      "dep": "09:04",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "09:19",
+      "dep": "09:19",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "10568": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "08:41",
+      "dep": "08:41",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "08:54",
+      "dep": "08:55",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "09:55",
+      "dep": "09:55",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "10569": [
+    {
+      "station": "PAVIA",
+      "arr": "09:05",
+      "dep": "09:05",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "10:03",
+      "dep": "10:04",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "10:19",
+      "dep": "10:19",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "10570": null,
+  "10571": null,
+  "10572": null,
+  "10656": null,
+  "10657": null,
+  "10658": null,
+  "10659": null,
+  "10660": null,
+  "10661": null,
+  "10662": null,
+  "10663": null,
+  "10664": null,
+  "10665": null,
+  "10666": null,
+  "10667": null,
+  "10668": null,
+  "10669": null,
+  "10670": null,
+  "10671": null,
+  "10689": null,
+  "10690": null,
+  "10691": null,
+  "10692": null,
+  "10693": null,
+  "10694": null,
+  "10695": null,
+  "10696": null,
+  "10697": null,
+  "10698": null,
+  "10699": null,
+  "10700": null,
+  "11046": null,
+  "11047": null,
+  "11048": null,
+  "11049": null,
+  "11050": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "05:40",
+      "dep": "05:40",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "06:00",
+      "dep": "06:00",
+      "progressivo": 7,
+      "tipo": "A"
+    }
+  ],
+  "11051": null,
+  "11052": null,
+  "11053": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "05:34",
+      "dep": "05:34",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "05:56",
+      "dep": "05:57",
+      "progressivo": 6,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "06:09",
+      "dep": "06:09",
+      "progressivo": 8,
+      "tipo": "A"
+    }
+  ],
+  "11054": null,
+  "11055": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:49",
+      "dep": "06:49",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "07:11",
+      "dep": "07:12",
+      "progressivo": 6,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "07:24",
+      "dep": "07:24",
+      "progressivo": 8,
+      "tipo": "A"
+    }
+  ],
+  "11056": [
+    {
+      "station": "VOGHERA",
+      "arr": "07:36",
+      "dep": "07:36",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "07:47",
+      "dep": "07:48",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "08:11",
+      "dep": "08:11",
+      "progressivo": 8,
+      "tipo": "A"
+    }
+  ],
+  "11057": [
+    {
+      "station": "ASTI",
+      "arr": "07:16",
+      "dep": "07:16",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:47",
+      "dep": "07:49",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "08:11",
+      "dep": "08:12",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "08:24",
+      "dep": "08:24",
+      "progressivo": 14,
+      "tipo": "A"
+    }
+  ],
+  "11058": null,
+  "11059": null,
+  "11060": [
+    {
+      "station": "VOGHERA",
+      "arr": "09:36",
+      "dep": "09:36",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "09:47",
+      "dep": "09:48",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "10:11",
+      "dep": "10:13",
+      "progressivo": 8,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "10:44",
+      "dep": "10:44",
+      "progressivo": 14,
+      "tipo": "A"
+    }
+  ],
+  "11061": null,
+  "11148": null,
+  "11149": null,
+  "11150": null,
+  "11151": null,
+  "11152": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "05:35",
+      "dep": "05:35",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "05:48",
+      "dep": "05:49",
+      "progressivo": 5,
+      "tipo": "F"
+    }
+  ],
+  "11153": [
+    {
+      "station": "VALENZA",
+      "arr": "07:10",
+      "dep": "07:11",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:25",
+      "dep": "07:25",
+      "progressivo": 22,
+      "tipo": "A"
+    }
+  ],
+  "11154": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "05:53",
+      "dep": "05:53",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "06:07",
+      "dep": "06:08",
+      "progressivo": 5,
+      "tipo": "F"
+    }
+  ],
+  "11155": [
+    {
+      "station": "VALENZA",
+      "arr": "08:10",
+      "dep": "08:11",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "08:25",
+      "dep": "08:25",
+      "progressivo": 22,
+      "tipo": "A"
+    }
+  ],
+  "11156": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:05",
+      "dep": "07:05",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "07:17",
+      "dep": "07:18",
+      "progressivo": 5,
+      "tipo": "F"
+    }
+  ],
+  "11157": [
+    {
+      "station": "VALENZA",
+      "arr": "09:10",
+      "dep": "09:11",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "09:25",
+      "dep": "09:25",
+      "progressivo": 22,
+      "tipo": "A"
+    }
+  ],
+  "11158": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:45",
+      "dep": "07:45",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "07:58",
+      "dep": "07:59",
+      "progressivo": 5,
+      "tipo": "F"
+    }
+  ],
+  "11159": [
+    {
+      "station": "VALENZA",
+      "arr": "10:10",
+      "dep": "10:11",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "10:25",
+      "dep": "10:25",
+      "progressivo": 22,
+      "tipo": "A"
+    }
+  ],
+  "11160": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "08:35",
+      "dep": "08:35",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "08:48",
+      "dep": "08:49",
+      "progressivo": 5,
+      "tipo": "F"
+    }
+  ],
+  "11161": [
+    {
+      "station": "VALENZA",
+      "arr": "11:10",
+      "dep": "11:11",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "11:25",
+      "dep": "11:25",
+      "progressivo": 22,
+      "tipo": "A"
+    }
+  ],
+  "11162": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "09:35",
+      "dep": "09:35",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "09:48",
+      "dep": "09:49",
+      "progressivo": 5,
+      "tipo": "F"
+    }
+  ],
+  "11179": [
+    {
+      "station": "VALENZA",
+      "arr": "19:10",
+      "dep": "19:11",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "19:25",
+      "dep": "19:25",
+      "progressivo": 22,
+      "tipo": "A"
+    }
+  ],
+  "11180": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "18:35",
+      "dep": "18:35",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "18:48",
+      "dep": "18:49",
+      "progressivo": 5,
+      "tipo": "F"
+    }
+  ],
+  "11181": [
+    {
+      "station": "VALENZA",
+      "arr": "20:10",
+      "dep": "20:11",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "20:25",
+      "dep": "20:25",
+      "progressivo": 22,
+      "tipo": "A"
+    }
+  ],
+  "11182": null,
+  "11183": [
+    {
+      "station": "VALENZA",
+      "arr": "21:10",
+      "dep": "21:11",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "21:25",
+      "dep": "21:25",
+      "progressivo": 22,
+      "tipo": "A"
+    }
+  ],
+  "11184": null,
+  "11185": [
+    {
+      "station": "VALENZA",
+      "arr": "21:46",
+      "dep": "21:47",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "22:05",
+      "dep": "22:05",
+      "progressivo": 22,
+      "tipo": "A"
+    }
+  ],
+  "11186": null,
+  "11187": null,
+  "11188": null,
+  "11189": null,
+  "11246": null,
+  "11247": null,
+  "11248": null,
+  "11249": null,
+  "11250": null,
+  "11251": [
+    {
+      "station": "NOVARA",
+      "arr": "06:08",
+      "dep": "06:08",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "MORTARA",
+      "arr": "06:31",
+      "dep": "06:32",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "06:56",
+      "dep": "06:57",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:13",
+      "dep": "07:13",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "11252": null,
+  "11253": [
+    {
+      "station": "NOVARA",
+      "arr": "07:08",
+      "dep": "07:08",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "MORTARA",
+      "arr": "07:31",
+      "dep": "07:32",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "07:56",
+      "dep": "07:57",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "08:13",
+      "dep": "08:13",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "11254": null,
+  "11255": [
+    {
+      "station": "NOVARA",
+      "arr": "08:08",
+      "dep": "08:08",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "MORTARA",
+      "arr": "08:31",
+      "dep": "08:32",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "08:56",
+      "dep": "08:57",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "09:13",
+      "dep": "09:13",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "11256": null,
+  "11257": null,
+  "11258": null,
+  "11259": null,
+  "11260": null,
+  "11278": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "18:47",
+      "dep": "18:47",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "19:01",
+      "dep": "19:02",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "MORTARA",
+      "arr": "19:27",
+      "dep": "19:28",
+      "progressivo": 10,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVARA",
+      "arr": "19:52",
+      "dep": "19:52",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "11279": null,
+  "11280": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "19:47",
+      "dep": "19:47",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "20:01",
+      "dep": "20:02",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "MORTARA",
+      "arr": "20:27",
+      "dep": "20:28",
+      "progressivo": 10,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVARA",
+      "arr": "20:52",
+      "dep": "20:52",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "11281": null,
+  "11282": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "20:47",
+      "dep": "20:47",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "VALENZA",
+      "arr": "21:01",
+      "dep": "21:02",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "MORTARA",
+      "arr": "21:27",
+      "dep": "21:28",
+      "progressivo": 10,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVARA",
+      "arr": "21:52",
+      "dep": "21:52",
+      "progressivo": 16,
+      "tipo": "A"
+    }
+  ],
+  "11283": null,
+  "11284": null,
+  "11285": null,
+  "11286": null,
+  "12007": null,
+  "12008": null,
+  "12009": null,
+  "12010": null,
+  "12011": null,
+  "12012": null,
+  "12013": null,
+  "12014": null,
+  "12015": null,
+  "12016": null,
+  "12017": null,
+  "12018": null,
+  "12019": null,
+  "12020": null,
+  "12021": null,
+  "12151": null,
+  "12152": null,
+  "12153": null,
+  "12154": null,
+  "12155": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:12",
+      "dep": "06:12",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "06:28",
+      "dep": "06:29",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "06:33",
+      "dep": "06:34",
+      "progressivo": 6,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "06:42",
+      "dep": "06:42",
+      "progressivo": 7,
+      "tipo": "A"
+    }
+  ],
+  "12156": [
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "07:13",
+      "dep": "07:13",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "07:19",
+      "dep": "07:20",
+      "progressivo": 2,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "07:24",
+      "dep": "07:25",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:43",
+      "dep": "07:43",
+      "progressivo": 7,
+      "tipo": "A"
+    }
+  ],
+  "12157": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:48",
+      "dep": "06:48",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "07:04",
+      "dep": "07:05",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "07:11",
+      "dep": "07:12",
+      "progressivo": 6,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "07:18",
+      "dep": "07:19",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "07:52",
+      "dep": "07:54",
+      "progressivo": 15,
+      "tipo": "F"
+    }
+  ],
+  "12158": null,
+  "12159": null,
+  "12160": null,
+  "12161": null,
+  "2098": null,
+  "2099": null,
+  "2100": null,
+  "2101": null,
+  "2102": [
+    {
+      "station": "NOVI LIGURE",
+      "arr": "06:24",
+      "dep": "06:24",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:39",
+      "dep": "06:40",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "07:00",
+      "dep": "07:01",
+      "progressivo": 11,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "07:45",
+      "dep": "07:45",
+      "progressivo": 22,
+      "tipo": "A"
+    }
+  ],
+  "2103": null,
+  "2104": [
+    {
+      "station": "NOVI LIGURE",
+      "arr": "06:58",
+      "dep": "06:58",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:15",
+      "dep": "07:18",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "07:38",
+      "dep": "07:39",
+      "progressivo": 11,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "08:23",
+      "dep": "08:23",
+      "progressivo": 22,
+      "tipo": "A"
+    }
+  ],
+  "2105": null,
+  "2106": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "12:31",
+      "dep": "12:31",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "12:52",
+      "dep": "12:54",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "13:30",
+      "dep": "13:30",
+      "progressivo": 18,
+      "tipo": "A"
+    }
+  ],
+  "2107": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "17:42",
+      "dep": "17:42",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "18:27",
+      "dep": "18:28",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "18:51",
+      "dep": "18:53",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "19:09",
+      "dep": "19:09",
+      "progressivo": 22,
+      "tipo": "A"
+    }
+  ],
+  "2108": null,
+  "2109": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "18:50",
+      "dep": "18:50",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "19:30",
+      "dep": "19:31",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "19:52",
+      "dep": "19:52",
+      "progressivo": 18,
+      "tipo": "A"
+    }
+  ],
+  "2110": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "04:25",
+      "dep": "04:25",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "04:44",
+      "dep": "04:45",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.SUSA",
+      "arr": "05:39",
+      "dep": "05:40",
+      "progressivo": 19,
+      "tipo": "F"
+    }
+  ],
+  "2111": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "04:25",
+      "dep": "04:25",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "04:44",
+      "dep": "04:45",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.SUSA",
+      "arr": "05:39",
+      "dep": "05:40",
+      "progressivo": 19,
+      "tipo": "F"
+    }
+  ],
+  "2112": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "05:20",
+      "dep": "05:20",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "05:49",
+      "dep": "05:50",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "06:40",
+      "dep": "06:40",
+      "progressivo": 18,
+      "tipo": "A"
+    }
+  ],
+  "2113": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "05:30",
+      "dep": "05:30",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "06:05",
+      "dep": "06:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:29",
+      "dep": "06:31",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "06:43",
+      "dep": "06:44",
+      "progressivo": 22,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "06:50",
+      "dep": "06:51",
+      "progressivo": 23,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "06:56",
+      "dep": "06:57",
+      "progressivo": 24,
+      "tipo": "F"
+    },
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "07:40",
+      "dep": "07:40",
+      "progressivo": 32,
+      "tipo": "A"
+    }
+  ],
+  "2114": [
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "05:24",
+      "dep": "05:27",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "05:59",
+      "dep": "06:00",
+      "progressivo": 11,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "06:06",
+      "dep": "06:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "06:13",
+      "dep": "06:14",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:29",
+      "dep": "06:31",
+      "progressivo": 17,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "06:52",
+      "dep": "06:54",
+      "progressivo": 23,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "07:33",
+      "dep": "07:33",
+      "progressivo": 34,
+      "tipo": "A"
+    }
+  ],
+  "2115": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "06:30",
+      "dep": "06:30",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "07:05",
+      "dep": "07:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:29",
+      "dep": "07:31",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "07:43",
+      "dep": "07:44",
+      "progressivo": 22,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "07:50",
+      "dep": "07:51",
+      "progressivo": 23,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "07:56",
+      "dep": "07:57",
+      "progressivo": 24,
+      "tipo": "F"
+    },
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "08:30",
+      "dep": "08:32",
+      "progressivo": 32,
+      "tipo": "F"
+    }
+  ],
+  "2116": [
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "06:24",
+      "dep": "06:27",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "06:59",
+      "dep": "07:00",
+      "progressivo": 11,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "07:06",
+      "dep": "07:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "07:13",
+      "dep": "07:14",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:29",
+      "dep": "07:31",
+      "progressivo": 17,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "07:52",
+      "dep": "07:54",
+      "progressivo": 23,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "08:33",
+      "dep": "08:33",
+      "progressivo": 34,
+      "tipo": "A"
+    }
+  ],
+  "2117": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "07:30",
+      "dep": "07:30",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "08:05",
+      "dep": "08:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "08:29",
+      "dep": "08:31",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "08:43",
+      "dep": "08:44",
+      "progressivo": 22,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "08:50",
+      "dep": "08:51",
+      "progressivo": 23,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "08:59",
+      "dep": "09:00",
+      "progressivo": 24,
+      "tipo": "F"
+    },
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "09:36",
+      "dep": "09:38",
+      "progressivo": 32,
+      "tipo": "F"
+    }
+  ],
+  "2118": [
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "07:24",
+      "dep": "07:27",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "07:59",
+      "dep": "08:00",
+      "progressivo": 11,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "08:06",
+      "dep": "08:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "08:13",
+      "dep": "08:14",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "08:29",
+      "dep": "08:31",
+      "progressivo": 17,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "08:52",
+      "dep": "08:54",
+      "progressivo": 23,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "09:33",
+      "dep": "09:33",
+      "progressivo": 34,
+      "tipo": "A"
+    }
+  ],
+  "2119": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "08:30",
+      "dep": "08:30",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "09:05",
+      "dep": "09:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "09:29",
+      "dep": "09:31",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "09:43",
+      "dep": "09:44",
+      "progressivo": 22,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "09:50",
+      "dep": "09:51",
+      "progressivo": 23,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "09:56",
+      "dep": "09:57",
+      "progressivo": 24,
+      "tipo": "F"
+    },
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "10:30",
+      "dep": "10:32",
+      "progressivo": 32,
+      "tipo": "F"
+    }
+  ],
+  "2120": [
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "08:27",
+      "dep": "08:27",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "08:59",
+      "dep": "09:00",
+      "progressivo": 9,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "09:06",
+      "dep": "09:07",
+      "progressivo": 10,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "09:13",
+      "dep": "09:14",
+      "progressivo": 11,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "09:29",
+      "dep": "09:31",
+      "progressivo": 15,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "09:52",
+      "dep": "09:54",
+      "progressivo": 21,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "10:33",
+      "dep": "10:33",
+      "progressivo": 32,
+      "tipo": "A"
+    }
+  ],
+  "2121": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "09:30",
+      "dep": "09:30",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "10:05",
+      "dep": "10:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "10:29",
+      "dep": "10:29",
+      "progressivo": 18,
+      "tipo": "A"
+    }
+  ],
+  "2122": [
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "09:24",
+      "dep": "09:27",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "09:59",
+      "dep": "10:00",
+      "progressivo": 11,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "10:06",
+      "dep": "10:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "10:13",
+      "dep": "10:14",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "10:29",
+      "dep": "10:31",
+      "progressivo": 17,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "10:52",
+      "dep": "10:54",
+      "progressivo": 23,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "11:33",
+      "dep": "11:33",
+      "progressivo": 34,
+      "tipo": "A"
+    }
+  ],
+  "2140": [
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "18:24",
+      "dep": "18:27",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "18:59",
+      "dep": "19:00",
+      "progressivo": 11,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "19:06",
+      "dep": "19:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "19:13",
+      "dep": "19:14",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "19:29",
+      "dep": "19:31",
+      "progressivo": 17,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "19:52",
+      "dep": "19:54",
+      "progressivo": 23,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "20:33",
+      "dep": "20:33",
+      "progressivo": 34,
+      "tipo": "A"
+    }
+  ],
+  "2141": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "19:30",
+      "dep": "19:30",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "20:05",
+      "dep": "20:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "20:29",
+      "dep": "20:31",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "20:43",
+      "dep": "20:44",
+      "progressivo": 22,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "20:50",
+      "dep": "20:51",
+      "progressivo": 23,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "20:56",
+      "dep": "20:57",
+      "progressivo": 24,
+      "tipo": "F"
+    },
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "21:30",
+      "dep": "21:32",
+      "progressivo": 32,
+      "tipo": "F"
+    }
+  ],
+  "2142": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "20:31",
+      "dep": "20:31",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "20:52",
+      "dep": "20:54",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "21:30",
+      "dep": "21:30",
+      "progressivo": 18,
+      "tipo": "A"
+    }
+  ],
+  "2143": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "20:30",
+      "dep": "20:30",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "21:05",
+      "dep": "21:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "21:29",
+      "dep": "21:29",
+      "progressivo": 18,
+      "tipo": "A"
+    }
+  ],
+  "2144": [
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "20:22",
+      "dep": "20:25",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "20:57",
+      "dep": "20:58",
+      "progressivo": 11,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "21:06",
+      "dep": "21:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "21:13",
+      "dep": "21:14",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "21:29",
+      "dep": "21:31",
+      "progressivo": 17,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "21:52",
+      "dep": "21:54",
+      "progressivo": 23,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "22:33",
+      "dep": "22:33",
+      "progressivo": 34,
+      "tipo": "A"
+    }
+  ],
+  "2145": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "21:30",
+      "dep": "21:30",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "22:05",
+      "dep": "22:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "22:29",
+      "dep": "22:31",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "22:43",
+      "dep": "22:44",
+      "progressivo": 22,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "22:50",
+      "dep": "22:51",
+      "progressivo": 23,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "22:56",
+      "dep": "22:57",
+      "progressivo": 24,
+      "tipo": "F"
+    },
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "23:30",
+      "dep": "23:32",
+      "progressivo": 31,
+      "tipo": "F"
+    }
+  ],
+  "2146": [
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "21:24",
+      "dep": "21:27",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "ARQUATA SCRIVIA",
+      "arr": "21:59",
+      "dep": "22:00",
+      "progressivo": 11,
+      "tipo": "F"
+    },
+    {
+      "station": "SERRAVALLE SCRIVIA",
+      "arr": "22:06",
+      "dep": "22:07",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "22:13",
+      "dep": "22:14",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "22:29",
+      "dep": "22:31",
+      "progressivo": 17,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "22:52",
+      "dep": "22:54",
+      "progressivo": 23,
+      "tipo": "F"
+    }
+  ],
+  "2147": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "22:20",
+      "dep": "22:20",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "23:16",
+      "dep": "23:18",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "23:37",
+      "dep": "23:37",
+      "progressivo": 18,
+      "tipo": "A"
+    }
+  ],
+  "2148": null,
+  "2149": null,
+  "2150": null,
+  "2151": null,
+  "2297": null,
+  "2298": null,
+  "2299": null,
+  "2300": null,
+  "2301": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:28",
+      "dep": "06:28",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "06:46",
+      "dep": "06:47",
+      "progressivo": 6,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "06:58",
+      "dep": "06:59",
+      "progressivo": 8,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "07:17",
+      "dep": "07:18",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "07:39",
+      "dep": "07:41",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "07:51",
+      "dep": "07:53",
+      "progressivo": 21,
+      "tipo": "F"
+    },
+    {
+      "station": "MI.CERTOSA",
+      "arr": "08:06",
+      "dep": "08:06",
+      "progressivo": 25,
+      "tipo": "A"
+    }
+  ],
+  "2302": [
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:28",
+      "dep": "06:28",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "06:46",
+      "dep": "06:47",
+      "progressivo": 6,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "06:58",
+      "dep": "06:59",
+      "progressivo": 8,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "07:17",
+      "dep": "07:18",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "07:39",
+      "dep": "07:41",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "07:51",
+      "dep": "07:53",
+      "progressivo": 21,
+      "tipo": "F"
+    },
+    {
+      "station": "MI.CERTOSA",
+      "arr": "08:06",
+      "dep": "08:06",
+      "progressivo": 25,
+      "tipo": "A"
+    }
+  ],
+  "2303": [
+    {
+      "station": "MI.CERTOSA",
+      "arr": "17:58",
+      "dep": "17:58",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "18:07",
+      "dep": "18:09",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "18:19",
+      "dep": "18:20",
+      "progressivo": 8,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "18:42",
+      "dep": "18:43",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "19:00",
+      "dep": "19:01",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "19:12",
+      "dep": "19:13",
+      "progressivo": 20,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "19:34",
+      "dep": "19:36",
+      "progressivo": 25,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "19:57",
+      "dep": "19:57",
+      "progressivo": 31,
+      "tipo": "A"
+    }
+  ],
+  "2304": [
+    {
+      "station": "MI.CERTOSA",
+      "arr": "17:58",
+      "dep": "17:58",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "18:07",
+      "dep": "18:09",
+      "progressivo": 5,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "18:19",
+      "dep": "18:20",
+      "progressivo": 8,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "18:42",
+      "dep": "18:43",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "19:00",
+      "dep": "19:01",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "19:12",
+      "dep": "19:13",
+      "progressivo": 20,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "19:34",
+      "dep": "19:36",
+      "progressivo": 25,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "19:57",
+      "dep": "19:57",
+      "progressivo": 31,
+      "tipo": "A"
+    }
+  ],
+  "2305": null,
+  "2306": null,
+  "2307": null,
+  "2308": null,
+  "2309": null,
+  "2310": null,
+  "2311": null,
+  "2312": null,
+  "2313": null,
+  "2314": null,
+  "2315": null,
+  "2316": null,
+  "2317": null,
+  "2318": null,
+  "2319": null,
+  "2320": null,
+  "2337": null,
+  "2338": null,
+  "2339": null,
+  "2340": null,
+  "2341": null,
+  "2342": null,
+  "2343": null,
+  "2344": null,
+  "2345": null,
+  "2346": null,
+  "2347": null,
+  "2348": null,
+  "2349": null,
+  "2350": null,
+  "2351": [
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "05:25",
+      "dep": "05:25",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "05:31",
+      "dep": "05:32",
+      "progressivo": 2,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "05:37",
+      "dep": "05:38",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "05:59",
+      "dep": "06:00",
+      "progressivo": 8,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "06:16",
+      "dep": "06:17",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "06:27",
+      "dep": "06:28",
+      "progressivo": 15,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:44",
+      "dep": "06:46",
+      "progressivo": 20,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "07:06",
+      "dep": "07:06",
+      "progressivo": 26,
+      "tipo": "A"
+    }
+  ],
+  "2352": [
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "05:25",
+      "dep": "05:25",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "05:31",
+      "dep": "05:32",
+      "progressivo": 2,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "05:37",
+      "dep": "05:38",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "05:59",
+      "dep": "06:00",
+      "progressivo": 8,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "06:16",
+      "dep": "06:17",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "06:27",
+      "dep": "06:28",
+      "progressivo": 15,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "06:44",
+      "dep": "06:46",
+      "progressivo": 20,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "07:06",
+      "dep": "07:06",
+      "progressivo": 26,
+      "tipo": "A"
+    }
+  ],
+  "2353": null,
+  "2354": null,
+  "2355": [
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "07:25",
+      "dep": "07:25",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "07:31",
+      "dep": "07:32",
+      "progressivo": 2,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "07:37",
+      "dep": "07:38",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "07:59",
+      "dep": "08:00",
+      "progressivo": 8,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "08:16",
+      "dep": "08:17",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "08:27",
+      "dep": "08:28",
+      "progressivo": 15,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "08:44",
+      "dep": "08:46",
+      "progressivo": 20,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "09:06",
+      "dep": "09:06",
+      "progressivo": 26,
+      "tipo": "A"
+    }
+  ],
+  "2356": [
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "07:25",
+      "dep": "07:25",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "07:31",
+      "dep": "07:32",
+      "progressivo": 2,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "07:37",
+      "dep": "07:38",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "07:59",
+      "dep": "08:00",
+      "progressivo": 8,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "08:16",
+      "dep": "08:17",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "08:27",
+      "dep": "08:28",
+      "progressivo": 15,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "08:44",
+      "dep": "08:46",
+      "progressivo": 20,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "09:06",
+      "dep": "09:06",
+      "progressivo": 26,
+      "tipo": "A"
+    }
+  ],
+  "2357": [
+    {
+      "station": "ASTI",
+      "arr": "06:54",
+      "dep": "06:54",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:14",
+      "dep": "07:16",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "07:31",
+      "dep": "07:32",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "07:42",
+      "dep": "07:43",
+      "progressivo": 14,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "07:59",
+      "dep": "08:00",
+      "progressivo": 19,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "08:21",
+      "dep": "08:22",
+      "progressivo": 24,
+      "tipo": "F"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "08:27",
+      "dep": "08:28",
+      "progressivo": 25,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "08:35",
+      "dep": "08:35",
+      "progressivo": 26,
+      "tipo": "A"
+    }
+  ],
+  "2358": [
+    {
+      "station": "ASTI",
+      "arr": "06:54",
+      "dep": "06:54",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:14",
+      "dep": "07:16",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "07:31",
+      "dep": "07:32",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "07:42",
+      "dep": "07:43",
+      "progressivo": 14,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "07:59",
+      "dep": "08:00",
+      "progressivo": 19,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "08:21",
+      "dep": "08:22",
+      "progressivo": 24,
+      "tipo": "F"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "08:27",
+      "dep": "08:28",
+      "progressivo": 25,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "08:35",
+      "dep": "08:35",
+      "progressivo": 26,
+      "tipo": "A"
+    }
+  ],
+  "2359": null,
+  "2360": null,
+  "2361": [
+    {
+      "station": "ASTI",
+      "arr": "08:54",
+      "dep": "08:54",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "09:14",
+      "dep": "09:16",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "09:31",
+      "dep": "09:32",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "09:42",
+      "dep": "09:43",
+      "progressivo": 14,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "09:59",
+      "dep": "10:00",
+      "progressivo": 19,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "10:21",
+      "dep": "10:22",
+      "progressivo": 24,
+      "tipo": "F"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "10:27",
+      "dep": "10:28",
+      "progressivo": 25,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "10:35",
+      "dep": "10:35",
+      "progressivo": 26,
+      "tipo": "A"
+    }
+  ],
+  "2379": [
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "19:25",
+      "dep": "19:25",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "19:31",
+      "dep": "19:32",
+      "progressivo": 2,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "19:37",
+      "dep": "19:38",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "19:59",
+      "dep": "20:00",
+      "progressivo": 8,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "20:16",
+      "dep": "20:17",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "20:27",
+      "dep": "20:28",
+      "progressivo": 15,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "20:44",
+      "dep": "20:46",
+      "progressivo": 20,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "21:06",
+      "dep": "21:06",
+      "progressivo": 26,
+      "tipo": "A"
+    }
+  ],
+  "2380": [
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "19:25",
+      "dep": "19:25",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "19:31",
+      "dep": "19:32",
+      "progressivo": 2,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "19:37",
+      "dep": "19:38",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "19:59",
+      "dep": "20:00",
+      "progressivo": 8,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "20:16",
+      "dep": "20:17",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "20:27",
+      "dep": "20:28",
+      "progressivo": 15,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "20:44",
+      "dep": "20:46",
+      "progressivo": 20,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "21:06",
+      "dep": "21:06",
+      "progressivo": 26,
+      "tipo": "A"
+    }
+  ],
+  "2381": [
+    {
+      "station": "ASTI",
+      "arr": "18:54",
+      "dep": "18:54",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "19:14",
+      "dep": "19:16",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "19:31",
+      "dep": "19:32",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "19:42",
+      "dep": "19:43",
+      "progressivo": 14,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "19:59",
+      "dep": "20:00",
+      "progressivo": 19,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "20:21",
+      "dep": "20:22",
+      "progressivo": 24,
+      "tipo": "F"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "20:27",
+      "dep": "20:28",
+      "progressivo": 25,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "20:35",
+      "dep": "20:35",
+      "progressivo": 26,
+      "tipo": "A"
+    }
+  ],
+  "2382": [
+    {
+      "station": "ASTI",
+      "arr": "18:54",
+      "dep": "18:54",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "19:14",
+      "dep": "19:16",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "19:31",
+      "dep": "19:32",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "19:42",
+      "dep": "19:43",
+      "progressivo": 14,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "19:59",
+      "dep": "20:00",
+      "progressivo": 19,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "20:21",
+      "dep": "20:22",
+      "progressivo": 24,
+      "tipo": "F"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "20:27",
+      "dep": "20:28",
+      "progressivo": 25,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "20:35",
+      "dep": "20:35",
+      "progressivo": 26,
+      "tipo": "A"
+    }
+  ],
+  "2383": [
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "21:25",
+      "dep": "21:25",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "21:31",
+      "dep": "21:32",
+      "progressivo": 2,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "21:37",
+      "dep": "21:38",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "21:59",
+      "dep": "22:00",
+      "progressivo": 8,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "22:16",
+      "dep": "22:17",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "22:27",
+      "dep": "22:28",
+      "progressivo": 15,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "22:44",
+      "dep": "22:44",
+      "progressivo": 20,
+      "tipo": "A"
+    }
+  ],
+  "2384": [
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "21:25",
+      "dep": "21:25",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "21:31",
+      "dep": "21:32",
+      "progressivo": 2,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "21:37",
+      "dep": "21:38",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "21:59",
+      "dep": "22:00",
+      "progressivo": 8,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "22:16",
+      "dep": "22:17",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "22:27",
+      "dep": "22:28",
+      "progressivo": 15,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "22:44",
+      "dep": "22:44",
+      "progressivo": 20,
+      "tipo": "A"
+    }
+  ],
+  "2385": [
+    {
+      "station": "ASTI",
+      "arr": "20:54",
+      "dep": "20:54",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "21:14",
+      "dep": "21:16",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "21:31",
+      "dep": "21:32",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "21:42",
+      "dep": "21:43",
+      "progressivo": 14,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "21:59",
+      "dep": "22:00",
+      "progressivo": 19,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "22:21",
+      "dep": "22:22",
+      "progressivo": 24,
+      "tipo": "F"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "22:27",
+      "dep": "22:28",
+      "progressivo": 25,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "22:35",
+      "dep": "22:35",
+      "progressivo": 26,
+      "tipo": "A"
+    }
+  ],
+  "2386": [
+    {
+      "station": "ASTI",
+      "arr": "20:54",
+      "dep": "20:54",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "21:14",
+      "dep": "21:16",
+      "progressivo": 7,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "21:31",
+      "dep": "21:32",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "21:42",
+      "dep": "21:43",
+      "progressivo": 14,
+      "tipo": "F"
+    },
+    {
+      "station": "PAVIA",
+      "arr": "21:59",
+      "dep": "22:00",
+      "progressivo": 19,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO ROGOREDO",
+      "arr": "22:21",
+      "dep": "22:22",
+      "progressivo": 24,
+      "tipo": "F"
+    },
+    {
+      "station": "MI.LAMBRATE",
+      "arr": "22:27",
+      "dep": "22:28",
+      "progressivo": 25,
+      "tipo": "F"
+    },
+    {
+      "station": "MILANO CENTRALE",
+      "arr": "22:35",
+      "dep": "22:35",
+      "progressivo": 26,
+      "tipo": "A"
+    }
+  ],
+  "2387": null,
+  "2388": null,
+  "2389": null,
+  "2390": null,
+  "2391": null,
+  "24307": null,
+  "24308": null,
+  "24309": null,
+  "24310": null,
+  "24311": null,
+  "24312": null,
+  "24313": null,
+  "24314": null,
+  "24315": null,
+  "24316": null,
+  "24317": null,
+  "24318": null,
+  "24319": null,
+  "24320": null,
+  "24321": null,
+  "24322": null,
+  "24323": null,
+  "24324": null,
+  "24325": null,
+  "24326": null,
+  "24327": null,
+  "24328": null,
+  "24369": null,
+  "24370": null,
+  "24371": null,
+  "24372": null,
+  "24373": null,
+  "24374": null,
+  "24375": null,
+  "24376": null,
+  "24377": null,
+  "24378": null,
+  "24379": null,
+  "24380": null,
+  "24381": null,
+  "24382": null,
+  "24383": null,
+  "24384": null,
+  "24385": null,
+  "24386": null,
+  "24387": null,
+  "24388": null,
+  "26600": null,
+  "26601": null,
+  "26602": null,
+  "26603": null,
+  "26604": null,
+  "26605": null,
+  "26606": null,
+  "26607": null,
+  "26608": null,
+  "26609": null,
+  "26610": null,
+  "26648": null,
+  "26649": null,
+  "26650": null,
+  "26651": null,
+  "26652": null,
+  "26653": null,
+  "26654": null,
+  "26655": null,
+  "26656": null,
+  "26657": null,
+  "26658": null,
+  "26659": null,
+  "26660": null,
+  "3009": null,
+  "3010": null,
+  "3011": null,
+  "3012": null,
+  "3013": null,
+  "3014": null,
+  "3015": null,
+  "3016": null,
+  "3017": null,
+  "3018": null,
+  "3019": null,
+  "3020": null,
+  "3021": null,
+  "3022": null,
+  "3023": null,
+  "3037": null,
+  "3038": null,
+  "3039": null,
+  "3040": null,
+  "3041": null,
+  "3042": null,
+  "3043": null,
+  "3044": null,
+  "3045": null,
+  "3046": null,
+  "3047": null,
+  "3048": null,
+  "3049": null,
+  "3050": null,
+  "3051": null,
+  "496": null,
+  "497": null,
+  "498": null,
+  "499": null,
+  "500": [
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "06:54",
+      "dep": "06:56",
+      "progressivo": 3,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "07:32",
+      "dep": "07:34",
+      "progressivo": 13,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:46",
+      "dep": "07:48",
+      "progressivo": 17,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "08:05",
+      "dep": "08:07",
+      "progressivo": 23,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "08:45",
+      "dep": "08:45",
+      "progressivo": 34,
+      "tipo": "A"
+    }
+  ],
+  "501": null,
+  "502": null,
+  "503": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "06:05",
+      "dep": "06:05",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "06:39",
+      "dep": "06:41",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:00",
+      "dep": "07:02",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "07:16",
+      "dep": "07:18",
+      "progressivo": 22,
+      "tipo": "F"
+    },
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "08:00",
+      "dep": "08:14",
+      "progressivo": 32,
+      "tipo": "F"
+    }
+  ],
+  "504": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "06:05",
+      "dep": "06:05",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "06:39",
+      "dep": "06:41",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "07:00",
+      "dep": "07:02",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "NOVI LIGURE",
+      "arr": "07:16",
+      "dep": "07:18",
+      "progressivo": 22,
+      "tipo": "F"
+    },
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "08:00",
+      "dep": "08:14",
+      "progressivo": 32,
+      "tipo": "F"
+    }
+  ],
+  "505": null,
+  "506": null,
+  "507": null,
+  "629": null,
+  "630": null,
+  "631": null,
+  "632": null,
+  "633": null,
+  "634": null,
+  "635": null,
+  "636": null,
+  "637": null,
+  "638": null,
+  "639": null,
+  "640": null,
+  "641": null,
+  "642": null,
+  "643": null,
+  "647": null,
+  "648": null,
+  "649": null,
+  "650": null,
+  "651": null,
+  "652": null,
+  "653": null,
+  "654": null,
+  "655": null,
+  "656": null,
+  "657": null,
+  "658": null,
+  "659": null,
+  "660": null,
+  "661": null,
+  "680": null,
+  "681": null,
+  "682": null,
+  "683": null,
+  "684": null,
+  "685": null,
+  "686": null,
+  "687": null,
+  "688": null,
+  "753": null,
+  "754": [
+    {
+      "station": "PIACENZA",
+      "arr": "07:08",
+      "dep": "07:10",
+      "progressivo": 137,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "07:55",
+      "dep": "07:57",
+      "progressivo": 147,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "08:06",
+      "dep": "08:08",
+      "progressivo": 149,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "08:23",
+      "dep": "08:25",
+      "progressivo": 154,
+      "tipo": "F"
+    },
+    {
+      "station": "ASTI",
+      "arr": "08:45",
+      "dep": "08:47",
+      "progressivo": 160,
+      "tipo": "F"
+    },
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "09:25",
+      "dep": "09:25",
+      "progressivo": 171,
+      "tipo": "A"
+    }
+  ],
+  "755": null,
+  "756": null,
+  "757": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "20:50",
+      "dep": "20:50",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "21:27",
+      "dep": "21:29",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "21:51",
+      "dep": "21:53",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "TORTONA",
+      "arr": "22:10",
+      "dep": "22:12",
+      "progressivo": 23,
+      "tipo": "F"
+    },
+    {
+      "station": "VOGHERA",
+      "arr": "22:22",
+      "dep": "22:24",
+      "progressivo": 25,
+      "tipo": "F"
+    },
+    {
+      "station": "PIACENZA",
+      "arr": "22:55",
+      "dep": "22:57",
+      "progressivo": 35,
+      "tipo": "F"
+    }
+  ],
+  "758": null,
+  "759": null,
+  "760": null,
+  "761": null,
+  "883": null,
+  "884": null,
+  "885": null,
+  "886": null,
+  "887": null,
+  "888": null,
+  "889": null,
+  "890": null,
+  "891": null,
+  "895": null,
+  "896": null,
+  "897": null,
+  "898": null,
+  "899": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "20:15",
+      "dep": "20:15",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "20:57",
+      "dep": "20:59",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "21:20",
+      "dep": "21:22",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "22:04",
+      "dep": "22:07",
+      "progressivo": 32,
+      "tipo": "F"
+    }
+  ],
+  "900": null,
+  "901": null,
+  "902": null,
+  "903": [
+    {
+      "station": "TO.P.NUOVA",
+      "arr": "15:20",
+      "dep": "15:20",
+      "progressivo": 1,
+      "tipo": "P"
+    },
+    {
+      "station": "ASTI",
+      "arr": "15:59",
+      "dep": "16:01",
+      "progressivo": 12,
+      "tipo": "F"
+    },
+    {
+      "station": "ALESSANDRIA",
+      "arr": "16:20",
+      "dep": "16:22",
+      "progressivo": 18,
+      "tipo": "F"
+    },
+    {
+      "station": "GENOVA P.PRINCIPE",
+      "arr": "17:09",
+      "dep": "17:11",
+      "progressivo": 32,
+      "tipo": "F"
+    }
+  ],
+  "9706": null,
+  "9707": null,
+  "9708": null,
+  "9709": null,
+  "9710": null,
+  "9711": null,
+  "9712": null,
+  "9713": null,
+  "9714": null
+}
