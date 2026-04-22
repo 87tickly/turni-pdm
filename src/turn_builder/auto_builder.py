@@ -18,6 +18,7 @@ Intelligenze attive:
 
 import math
 import random
+from collections import Counter
 from copy import deepcopy
 
 from ..database.db import Database
@@ -79,6 +80,10 @@ class AutoBuilder:
         self.deposito = deposito.upper().strip()
         self.validator = TurnValidator(deposito=self.deposito)
         self._used_trains_global: set[str] = set()
+        # Rotation linee cross-day: Counter (pair -> count) delle linee
+        # gia' usate in giornate precedenti dello stesso build_schedule.
+        # Penalizza in _score_chain per evitare fossilizzazione su 1 linea.
+        self._used_lines_global: Counter = Counter()
         # v4: path architetturale nuovo (seed + position + assembler)
         # Fallback default a v3 per sicurezza/retrocompatibilita'
         self._use_v4_assembler = use_v4_assembler
@@ -728,7 +733,53 @@ class AutoBuilder:
         if max_wait > 60:
             score -= (max_wait - 60) * 1.5
 
+        # ── ROTATION LINEE CROSS-DAY: penalizza catene che usano linee
+        # gia' usate in giornate precedenti dello stesso build. Evita la
+        # fossilizzazione su 1 sola tratta (es. ALESSANDRIA sempre Pavia
+        # quando in teoria potrebbe mixare MI.ROGOREDO, CREMONA).
+        # Penalita' triangolare: 1a ripetizione -50, 2a -150, 3a -300...
+        if self._used_lines_global:
+            seen_in_chain: set = set()
+            for seg in chain:
+                if seg.get("is_deadhead", False):
+                    continue
+                frm = (seg.get("from_station", "") or "").upper().strip()
+                to = (seg.get("to_station", "") or "").upper().strip()
+                if not frm or not to or frm == to:
+                    continue
+                pair = tuple(sorted([frm, to]))
+                if pair in seen_in_chain:
+                    continue  # conta ogni linea una volta per catena
+                seen_in_chain.add(pair)
+                k = self._used_lines_global.get(pair, 0)
+                if k > 0:
+                    score -= 50 * k * (k + 1) / 2
+
         return score
+
+    def _register_lines_from_summary(self, summary) -> None:
+        """Aggiorna _used_lines_global con le linee (coppie from/to) usate
+        nei segmenti PRODUTTIVI (no deadhead) di una giornata. Chiamato
+        dopo ogni giornata generata per far convergere il scoring cross-day."""
+        if not summary or not getattr(summary, "segments", None):
+            return
+        seen: set = set()
+        for seg in summary.segments:
+            is_dh = (seg.get("is_deadhead", False) if isinstance(seg, dict)
+                     else getattr(seg, "is_deadhead", False))
+            if is_dh:
+                continue
+            frm = (seg.get("from_station", "") if isinstance(seg, dict)
+                   else getattr(seg, "from_station", "")).upper().strip()
+            to = (seg.get("to_station", "") if isinstance(seg, dict)
+                  else getattr(seg, "to_station", "")).upper().strip()
+            if not frm or not to or frm == to:
+                continue
+            pair = tuple(sorted([frm, to]))
+            if pair in seen:
+                continue
+            seen.add(pair)
+            self._used_lines_global[pair] += 1
 
     def _has_valid_meal_gap(self, chain: list[dict]) -> bool:
         """Verifica se la catena ha almeno un gap >= 30min in finestra refezione."""
@@ -972,6 +1023,7 @@ class AutoBuilder:
           4. Seleziona catena (deterministica o randomizzata)
         """
         self._used_trains_global = set(base_excluded)
+        self._used_lines_global = Counter()  # reset rotation linee per questo build
         calendar = self.validator.build_calendar(n_workdays)
 
         # ── VINCOLI PRIMO/ULTIMO GIORNO ──
@@ -1061,7 +1113,7 @@ class AutoBuilder:
                     max_arr = LAST_DAY_MAX_END_HOUR * 60 - 15
                     raw_segs = [s for s in raw_segs
                                 if _time_to_min(s["arr_time"]) <= max_arr]
-                seeds = seed_enumerator.enumerate_seeds(raw_segs, max_seeds=50)
+                seeds = seed_enumerator.enumerate_seeds(raw_segs, max_seeds=200)
                 # Per assembler: serve anche pool unfiltered (per pos/return)
                 unf_segs = self._load_day_segments(
                     db_day, 0, available_days,
@@ -1109,6 +1161,7 @@ class AutoBuilder:
                         tid = (seg.get("train_id", "")
                                if isinstance(seg, dict) else seg.train_id)
                         self._used_trains_global.add(tid)
+                    self._register_lines_from_summary(summary)
                     if summary.end_time:
                         prev_end_min = _time_to_min(summary.end_time)
                     else:
@@ -1220,6 +1273,7 @@ class AutoBuilder:
                     tid = (seg.get("train_id", "")
                            if isinstance(seg, dict) else seg.train_id)
                     self._used_trains_global.add(tid)
+                self._register_lines_from_summary(summary)
                 if summary.end_time:
                     prev_end_min = _time_to_min(summary.end_time)
                 else:

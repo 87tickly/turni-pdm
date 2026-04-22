@@ -4,6 +4,51 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 3: rotation linee cross-day + max_seeds 50->200
+
+### Problema
+
+Screenshot utente: ALESSANDRIA fissava sempre PAVIA per tutte le giornate.
+`_score_chain` premiava diversita' ma solo all'interno della SINGOLA catena
+(linee distinte in una giornata). Non c'era nessun meccanismo che ricordasse
+quali linee erano gia' state usate nei giorni precedenti dello stesso build.
+Conseguenza: pool povero (1 linea utile) -> fossilizzazione garantita.
+
+### Fix
+
+- `AutoBuilder.__init__`: nuovo `self._used_lines_global: Counter`
+- `_build_one_schedule`: reset `_used_lines_global = Counter()` all'inizio
+- Nuovo `_register_lines_from_summary(summary)`: dopo ogni giornata
+  conclusa, incrementa Counter con le linee produttive usate
+- `_score_chain`: penalita' triangolare 50*k*(k+1)/2 per ogni linea
+  gia' usata k volte (1a ripetizione -50, 2a -150, 3a -300, ...)
+- v4 `enumerate_seeds(max_seeds=50 -> 200)`: pool 4x piu' grande
+  per far emergere alternative
+
+### Numeri reali — 7gg LV
+
+| Deposito | Linee distinte (prima->dopo) | Nuove linee introdotte/7 | CCT media |
+|----------|------------------------------|-------------------------|-----------|
+| MI.P.GARIBALDI | ~2 -> **10** | 6/7 gg | 4.1h |
+| BRESCIA | ~3 -> **9** | 6/7 gg | 4.0h |
+| CREMONA | ~4 -> **11** | 4/7 gg | 4.3h |
+| ALESSANDRIA | 1 -> **2** (G4 ora MI.ROGOREDO!) | 2/7 gg | 2.8h |
+
+Esempio MI.P.GARIBALDI: Como, Arona, Bergamo, Lecco, Piacenza, Stradella,
+Porto Ceresio, Sesto Calende, Ponte S.Pietro, ...
+
+ALESSANDRIA: finalmente G4 sceglie ALE-MI.ROGOREDO (linea che prima
+veniva sempre scartata per score). Pool molto povero quindi le altre
+6 giornate restano Pavia, ma c'e' rotation reale.
+
+### File modificati
+
+- `src/turn_builder/auto_builder.py`
+
+pytest: 112/112 PASS.
+
+---
+
 ## 2026-04-22 — Step 2: ARTURO Live auto-corregge orari (FIXED_TIME_FROM_API)
 
 ### Problema
