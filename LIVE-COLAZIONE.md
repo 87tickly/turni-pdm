@@ -4,6 +4,74 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Fix Step 1: pool v3 scarta catene aperte non-FR + MAX_HOP_WAIT parametrico
+
+Risolve i sintomi piu' gravi dello screenshot utente (Giornata 9 ALE->MI.ROG
+08:47 con violazione `NO_RIENTRO_BASE`, settimana a 20h vs target 38h).
+
+### Diagnosi
+
+Il builder v3 (`_build_chain_pool`, `_add_positioning_chains`) aggiungeva al
+pool sia la catena chiusa (con rientro) che la stessa aperta (senza rientro),
+lasciando al validator il compito di segnalare `NO_RIENTRO_BASE`. Se il
+validator segnalava l'errore, la catena era gia' stata scelta: vedevamo
+giornate di 2h di prestazione a MI.ROGOREDO con un solo treno.
+
+Radice: span + overhead > MAX_PRESTAZIONE_MIN (510min) esclude il rientro
+diretto dal `_try_return_segment` per seed mattutini lunghi; la catena
+aperta resta e vince.
+
+### Fix in 2 punti
+
+1. `src/turn_builder/position_finder.py`:
+   - Parametro `max_hop_wait` in `find_position_path` (default 60' per
+     posizionamento stretto)
+   - `find_return_path` sceglie dinamicamente: 180' di attesa max tra hop
+     per rientri entro le 18:00, 360' per rientri dopo le 18:00 (ultimi
+     treni utili della notte). Utile per v4.
+
+2. `src/turn_builder/auto_builder.py`:
+   - Nuovo helper `_is_chain_fr_valid_end(chain)`: True se fine catena
+     e' in stazione FR autorizzata (`validator.fr_stations`) E fine turno
+     in finestra serale/notturna (>=17:00 OR <=04:00, cfr `rules.py:404-413`)
+   - 3 punti di `pool.append(chain)` aperta modificati: accettano la
+     catena SOLO se rientra al deposito, se ha iniezione rientro, o se
+     `_is_chain_fr_valid_end` vale. Altrimenti scartano (meglio giornata
+     vuota che turno rotto)
+   - Modificati: `_add_positioning_chains` (riga ~445), DFS depth max
+     (riga ~503), DFS no-cand (riga ~538)
+
+### Numeri reali — ALESSANDRIA 7 giorni LV, builder v3 (default UI)
+
+| Metrica | Pre-fix (screenshot) | Post-fix |
+|---------|---------------------|----------|
+| Giornate OK | 2 (G9 con violazione) | **7/7** |
+| Violazioni NO_RIENTRO_BASE | 1+ | **0** |
+| Rientri al deposito | parziali | **7/7** |
+| Ore settimana totali | ~20h | **32.9h** |
+| Condotta media | 1.8h (G9) | 2.8h (target 2-3h: on-target) |
+| Prestazione media | 2.2h (G9) | 4.9h |
+| Tempo generazione | 6-8s | 7.9s (invariato) |
+
+G1: 13:26-19:32 PREST 6h6m CCT 2h38m, tutte le altre 4-6h PREST / 2.6-3.5h CCT.
+
+pytest: 112/112 PASS, nessuna regressione.
+
+### Residui — prossimi step
+
+- **WARN_TIME_MISMATCH** presente ancora (es. 10569 PAV->ALE dep DB 08:05
+  vs reale 09:05): la cache ARTURO Live legge ma non corregge gli orari.
+  Step 2.
+- **Fossilizzazione 2 linee**: ALESSANDRIA usa solo ALE-PAV + 1 altra.
+  Rotation linee cross-day + pool piu' grande. Step 3.
+- **SAB/DOM non veri**: day_cycle dice SAB/DOM per G6-G7 ma scheduling
+  e' LV-like. Il frontend deve chiamare `build_weekly_schedule` + cycle
+  honored. Step 4.
+- **33h vs target 38h**: servirebbe seconda passata se sotto 30h.
+  Step 5.
+
+---
+
 ## 2026-04-21 — Treno di posizionamento iniziale in vettura (Step 3/3)
 
 Sblocca l'uso di linee abilitate che NON partono fisicamente dal

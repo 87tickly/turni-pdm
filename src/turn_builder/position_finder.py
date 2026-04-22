@@ -26,7 +26,12 @@ from ..validator.rules import _time_to_min
 # Parametri (richiesta utente: max 3 hop)
 MAX_HOPS = 3
 MIN_CHANGE_MIN = 5  # 5' min tra un treno e il successivo
-MAX_HOP_WAIT = 60   # 60' max attesa tra 2 hop consecutivi
+MAX_HOP_WAIT = 60   # 60' max attesa tra 2 hop consecutivi (default, posizionamento)
+# Per il RIENTRO a deposito la tolleranza e' piu' ampia: il PdC puo' aspettare
+# il prossimo treno utile, non puo' "scappare a piedi". Scala per fascia oraria.
+MAX_HOP_WAIT_RETURN_DAY = 180    # 3h per rientri entro le 18:00
+MAX_HOP_WAIT_RETURN_EVENING = 360  # 6h per rientri dopo le 18:00 (ultimi treni notte)
+EVENING_THRESHOLD_MIN = 18 * 60  # 18:00
 MAX_POSITIONING_DURATION = 240  # 4h max totali di posizionamento
 
 
@@ -38,6 +43,7 @@ def find_position_path(
     depart_after_min: int = 0,
     max_hops: int = MAX_HOPS,
     exclude_train_ids: set = None,
+    max_hop_wait: int = MAX_HOP_WAIT,
 ) -> list:
     """
     Cerca percorsi in vettura (from_station -> to_station) che arrivino
@@ -51,6 +57,9 @@ def find_position_path(
         depart_after_min: orario minimo di partenza (default 0)
         max_hops: max numero di treni concatenati (default 3)
         exclude_train_ids: train_id da NON usare (gia' bloccati)
+        max_hop_wait: attesa max (min) tra 2 hop consecutivi. Default 60'
+            (posizionamento stretto). find_return_path lo innalza per
+            accogliere attese di rientro, specie serali/notturne.
 
     Returns:
         Lista di percorsi. Ogni percorso = lista di segmenti marcati
@@ -89,7 +98,7 @@ def find_position_path(
             if dep_m < cur_arr + MIN_CHANGE_MIN:
                 continue
             gap = dep_m - cur_arr
-            if gap > MAX_HOP_WAIT and len(chain) > 0:
+            if gap > max_hop_wait and len(chain) > 0:
                 continue
             arr_m = _time_to_min(seg["arr_time"])
             if arr_m < dep_m:
@@ -134,9 +143,22 @@ def find_return_path(
     Cerca percorsi di rientro al deposito dopo il seed produttivo.
     Wrapper di find_position_path senza vincolo arrive_by (arriva
     quando possibile).
+
+    Strategia attesa tra hop:
+    - fine seed prima delle 18:00 -> max 3h di attesa tra hop
+    - fine seed dopo le 18:00    -> max 6h (ultimi treni utili della notte)
+    Motivo: il PdC puo' aspettare un treno utile. Bloccare il rientro
+    con MAX_HOP_WAIT=60min genera falsi NO_RIENTRO_BASE (turno termina
+    lontano dal deposito "dovrebbe rientrare" ma non trova treno entro
+    1h). Cfr. caso reale ALE->MI.ROGOREDO 08:47, dove il prossimo
+    rientro utile e' nel pomeriggio.
     """
     # "arrive_by" = fine giornata (es. 26:00 per coprire anche notturni)
     ARRIVE_BY_END_OF_DAY = 1440 + 360  # 06:00 del giorno dopo = 30:00
+    if depart_after_min >= EVENING_THRESHOLD_MIN:
+        hop_wait = MAX_HOP_WAIT_RETURN_EVENING
+    else:
+        hop_wait = MAX_HOP_WAIT_RETURN_DAY
     return find_position_path(
         all_day_segments=all_day_segments,
         from_station=from_station,
@@ -145,4 +167,5 @@ def find_return_path(
         depart_after_min=depart_after_min,
         max_hops=max_hops,
         exclude_train_ids=exclude_train_ids,
+        max_hop_wait=hop_wait,
     )

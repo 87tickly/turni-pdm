@@ -228,6 +228,33 @@ class AutoBuilder:
     def _returns_depot(self, chain: list[dict]) -> bool:
         return self._last_station(chain) == self.deposito
 
+    def _is_chain_fr_valid_end(self, chain: list[dict]) -> bool:
+        """
+        True se la catena chiude legittimamente in FR (fuori residenza):
+        - stazione finale in self.validator.fr_stations (es. Milano Centrale,
+          Genova P.P., ecc.)
+        - orario fine (con overhead) nella finestra FR: >= 17:00 OPPURE <= 04:00
+          (turno serale o notturno). Per la finestra diurna il PdC deve
+          rientrare al deposito.
+
+        Usata per filtrare dal pool catene "aperte" (che non rientrano al
+        deposito): senza questo check il pool finisce per contenere catene
+        rotte (non rientrano, non FR-valide) che poi il validator marca
+        come NO_RIENTRO_BASE — troppo tardi, la scelta e' gia' stata fatta.
+        """
+        if not chain or not self.deposito:
+            return False
+        last_st = self._last_station(chain)
+        if not last_st or last_st == self.deposito:
+            return False
+        fr_set = {(s or "").upper() for s in getattr(self.validator, "fr_stations", []) or []}
+        if last_st not in fr_set:
+            return False
+        # Finestra FR: fine >= 17:00 OR <= 04:00 (vedi rules.py:404-413)
+        end_min = self._chain_end_min(chain)
+        end_hour = (end_min % 1440) // 60
+        return end_hour >= 17 or end_hour <= 4
+
     def _required_rest_h(self, end_time_min: int) -> float:
         """Calcola ore di riposo minime basate sull'orario di fine turno."""
         end_mod = end_time_min % 1440
@@ -439,9 +466,10 @@ class AutoBuilder:
                     if ret is not None:
                         pool.append(chain + [ret])
                         added += 1
-                    else:
-                        # Catena "aperta": valida solo se FR (orario serale)
-                        # Lasciamo decidere al validator
+                    elif self._is_chain_fr_valid_end(chain):
+                        # Catena aperta ACCETTATA solo se FR serale/notturna.
+                        # Nei casi diurni non-FR, la catena "rotta" viene scartata
+                        # per non produrre turni con violazione NO_RIENTRO_BASE.
                         pool.append(chain)
                         added += 1
 
@@ -500,9 +528,10 @@ class AutoBuilder:
 
                 if len(chain) >= DFS_DEPTH:
                     if cur_cond >= MIN_COND_CHAIN:
-                        pool.append(list(chain))
-                        # CVL: cerca sotto-catene che passano per il deposito
-                        if cur_st != deposito:
+                        if cur_st == deposito:
+                            # Catena chiusa al deposito: aggiungila
+                            pool.append(list(chain))
+                        else:
                             # Iniezione rientro (in condotta o in vettura)
                             ret = self._try_return_segment(
                                 all_day_segments, cur_st, cur_arr,
@@ -510,6 +539,9 @@ class AutoBuilder:
                             )
                             if ret is not None:
                                 pool.append(list(chain) + [ret])
+                            elif self._is_chain_fr_valid_end(chain):
+                                pool.append(list(chain))  # FR serale/notturno valido
+                            # Altrimenti: catena rotta (non rientra, non FR) -> scarta
                             self._extract_cvl_subchains(chain, deposito, pool)
                     continue
 
@@ -535,11 +567,9 @@ class AutoBuilder:
 
                 if not cands:
                     if cur_cond >= MIN_COND_CHAIN:
-                        pool.append(list(chain))
-                        # ── CVL: se la catena NON rientra al deposito,
-                        # cerca un punto intermedio dove passa per il deposito
-                        # e aggiungi anche la sotto-catena tagliata lì (cambio volante)
-                        if cur_st != deposito:
+                        if cur_st == deposito:
+                            pool.append(list(chain))
+                        else:
                             # Iniezione rientro (in condotta o in vettura)
                             ret = self._try_return_segment(
                                 all_day_segments, cur_st, cur_arr,
@@ -547,6 +577,10 @@ class AutoBuilder:
                             )
                             if ret is not None:
                                 pool.append(list(chain) + [ret])
+                            elif self._is_chain_fr_valid_end(chain):
+                                pool.append(list(chain))  # FR serale/notturno valido
+                            # Altrimenti: catena rotta -> scarta, meglio giornata
+                            # vuota che turno con NO_RIENTRO_BASE
                             self._extract_cvl_subchains(chain, deposito, pool)
                     continue
 
