@@ -84,6 +84,11 @@ class AutoBuilder:
         # gia' usate in giornate precedenti dello stesso build_schedule.
         # Penalizza in _score_chain per evitare fossilizzazione su 1 linea.
         self._used_lines_global: Counter = Counter()
+        # Ciclo settimanale attivo (5+2): set da build_schedule prima di
+        # _build_one_schedule. Usato per filtrare i day_index per day_type
+        # (G6=SAB usa solo day_index SAB, G7=DOM usa solo day_index DOM).
+        self._day_type_cycle: list[str] = []
+        self._indices_per_type: dict = {}
         # v4: path architetturale nuovo (seed + position + assembler)
         # Fallback default a v3 per sicurezza/retrocompatibilita'
         self._use_v4_assembler = use_v4_assembler
@@ -1064,7 +1069,20 @@ class AutoBuilder:
                 prev_end_min = None  # dopo riposo, nessun vincolo
                 continue
 
-            db_day = available_days[day_idx_cycle % len(available_days)]
+            # ── Filtro day_index per day_type della giornata corrente ──
+            # Cycle 5+2: G1-G5 usano i day_index LV del materiale, G6 quelli
+            # SAB, G7 quelli DOM. Questo produce finalmente catene con treni
+            # CIRCOLANTI nel giorno-tipo, non LV forzati anche a sabato.
+            current_day_type = (self._day_type_cycle[day_idx_cycle]
+                                if self._day_type_cycle
+                                and day_idx_cycle < len(self._day_type_cycle)
+                                else "LV")
+            day_type_indices = self._indices_per_type.get(current_day_type) or []
+            # Fallback se nessun day_index specifico per quel day_type (es. DOM
+            # assente): usa l'union globale
+            day_indices_for_day = day_type_indices if day_type_indices else available_days
+
+            db_day = day_indices_for_day[day_idx_cycle % len(day_indices_for_day)]
             target_hour = time_slots[day_idx_cycle % len(time_slots)]
             is_last_day = (day_idx_cycle == n_turns - 1)
 
@@ -1087,7 +1105,7 @@ class AutoBuilder:
 
             # ── ULTIMO GIORNO: prova TUTTI i day_index per trovare catene entro le 15 ──
             if is_last_day:
-                days_to_try = [db_day] + [d for d in available_days if d != db_day]
+                days_to_try = [db_day] + [d for d in day_indices_for_day if d != db_day]
             else:
                 days_to_try = [db_day]
 
@@ -1101,7 +1119,7 @@ class AutoBuilder:
                 fr_set = {s.upper() for s in ALLOWED_FR_STATIONS_DEFAULT}
                 # Carica segmenti: abilitati SI, zona NO (per FLOZ/MLCE ecc.)
                 raw_segs = self._load_day_segments(
-                    db_day, 0, available_days,
+                    db_day, 0, day_indices_for_day,
                     apply_zone=False, apply_abilitazione=True,
                     union_all_days=True,
                 )
@@ -1116,7 +1134,7 @@ class AutoBuilder:
                 seeds = seed_enumerator.enumerate_seeds(raw_segs, max_seeds=200)
                 # Per assembler: serve anche pool unfiltered (per pos/return)
                 unf_segs = self._load_day_segments(
-                    db_day, 0, available_days,
+                    db_day, 0, day_indices_for_day,
                     apply_zone=False, apply_abilitazione=False,
                     union_all_days=True,
                 )
@@ -1180,7 +1198,7 @@ class AutoBuilder:
                 # ma in union ne ha ~30, abbastanza per chiudere catene
                 # con rientro. _used_trains_global previene il riuso.
                 day_filtered = self._load_day_segments(
-                    try_day, earliest_start_min // 60, available_days,
+                    try_day, earliest_start_min // 60, day_indices_for_day,
                     union_all_days=True,
                 )
                 if not day_filtered:
@@ -1207,7 +1225,7 @@ class AutoBuilder:
                 # treni di rientro al deposito anche su linee non abilitate
                 # (in tal caso saranno marcati in vettura/deadhead).
                 day_unfiltered = self._load_day_segments(
-                    try_day, 0, available_days,
+                    try_day, 0, day_indices_for_day,
                     apply_zone_and_abilitazioni=False,
                     union_all_days=True,
                 )
@@ -1660,13 +1678,30 @@ class AutoBuilder:
         # di tutti i tipi usati. Il builder non si limita a LV.
         day_type_cycle = self._compute_day_type_cycle(n_workdays, start=day_type)
         used_types = set(day_type_cycle)
-        available_days_set: set = set()
+        # Mappa day_type -> lista di day_index del materiale validi per quel tipo.
+        # Strategia: preferisci l'euristica density-based di get_day_index_groups
+        # (LV = day_index piu' popolati, SAB/DOM = meno) perche' il parser
+        # scrive validity_text sporchi ("LV ESCLUSI EFFETTUATO 6F", "GG", ecc.)
+        # che fanno matchare tutti i day_index a tutti i tipi. Fallback:
+        # get_day_indices_for_validity se groups non ha nulla per quel tipo.
+        indices_per_type: dict = {}
+        try:
+            groups = self.db.get_day_index_groups() or {}
+        except Exception:
+            groups = {}
         for dt in used_types:
+            heuristic = sorted(groups.get(dt, []) or [])
+            if heuristic:
+                indices_per_type[dt] = heuristic
+                continue
             try:
-                for idx in self.db.get_day_indices_for_validity(dt):
-                    available_days_set.add(idx)
+                precise = sorted(self.db.get_day_indices_for_validity(dt))
             except Exception:
-                pass
+                precise = []
+            indices_per_type[dt] = precise
+        available_days_set: set = set()
+        for idxs in indices_per_type.values():
+            available_days_set.update(idxs)
         if not available_days_set:
             try:
                 for idx in self.db.get_distinct_day_indices():
@@ -1674,7 +1709,11 @@ class AutoBuilder:
             except Exception:
                 pass
         available_days = sorted(available_days_set) if available_days_set else [1]
-        print(f"  Day cycle: {day_type_cycle}  (union day_index: {len(available_days)})")
+        # Esponi al loop di _build_one_schedule per filtraggio per-giornata
+        self._day_type_cycle = day_type_cycle
+        self._indices_per_type = indices_per_type
+        print(f"  Day cycle: {day_type_cycle}  (union day_index: {len(available_days)}, "
+              f"per-type: {{ {', '.join(f'{k}:{len(v)}' for k,v in indices_per_type.items())} }})")
 
         # ── FASE 2: Multi-restart ──
         print(f"\n  FASE 2 · Multi-restart ({NUM_RESTARTS} tentativi)...")

@@ -4,6 +4,67 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 4: cycle LV/SAB/DOM applicato per giornata (finalmente)
+
+### Problema
+
+`_compute_day_type_cycle(7)` generava il cycle corretto
+`['LV','LV','LV','LV','LV','SAB','DOM']` ma `_build_one_schedule` caricava
+i segmenti dall'UNION di TUTTI i day_index validi (LV+SAB+DOM insieme) per
+massima flessibilita'. Conseguenza: G6 e G7 pescavano treni LV come tutti
+gli altri. Il turno settimanale era di fatto 7 giorni LV.
+
+Secondo problema: `get_day_indices_for_validity(dt)` usa `validity_text IN ('LV','LS','GG')`.
+Ma il parser ha scritto `validity_text` molto sporchi ("LV ESCLUSI EFFETTUATO 6F",
+"VIA CODOGNO", ecc.). Match solo su 'GG' (comune a tutti i tipi). Tutti i
+tipi matchavano gli stessi day_index.
+
+### Fix
+
+- `build_schedule`: calcola `indices_per_type: dict` usando
+  `get_day_index_groups()` (euristica density-based: top 40% = LV, middle
+  30% = SAB, rest = DOM). Risultato distinto per davvero
+- Espone `self._day_type_cycle` e `self._indices_per_type` per il loop
+- `_build_one_schedule`: per ogni giornata, calcola
+  `current_day_type = self._day_type_cycle[day_idx]` e
+  `day_indices_for_day = self._indices_per_type[current_day_type]`,
+  sostituisce `available_days` con `day_indices_for_day` nelle 4 chiamate
+  a `_load_day_segments` e in `days_to_try`
+
+### Numeri reali — BRESCIA 7gg
+
+Groups density-based: LV=[1,2,3,4,5,6], SAB=[7,8,9,10,11], DOM=[12,13,14,15,16,17]
+
+| Giornata | Tipo cycle | day_index primari segmenti scelti |
+|----------|-----------|-----------------------------------|
+| G1 | LV | [1,1,3,3,3] |
+| G2 | LV | [2,2] |
+| G3 | LV | [1,1] |
+| G4 | LV | [3,6,3] |
+| G5 | LV | [5,3] |
+| G6 | SAB | [7,1,4] — principalmente 7 (SAB), rimanenti in LV per treni multi-day |
+| G7 | DOM | [2,2] (fallback: DOM povero, treni multi-day) |
+
+CCT 3.9h/gg. 0 violazioni. Il filtering funziona: G1-G5 scelgono da
+day_index LV, G6 introduce 7 (SAB), G7 limitato dal pool DOM.
+
+### Limite residuo
+
+Un treno puo' essere circolante in piu' day_index (LV+SAB). Il lookup
+`SELECT day_index FROM train_segment WHERE train_id=? LIMIT 1` ritorna
+un valore "principale" ambiguo. Il filtering del pool a monte e' corretto,
+ma la colonna day_index principale non distingue. Per distinzione piu'
+fine servirebbe parser fix che scrive validity_text puliti. Step
+parser separato.
+
+### File modificati
+
+- `src/turn_builder/auto_builder.py`
+
+pytest: 112/112 PASS.
+
+---
+
 ## 2026-04-22 — Step 3: rotation linee cross-day + max_seeds 50->200
 
 ### Problema
