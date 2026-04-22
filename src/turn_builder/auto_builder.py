@@ -785,7 +785,11 @@ class AutoBuilder:
                 seen_in_chain.add(pair)
                 k = self._used_lines_global.get(pair, 0)
                 if k > 0:
-                    score -= 50 * k * (k + 1) / 2
+                    # Penalty aumentata 50->200 per forzare diversificazione
+                    # anche quando il pool e' dominato da una linea (es. ALE-PAV
+                    # ha 49 seg vs MI.ROG 13). Stimola rotazione su tutte le
+                    # 5 linee abilitate invece di ripetere la dominante.
+                    score -= 200 * k * (k + 1) / 2
 
         return score
 
@@ -1029,12 +1033,16 @@ class AutoBuilder:
         # al deposito: cosi' diversita' non incentiva turni NO_RIENTRO.
         unique_lines_with_rientro = len({l for l in line_usage_rientranti})
         if unique_lines_with_rientro > 0:
-            score += unique_lines_with_rientro * 200
-        # Penalita' ripetizione su TUTTE le linee (anche non rientranti)
+            # Bonus aumentato 200 -> 400 per linea distinta nei rientranti:
+            # incentiva turni che usano >=3 linee diverse (ASTI, MI.ROG,
+            # MI.CENTRALE) invece di replicare l'A/R dominante (ALE-PAV).
+            score += unique_lines_with_rientro * 400
+        # Penalita' ripetizione su TUTTE le linee (anche non rientranti).
+        # Aumentata 60 -> 200 per k>1 per forzare rotation cross-day.
         for pair, k in line_usage.items():
             if k > 1:
                 excess = k - 1
-                score -= 60 * excess * excess
+                score -= 200 * excess * excess
 
         return score
 
@@ -2315,17 +2323,8 @@ class AutoBuilder:
                 "variants": [lv_variant, sab_variant, dom_variant],
             })
 
-        # Post-verifica ARTURO su tutte le varianti SAB/DOM (LV gia' verificato
-        # in build_schedule). Cache hit = 0ms per treni gia' visti nel LV;
-        # solo i treni unici SAB/DOM hanno costo API ~600ms ciascuno.
-        # Corregge gli orari sballati del parser DB (es. 10569 +60min).
-        try:
-            if sab_turns:
-                self._verify_turn_via_api(sab_cal)
-            if dom_turns:
-                self._verify_turn_via_api(dom_cal)
-        except Exception as e:
-            print(f"  Post-verify SAB/DOM saltata: {e}")
+        # (Post-verify ARTURO gia' fatta PRIMA del merge per aggiornare
+        # summary_obj — vedere sopra, riga ~2234)
 
         # Step 4: Calcola ore pesate
         total_weighted = 0
