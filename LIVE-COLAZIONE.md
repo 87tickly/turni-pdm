@@ -4,6 +4,44 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 10: barra di progresso simulata durante generazione
+
+### Feedback utente
+
+> "quando stiamo generando non possiamo mettere una barra con % che
+> aumente fino al 100% cosi almeno sembra che il tempo non sia bloccato?"
+
+### Fix
+
+Barra simulata (no backend streaming necessario). In `AutoBuilderPage.tsx`:
+
+- State `progress` (0-100) + `progressPhase` (testo descrittivo)
+- useEffect con setInterval(150ms) durante `loading=true`
+- Curva calibrata: lineare fino a 85% in `expectedMs` (~6s/giornata),
+  poi asymptotic fino a 98% (mai raggiunto fino al ritorno reale)
+- Al ritorno della response: `progress=100` + breve delay 250ms prima
+  di nascondere (feedback visivo "completato")
+- Fasi testuali basate su threshold temporali (coerenti coi log backend):
+  - 0%: "Caricamento pool ARTURO + DB material"
+  - 15%: "Fase 2 · Multi-restart (25 tentativi)"
+  - 45%: "Fase 3 · Genetic crossover"
+  - 65%: "Fase 4 · Simulated annealing"
+  - 80%: "Ricerca varianti SAB/DOM"
+  - 93%: "Verifica orari via live.arturo.travel"
+
+UI: pannello compatto sopra il form con label fase a sinistra + % a
+destra, barra gradient brand sotto (h-1.5). Pulsante "Genera" mostra
+anche il % durante il caricamento.
+
+### File modificati
+
+- `frontend/src/pages/AutoBuilderPage.tsx`
+- `frontend/dist` (rebuild per Railway)
+
+npm build: 236ms, bundle 510kB. Preview: 0 errori console.
+
+---
+
 ## 2026-04-22 — Step 9: turno = N giornate materiale × 3 varianti LMXGV/S/D
 
 ### Feedback utente (svolta architetturale)

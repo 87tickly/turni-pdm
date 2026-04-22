@@ -47,6 +47,8 @@ export function AutoBuilderPage() {
   const [elapsed, setElapsed] = useState<number | null>(null)
   const [result, setResult] = useState<BuildAutoWeeklyResponse | null>(null)
   const [error, setError] = useState<string>("")
+  const [progress, setProgress] = useState<number>(0)
+  const [progressPhase, setProgressPhase] = useState<string>("")
 
   useEffect(() => {
     getConstants()
@@ -60,6 +62,50 @@ export function AutoBuilderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Barra di progresso simulata: nessun feedback reale dal backend, ma la
+  // curva e' calibrata sui tempi tipici del builder (~25-35s per 5 giornate
+  // x 3 varianti). Fasi a soglie temporali basate sui log backend.
+  useEffect(() => {
+    if (!loading) {
+      setProgress(0)
+      setProgressPhase("")
+      return
+    }
+    const t0 = performance.now()
+    // Tempo atteso ~30s per 5 gg * 3 varianti. Scala con nDays.
+    const expectedMs = Math.max(15000, nDays * 6000)
+    const phases: Array<{ at: number; label: string }> = [
+      { at: 0, label: "Caricamento pool ARTURO + DB material" },
+      { at: 0.15, label: "Fase 2 · Multi-restart (25 tentativi)" },
+      { at: 0.45, label: "Fase 3 · Genetic crossover" },
+      { at: 0.65, label: "Fase 4 · Simulated annealing" },
+      { at: 0.80, label: "Ricerca varianti SAB/DOM" },
+      { at: 0.93, label: "Verifica orari via live.arturo.travel" },
+    ]
+    const id = window.setInterval(() => {
+      const elapsed = (performance.now() - t0) / expectedMs // 0..inf
+      // Curva: lineare fino 0.9, poi asymptotic verso 0.98 (mai raggiunto)
+      let pct: number
+      if (elapsed < 0.9) {
+        pct = elapsed * 95 // 0..85.5
+      } else {
+        // Asymptotic: l'extra tempo non supera 98%
+        const over = elapsed - 0.9
+        pct = 85.5 + (1 - Math.exp(-over * 2)) * 12.5
+      }
+      pct = Math.min(98, Math.max(0, pct))
+      setProgress(pct)
+      // Fase corrente
+      const normalized = Math.min(1, elapsed)
+      let current = phases[0].label
+      for (const p of phases) {
+        if (normalized >= p.at) current = p.label
+      }
+      setProgressPhase(current)
+    }, 150)
+    return () => window.clearInterval(id)
+  }, [loading, nDays])
+
   async function handleGenerate() {
     if (!deposito) {
       setError("Seleziona un deposito")
@@ -72,16 +118,21 @@ export function AutoBuilderPage() {
     setLoading(true)
     setError("")
     setResult(null)
+    setProgress(0)
+    setProgressPhase("Avvio…")
     const t0 = performance.now()
     try {
       // build-auto-weekly: ritorna N giornate del turno materiale, ciascuna
       // con le 3 varianti LMXGV/S/D come nel PDF originale Trenord
       const res = await buildAutoWeekly({ deposito, days: nDays })
+      setProgress(100)
+      setProgressPhase("Completato")
       setResult(res)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setLoading(false)
+      // Breve delay per mostrare 100% prima di nascondere
+      setTimeout(() => setLoading(false), 250)
       setElapsed((performance.now() - t0) / 1000)
     }
   }
@@ -232,7 +283,7 @@ export function AutoBuilderPage() {
             {loading ? (
               <>
                 <Loader2 size={14} className="animate-spin" />
-                Generazione…
+                {Math.floor(progress)}%
               </>
             ) : (
               <>
@@ -243,6 +294,51 @@ export function AutoBuilderPage() {
           </button>
         </div>
       </div>
+
+      {/* ── Progress bar durante generazione ── */}
+      {loading && (
+        <div
+          className="rounded-xl px-5 py-3 mb-4"
+          style={{
+            backgroundColor: "var(--color-surface-container-lowest)",
+            boxShadow: "var(--shadow-sm)",
+          }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span
+              className="text-[11px] font-semibold uppercase"
+              style={{
+                fontFamily: "var(--font-display)",
+                color: "var(--color-on-surface-muted)",
+                letterSpacing: "0.08em",
+              }}
+            >
+              {progressPhase || "Avvio…"}
+            </span>
+            <span
+              className="text-[13px] font-bold"
+              style={{
+                fontFamily: "var(--font-mono)",
+                color: "var(--color-brand)",
+              }}
+            >
+              {Math.floor(progress)}%
+            </span>
+          </div>
+          <div
+            className="h-1.5 rounded-full overflow-hidden"
+            style={{ backgroundColor: "var(--color-surface-container-high)" }}
+          >
+            <div
+              className="h-full rounded-full transition-all duration-300 ease-out"
+              style={{
+                width: `${progress}%`,
+                background: "var(--gradient-primary)",
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* ── Error ── */}
       {error && (
