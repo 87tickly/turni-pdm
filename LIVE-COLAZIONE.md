@@ -4,6 +4,84 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 8: classify_validity robusto per SAB/DOM reali
+
+### Feedback utente
+
+> "la giornata 1 può essere effettuata dal lunedì al venerdi ma anche
+> sabato e domenica e non è detto che gli stessi treni siano presenti.
+> essendo un turno ciclico e che gira ogni giornata può essere effettuata
+> in qualsiasi giorno della settimana."
+>
+> "non è detto che la domenica sia sempre S.COMP ci sono tanti treni che
+> girano la domenica e il sabato, dipende da come vuoi generare il turno"
+
+### Diagnosi
+
+Lo schema DB: `day_variant(day_index, material_turn_id, validity_text)`.
+Ogni giornata del turno materiale ha varianti per day_type (LMXGV/S/D)
+marcate via `validity_text`. MA:
+1. Il parser PDF scrive `validity_text` SPORCO: "LV ESCLUSO SF", "SABATO
+   DAL AL ESCLUSO", "EFFETTUATO 6F", "SI EFF.", "GG", "CAMBIO BANCO",
+   ecc. (327 varianti distinte nel DB)
+2. Lo Step 4 usava density-based `get_day_index_groups` (top 40% = LV,
+   middle = SAB, bottom = DOM) che NON rispetta la semantica reale
+3. Il pool ARTURO veniva mergiato indiscriminatamente → G6 SAB / G7 DOM
+   pescavano treni ARTURO `quando=oggi` (solo giorno corrente, tipicamente
+   feriale)
+
+### Fix
+
+**1) Classificatore robusto in `src/database/db.py`**:
+- `Database.classify_validity(text) -> "LV"|"SAB"|"DOM"|"GG"`
+  regole ordinate (DOM prima, poi SAB, poi LV, fallback GG)
+- `Database.get_day_indices_by_variant_type(variant, include_generic)`
+  normalizza validity_text a runtime. Include GG (generico) opzionale
+- Numeri reali: 65 varianti classificate LV, 46 SAB, 5 DOM, 272 GG
+
+**2) Builder usa strict + fallback loose**:
+- `_indices_per_type[dt]` prova prima strict (`include_generic=False`),
+  se almeno 2 giornate OK. Altrimenti loose (include GG). Fallback
+  estremo: density-based
+- Esempio ALE: LV=15, SAB=12, DOM=4 (solo 4 day_index con validity
+  classificato DOM — pool DOM povero, ma onesto)
+
+**3) Pool ARTURO solo LV**:
+- `_current_day_is_weekend` settato nel loop per ogni giornata
+- `_load_day_segments`: skip merge `_arturo_pool` se weekend.
+  Motivo: `cerca_tratta(quando="oggi")` non promette SAB/DOM.
+- G6/G7 usano SOLO segmenti DB material che classificano SAB/DOM
+
+**4) UI placeholder neutro**:
+- Se giornata vuota e week_day_type in (SAB, DOM):
+  "Nessun seed trovato per questo giorno — abilita piu' linee o il
+  dispatcher puo' marcarla come S.COMP"
+- NON etichettato automaticamente come S.COMP (S.COMP e' scelta del
+  dispatcher, non del builder — feedback utente)
+
+### Numeri reali ALESSANDRIA 7gg con 7 linee abilitate
+
+```
+G1 [LV]: 10578(d13:LV/GG) 10585(d1:SAB/LV/GG/DOM)    -> classifier ok
+G6 [SAB]: 10584(d3:SAB/LV/GG) 10591(d2:SAB/LV/GG)    -> treni sabato reali
+G7 [DOM]: vuoto -> pool DOM [1,7,9,11] non ha seed compatibili ALE
+```
+
+G7 vuoto NON significa "domenica S.COMP": significa che su ALE nessuno
+dei 4 day_index DOM del DB ha treni compatibili. Se abiliti piu' linee
+o un deposito con turni DOM (Milano, Brescia), G7 si popola.
+
+### File modificati
+
+- `src/database/db.py` (classify_validity + get_day_indices_by_variant_type)
+- `src/turn_builder/auto_builder.py` (_indices_per_type refactor + weekend skip)
+- `frontend/src/pages/AutoBuilderPage.tsx` (placeholder neutro vuoto SAB/DOM)
+- `frontend/dist` (rebuild per Railway)
+
+pytest: 112/112. npm build: 238ms. Preview login page render OK.
+
+---
+
 ## 2026-04-22 — Step 7: cross-check Trenord + SAB/DOM badge visibile
 
 ### Feedback utente

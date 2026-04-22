@@ -1314,6 +1314,63 @@ class Database:
             return self.get_distinct_day_indices()
         return result
 
+    @staticmethod
+    def classify_validity(validity_text: str) -> str:
+        """
+        Classifica un validity_text sporco del parser PDF in LV/SAB/DOM/GG.
+
+        Regole (verificate su 327 varianti reali del DB Trenord):
+        - DOM: contiene 'DOM', 'DOMENICA', 'FESTIVO', 'FEST '
+        - SAB: 'SABATO' OR 'SAB' (ma non 'ESCLUSO SAB'), OR '6F' senza 'ESCL'
+        - LV: 'LV', 'LMXGV', 'LUNEDÌ', 'FERIALE', 'VENERDÌ'
+        - GG: fallback (generico o noise parser tipo 'SI EFF.', 'CAMBIO BANCO')
+
+        'GG' = accetta ogni giorno (LV/SAB/DOM).
+        """
+        t = (validity_text or "").upper().strip()
+        if not t:
+            return "GG"
+        if any(k in t for k in ("DOM", "DOMENICA", "FESTIVO", "FEST ")):
+            return "DOM"
+        if "SABATO" in t or ("SAB" in t and "ESCLUSO SAB" not in t):
+            return "SAB"
+        if "6F" in t and "ESCL" not in t:
+            return "SAB"
+        if any(k in t for k in ("LV", "LMXGV", "LUNEDÌ", "FERIALE", "VENERDÌ")):
+            return "LV"
+        return "GG"
+
+    def get_day_indices_by_variant_type(self, variant: str,
+                                         include_generic: bool = True) -> list[int]:
+        """
+        Ritorna i day_index compatibili con una variante (LV/SAB/DOM),
+        normalizzando `validity_text` a runtime con classify_validity().
+
+        include_generic (default True): include anche i day_index con
+        variant classificato come 'GG' (generico, accetta ogni giorno).
+        Questo e' quello che l'utente vuole: un treno "GG" circola lun-dom,
+        quindi va bene sia per LV sia per SAB sia per DOM.
+
+        variant: 'LV' | 'SAB' | 'DOM'. Case-insensitive.
+        """
+        v = (variant or "").upper().strip()
+        if v not in ("LV", "SAB", "DOM"):
+            return []
+        cur = self._cursor()
+        cur.execute("SELECT DISTINCT day_index, validity_text FROM day_variant "
+                    "ORDER BY day_index")
+        rows = cur.fetchall()
+        out: set = set()
+        for r in rows:
+            d = self._dict(r)
+            di = d.get("day_index")
+            vt = d.get("validity_text", "")
+            cat = self.classify_validity(vt)
+            if cat == v or (include_generic and cat == "GG"):
+                if di is not None:
+                    out.add(di)
+        return sorted(out)
+
     def check_trains_for_day_type(self, train_ids: list[str],
                                   target_day: str) -> dict:
         """Per ogni train_id, verifica se esiste nei day_index compatibili

@@ -454,7 +454,56 @@ function ResultStat({
 
 function DayPreview({ entry }: { entry: BuildAutoEntry }) {
   const s = entry.summary
-  if (!s) return null
+  // Giornata vuota (nessun seed trovato per quel day_type). Mostra
+  // un placeholder neutro con il badge del tipo di giorno, senza
+  // etichettarla come S.COMP: S.COMP e' una scelta del dispatcher,
+  // non del builder.
+  if (!s || !s.segments || s.segments.length === 0) {
+    const wdt = entry.week_day_type
+    if (wdt === "SAB" || wdt === "DOM") {
+      return (
+        <div
+          className="rounded-xl px-4 py-3 flex items-center gap-3"
+          style={{
+            backgroundColor: "var(--color-surface-container-lowest)",
+            boxShadow: "var(--shadow-sm)",
+          }}
+        >
+          <div
+            className="font-bold"
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: "15px",
+              color: "var(--color-on-surface-strong)",
+            }}
+          >
+            Giornata {entry.day}
+          </div>
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded font-bold"
+            style={{
+              backgroundColor:
+                wdt === "SAB"
+                  ? "rgba(234, 88, 12, 0.14)"
+                  : "rgba(220, 38, 38, 0.14)",
+              color: wdt === "SAB" ? "#C2410C" : "#B91C1C",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            {wdt}
+          </span>
+          <span
+            className="text-[12px]"
+            style={{ color: "var(--color-on-surface-muted)" }}
+          >
+            Nessun seed trovato per questo giorno — abilita piu' linee o
+            il dispatcher puo' marcarla come S.COMP (disponibilita').
+          </span>
+        </div>
+      )
+    }
+    return null
+  }
   const segments = s.segments ?? []
   const hasViolations = s.violations.length > 0
   const firstFrom = segments[0]?.from_station ?? "—"

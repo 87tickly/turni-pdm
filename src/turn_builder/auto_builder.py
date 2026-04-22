@@ -1106,6 +1106,11 @@ class AutoBuilder:
             # Esponi il day_type (LV/SAB/DOM) nell'entry cosi' il frontend
             # puo' distinguere visivamente le giornate di tipo diverso.
             entry["week_day_type"] = current_day_type
+            # Flag usato da _load_day_segments: ARTURO cerca_tratta usa
+            # `quando="oggi"` (giorno corrente, tipicamente LV). Per SAB/DOM
+            # il pool ARTURO non e' rappresentativo: lo skippa e usa solo
+            # i segmenti DB material che matchano la variante.
+            self._current_day_is_weekend = current_day_type in ("SAB", "DOM")
             day_type_indices = self._indices_per_type.get(current_day_type) or []
             # Fallback se nessun day_index specifico per quel day_type (es. DOM
             # assente): usa l'union globale
@@ -1713,26 +1718,41 @@ class AutoBuilder:
         day_type_cycle = self._compute_day_type_cycle(n_workdays, start=day_type)
         used_types = set(day_type_cycle)
         # Mappa day_type -> lista di day_index del materiale validi per quel tipo.
-        # Strategia: preferisci l'euristica density-based di get_day_index_groups
-        # (LV = day_index piu' popolati, SAB/DOM = meno) perche' il parser
-        # scrive validity_text sporchi ("LV ESCLUSI EFFETTUATO 6F", "GG", ecc.)
-        # che fanno matchare tutti i day_index a tutti i tipi. Fallback:
-        # get_day_indices_for_validity se groups non ha nulla per quel tipo.
+        # Uso la classificazione robusta `classify_validity` (normalizza il
+        # validity_text sporco del parser PDF: "LV ESCLUSO SF", "SABATO DAL
+        # AL ESCLUSO", "EFFETTUATO 6F", ecc. -> LV/SAB/DOM/GG).
+        # include_generic=True: le giornate con validity 'GG' (generiche)
+        # vengono accettate sia per LV, sia per SAB, sia per DOM — coerente
+        # con feedback utente "la giornata 1 puo' essere effettuata in
+        # qualsiasi giorno della settimana".
+        # Fallback density-based solo se la classificazione ritorna vuoto
+        # (es. DB senza day_variant puliti).
         indices_per_type: dict = {}
         try:
-            groups = self.db.get_day_index_groups() or {}
+            groups_fallback = self.db.get_day_index_groups() or {}
         except Exception:
-            groups = {}
+            groups_fallback = {}
         for dt in used_types:
-            heuristic = sorted(groups.get(dt, []) or [])
-            if heuristic:
-                indices_per_type[dt] = heuristic
-                continue
+            # Prima prova STRICT (solo day_index con validity classificata
+            # come questo specifico variant_type). Se strict e' troppo
+            # restrittivo (nessun risultato o meno di 2 giornate), rilassa
+            # a include_generic=True che aggiunge anche i 'GG' (ogni giorno).
             try:
-                precise = sorted(self.db.get_day_indices_for_validity(dt))
+                strict = self.db.get_day_indices_by_variant_type(
+                    dt, include_generic=False,
+                )
+                loose = self.db.get_day_indices_by_variant_type(
+                    dt, include_generic=True,
+                )
             except Exception:
-                precise = []
-            indices_per_type[dt] = precise
+                strict, loose = [], []
+            if strict and len(strict) >= 2:
+                indices_per_type[dt] = strict
+            elif loose:
+                indices_per_type[dt] = loose
+            else:
+                # Fallback: density-based
+                indices_per_type[dt] = sorted(groups_fallback.get(dt, []) or [])
         available_days_set: set = set()
         for idxs in indices_per_type.values():
             available_days_set.update(idxs)
@@ -2321,10 +2341,13 @@ class AutoBuilder:
             if not merged:
                 merged = self.db.get_all_segments() or []
             # ── ARTURO Live pool: treni reali su linee abilitate dal deposito ──
-            # Merge sempre: il pool arturo contiene solo linee abilitate
-            # (filtrate a monte da enrich_pool_with_arturo). Utili sia per
-            # produttivi che per rientri in vettura.
-            if self._arturo_pool:
+            # Merge solo per giornate LV: ARTURO cerca_tratta usa
+            # `quando="oggi"` (giorno corrente, tipicamente LV). Per SAB/DOM
+            # i treni "oggi" non rappresentano i servizi di sabato/domenica.
+            # Il flag _current_day_is_weekend e' settato dal loop di
+            # _build_one_schedule ad ogni iterazione giornata.
+            skip_arturo = getattr(self, "_current_day_is_weekend", False)
+            if self._arturo_pool and not skip_arturo:
                 for s in self._arturo_pool:
                     key = (s.get("train_id", ""), s.get("from_station", ""),
                            s.get("dep_time", ""), s.get("to_station", ""),
