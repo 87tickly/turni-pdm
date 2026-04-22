@@ -4,6 +4,63 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 13: verify ARTURO esteso a SAB/DOM (correzione orari)
+
+### Feedback utente
+
+> "1: vedi screen quei treni hanno uno 0 in piu. 2: alcuni treni hanno
+> l orario sbagliato vedi 10569"
+
+### Diagnosi
+
+**Issue 1 (treni con "0 extra")**: **non e' un bug del backend attuale**.
+Test locale con Step 12: train_id serializzati corretti (`10578, 10585,
+10062...`). Lo screenshot era di una generazione pre-deploy Step 12
+che Railway non aveva ancora aggiornato. Dopo redeploy Railway i numeri
+sono corretti.
+
+**Issue 2 (orari sballati 10569 ecc.)**: bug reale. Il mio Step 11 aveva
+impostato `skip_api_verify=True` per le chiamate ricorsive SAB/DOM per
+performance (142s -> 36s). Ora col batch (Step 12) lo skip valeva anche
+per le chiamate SAB/DOM full-batch. Conseguenza: treni nelle varianti
+S/D avevano orari DB scorretti (es. 10569 PAV->ALE dep 08:05 DB vs
+09:05 reale).
+
+### Fix
+
+In `build_weekly_schedule`, dopo il merge delle 3 chiamate batch,
+`_verify_turn_via_api(sab_cal)` e `_verify_turn_via_api(dom_cal)` vengono
+chiamati esplicitamente. Cache hit 0ms per treni gia' visti nel LV (la
+maggior parte); solo treni unici SAB/DOM hanno costo API ~600ms.
+
+### Numeri
+
+ALE 5gg (test post-fix):
+- G1/G2/G3 LMXGV + S: entrambe hanno `FIXED_TIME_FROM_API` applicato
+- Totale build_weekly: **11.9s** (invariato rispetto a Step 12)
+
+pytest 112/112. npm build OK.
+
+### Issue 3 residua (ore sotto target)
+
+Utente: "siamo troppo sotto le ore minime lavorate. troppe volte ti
+limiti a fare solo a/r".
+
+ALE weekly: 25.8h LV (sotto 33h min). Il builder predilige catene
+A/R semplici (2 treni ALE-PAV-ALE). Per aumentare le ore serve:
+- Scoring che premia catene 4+ treni
+- Uso piu' aggressivo di altre linee abilitate (ASTI, MI.ROGOREDO)
+- Eventuale refezione forzata + seconda mezza giornata
+
+Task separato: richiede tuning scoring chain + refactor branch DFS.
+
+### File modificati
+
+- `src/turn_builder/auto_builder.py` (post-verify SAB/DOM)
+- `frontend/dist` (rebuild)
+
+---
+
 ## 2026-04-22 — Step 12: fix BUG cycle SAB/DOM + batch 142s -> 12s
 
 ### Feedback utente

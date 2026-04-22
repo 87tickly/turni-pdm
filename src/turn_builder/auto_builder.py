@@ -2296,6 +2296,18 @@ class AutoBuilder:
                 "variants": [lv_variant, sab_variant, dom_variant],
             })
 
+        # Post-verifica ARTURO su tutte le varianti SAB/DOM (LV gia' verificato
+        # in build_schedule). Cache hit = 0ms per treni gia' visti nel LV;
+        # solo i treni unici SAB/DOM hanno costo API ~600ms ciascuno.
+        # Corregge gli orari sballati del parser DB (es. 10569 +60min).
+        try:
+            if sab_turns:
+                self._verify_turn_via_api(sab_cal)
+            if dom_turns:
+                self._verify_turn_via_api(dom_cal)
+        except Exception as e:
+            print(f"  Post-verify SAB/DOM saltata: {e}")
+
         # Step 4: Calcola ore pesate
         total_weighted = 0
         freq_total = 0
