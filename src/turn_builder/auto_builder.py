@@ -1924,8 +1924,9 @@ class AutoBuilder:
                 gap_h = (WEEKLY_HOURS_MIN / 60) - weekly_hours_total
                 weekly_warning = (f"Settimana a {weekly_hours_total:.1f}h, sotto "
                                   f"min contratto {WEEKLY_HOURS_MIN/60:.0f}h di "
-                                  f"{gap_h:.1f}h. Pool {self.deposito} povero: "
-                                  f"abilita piu' linee.")
+                                  f"{gap_h:.1f}h. Il builder preferisce catene "
+                                  f"A/R brevi: serve tuning scoring per catene "
+                                  f"multi-linea piu' lunghe.")
                 rule = "WEEKLY_HOURS_LOW"
             elif weekly_over_max:
                 over_h = weekly_hours_total - (WEEKLY_HOURS_MAX / 60)
@@ -2226,6 +2227,24 @@ class AutoBuilder:
             self._used_lines_global = prev_used_lines
         dom_turns = _extract_turns(dom_cal)
 
+        # Post-verifica ARTURO PRIMA del merge (per aggiornare summary_obj).
+        # Cache hit 0ms per treni gia' visti nel LV; solo treni unici SAB/DOM
+        # hanno costo API ~600ms. Corregge gli orari sballati del parser DB
+        # (es. 10569 PAV->ALE dep 08:05 DB vs 09:05 reale).
+        try:
+            if sab_turns:
+                print(f"\n  Post-verify SAB...")
+                self._verify_turn_via_api(sab_cal)
+                # Reload sab_turns dopo verify (entry["summary"] potrebbe essere
+                # stato sostituito da validator.validate_day)
+                sab_turns = _extract_turns(sab_cal)
+            if dom_turns:
+                print(f"  Post-verify DOM...")
+                self._verify_turn_via_api(dom_cal)
+                dom_turns = _extract_turns(dom_cal)
+        except Exception as e:
+            print(f"  Post-verify SAB/DOM saltata: {e}")
+
         # Merge: per ogni giornata LV, pesca la corrispondente SAB e DOM
         days = []
         for i, lv_entry in enumerate(lv_turns):
@@ -2450,13 +2469,12 @@ class AutoBuilder:
             if not merged:
                 merged = self.db.get_all_segments() or []
             # ── ARTURO Live pool: treni reali su linee abilitate dal deposito ──
-            # Merge solo per giornate LV: ARTURO cerca_tratta usa
-            # `quando="oggi"` (giorno corrente, tipicamente LV). Per SAB/DOM
-            # i treni "oggi" non rappresentano i servizi di sabato/domenica.
-            # Il flag _current_day_is_weekend e' settato dal loop di
-            # _build_one_schedule ad ogni iterazione giornata.
-            skip_arturo = getattr(self, "_current_day_is_weekend", False)
-            if self._arturo_pool and not skip_arturo:
+            # Merge sempre, anche per giornate SAB/DOM. I treni ARTURO sono
+            # piu' rappresentativi della realta' attuale: anche se fetchati
+            # con `quando="oggi"`, molti circolano ogni giorno (GG) e il
+            # validator gestira' quelli che non circolano in SAB/DOM.
+            # Meglio un pool ricco che un pool povero che limita artificialmente.
+            if self._arturo_pool:
                 for s in self._arturo_pool:
                     key = (s.get("train_id", ""), s.get("from_station", ""),
                            s.get("dep_time", ""), s.get("to_station", ""),
