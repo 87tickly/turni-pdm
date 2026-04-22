@@ -4,6 +4,92 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-22 — Step 18: ASTI raggiunto via ARTURO — arricchimento DB + fix abilit
+
+### Feedback utente (brutale ma utile)
+
+> "ma tu per asti, guardi il turno materiale e prendi i numeri dei treni,
+> li testi su arturo rifai il test sul giro materiale per conferma e poi
+> generi il turno. non e' difficile, stai facendo tutto un giro inutile"
+
+Aveva ragione. Invece di cercare ASTI nel DB (dove mancava), dovevo
+**interrogare ARTURO** per le fermate reali dei treni IC 2xxx.
+
+### Scoperta ARTURO
+
+Chiamata `ac.treno('2351')`: 8 fermate reali tra MI.CENTRALE e ASTI:
+MI.CENTRALE 05:25 → MI.LAMBRATE → MI.ROGOREDO → PAVIA → VOGHERA →
+TORTONA → **ALESSANDRIA 06:44/06:46** → ASTI 07:06.
+
+Il PDF turno materiale Trenord aveva 1 solo segmento MI.CENTRALE->ASTI.
+Il parser aveva perso le fermate intermedie. Ma **ARTURO le sa**.
+
+Test su 14 treni base ASTI: **11/14 confermano fermata ALESSANDRIA**.
+(3 "not found" su ARTURO oggi: 2365, 2393, 2395).
+
+### Script `scripts/enrich_db_asti_from_arturo.py`
+
+One-shot (idempotente):
+1. Elenca train_id ASTI nel DB
+2. Per ogni numero base, chiama ARTURO `/treno/{num}`
+3. Estrae fermate KEY_STATIONS (MI.CENTRALE, MI.CERTOSA, MI.ROG, ALE, ASTI)
+4. Inserisce segmenti derivati (con ALE come endpoint) nel DB con
+   `raw_text='ARTURO-enriched'`, stesso tid/day_index/material_turn_id
+5. Rimuove segmenti "diretti" MI-ASTI originali duplicati
+
+Risultato: **+51 segmenti, 20 diretti rimossi**. Pool ALE ora ha:
+- ALE<->ASTI: 17 segmenti (da 0)
+- ALE<->MI.CENTRALE: 16 segmenti (da 1)
+
+### Bug _seg_abilitato (scoperto durante il test)
+
+Dopo enrichment, ASTI appariva ma **sempre in vettura**, mai condotta.
+
+Root cause in `_seg_abilitato`:
+```python
+if not self._enabled_materials: ...  # MANCAVA
+return mat in self._enabled_materials  # False se set vuoto
+```
+
+ALE ha 7 linee abilitate ma 0 materiali -> i segmenti ETR522 (IC Trenitalia)
+fallivano `mat in {}` = False -> marcati non-abilitati -> vettura.
+
+**Fix**: se `_enabled_materials` e' vuoto, wildcard True. Logica:
+l'utente ha abilitato linee senza restringere rotabili -> tutti OK.
+
+### Numeri ALE 5gg LV post-fix
+
+| Metrica | Step 17 (pre-ARTURO) | Step 18 (post) |
+|---------|---------------------|----------------|
+| Prest sett | 31.7h | 31.0h (-0.7h piccola regressione) |
+| ASTI condotta | 0 | **2 segmenti** (G2 ASTI-MI.CENTRALE A/R) |
+| ASTI vettura | 0 | 6 (positioning) |
+| Linee usate | 3 (PAV/MI.CENTRALE/MI.ROG) | **4** (+ASTI-MI.CENTRALE) |
+
+G2 esempio: `ALE>ASTI(V) ASTI>ALE(V) ALE>ASTI(V) ASTI>MI.CENTRALE ->
+MI.CENTRALE>ASTI ASTI>ALE(V)` — 6 treni, cond 205min, pres 444min.
+Due produttivi ASTI<->MI.CENTRALE (condotta reale).
+
+### Residui noti
+
+1. ASTI ancora usato molto come vettura (6 vs 2 condotta). Il builder
+   preferisce positioning ASTI invece di catene interamente produttive.
+   Richiede tuning ulteriore: penalty alto ratio deadhead.
+
+2. Ore settimana scese a 31.0h da 31.7h. Il pool piu' grande ha reso la
+   ricerca piu' dispersa. Da valutare aumento population_size / restarts.
+
+### File modificati
+
+- `scripts/enrich_db_asti_from_arturo.py` (NEW)
+- `src/turn_builder/auto_builder.py` (wildcard materiali in `_seg_abilitato`)
+- `turni.db` (segmenti arricchiti + linea ALE-ASTI abilitata)
+- `LIVE-COLAZIONE.md`
+
+pytest 112/112. npm build OK.
+
+---
+
 ## 2026-04-22 — Step 17: tuning scoring profondo — 27.2h -> 31.7h (+4.5h)
 
 ### Feedback utente

@@ -246,6 +246,13 @@ class AutoBuilder:
         line = self.db._normalize_line_pair(from_st, to_st)
         if line not in self._enabled_lines:
             return False
+        # Se l'utente non ha configurato materiali, trattalo come wildcard:
+        # ha abilitato linee senza restringere i rotabili -> tutti OK.
+        # Senza questa wildcard, segmenti su materiali non listati (es.
+        # ETR522 dei treni IC Trenitalia arricchiti da ARTURO) venivano
+        # marcati non-abilitati e finivano in vettura.
+        if not self._enabled_materials:
+            return True
         # Materiale (cache via material_turn_id)
         mat_turn_id = seg.get("material_turn_id") if isinstance(seg, dict) else getattr(seg, "material_turn_id", None)
         if not mat_turn_id:
