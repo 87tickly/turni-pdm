@@ -4,6 +4,105 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Step 6/10: integrazione accessori + CV in day_assembler
+
+### Contesto
+
+Step 4 e 5 hanno prodotto i moduli `accessori.py` e `cv_registry.py`
+come unita' isolate e testate. Step 6 li **cabla** dentro
+`day_assembler.assemble_day` in modo retrocompat: se il chiamante non
+fornisce la callback di lookup giro materiale, il comportamento legacy
+resta identico.
+
+### Nuovi parametri di assemble_day
+
+```python
+def assemble_day(
+    ...,
+    day_date: Optional[date] = None,
+    get_material_segments: Optional[Callable[[int, int], list]] = None,
+):
+```
+
+- `day_date`: data della giornata, per il calendario preriscaldo
+  (dic-feb). Default `date.today()` se None.
+- `get_material_segments(material_turn_id, day_index) -> list`: callback
+  di lookup usata per calcolare i gap materiale e gli accessori
+  ACCp/ACCa. Se None, si usano valori flat PRESENTATION_MIN (15') e
+  END_MIN (10') come prima.
+
+### Cambi al calcolo prestazione_min
+
+Prima:
+```
+prestazione = (last_arr - first_dep) + 15 + 10
+```
+
+Ora:
+```
+ACCp_primo_real  = accessori.apply_accessori(first_real_seg)   # 40/15/80/0
+ACCa_ultimo_real = accessori.apply_accessori(last_real_seg)    # 40/10/0
+
+# Se refez e' slot 4 (inizio): accp_boundary = 0 (refez assorbe ingresso)
+# Se refez e' slot 5 (fine):   acca_boundary = 0
+# Altrimenti:                  valori ACCp/ACCa del primo/ultimo segmento
+
+prestazione = (last_arr - first_dep) + accp_boundary + acca_boundary
+```
+
+Ogni segmento reale della sequenza ottiene i campi `accp_min` e
+`acca_min` annotati (visibili in UI, utili per il livello settimanale).
+
+### CV interni
+
+Tra ogni coppia di segmenti reali consecutivi la nuova logica chiama
+`cv_registry.detect_cv`. Se rilevato, annota sui segmenti:
+- `prev_seg["cv_after_min"]`
+- `next_seg["cv_before_min"]`
+
+I CV **interni al turno del PdC** sono trattati come `same_pdc=True`
+(il PdC prende tutto il gap), nessuna persistenza sul ledger in questo
+step. La persistenza con split tra PdC diversi sara' gestita a Step 8
+(livello settimanale) quando coordineremo piu' PdC.
+
+### Campi aggiuntivi nel dict di ritorno
+
+- `accp_boundary_min`, `acca_boundary_min`: i due accessori usati per
+  calcolare la prestazione (0 se refez al bordo)
+- `n_cv`: numero di CV rilevati nel turno
+
+### Verifica
+
+`tests/test_day_assembler_step6.py` (NEW, 8 test):
+- Condotta con gap materiale ampi -> accp_min=40, acca_min=40
+- Preriscaldo in dicembre -> accp_min=80
+- Vettura (positioning da deposito a seed) -> accp=15, acca=10
+- Gap materiale < 65 -> accp=0 (non c'e' spazio)
+- Prestazione con ACCp/ACCa reali
+- Retrocompat: senza callback -> fallback 15/10
+- CV interno rilevato e annotato (same_pdc, prende tutto)
+- Nessun CV quando gap materiale >= 65 (e' accessorio pieno)
+
+Pytest completo: **171/171** (163 + 8 nuovi). Zero regressioni.
+
+### Residuo / prossimi step
+
+- Step 7: FR candidate (flag + tabella `pdc_fr_approved`).
+- Step 8: `week_assembler.py` per il ciclo 5+2, vincoli riposo, FR
+  settimanali. Qui si useranno i CV del ledger con split tra PdC
+  diversi.
+- Step 9: cablaggio `/api/build-auto` al nuovo flusso v4.
+
+### File modificati
+
+- `src/turn_builder/day_assembler.py` (integra accessori + CV)
+- `tests/test_day_assembler_step6.py` (NEW)
+- `LIVE-COLAZIONE.md`
+
+pytest 171/171.
+
+---
+
 ## 2026-04-23 — Step 5/10: CV registry con memoria condivisa persistente
 
 ### Regola di business

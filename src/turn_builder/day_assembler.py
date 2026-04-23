@@ -19,7 +19,8 @@ La sequenza viene poi passata al validator esistente per score + regole.
 """
 from __future__ import annotations
 
-from typing import Optional
+from datetime import date
+from typing import Callable, Optional
 
 from ..validator.rules import _time_to_min, _min_to_time
 from ..constants import (
@@ -28,11 +29,14 @@ from ..constants import (
     MEAL_WINDOW_2_START, MEAL_WINDOW_2_END,
 )
 from . import position_finder
+from . import accessori as accessori_mod
+from . import cv_registry
 
 
-# Parametri giornata
-PRESENTATION_MIN = 15  # 15' di accessori iniziali prima del primo segmento
-END_MIN = 10           # 10' di accessori finali dopo l'ultimo segmento
+# Parametri giornata (legacy, usati come fallback quando callback accessori
+# non disponibile; Step 6 sostituisce con calcolo variabile da giro materiale)
+PRESENTATION_MIN = 15  # 15' flat, fallback per il primo segmento
+END_MIN = 10           # 10' flat, fallback per l'ultimo segmento
 MAX_DAY_DURATION = 520  # 8h40 max prestazione (vincolo contrattuale ~8h30)
 
 # Step 2 (23/04/2026) — fase C refezione
@@ -193,6 +197,8 @@ def assemble_day(
     used_train_ids: set = None,
     allow_fr_end: bool = True,
     fr_stations: set = None,
+    day_date: Optional[date] = None,
+    get_material_segments: Optional[Callable[[int, int], list]] = None,
 ) -> Optional[dict]:
     """
     Assembla una giornata completa dato un seed produttivo.
@@ -207,23 +213,34 @@ def assemble_day(
         allow_fr_end: se True, accetta giornate che finiscono in
               stazione FR autorizzata (no rientro)
         fr_stations: set di stazioni FR autorizzate (case-insensitive)
+        day_date: data della giornata (per calendario preriscaldo).
+              Default date.today() se None.
+        get_material_segments: callback opzionale (material_turn_id,
+              day_index) -> list[segmenti] usato per calcolare gap
+              materiale e accessori ACCp/ACCa per ogni segmento. Se
+              None, si applicano valori flat PRESENTATION_MIN e END_MIN
+              al primo/ultimo segmento come fallback.
 
     Returns:
         dict con {
-          "segments": list di segmenti ordinati (produttivi + vettura),
+          "segments": list di segmenti ordinati (con accp_min/acca_min
+                annotati per segmento, se callback disponibile),
           "from_station": stazione inizio giornata (deposito o prima vettura),
           "to_station": stazione fine giornata,
           "first_dep_min": inizio primo segmento,
           "last_arr_min": fine ultimo segmento,
-          "prestazione_min": first_dep-presentation .. last_arr+end,
-          "condotta_min": totale condotta (solo seed produttivo),
+          "prestazione_min": durata totale turno (range + ACCp_primo + ACCa_ultimo),
+          "condotta_min": totale condotta (solo seed produttivo, no refezione),
           "n_positioning": numero segmenti vettura di posizionamento,
           "n_return": numero segmenti vettura di rientro,
+          "n_cv": numero CV rilevati nella sequenza del PdC,
           "returns_depot": bool,
           "is_fr": bool,
         }
         None se nessuna combinazione valida trovata.
     """
+    if day_date is None:
+        day_date = date.today()
     dep = (deposito or "").upper().strip()
     if not dep or not seed or not seed.get("trains"):
         return None
@@ -366,12 +383,79 @@ def assemble_day(
     if last_arr_min < first_dep_min:
         last_arr_min += 1440
 
-    # Prestazione = presentation + (last_arr - first_dep) + end
-    prestazione_min = last_arr_min - first_dep_min + PRESENTATION_MIN + END_MIN
+    # --- Step 6: accessori ACCp/ACCa per ogni segmento reale ---
+    # Se la callback get_material_segments e' fornita, calcoliamo i valori
+    # variabili dal giro materiale (40 condotta, 15/10 vettura, 80 preriscaldo
+    # dic-feb). Altrimenti fallback ai valori flat PRESENTATION_MIN / END_MIN.
+    if get_material_segments is not None:
+        for seg in all_segments:
+            if _seg_is_refezione(seg):
+                seg.setdefault("accp_min", 0)
+                seg.setdefault("acca_min", 0)
+                continue
+            mtid = seg.get("material_turn_id")
+            dix = seg.get("day_index", 0)
+            if mtid is None:
+                # Segmento senza giro materiale (raro): accessori di fallback
+                seg["accp_min"] = PRESENTATION_MIN if not _seg_is_deadhead(seg) else 15
+                seg["acca_min"] = END_MIN
+                continue
+            mat_segs = get_material_segments(mtid, dix) or [seg]
+            res = accessori_mod.apply_accessori(mat_segs, seg, day_date)
+            seg["accp_min"] = res["accp_min"]
+            seg["acca_min"] = res["acca_min"]
+
+    # ACCp del primo segmento REALE (non refez) + ACCa dell'ultimo REALE.
+    # Se il primo segmento e' una refez (slot 4), la refez copre l'ingresso:
+    # NON aggiungiamo ACCp separato. Stesso ragionamento per la coda.
+    first_is_refez = bool(all_segments) and _seg_is_refezione(all_segments[0])
+    last_is_refez = bool(all_segments) and _seg_is_refezione(all_segments[-1])
+
+    first_real = next((s for s in all_segments if not _seg_is_refezione(s)), None)
+    last_real = next((s for s in reversed(all_segments) if not _seg_is_refezione(s)), None)
+
+    if first_is_refez:
+        accp_boundary = 0
+    elif first_real is not None and "accp_min" in first_real:
+        accp_boundary = first_real["accp_min"]
+    else:
+        accp_boundary = PRESENTATION_MIN
+
+    if last_is_refez:
+        acca_boundary = 0
+    elif last_real is not None and "acca_min" in last_real:
+        acca_boundary = last_real["acca_min"]
+    else:
+        acca_boundary = END_MIN
+
+    # Prestazione = range (first-last di TUTTA la sequenza, refez inclusa) +
+    # ACCp del primo reale + ACCa dell'ultimo reale
+    prestazione_min = last_arr_min - first_dep_min + accp_boundary + acca_boundary
 
     # Condotta = solo segmenti produttivi (no deadhead, no refezione)
     condotta_min = sum(_seg_duration(s) for s in all_segments
                        if not _seg_is_deadhead(s) and not _seg_is_refezione(s))
+
+    # --- Step 6: rilevamento CV interni (same_pdc, prende tutto il PdC) ---
+    # Annota cv_min tra coppie consecutive di segmenti reali dello stesso
+    # material_turn_id. Serve per visualizzazione UI e per Step 8 (livello
+    # settimanale) dove si gestira' lo split tra PdC diversi.
+    n_cv = 0
+    real_seq = [s for s in all_segments if not _seg_is_refezione(s)]
+    for i in range(len(real_seq) - 1):
+        prev_s, next_s = real_seq[i], real_seq[i + 1]
+        cv = cv_registry.detect_cv(prev_s, next_s)
+        if cv is not None:
+            # same_pdc=True per i CV interni del turno PdC
+            try:
+                cva, cvp = cv_registry.compute_cv_split(cv["gap_min"],
+                                                         same_pdc=True)
+                prev_s["cv_after_min"] = cva
+                next_s["cv_before_min"] = cvp
+                n_cv += 1
+            except ValueError:
+                # Gap troppo piccolo per un CV valido: non annotiamo
+                pass
 
     # Vincolo hard: prestazione <= 8h40 ~ 520 min (slack sul 8h30 contratto)
     if prestazione_min > MAX_DAY_DURATION:
@@ -389,8 +473,11 @@ def assemble_day(
         "last_arr_min": last_arr_min,
         "prestazione_min": prestazione_min,
         "condotta_min": condotta_min,
+        "accp_boundary_min": accp_boundary,
+        "acca_boundary_min": acca_boundary,
         "n_positioning": len(positioning),
         "n_return": len(retur),
+        "n_cv": n_cv,
         "returns_depot": returns_depot,
         "is_fr": is_fr,
     }
