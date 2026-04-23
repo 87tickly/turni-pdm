@@ -4,6 +4,93 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Claude Design handoff #3: Step 0 Abilitazioni (corridoi)
+
+### Contesto
+
+Terzo handoff Claude Design (bundle wZp8lKDl6NNAwq9ntepASA). Implementa
+il prompt `PROMPT-claude-design-abilitazioni-rotabili.md`.
+
+Il bundle non includeva un `HANDOFF-abilitazioni.md` esplicito — ho
+ricostruito le specifiche dal mockup `screen-abilitazioni.html` e dalla
+chat, salvandole in `docs/HANDOFF-abilitazioni.md` per tracciabilita'.
+
+### Implementazione
+
+#### Mapping deterministico stazione → corridoio
+
+`frontend/src/lib/corridors.ts` (NEW, 120 righe):
+- 6 corridoi con badge colorato, ordine di rendering, nome:
+  `AT` ASTI (ambra), `MI` Milano (blu), `BG` Bergamo (viola),
+  `PV` Pavia/Po (teal), `MV` Mortara/Vigevano (slate), `OT` Altri
+- `classifyCorridor(a, b)`: primo match vince (ordine importante per
+  casi di confine come PAVIA↔VERCELLI → Pavia/Po e
+  MILANO ROGOREDO↔MORTARA → Milano)
+- `groupLinesByCorridor(lines)`: restituisce le linee raggruppate con
+  contatori enabled/total, ordinate per priorita' corridoio
+
+Match supporta wildcard prefisso (es. `MI.*` copre MI.CERTOSA,
+MI.LAMBRATE, MI.ROGOREDO, MI.P.GARIBALDI) e match esatto.
+
+#### AbilitazioniPanel riscritto
+
+`frontend/src/components/AbilitazioniPanel.tsx` (riscritto, 600 righe):
+
+**Stato COLLAPSED:**
+- Shield verde/warning + contatori linee/materiali
+- Lista dei primi 3 corridoi coperti inline
+- **Mini coverage bar** (6 colonne): badge corridoio + nome compatto +
+  count enabled/total + fill colorato proporzionale al ratio
+
+**Stato EXPANDED:**
+- **Chip materiali** orizzontali in alto (promossi dalla "codina")
+  con bottone "Tutti" per bulk enable
+- **Search inline** con placeholder "Cerca stazione…" e shortcut `/`
+  globale (listener su window keydown)
+- **Bulk globale**: "Attiva visibili" (enable tutte le filtrate) e
+  "Azzera tutto" (disable tutte)
+- **Corridoi** come card collassabili, ciascuno con:
+  - Badge colorato 2-lettere (`MI`/`PV`/`AT`/`BG`/`MV`/`OT`)
+  - Nome + contatore attive/totali
+  - Bottoni "Tutte" / "Nessuna" per corridoio
+  - Chevron collassabile
+  - Lista linee filtrate + contatore giri per linea
+
+Toggle ottimistici preservati (stessa API backend: addLinea,
+removeLinea, addMateriale, removeMateriale, getAbilitazioni).
+
+### Verifica
+
+- `npm run build` OK: 1762 moduli, 547 kB JS, 63 kB CSS
+- Preview dev: login pulita, **zero errori console**
+- TypeScript strict pass con `verbatimModuleSyntax`
+
+### Residui dichiarati
+
+1. **Bulk backend**: il redesign usa loop `addLinea` per enable di
+   un intero corridoio. Funziona ma e' lento su corridoi grandi
+   (es. Bergamo 4 linee ~400ms). Sarebbe meglio un
+   `POST /abilitazioni/bulk` lato backend — non bloccante, feature
+   futura.
+2. **Tooltip coverage bar** con lista linee — non prioritario.
+3. **Drag-drop re-assign manuale** di una linea a corridoio diverso —
+   non necessario oggi, il mapping copre tutti i casi reali.
+4. **Mapping per-deposito** (oggi ottimizzato per ALESSANDRIA):
+   estendere a `CORRIDORS_BY_DEPOT` quando aggiungeremo altri depositi
+   con stazioni che non matchano i pattern attuali.
+
+### File modificati
+
+- `frontend/src/lib/corridors.ts` (NEW)
+- `frontend/src/components/AbilitazioniPanel.tsx` (riscritto)
+- `frontend/dist/*` (rebuild)
+- `docs/HANDOFF-abilitazioni.md` (NEW, ricostruito dal mockup)
+- `LIVE-COLAZIONE.md`
+
+pytest 203/203 (nessun test Python toccato). npm build OK.
+
+---
+
 ## 2026-04-23 — Claude Design handoff #2: Gantt v3 (falsa riga PDF Trenord)
 
 ### Contesto
