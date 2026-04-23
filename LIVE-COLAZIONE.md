@@ -4,6 +4,97 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Handoff Claude Design: gantt interactions (estratto)
+
+### Contesto
+
+L'utente ha copiato `docs/PROMPT-claude-design-gantt-interactions.md`
+(creato stamattina, commit `eecb1ce`) su claude.ai/design. Claude
+Design ha risposto con un bundle tar.gz (5.9MB) contenente l'intero
+progetto di design (10 screen).
+
+### Cosa è stato recuperato dal bundle
+
+Il bundle contiene 10 screen, di cui 4 sono già implementate nel
+nostro repo (sidebar, calendario agente, gantt v3 base, abilitazioni)
+e 5 non ancora (editor+drawer, command palette, dashboard, cerca
+treni, handoff meta). Rilevante per questa sessione: **tab 3b · Gantt
+v3 · interactions**, che è la risposta diretta al nostro prompt.
+
+Claude Design ha prodotto:
+- `screen-gantt-interactions.html` (507 righe, 4 stati: idle /
+  selected+action-bar / drag-in-progress / cross-day DnD)
+- `gantt-ix.css` (325 righe) con token per action bar, slot
+  indicator, sticky time tooltip, kinetic ring
+- API TypeScript completa in `<pre>` dentro al mockup
+- Coverage table 1:1 `PdcGanttV2 → GanttSheet esteso` (10 feature
+  coperte 1:1 + 3 migliorate/nuove)
+
+Claude Design NON ha prodotto un handoff markdown separato come
+chiesto: la spec vive dentro al mockup HTML. Scelta:
+
+### Deliverable della sessione
+
+1. `docs/claude-design-bundles/gantt-interactions/` (NEW dir)
+   - `screen-gantt-interactions.html` (copia autoritativa dal bundle)
+   - `gantt-ix.css` (copia autoritativa dal bundle)
+   - `BUNDLE-README.md` (README del bundle Claude Design originale)
+2. `docs/HANDOFF-gantt-v3-interactions.md` (NEW, ~290 righe)
+
+### Contenuto dell'handoff estratto
+
+Sezioni:
+- **Obiettivo + invariante zero-regressione**
+- **API estesa · Props** — 10 props opt-in (ganttId, onSegmentDrag,
+  onTimelineClick, onCrossDragStart, onCrossDrop, onCrossRemove,
+  onAction, hideActionBar, autoFit, snapMinutes, dragThresholdPx)
+- **API estesa · Nuovi tipi** — `GanttAction` (8 valori), `CrossDragPayload`,
+  `CROSS_DAY_MIME = "application/x-colazione-block"`
+- **API estesa · Nuovi token** — 7 colori/shadow per `tokens.ts`
+  (SELECTED_RING, SELECTED_SHADOW, DRAG_GHOST_BORDER, DROP_SLOT,
+  DROP_SLOT_HALO, ACTION_BAR_BG, STICKY_TIME_BG)
+- **I 4 stati visivi** — spec render per S1 idle / S2 selected+action
+  bar / S3 drag (ghost + slot + sticky) / S4 cross-day (source/target
+  stack)
+- **Coverage 1:1** tabella completa 14 voci tutte dichiarate coperte
+- **Architettura suggerita** — `interactions.ts` come hook helper
+  esterno a `GanttSheet.tsx` per non gonfiarlo, firma
+  `useGanttInteractions()`, bind per segment/timeline, overlay
+  render helpers (action bar, ghost, slot indicator, sticky time)
+- **Edge case** — 8 casi dal prompt, tutti affrontati
+- **Checklist di merge** — 13 voci per la sessione implementativa
+- **File sorgente di riferimento** — puntatori al bundle con regola
+  "in caso di ambiguità vincono i sorgenti CSS/HTML"
+
+### Stato prossimo passo
+
+**CHECKPOINT**: aspetto validazione utente su l'handoff estratto
+prima di iniziare l'implementazione del codice. Motivo: implementare
+significa:
+- Estendere `GanttSheet.tsx` con hook `useGanttInteractions`
+- Creare `interactions.ts` (file nuovo)
+- Aggiornare `types.ts` + `tokens.ts`
+- Riscrivere `PdcGanttV2.tsx` come wrapper (~150 righe vs 1400 oggi)
+- Migrare i 3 consumer (`PdcPage`, `PdcBuilderPage`, `PdcDepotPage`)
+  in un commit unico per evitare stati ibridi
+- Test manuale tri-pagina
+
+Stima 5-8h di lavoro. Se l'handoff estratto è sbagliato o incompleto,
+si propaga al codice. Meglio validare su markdown che su 1500 righe
+di React.
+
+### File toccati
+
+- `docs/HANDOFF-gantt-v3-interactions.md` (NEW)
+- `docs/claude-design-bundles/gantt-interactions/screen-gantt-interactions.html` (NEW, da bundle)
+- `docs/claude-design-bundles/gantt-interactions/gantt-ix.css` (NEW, da bundle)
+- `docs/claude-design-bundles/gantt-interactions/BUNDLE-README.md` (NEW, da bundle)
+- `LIVE-COLAZIONE.md` (questa entry)
+
+Commit "docs:" → salta build+preview (regola 5 metodo).
+
+---
+
 ## 2026-04-23 — Prompt Claude Design per interazioni GanttSheet
 
 ### Contesto e diagnosi
