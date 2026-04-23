@@ -4,6 +4,97 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Prompt Claude Design per interazioni GanttSheet
+
+### Contesto e diagnosi
+
+Apertura sessione successiva alla chiusura di oggi. Scelto come task
+"migrazione `PdcGanttV2` → base Gantt v3" (residuo #1 dichiarato
+questa mattina). Diagnosi preliminare ha rivelato un blocco:
+
+1. `GanttSheet` oggi espone solo `onSegmentClick` e
+   `onSegmentContextMenu` (sola resa).
+2. `PdcGanttV2` ha 8 capacità interattive: drag move, resize
+   start/end, gruppo CVp/CVa legato al treno padrone, cross-day
+   HTML5 DnD, timeline click (add block), hover tooltip, action bar
+   contestuale 8-icone, autoFit range.
+3. I 3 consumer di `PdcGanttV2` (`PdcPage.tsx`, `PdcBuilderPage.tsx`,
+   `PdcDepotPage.tsx`) **sono tutti editor vivi**. Verifica:
+   `PdcPage` linea 697 `canEdit = !!onDetailChange`, e il chiamante
+   a linea 1361 passa sempre `onDetailChange={handleDetailChange}`
+   → `canEdit === true` sempre → drag+cross-day attivi.
+4. Una migrazione "props-invariate" di `PdcGanttV2` come wrapper di
+   `GanttSheet` (modello `AutoBuilderGantt`) rimuoverebbe
+   silenziosamente drag/resize/cross-day da tutte e 3 le pagine →
+   regressione grave.
+
+Ho prima proposto male una "Fase A limitata a PdcPage read-only";
+poi rivisto la diagnosi (PdcPage NON è read-only) e ammesso
+l'errore. Metodo regola 4.
+
+### Deliverable della sessione
+
+`docs/PROMPT-claude-design-gantt-interactions.md` (NEW, ~280 righe):
+
+Prompt mirato per claude.ai/design che chiede il redesign del
+**layer interazioni** sopra `GanttSheet`, senza toccare la resa
+visiva v3 esistente.
+
+Contenuti principali:
+
+- **Problema dichiarato**: copertura 0/8 capacità interattive di
+  `PdcGanttV2` in `GanttSheet`, tabella consumer e file reference
+- **8 capacità da portare dentro `GanttSheet`** specificate una per
+  una (drag, resize, linkage CV, cross-day DnD, timeline click,
+  tooltip, action bar, autoFit)
+- **API estesa auspicata** in TypeScript (tutte opt-in, zero
+  regressione su `AutoBuilderGantt` + `/gantt-preview`)
+- **Vincoli duri**: zero regressione consumer attuali, estetica v3
+  intatta, nessuna libreria DnD nuova, accessibilità keyboard
+  minima `Esc`
+- **8 edge case** (blocco ai margini, overnight wrap, gantt vuoto,
+  autoFit vs range esplicito, action bar clampata, auto-scroll
+  drag oltre il viewport, threshold 4px click-vs-drag, context menu
+  destro vs action bar)
+- **Deliverable atteso**: `docs/HANDOFF-gantt-v3-interactions.md`
+  con API + specifica interazioni + architettura hook suggerita +
+  spec action bar + spec cross-day DnD + tabella copertura
+  `PdcGanttV2 → GanttSheet esteso` per verificare 1:1, HTML
+  reference autocontenuto, sezione "Interazioni" in `GANTT-GUIDE.md`
+
+### Perché questo artefatto invece di codice
+
+CLAUDE.md regola 5: design UX/UI SEMPRE via Claude Design, MAI
+generare CSS/JSX inline. Qui si trattava di **decidere
+l'architettura** di 8 interazioni e relative interazioni fra loro
+(es. cosa fa un drag mentre l'action bar è aperta, threshold
+click-vs-drag, ghost durante cross-drag). È lavoro di design che
+Claude Design fa meglio con Opus 4.7 vision + lettura codebase
+diretta.
+
+### Prossimi passi (tracciati nei residui)
+
+Il residuo #1 (migrazione `PdcGanttV2`) resta parkato finché non
+arriva l'handoff `HANDOFF-gantt-v3-interactions.md`. Quando l'utente
+copia il prompt su claude.ai/design e riceve l'handoff, una sessione
+successiva implementa:
+
+1. Estensione di `GanttSheet` secondo la nuova API
+2. Riscrittura di `PdcGanttV2` come wrapper di `GanttSheet` (a
+   questo punto fattibile drop-in senza regressione)
+3. Migrazione dei 3 consumer in un batch unico per evitare stati
+   ibridi
+
+### File toccati
+
+- `docs/PROMPT-claude-design-gantt-interactions.md` (NEW)
+- `LIVE-COLAZIONE.md` (questa entry)
+
+Nessun cambio a codice eseguibile. Commit "docs:" → salta
+build+preview per la regola 5 del metodo.
+
+---
+
 ## 2026-04-23 — Chiusura sessione: docs/GANTT-GUIDE.md
 
 Fine sessione 2026-04-23. Creata nuova guida consolidata
