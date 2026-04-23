@@ -11,6 +11,7 @@ import { PdcPage } from "@/pages/PdcPage"
 import { PdcBuilderPage } from "@/pages/PdcBuilderPage"
 import { PdcDepotPage } from "@/pages/PdcDepotPage"
 import { AutoBuilderPage } from "@/pages/AutoBuilderPage"
+import { FRApprovalsPage } from "@/pages/FRApprovalsPage"
 import { SettingsPage } from "@/pages/SettingsPage"
 
 export default function App() {
@@ -29,6 +30,7 @@ export default function App() {
           <Route path="pdc/edit" element={<PdcBuilderPage />} />
           <Route path="pdc/depot/:impianto" element={<PdcDepotPage />} />
           <Route path="auto-genera" element={<AutoBuilderPage />} />
+          <Route path="fr-approvati" element={<FRApprovalsPage />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="impostazioni" element={<SettingsPage />} />
         </Route>

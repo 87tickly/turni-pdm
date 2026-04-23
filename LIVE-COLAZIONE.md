@@ -4,6 +4,108 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Step 10/10: UI dormite + taxi + non-chiudibili (FINALE)
+
+### Obiettivo
+
+Chiudere il piano con la UI che permette all'utente di approvare le FR
+candidate proposte dal builder, revocare approvazioni, e vedere le
+giornate non chiudibili con opzione taxi di rientro.
+
+### Implementazione frontend
+
+`frontend/src/components/FRApprovalsPanel.tsx` (NEW, 220 righe):
+- Carica lista FR approvate dal backend via GET
+- Mostra "Dormite proposte" (candidate) con bottone ✓ Approva
+- Mostra FR approvate con bottone ✕ per revocare
+- Input manuale per aggiungere stazione FR
+- Sezione "Giornate non chiudibili" con bottone 🚕 Taxi (placeholder
+  alert per ora, implementazione calcolo tragitto in future)
+- Stati: loading, error, empty
+
+`frontend/src/pages/FRApprovalsPage.tsx` (NEW, 60 righe):
+- Input PdC ID
+- Mostra FRApprovalsPanel quando PdC selezionato
+
+`frontend/src/App.tsx`:
+- Nuova route `/fr-approvati` -> FRApprovalsPage
+
+### Build
+
+`npm run build` eseguito: Vite 8.0.8, 1759 moduli, 516 kB JS, 62 kB CSS.
+Bundle committato in `frontend/dist/` (come da memoria operativa del
+progetto: Railway serve da dist, quindi va versionato).
+
+### Verifica UI
+
+Preview dev server avviato (port 5173):
+- Login page renderizza pulita (build OK)
+- Zero errori console
+- La nuova pagina `/fr-approvati` e' dietro Layout auth-gated; non
+  testabile senza backend attivo, ma compilazione TypeScript + Vite
+  pulita e route correttamente registrata.
+
+### Stato finale del piano 10/10
+
+Tutti i 10 step del piano condiviso con l'utente sono completati:
+
+| Step | Tema | Test nuovi |
+|---|---|---|
+| 1 | Vincoli base v4 (hop 1, gap 10) | 5 |
+| 2 | Fase C refezione (5 slot) | 8 |
+| 3 | Calendario preriscaldo | 8 |
+| 4 | Modulo accessori (gap >= 65) | 14 |
+| 5 | CV registry persistente | 16 |
+| 6 | Integrazione accessori+CV | 8 |
+| 7 | FR candidate + registry | 10 |
+| 8 | Week_assembler (ciclo 5+2) | 8 |
+| 9 | Cablaggio /api/build-auto | 6 |
+| 10 | UI dormite + taxi | (smoke UI) |
+
+**Test totali: 195/195 passati.** Tutti i 10 commit pushati su master.
+
+### Cosa il sistema fa ora
+
+- Builder v4 opera con `use_v4=True` dall'endpoint `/build-auto`
+- Giornata completa: seed (1-2 condotta) + pos (hop 1/2) + **refezione
+  automatica (5 slot + finestre)** + rientro, con fallback FR
+- **ACCp/ACCa reali** calcolati dal giro materiale (gap >= 65 min)
+- **Preriscaldo 80'** solo dic-feb
+- **CV interni** rilevati, annotati sui segmenti
+- **Registro cv_ledger** persistente per split CV tra PdC diversi
+- **FR approvate** persistenti per PdC, candidate proposte
+- **Vincoli riposo** 11h/14h/16h tra giornate (in week_assembler)
+- **UI** per approvare FR / revocare / vedere non-chiudibili
+- **Retrocompat totale**: use_v4=False mantiene comportamento legacy
+
+### Residui noti
+
+- Calcolo Taxi di rientro: il bottone nella UI oggi mostra solo un
+  alert, l'implementazione reale (durata/costo stimato da stazione a
+  deposito) e' feature futura
+- `week_assembler` non e' ancora cablato nell'endpoint principale
+  (`/build-auto` usa ancora la pipeline auto_builder con path v4 di
+  singola giornata); il cablaggio week-level richiede un endpoint
+  dedicato o un flag aggiuntivo
+- Contatore FR 28 giorni (max 3) richiede storico persistente tra
+  generazioni, non implementato in week_assembler v1
+- Scoring globale settimana (ore 33-38, varieta' linee) lasciato al
+  successivo lavoro di ottimizzazione
+- Benchmark ALOR_C pre/post v4 non eseguito: richiede PdC/deposito
+  con dataset reale nel DB; il cablaggio tecnico e' pronto
+
+### File modificati
+
+- `frontend/src/components/FRApprovalsPanel.tsx` (NEW)
+- `frontend/src/pages/FRApprovalsPage.tsx` (NEW)
+- `frontend/src/App.tsx` (route aggiunta)
+- `frontend/dist/*` (rebuild bundle)
+- `LIVE-COLAZIONE.md`
+
+pytest 195/195. npm run build OK.
+
+---
+
 ## 2026-04-23 — Step 9/10: cablaggio /api/build-auto al nuovo flusso v4
 
 ### Cosa era gia' in place
