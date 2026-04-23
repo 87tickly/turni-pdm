@@ -4,6 +4,89 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Fix AutoBuilderGantt: axis 00-24, ACCp/ACCa/CV sul Gantt, grab cursor, drop zone larga
+
+### Segnalazioni post-deploy del primo #4
+
+L'utente ha testato e riportato:
+1. "il gantt deve essere dalle 00 alle 24" — axis autoFit non voluta
+2. "mancano tutti i dettagli accessori in arrivo in partenza e i CVL
+   rappresentati nel gantt" — ACCp/ACCa e CV non si vedono nel Gantt
+   (erano solo nel popover)
+3. "se ci fai caso si accavallano le scritte" — label orari dep/arr
+   di uno stesso blocco si accavallano quando il blocco e' stretto
+4. "non è interagibile e non si possono muovere i treni tra un turno
+   e l altro" — UX drag non funziona/non e' chiara
+
+### Fix
+
+`frontend/src/components/gantt/types.ts`:
+- Esteso `GanttSegment` con `accp_min`, `acca_min`, `cv_before_min`,
+  `cv_after_min` (optional numbers) — propagazione fino al render
+  dentro GanttSheet.
+
+`frontend/src/components/AutoBuilderGantt.tsx`:
+- **Range fisso 00-24**: `startHour = 0`, `endHour = 24` sempre.
+  Tutti i Gantt auto-genera ora hanno la stessa scala, il dispatcher
+  riconosce a colpo d'occhio l'orario del turno.
+- Mapping ora propaga `accp_min`/`acca_min`/`cv_before_min`/
+  `cv_after_min` dal TrainSegment al GanttSegment (in aggiunta ai
+  flag `preheat`/`cvp`/`cva` gia' settati).
+
+`frontend/src/components/gantt/GanttSheet.tsx`:
+- **Label orari** soglia alzata da 40 a 70 px. Sotto 70px il blocco
+  mostra solo `dep_time` centrato invece di `dep + arr` alle estremita'.
+  Risolve l'accavallamento di "15:41 16:55" su blocchi stretti.
+- **Pill ACCp/ACCa sul Gantt**: piccola etichetta con bordo
+  `PREHEAT` color che appare a sinistra (ACCp) e a destra (ACCa) del
+  segmento quando i valori sono presenti. Formato `+40'`.
+- **Label CVp/CVa minuti**: "CVp 35'" sotto-inizio del seg, "CVa 20'"
+  sotto-fine — solo quando cv_before_min/cv_after_min > 0. In
+  aggiunta alla striscia verticale ambra/viola gia' rendered.
+- **Cursor grab** quando il seg e' trascinabile (draggable=true dal
+  cross-day), non solo quando onMouseDown e' set. L'utente vede
+  subito che puo' trascinare.
+- **Drop zone piu' larga**: da 40px (barHeight+20) a tutto rowH
+  (~75px). Il drop nel target Gantt si puo' fare ovunque nella riga,
+  non solo nella striscia stretta attorno alla barra.
+
+### Invariante zero-regressione
+
+`AutoBuilderGantt` e `/gantt-preview` continuano a funzionare perche'
+le modifiche sono additive:
+- Nuovi campi `GanttSegment.accp_min/acca_min/cv_*` sono `?` (opzionali)
+- GanttSheet li renderizza SOLO se `> 0` → niente visibile su
+  segmenti senza dati
+- Cursor "grab" si attiva solo se `draggable=true` (cross-day abilitato)
+
+### Verifica
+
+- `npm run build` clean (1764 moduli, 549 kB)
+- `/gantt-preview` invariato: 4 SVG, 43 foreignObject, cursor
+  `pointer` sui seg (draggable=false → no regressione)
+- No console errors
+- Verifica visiva su `/auto-genera` post-deploy
+
+### Residui ancora aperti
+
+- **Cross-turn drag non verificabile localmente** (serve deposito +
+  dati generati): se dopo deploy il drag ancora non funziona,
+  servira' diagnostica live in DevTools console
+- **Label overlap orizzontale tra segmenti adiacenti** (non dep/arr
+  dello stesso seg, ma label verticali di segmenti vicini): ancora
+  possibile se 2 blocchi distano < 60px. Non coperto da questa
+  pass, potenziale ulteriore fix (es. clipPath per label verticali)
+
+### File toccati
+
+- `frontend/src/components/gantt/types.ts`
+- `frontend/src/components/gantt/GanttSheet.tsx`
+- `frontend/src/components/AutoBuilderGantt.tsx`
+- `frontend/dist/*` (rebuild)
+- `LIVE-COLAZIONE.md`
+
+---
+
 ## 2026-04-23 — #4 Logica ACCp/ACCa/CVp/CVa esposta al frontend
 
 ### Diagnosi

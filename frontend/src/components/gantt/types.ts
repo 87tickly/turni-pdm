@@ -23,6 +23,12 @@ export interface GanttSegment {
   suspect_reason?: string   // vettura sospetta (ciclo); se set -> rosso punteggiato + ⚠
   cvp?: boolean             // prefix CVp nell'etichetta
   cva?: boolean             // prefix CVa nell'etichetta
+  // Accessori (backend: src/turn_builder/accessori.py)
+  accp_min?: number         // accessori in partenza (es. 40 cond, 15 vett, 80 preheat)
+  acca_min?: number         // accessori in arrivo (es. 40 cond, 10 vett)
+  // Cambio volante minuti (backend: src/turn_builder/cv_registry.py)
+  cv_before_min?: number    // CVp minuti (l'utente entra sul mezzo)
+  cv_after_min?: number     // CVa minuti (l'utente esce dal mezzo)
 }
 
 export interface GanttMetrics {

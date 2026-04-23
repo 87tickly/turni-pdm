@@ -235,18 +235,21 @@ export function GanttSheet({
           })}
         </g>
 
-        {/* Timeline click/drop zone — foreignObject per DnD affidabile */}
+        {/* Timeline click/drop zone — foreignObject per DnD affidabile.
+            Copre l'intera riga (non solo la banda della barra) cosi' il
+            drop cross-turn accetta il rilascio ovunque, non solo nella
+            striscia 20px attorno alla barra. */}
         {(onTimelineClick || onCrossDrop) && rows.map((_, i) => {
-          const y =
-            GANTT_LAYOUT.AXIS_Y + i * rowH + GANTT_LAYOUT.LABEL_BAND
+          const yRowTop =
+            GANTT_LAYOUT.AXIS_Y + i * rowH
           const bind = ix.bindTimeline()
           return (
             <foreignObject
               key={`timeline-zone-${i}`}
               x={GANTT_LAYOUT.COL_LEFT}
-              y={y - 10}
+              y={yRowTop}
               width={axisW}
-              height={barHeight + 20}
+              height={rowH}
               style={{ overflow: "visible" }}
             >
               <div
@@ -844,7 +847,9 @@ function SegHit({
         style={{
           width: "100%",
           height: "100%",
-          cursor: onMouseDown ? "grab" : "pointer",
+          // grab se il blocco e' trascinabile (cross-day) o resize-able
+          // (onMouseDown presente). pointer negli altri casi (click → popover).
+          cursor: draggable ? "grab" : onMouseDown ? "grab" : "pointer",
         }}
         onClick={onClick}
         onContextMenu={onContextMenu}
@@ -1248,11 +1253,13 @@ function TrainBar(p: SegProps) {
         </text>
       )}
 
-      {/* Minuti sotto barra */}
+      {/* Minuti sotto barra — due estremi solo se c'e' spazio sufficiente
+          (~70px per evitare collisione dei 5 char "HH:MM" × 2 = ~60px +
+          margine). Altrimenti solo dep_time centrato. */}
       {minutesMode !== "off" && (
         <g>
           {minutesMode === "hhmm" ? (
-            w > 40 ? (
+            w > 70 ? (
               <>
                 <text
                   x={x1}
@@ -1301,6 +1308,88 @@ function TrainBar(p: SegProps) {
             </text>
           )}
         </g>
+      )}
+
+      {/* ACCp / ACCa — pill orizzontali appoggiate ai bordi della barra */}
+      {(seg.accp_min ?? 0) > 0 && (
+        <g pointerEvents="none">
+          <rect
+            x={x1 - 22}
+            y={yBarTop + barH / 2 - 6}
+            width={20}
+            height={12}
+            rx={2}
+            fill="var(--color-surface-container-lowest, #FEFEFD)"
+            stroke={GANTT_COLORS.PREHEAT}
+            strokeWidth={0.6}
+          />
+          <text
+            x={x1 - 12}
+            y={yBarTop + barH / 2 + 3}
+            textAnchor="middle"
+            fontSize={8}
+            fontWeight={700}
+            fill={GANTT_COLORS.PREHEAT}
+            style={{ fontFamily: "var(--font-mono, monospace)" }}
+          >
+            +{seg.accp_min}&apos;
+          </text>
+        </g>
+      )}
+      {(seg.acca_min ?? 0) > 0 && (
+        <g pointerEvents="none">
+          <rect
+            x={x2 + 2}
+            y={yBarTop + barH / 2 - 6}
+            width={20}
+            height={12}
+            rx={2}
+            fill="var(--color-surface-container-lowest, #FEFEFD)"
+            stroke={GANTT_COLORS.PREHEAT}
+            strokeWidth={0.6}
+          />
+          <text
+            x={x2 + 12}
+            y={yBarTop + barH / 2 + 3}
+            textAnchor="middle"
+            fontSize={8}
+            fontWeight={700}
+            fill={GANTT_COLORS.PREHEAT}
+            style={{ fontFamily: "var(--font-mono, monospace)" }}
+          >
+            +{seg.acca_min}&apos;
+          </text>
+        </g>
+      )}
+
+      {/* CVp / CVa minuti — etichetta specifica se presente il valore
+          (oltre al flag cvp/cva gia' renderizzato come striscia verticale) */}
+      {(seg.cv_before_min ?? 0) > 0 && (
+        <text
+          x={x1 + 2}
+          y={yBarBot + 22}
+          fontSize={8}
+          fontWeight={600}
+          fill={GANTT_COLORS.CVP}
+          style={{ fontFamily: "var(--font-mono, monospace)" }}
+          pointerEvents="none"
+        >
+          CVp {seg.cv_before_min}&apos;
+        </text>
+      )}
+      {(seg.cv_after_min ?? 0) > 0 && (
+        <text
+          x={x2 - 2}
+          y={yBarBot + 22}
+          textAnchor="end"
+          fontSize={8}
+          fontWeight={600}
+          fill={GANTT_COLORS.CVA}
+          style={{ fontFamily: "var(--font-mono, monospace)" }}
+          pointerEvents="none"
+        >
+          CVa {seg.cv_after_min}&apos;
+        </text>
       )}
 
       {/* ⚠ vettura sospetta */}

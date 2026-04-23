@@ -134,9 +134,6 @@ export function AutoBuilderGantt({
     segments.forEach((seg, origIdx) => {
       const isRefez = Boolean(seg.is_refezione)
       const isDH = !isRefez && Boolean(seg.is_deadhead)
-      // CVp = questo seg e' entrata su un cambio volante (cv_before_min > 0)
-      // CVa = uscita su un cambio volante (cv_after_min > 0)
-      // Backend: src/turn_builder/cv_registry.py annota questi valori.
       const cvp = (seg.cv_before_min ?? 0) > 0
       const cva = (seg.cv_after_min ?? 0) > 0
       mapped.push({
@@ -149,6 +146,10 @@ export function AutoBuilderGantt({
         preheat: seg.is_preheat,
         cvp,
         cva,
+        accp_min: seg.accp_min,
+        acca_min: seg.acca_min,
+        cv_before_min: seg.cv_before_min,
+        cv_after_min: seg.cv_after_min,
       })
       mappedToOriginalIdx.push(origIdx)
     })
@@ -183,6 +184,9 @@ export function AutoBuilderGantt({
     }
 
     // ─── Range orario ───
+    // Richiesta utente 23/04/2026: asse sempre 00-24, non auto-fit —
+    // cosi' tutti i Gantt hanno la stessa scala e il dispatcher
+    // riconosce a colpo d'occhio "che orario occupa un turno".
     const startAnchor = presentationTime
       ? timeToMin(presentationTime)
       : timeToMin(segments[0].dep_time)
@@ -190,9 +194,8 @@ export function AutoBuilderGantt({
       ? timeToMin(endTime)
       : timeToMin(segments[segments.length - 1].arr_time)
     if (endAnchor < startAnchor) endAnchor += 1440
-
-    const startHour = Math.floor(startAnchor / 60)
-    const endHour = Math.ceil(endAnchor / 60)
+    const startHour = 0
+    const endHour = 24
 
     // ─── Metriche placeholder ───
     // AutoBuilderPage non passa metriche al Gantt (sono mostrate a parte
