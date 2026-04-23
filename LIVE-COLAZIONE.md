@@ -4,6 +4,73 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Step 8/10: week_assembler (orchestrazione ciclo 5+2)
+
+### Contesto
+
+Sopra al `day_assembler` (che genera UNA giornata) serviva un livello
+superiore che orchestrasse l'intera settimana del PdC: 5 giornate
+lavorative + 2 riposi, con i vincoli di riposo tra turni che cambiano
+in base al tipo di giornata precedente.
+
+### Implementazione
+
+`src/turn_builder/week_assembler.py` (NEW, 200 righe):
+
+- `required_rest_min(day_result)` -> int: riposo richiesto DOPO una
+  giornata in base alle regole:
+    - 11h standard (default)
+    - 14h se fine turno in finestra 00:01-01:00
+    - 16h se il turno e' notturno (tocca fascia 00:01-06:00)
+  Si applica la regola piu' stringente.
+
+- `assemble_week(pdc_id, deposito, days_input, fr_stations, ...)` -> dict:
+  greedy con backtracking locale sui seed candidati:
+    - Per ogni giorno, prova i seed in ordine di score
+    - Scarta quelli che violerebbero il riposo dal giorno precedente
+    - Rispetta vincolo FR max 1 approvata/settimana
+    - Carica FR approvate da DB via `fr_registry` se conn fornita
+    - Restituisce 5 day_result + 2 None (i giorni di riposo)
+    - Metriche: ore, condotta, n FR approvate, n FR candidate, scoperte
+
+Vincolo attivo:
+  - Riposo 11h/14h/16h tra turni (da src/constants.py)
+  - Max 1 FR approvata per settimana (richiesta utente)
+
+Vincolo non implementato in questo step (future):
+  - Ciclo 5+2 con rotazione settimana piena (LMXGVS + D)
+  - Contatore FR 28 giorni (richiede storico PdC, arrivera' con la UI)
+  - Scoring globale (sara' integrato a Step 9 riciclando auto_builder)
+
+### Verifica
+
+`tests/test_week_assembler_step8.py` (NEW, 8 test):
+- Settimana 5 giorni OK (tutti assemblati + 2 riposo None)
+- Seed che violerebbe riposo 11h viene scartato, si prova il successivo
+- Max 1 FR approvata per settimana rispettato
+- Giornata senza seed candidates -> scoperta (None) con contatori coerenti
+- required_rest_min: standard, dopo notturno (fascia 00:01-06:00 = 16h),
+  fine 00:01-01:00, default per day=None
+
+Pytest: **189/189** (181 + 8 nuovi). Zero regressioni.
+
+### Residuo / prossimi step
+
+- Step 9: cablare `/api/build-auto` al nuovo flusso v4. Adapter che
+  costruisce days_input dal DB (get_material_segments, seed candidates
+  per giorno), feature flag USE_V4, benchmark su ALOR_C.
+- Step 10: UI dormite + taxi + non-chiudibili.
+
+### File modificati
+
+- `src/turn_builder/week_assembler.py` (NEW)
+- `tests/test_week_assembler_step8.py` (NEW)
+- `LIVE-COLAZIONE.md`
+
+pytest 189/189.
+
+---
+
 ## 2026-04-23 — Step 7/10: FR candidate + registry pdc_fr_approved
 
 ### Regola di business
