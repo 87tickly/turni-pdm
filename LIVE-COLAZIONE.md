@@ -4,6 +4,83 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — #3 Cross-turn drag in AutoBuilderPage
+
+### Contesto
+
+Residuo #3 del feedback utente su `/auto-genera`: "non vi è
+nessuna interazione/spostamento fluido verso un altro turno prodotto".
+Ogni `AutoBuilderGantt` era isolato (no `ganttId`, no handler
+cross-day), quindi trascinare un treno da una variante all'altra
+non faceva nulla.
+
+### Implementazione
+
+`frontend/src/components/AutoBuilderGantt.tsx`:
+- Nuove prop opzionali: `ganttId`, `onCrossDragStart`, `onCrossDrop`,
+  `onCrossRemove` (passate a `GanttSheet`)
+- Helper `ganttSegToTrainSeg()` che ricostruisce un `TrainSegment`
+  dal `GanttSegment` del payload cross-gantt (il target non ha
+  accesso diretto al TrainSegment del source — lo ricrea dai campi
+  comuni)
+- `handleCrossDragStart` converte payload payload CrossDragPayload
+  → oggetto `{seg, segIdx, ganttId}` specifico per l'AutoBuilder,
+  filtrando i seg virtuali (refez iniettata idx=-1, non trascinabile)
+- `handleCrossDrop` forward atomico al parent: source id+idx+seg
+  + target id + dropTime
+
+`frontend/src/pages/AutoBuilderPage.tsx`:
+- Nuovo utility `ganttIdFor(day, variant)` → `D${day}-${variant}`
+  (es. `D2-LMXGV`), e `parseGanttId()` inverso
+- Stato `dirty: DirtyMap` (key `D${day}-${variant}` → boolean) per
+  tracciare le varianti modificate via drag
+- `moveSegmentAcrossTurns()` — handler unificato che in **un'unica
+  `setResult`** atomica:
+  1. Rimuove il segmento da `days[src.day].variants[src.var].summary.segments[src.idx]`
+  2. Lo inserisce in `days[tgt.day].variants[tgt.var].summary.segments` ordinato per dep_time, con tempi aggiornati
+     (preserva durata originale spostando dep al dropTime)
+  3. Marca source + target come dirty
+- Propagazione handler: AutoBuilderPage → DayBlock → VariantRow →
+  AutoBuilderGantt
+- Badge `MODIFICATO` arancio accanto al badge FR sulla variant
+  row, con `title` che spiega "metriche non aggiornate, ri-salva
+  per ricalcolare"
+
+### Limiti noti (tracciati)
+
+- **Metriche stale**: dopo drag, `condotta_min`, `prestazione_min`,
+  `meal_*`, `violations`, `last_station` restano i valori
+  precedenti al drag. La variante e' marcata `MODIFICATO` come
+  avviso visivo. Ri-calcolare richiederebbe re-invocare
+  `validate_day_variant()` backend o portare la logica lato client.
+  Per ora: acceptable prototipo. Prossima iterazione: endpoint
+  dedicato `/validate-variant` che prende `segments[]` + depot e
+  ritorna summary aggiornata.
+- **Cross-day tra giornate diverse ok**: il handler supporta anche
+  `sourceDay !== targetDay` (es. spostare treno da D2-LMXGV a
+  D3-LMXGV). Il badge MODIFICATO compare su entrambe.
+- **Undo non disponibile**: una volta trascinato, non c'e' pulsante
+  "annulla". L'utente puo' ri-generare da zero se sbaglia. Residuo
+  UX.
+
+### Verifica
+
+- `npm run build` clean (1764 moduli, 546 kB)
+- `/gantt-preview` invariato (4 SVG, 43 foreignObject, no console
+  errors) — nessuna regressione sulla base
+- `/auto-genera` non testabile su devtest (richiede deposito con
+  materiale + generazione). Verifica visiva su produzione dopo
+  deploy
+
+### File toccati
+
+- `frontend/src/components/AutoBuilderGantt.tsx`
+- `frontend/src/pages/AutoBuilderPage.tsx`
+- `frontend/dist/*` (rebuild)
+- `LIVE-COLAZIONE.md`
+
+---
+
 ## 2026-04-23 — Fix AutoBuilderGantt: vertical labels + click popover
 
 ### Problemi segnalati

@@ -13,7 +13,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { TrainSegment } from "@/lib/api"
 import { GanttSheet } from "@/components/gantt/GanttSheet"
-import type { GanttSegment, GanttRow } from "@/components/gantt/types"
+import type {
+  CrossDragPayload,
+  GanttSegment,
+  GanttRow,
+} from "@/components/gantt/types"
 
 
 interface Props {
@@ -23,6 +27,40 @@ interface Props {
   mealStart?: string
   mealEnd?: string
   onSegmentClick?: (seg: TrainSegment, index: number) => void
+  /**
+   * Abilita cross-turn drag fra piu' AutoBuilderGantt in pagina.
+   * Il consumer passa un ID univoco (es. "D2-LMXGV"), gli handler
+   * di drop/remove mutano gli array di segmenti a livello parent.
+   */
+  ganttId?: string
+  onCrossDragStart?: (p: { seg: TrainSegment; segIdx: number; ganttId: string }) => void
+  onCrossDrop?: (
+    sourceGanttId: string,
+    sourceSegIdx: number,
+    sourceSeg: TrainSegment,
+    targetGanttId: string,
+    dropTime: { hour: number; minute: number },
+  ) => void
+  onCrossRemove?: (segIdx: number) => void
+}
+
+
+/** Converte GanttSegment -> TrainSegment perdendo solo i flag visivi che
+ * non esistono sul modello backend (preheat, cvp, cva diventano boolean
+ * su TrainSegment se presenti, altrimenti scartati). */
+function ganttSegToTrainSeg(gs: GanttSegment): TrainSegment {
+  return {
+    train_id: gs.train_id,
+    from_station: gs.from_station,
+    to_station: gs.to_station,
+    dep_time: gs.dep_time,
+    arr_time: gs.arr_time,
+    is_deadhead: gs.kind === "dh",
+    ...(gs.kind === "refez" ? { is_refezione: true } : {}),
+    ...(gs.preheat ? { is_preheat: true } : {}),
+    ...(gs.cvp ? { cvp: true } : {}),
+    ...(gs.cva ? { cva: true } : {}),
+  } as TrainSegment
 }
 
 
@@ -49,6 +87,10 @@ export function AutoBuilderGantt({
   mealStart,
   mealEnd,
   onSegmentClick,
+  ganttId,
+  onCrossDragStart,
+  onCrossDrop,
+  onCrossRemove,
 }: Props) {
   const [popover, setPopover] = useState<{
     seg: TrainSegment
@@ -241,6 +283,50 @@ export function AutoBuilderGantt({
         labels="vertical"
         minutes="hhmm"
         onSegmentClick={handleSegmentClick}
+        ganttId={ganttId}
+        onCrossDragStart={
+          onCrossDragStart && ganttId
+            ? (payload: CrossDragPayload) => {
+                const segIdx = view.rows[0].segments.indexOf(payload.seg)
+                if (segIdx < 0) return
+                const origIdx = view.mappedToOriginalIdx[segIdx]
+                if (origIdx < 0) return  // refez virtuale: non trascinabile
+                onCrossDragStart({
+                  seg: segments[origIdx],
+                  segIdx: origIdx,
+                  ganttId: payload.ganttId,
+                })
+              }
+            : undefined
+        }
+        onCrossDrop={
+          onCrossDrop && ganttId
+            ? (payload: CrossDragPayload, targetGanttId: string, dropTime) => {
+                // Il source puo' essere un altro AutoBuilderGantt — il
+                // payload ha il GanttSegment ma non il TrainSegment
+                // originale. Ricostruiamo TrainSegment dai campi del GS.
+                const sourceSeg = ganttSegToTrainSeg(payload.seg)
+                onCrossDrop(
+                  payload.ganttId,
+                  payload.segIdx,
+                  sourceSeg,
+                  targetGanttId,
+                  { hour: dropTime.hour, minute: dropTime.minute },
+                )
+              }
+            : undefined
+        }
+        onCrossRemove={
+          onCrossRemove
+            ? (_segIdx: number, _withLinkedCvs: boolean) => {
+                // segIdx arriva indicizzato sulla view (mappedToOriginalIdx).
+                // Lo ritraduciamo all'indice originale di `segments`.
+                const origIdx = view.mappedToOriginalIdx[_segIdx]
+                if (origIdx < 0) return
+                onCrossRemove(origIdx)
+              }
+            : undefined
+        }
       />
 
       {popover && (

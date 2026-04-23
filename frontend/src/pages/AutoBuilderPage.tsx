@@ -34,9 +34,38 @@ import {
   type BuildAutoWeeklyDay,
   type AutoWeeklyVariant,
   type AppConstants,
+  type TrainSegment,
 } from "@/lib/api"
 import { AbilitazioniPanel } from "@/components/AbilitazioniPanel"
 import { AutoBuilderGantt } from "@/components/AutoBuilderGantt"
+
+// Segna quali varianti sono state modificate dall'utente (drag cross-turn)
+// → metriche mostrate diventano stale finche' non si ricalcolano.
+type DirtyMap = Record<string, boolean>  // key = `D${day}-${variant}`
+
+function ganttIdFor(dayNum: number, variantType: string): string {
+  return `D${dayNum}-${variantType}`
+}
+
+function parseGanttId(id: string): { day: number; variant: string } | null {
+  const m = id.match(/^D(\d+)-(.+)$/)
+  if (!m) return null
+  return { day: parseInt(m[1], 10), variant: m[2] }
+}
+
+function timeToMin(t: string): number {
+  if (!t || !/^\d{1,2}:\d{2}$/.test(t)) return 0
+  const [h, m] = t.split(":").map(Number)
+  return h * 60 + (m || 0)
+}
+
+function minToTimeHHMM(min: number): string {
+  const m = ((min % 1440) + 1440) % 1440
+  const h = Math.floor(m / 60)
+  const mm = m % 60
+  return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`
+}
+
 
 export function AutoBuilderPage() {
   const navigate = useNavigate()
@@ -49,6 +78,82 @@ export function AutoBuilderPage() {
   const [error, setError] = useState<string>("")
   const [progress, setProgress] = useState<number>(0)
   const [progressPhase, setProgressPhase] = useState<string>("")
+  const [dirty, setDirty] = useState<DirtyMap>({})
+
+  // Handler cross-turn drag: sposta un segmento da (sourceDay,sourceVar)
+  // a (targetDay,targetVar) al dropTime indicato. Rimozione da source +
+  // inserimento in target avvengono in un'unica setResult atomica.
+  // Metriche (condotta_min, prestazione_min, meal_*, violations) non
+  // ricalcolate — marchiamo entrambe le varianti come "dirty" per
+  // avvisare l'utente che serve re-generare o salvare.
+  const moveSegmentAcrossTurns = (
+    sourceGanttId: string,
+    sourceSegIdx: number,
+    sourceSeg: TrainSegment,
+    targetGanttId: string,
+    dropTime: { hour: number; minute: number },
+  ) => {
+    if (sourceGanttId === targetGanttId) return
+    const src = parseGanttId(sourceGanttId)
+    const tgt = parseGanttId(targetGanttId)
+    if (!src || !tgt) return
+
+    setResult((prev) => {
+      if (!prev) return prev
+      // Deep clone of days — rest of response unchanged
+      const nextDays = prev.days.map((d) => {
+        if (d.day_number !== src.day && d.day_number !== tgt.day) return d
+        return {
+          ...d,
+          variants: d.variants.map((v) => {
+            // Source: rimuovi
+            if (d.day_number === src.day && v.variant_type === src.variant) {
+              if (!v.summary) return v
+              const segs = [...v.summary.segments]
+              segs.splice(sourceSegIdx, 1)
+              return {
+                ...v,
+                summary: { ...v.summary, segments: segs },
+              }
+            }
+            // Target: inserisci con nuovo orario
+            if (d.day_number === tgt.day && v.variant_type === tgt.variant) {
+              if (!v.summary) return v
+              const dropMin = dropTime.hour * 60 + dropTime.minute
+              const depOrigMin = timeToMin(sourceSeg.dep_time)
+              let arrOrigMin = timeToMin(sourceSeg.arr_time)
+              if (arrOrigMin < depOrigMin) arrOrigMin += 1440
+              const duration = arrOrigMin - depOrigMin
+              const newArrMin = dropMin + (duration > 0 ? duration : 0)
+              const moved: TrainSegment = {
+                ...sourceSeg,
+                dep_time: minToTimeHHMM(dropMin),
+                arr_time: minToTimeHHMM(newArrMin),
+              }
+              const segs = [...v.summary.segments]
+              const insertAt = segs.findIndex(
+                (s) => timeToMin(s.dep_time) > dropMin,
+              )
+              if (insertAt === -1) segs.push(moved)
+              else segs.splice(insertAt, 0, moved)
+              return {
+                ...v,
+                summary: { ...v.summary, segments: segs },
+              }
+            }
+            return v
+          }),
+        }
+      })
+      return { ...prev, days: nextDays }
+    })
+
+    setDirty((prev) => ({
+      ...prev,
+      [sourceGanttId]: true,
+      [targetGanttId]: true,
+    }))
+  }
 
   useEffect(() => {
     getConstants()
@@ -429,7 +534,12 @@ export function AutoBuilderPage() {
       {result && days.length > 0 && (
         <div className="space-y-5">
           {days.map((day) => (
-            <DayBlock key={`day-${day.day_number}`} day={day} />
+            <DayBlock
+              key={`day-${day.day_number}`}
+              day={day}
+              dirty={dirty}
+              onCrossDrop={moveSegmentAcrossTurns}
+            />
           ))}
         </div>
       )}
@@ -539,7 +649,21 @@ function variantColors(vt: string): { bg: string; fg: string } {
   return { bg: "var(--color-surface-container-high)", fg: "var(--color-on-surface-muted)" }
 }
 
-function DayBlock({ day }: { day: BuildAutoWeeklyDay }) {
+function DayBlock({
+  day,
+  dirty,
+  onCrossDrop,
+}: {
+  day: BuildAutoWeeklyDay
+  dirty: DirtyMap
+  onCrossDrop: (
+    sourceGanttId: string,
+    sourceSegIdx: number,
+    sourceSeg: TrainSegment,
+    targetGanttId: string,
+    dropTime: { hour: number; minute: number },
+  ) => void
+}) {
   return (
     <div
       className="rounded-xl overflow-hidden"
@@ -580,6 +704,8 @@ function DayBlock({ day }: { day: BuildAutoWeeklyDay }) {
             key={`day${day.day_number}-${v.variant_type}-${i}`}
             dayNum={day.day_number}
             variant={v}
+            isDirty={!!dirty[ganttIdFor(day.day_number, v.variant_type)]}
+            onCrossDrop={onCrossDrop}
           />
         ))}
       </div>
@@ -587,8 +713,25 @@ function DayBlock({ day }: { day: BuildAutoWeeklyDay }) {
   )
 }
 
-function VariantRow({ dayNum, variant }: { dayNum: number; variant: AutoWeeklyVariant }) {
+function VariantRow({
+  dayNum,
+  variant,
+  isDirty,
+  onCrossDrop,
+}: {
+  dayNum: number
+  variant: AutoWeeklyVariant
+  isDirty: boolean
+  onCrossDrop: (
+    sourceGanttId: string,
+    sourceSegIdx: number,
+    sourceSeg: TrainSegment,
+    targetGanttId: string,
+    dropTime: { hour: number; minute: number },
+  ) => void
+}) {
   const vt = variant.variant_type
+  const thisGanttId = ganttIdFor(dayNum, vt)
   const colors = variantColors(vt)
   const label = variantLabel(vt)
 
@@ -734,6 +877,20 @@ function VariantRow({ dayNum, variant }: { dayNum: number; variant: AutoWeeklyVa
             FR
           </span>
         )}
+        {isDirty && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+            title="Modificato via drag — metriche non aggiornate, ri-salva per ricalcolare"
+            style={{
+              backgroundColor: "rgba(234, 88, 12, 0.14)",
+              color: "#C2410C",
+              fontFamily: "var(--font-mono)",
+              letterSpacing: "0.04em",
+            }}
+          >
+            MODIFICATO
+          </span>
+        )}
         {s.night_minutes > 0 && (
           <Moon size={12} style={{ color: "var(--color-on-surface-muted)" }} />
         )}
@@ -777,6 +934,8 @@ function VariantRow({ dayNum, variant }: { dayNum: number; variant: AutoWeeklyVa
           endTime={s.end_time}
           mealStart={s.meal_start}
           mealEnd={s.meal_end}
+          ganttId={thisGanttId}
+          onCrossDrop={onCrossDrop}
         />
       </div>
 
