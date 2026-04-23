@@ -132,24 +132,23 @@ export function AutoBuilderGantt({
     const mapped: GanttSegment[] = []
     const mappedToOriginalIdx: number[] = []
     segments.forEach((seg, origIdx) => {
-      const s = seg as TrainSegment & {
-        is_refezione?: boolean
-        is_preheat?: boolean
-        cvp?: boolean
-        cva?: boolean
-      }
-      const isRefez = Boolean(s.is_refezione)
-      const isDH = !isRefez && Boolean(s.is_deadhead)
+      const isRefez = Boolean(seg.is_refezione)
+      const isDH = !isRefez && Boolean(seg.is_deadhead)
+      // CVp = questo seg e' entrata su un cambio volante (cv_before_min > 0)
+      // CVa = uscita su un cambio volante (cv_after_min > 0)
+      // Backend: src/turn_builder/cv_registry.py annota questi valori.
+      const cvp = (seg.cv_before_min ?? 0) > 0
+      const cva = (seg.cv_after_min ?? 0) > 0
       mapped.push({
         kind: isRefez ? "refez" : isDH ? "dh" : "cond",
-        train_id: s.train_id,
-        from_station: s.from_station,
-        to_station: s.to_station,
-        dep_time: s.dep_time,
-        arr_time: s.arr_time,
-        preheat: s.is_preheat,
-        cvp: s.cvp,
-        cva: s.cva,
+        train_id: seg.train_id,
+        from_station: seg.from_station,
+        to_station: seg.to_station,
+        dep_time: seg.dep_time,
+        arr_time: seg.arr_time,
+        preheat: seg.is_preheat,
+        cvp,
+        cva,
       })
       mappedToOriginalIdx.push(origIdx)
     })
@@ -413,18 +412,93 @@ export function AutoBuilderGantt({
               {" → "}
               <strong>{popover.seg.arr_time}</strong>
             </div>
-            <div>
+            <div style={{ marginBottom: 2 }}>
               <span style={{ color: "var(--color-on-surface-quiet, #6B7280)" }}>
                 Tipo:{" "}
               </span>
               <strong>
                 {popover.seg.is_deadhead
                   ? "Vettura (deadhead)"
-                  : (popover.seg as TrainSegment & { is_refezione?: boolean }).is_refezione
+                  : popover.seg.is_refezione
                   ? "Refezione"
                   : "Condotta"}
               </strong>
             </div>
+
+            {/* Accessori ACCp/ACCa (solo se presenti e > 0) */}
+            {((popover.seg.accp_min ?? 0) > 0 || (popover.seg.acca_min ?? 0) > 0) && (
+              <div
+                style={{
+                  marginTop: 6,
+                  paddingTop: 6,
+                  boxShadow: "inset 0 1px 0 var(--color-ghost, #E1E5EC)",
+                }}
+              >
+                {(popover.seg.accp_min ?? 0) > 0 && (
+                  <div style={{ marginBottom: 2 }}>
+                    <span style={{ color: "var(--color-on-surface-quiet, #6B7280)" }}>
+                      ACCp (preparazione):{" "}
+                    </span>
+                    <strong>{popover.seg.accp_min}&apos;</strong>
+                    {popover.seg.is_preheat && (
+                      <span style={{ marginLeft: 6, color: "#0062CC" }}>
+                        ● preriscaldo
+                      </span>
+                    )}
+                  </div>
+                )}
+                {(popover.seg.acca_min ?? 0) > 0 && (
+                  <div style={{ marginBottom: 2 }}>
+                    <span style={{ color: "var(--color-on-surface-quiet, #6B7280)" }}>
+                      ACCa (spegnimento):{" "}
+                    </span>
+                    <strong>{popover.seg.acca_min}&apos;</strong>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Cambio volante CVp/CVa (solo se presenti) */}
+            {((popover.seg.cv_before_min ?? 0) > 0 || (popover.seg.cv_after_min ?? 0) > 0) && (
+              <div
+                style={{
+                  marginTop: 6,
+                  paddingTop: 6,
+                  boxShadow: "inset 0 1px 0 var(--color-ghost, #E1E5EC)",
+                }}
+              >
+                {(popover.seg.cv_before_min ?? 0) > 0 && (
+                  <div style={{ marginBottom: 2 }}>
+                    <span style={{ color: "#B45309" }}>CVp (cambio volante in):</span>{" "}
+                    <strong>{popover.seg.cv_before_min}&apos;</strong>
+                  </div>
+                )}
+                {(popover.seg.cv_after_min ?? 0) > 0 && (
+                  <div style={{ marginBottom: 2 }}>
+                    <span style={{ color: "#6B21A8" }}>CVa (cambio volante out):</span>{" "}
+                    <strong>{popover.seg.cv_after_min}&apos;</strong>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Diagnostica gap materiale */}
+            {(popover.seg.gap_before != null || popover.seg.gap_after != null) && (
+              <div
+                style={{
+                  marginTop: 6,
+                  paddingTop: 6,
+                  boxShadow: "inset 0 1px 0 var(--color-ghost, #E1E5EC)",
+                  fontSize: 10.5,
+                  color: "var(--color-on-surface-quiet, #6B7280)",
+                }}
+              >
+                Gap materiale:{" "}
+                {popover.seg.gap_before != null ? `${popover.seg.gap_before}' prima` : "primo"}
+                {" · "}
+                {popover.seg.gap_after != null ? `${popover.seg.gap_after}' dopo` : "ultimo"}
+              </div>
+            )}
           </div>
         </div>
       )}

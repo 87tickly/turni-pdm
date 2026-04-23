@@ -4,6 +4,90 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — #4 Logica ACCp/ACCa/CVp/CVa esposta al frontend
+
+### Diagnosi
+
+L'utente lamentava "non viene adottata nessuna logica di acca, accp,
+cv di refezione" sui turni generati da `/auto-genera`.
+
+Studiando il codice backend ho trovato che la logica **esiste già**:
+
+- `src/turn_builder/accessori.py` (33 righe docs + 147 implementation):
+  calcola ACCp/ACCa per ogni segmento in base al gap materiale ≥65min
+  (soglia). Valori: ACCp condotta 40', ACCp vettura 15', ACCp
+  preriscaldo (dic-feb) 80', ACCa condotta 40', ACCa vettura 10'
+- `src/turn_builder/cv_registry.py`: registra CV (cambio volante)
+  persistente, calcola split minuti tra PdC che subentra e PdC che
+  esce quando il gap materiale e' <65min
+- `src/turn_builder/day_assembler.py` linea 408-424: **chiama**
+  `apply_accessori()` sui segmenti reali della giornata, salvando
+  `accp_min` e `acca_min` sul dict segmento
+- `day_assembler.py` linea 461-476: **chiama** `detect_cv()` +
+  `compute_cv_split()` tra coppie consecutive, salva `cv_after_min`
+  e `cv_before_min`
+
+Il problema **non era backend mancante** — il problema era che
+questi campi **non arrivavano al frontend**: il tipo TypeScript
+`TrainSegment` in `frontend/src/lib/api.ts` dichiarava solo
+`train_id/from_station/to_station/dep_time/arr_time/is_deadhead/
+material_turn_id/day_index`. Tutti gli altri campi runtime erano
+ignorati da TS e quindi invisibili al rendering.
+
+### Implementazione
+
+`frontend/src/lib/api.ts`:
+- Esteso `TrainSegment` con 8 campi opzionali documentati:
+  `accp_min`, `acca_min`, `cv_before_min`, `cv_after_min`,
+  `is_preheat`, `is_refezione`, `gap_before`, `gap_after`
+
+`frontend/src/components/AutoBuilderGantt.tsx`:
+- Mapping TrainSegment → GanttSegment ora popola i flag:
+  - `preheat` ← `seg.is_preheat` (bullet ● gia' renderizzato da
+    GanttSheet TrainBar)
+  - `cvp` ← `seg.cv_before_min > 0` (marker verticale ambra)
+  - `cva` ← `seg.cv_after_min > 0` (marker verticale viola)
+- Popover info treno esteso con:
+  - Blocco "Accessori" (ACCp/ACCa) in minuti se presenti
+    + badge "● preriscaldo" se applicabile
+  - Blocco "Cambio volante" (CVp/CVa) in minuti se presenti
+  - Diagnostica gap materiale (gap_before/gap_after) in footnote
+- `ganttSegToTrainSeg` esteso per preservare `is_refezione` +
+  `is_preheat` nel cross-turn drop (il target ri-crea il
+  TrainSegment dalla GanttSegment)
+
+### Residui tracciati
+
+- **Visualizzazione ACCp/ACCa sull'asse**: il PDF Trenord mostra i
+  minuti accessori sull'asse secondario (riga ausiliaria). Oggi
+  sono visibili solo nel popover. Se utile, aggiungere banda
+  ausiliaria in GanttSheet per ACCp (es. "+40" a inizio segmento) e
+  ACCa (es. "+40" a fine). Tracked separately.
+- **Backend-side endpoint `/validate-variant`**: dopo cross-turn
+  drag (#3), le metriche condotta/prestazione/violations restano
+  stale. Aggiungere endpoint che prende `segments[]` + `deposito`
+  e ritorna un `DayVariantSummary` ricalcolato. Tracked separately.
+- **Logica ACCA/ACCP nel PdcBuilder (editor manuale)**: oggi solo
+  auto-genera applica la logica. Il builder manuale di `/pdc/new`
+  lascia `accessori_maggiorati` come flag. Se utile, aggiungere
+  calcolo automatico anche in editor.
+
+### Verifica
+
+- `npm run build` clean (1764 moduli, 548 kB)
+- `pytest tests/` → **209/209 OK** — zero regressione backend
+- `/gantt-preview` invariato
+- Verifica visiva su `/auto-genera` dopo deploy Railway
+
+### File toccati
+
+- `frontend/src/lib/api.ts`
+- `frontend/src/components/AutoBuilderGantt.tsx`
+- `frontend/dist/*` (rebuild)
+- `LIVE-COLAZIONE.md`
+
+---
+
 ## 2026-04-23 — #3 Cross-turn drag in AutoBuilderPage
 
 ### Contesto

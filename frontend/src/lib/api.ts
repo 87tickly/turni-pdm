@@ -248,6 +248,16 @@ export interface TrainSegment {
   is_deadhead?: boolean
   material_turn_id?: number
   day_index?: number
+  // Annotazioni backend (src/turn_builder/day_assembler.py + accessori.py
+  // + cv_registry.py). Presenti sui segmenti di /build-auto-weekly.
+  accp_min?: number              // minuti accessori in partenza (40 cond, 15 vett)
+  acca_min?: number              // minuti accessori in arrivo (40 cond, 10 vett)
+  cv_before_min?: number         // CVp minuti — cambio volante in partenza
+  cv_after_min?: number          // CVa minuti — cambio volante in arrivo
+  is_preheat?: boolean           // preriscaldo ● (dic-feb, accp maggiorato 80')
+  is_refezione?: boolean         // segmento refezione virtuale
+  gap_before?: number | null     // gap materiale prima del seg (diagnostica)
+  gap_after?: number | null      // gap materiale dopo
 }
 
 export interface TrainQueryResult {
