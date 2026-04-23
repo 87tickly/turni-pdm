@@ -102,6 +102,13 @@ class AutoBuilder:
         # Key (db_day, tuple(day_indices), apply_zone, apply_abilitazione,
         #      union_all_days) — pool segmenti pre-used-filter.
         self._v4_load_day_cache: dict = {}
+        # ID() di ogni pool segmenti gia' verificato via ARTURO (evita
+        # doppio passaggio). Contiene anche la fermate data per rimozione
+        # in-place senza richiamare l'API.
+        self._v4_verified_pool_ids: set = set()
+        # train_id -> bool: True se ARTURO ha confermato la rotta,
+        # False se mismatch/not_found (va filtrato dal pool seed).
+        self._v4_train_route_ok: dict[str, bool] = {}
 
         if self.deposito:
             self._reachable = set(
@@ -1325,13 +1332,17 @@ class AutoBuilder:
                 cache_key_abil = (db_day, day_indices_key,
                                   False, True, True)
                 if cache_key_abil not in self._v4_load_day_cache:
-                    self._v4_load_day_cache[cache_key_abil] = (
-                        self._load_day_segments(
-                            db_day, 0, day_indices_for_day,
-                            apply_zone=False, apply_abilitazione=True,
-                            union_all_days=True,
-                        )
+                    loaded = self._load_day_segments(
+                        db_day, 0, day_indices_for_day,
+                        apply_zone=False, apply_abilitazione=True,
+                        union_all_days=True,
                     )
+                    # PRE-verify ARTURO: filtra treni corrotti + corregge orari
+                    # PRIMA di enumerare seeds (altrimenti day_assembler decide
+                    # su dati errati e il validator scopre la violazione a
+                    # posteriori, troppo tardi per cambiare seed).
+                    self._v4_prefetch_pool(loaded)
+                    self._v4_load_day_cache[cache_key_abil] = loaded
                 raw_segs_base = self._v4_load_day_cache[cache_key_abil]
                 # Escludi treni gia' usati + filtro orario minimo
                 raw_segs = [s for s in raw_segs_base
@@ -1349,13 +1360,13 @@ class AutoBuilder:
                 cache_key_unf = (db_day, day_indices_key,
                                  False, False, True)
                 if cache_key_unf not in self._v4_load_day_cache:
-                    self._v4_load_day_cache[cache_key_unf] = (
-                        self._load_day_segments(
-                            db_day, 0, day_indices_for_day,
-                            apply_zone=False, apply_abilitazione=False,
-                            union_all_days=True,
-                        )
+                    loaded_unf = self._load_day_segments(
+                        db_day, 0, day_indices_for_day,
+                        apply_zone=False, apply_abilitazione=False,
+                        union_all_days=True,
                     )
+                    self._v4_prefetch_pool(loaded_unf)
+                    self._v4_load_day_cache[cache_key_unf] = loaded_unf
                 unf_segs = self._v4_load_day_cache[cache_key_unf]
                 best_day = None
                 best_score = -1e9
@@ -2115,10 +2126,15 @@ class AutoBuilder:
         # Per ogni segmento del turno finale, cerca conferma rotta reale
         # (cache hit = istantaneo; miss = chiamata API ~600ms).
         # Skip se skip_api_verify=True (chiamate ricorsive da _find_day_variant).
+        # Skip anche in path v4: il pool e' gia' stato pre-verificato prima
+        # di enumerare seeds, quindi i dati sono gia' corretti (23/04/2026).
         try:
             if skip_api_verify:
                 api_stats = {}
                 print(f"  API verify: SKIP (skip_api_verify=True)")
+            elif self._use_v4_assembler:
+                api_stats = {}
+                print(f"  API verify: SKIP (path v4, pool gia' pre-verificato)")
             else:
                 api_stats = self._verify_turn_via_api(final_cal)
                 print(f"  API verify: {api_stats['ok']} ok, "
@@ -2195,6 +2211,102 @@ class AutoBuilder:
             }
 
         return final_cal
+
+    def _v4_prefetch_pool(self, segs: list) -> list:
+        """
+        PRE-verifica ARTURO di un pool di segmenti (path v4, 23/04/2026).
+
+        Per ogni segmento:
+          - Se il treno non esiste (not_found) o la rotta non contiene
+            (from -> to) → segmento RIMOSSO dal pool (dati DB corrotti)
+          - Se orari API differiscono > 2 min → dep/arr sovrascritti
+            in-place con valori ARTURO (converted UTC -> Europe/Rome)
+
+        Cache: usa self._v4_verified_pool_ids per non rifare lo stesso
+        pool due volte; self._v4_train_route_ok per memorizzare
+        verdetto per train_id.
+
+        Beneficio: il day_assembler lavora su dati validati → evita il
+        bug "prestazione supera 8h30 dopo correzione ARTURO post-gen".
+        """
+        if not segs:
+            return segs
+        pool_id = id(segs)
+        if pool_id in self._v4_verified_pool_ids:
+            return segs
+        from services.train_route_cache import (
+            fetch_routes_batch, fermate_segment,
+        )
+        # Raccogli (tid, from_st) distinti
+        pairs: list[tuple[str, str]] = []
+        for s in segs:
+            tid = s.get("train_id", "")
+            from_st = s.get("from_station", "")
+            if tid:
+                pairs.append((tid, from_st))
+        if not pairs:
+            self._v4_verified_pool_ids.add(pool_id)
+            return segs
+        routes_by_pair = fetch_routes_batch(self.db, pairs)
+        TOL_MIN = 2
+        cleaned: list = []
+        for s in segs:
+            tid = (s.get("train_id", "") or "").strip()
+            from_st = s.get("from_station", "")
+            to_st = s.get("to_station", "")
+            if not tid:
+                cleaned.append(s)
+                continue
+            key = (tid, (from_st or "").upper().strip())
+            route = routes_by_pair.get(key)
+            if route is None:
+                cleaned.append(s)  # no info, preserve
+                continue
+            status = route.get("api_status", "ok")
+            if status == "not_found":
+                self._v4_train_route_ok[tid] = False
+                continue  # drop: treno inesistente
+            if status == "error_transient":
+                cleaned.append(s)  # rete KO: preserva
+                continue
+            ferm = route.get("fermate", [])
+            if not ferm:
+                cleaned.append(s)
+                continue
+            check = fermate_segment(ferm, from_st, to_st)
+            if check is None:
+                # Mismatch rotta: il DB ha (from->to) ma ARTURO dice no.
+                # Filtra dal pool per evitare di costruire turni su dati
+                # sbagliati.
+                self._v4_train_route_ok[tid] = False
+                continue
+            idx_from, idx_to = check
+            api_dep = self._api_time_to_local_hhmm(
+                ferm[idx_from].get("programmato_partenza") or "")
+            api_arr = self._api_time_to_local_hhmm(
+                ferm[idx_to].get("programmato_arrivo") or "")
+            db_dep = s.get("dep_time", "")
+            db_arr = s.get("arr_time", "")
+            if api_dep and db_dep:
+                diff = abs(_time_to_min(api_dep) - _time_to_min(db_dep))
+                if diff > 720:
+                    diff = 1440 - diff
+                if diff > TOL_MIN:
+                    s["dep_time"] = api_dep
+            if api_arr and db_arr:
+                diff = abs(_time_to_min(api_arr) - _time_to_min(db_arr))
+                if diff > 720:
+                    diff = 1440 - diff
+                if diff > TOL_MIN:
+                    s["arr_time"] = api_arr
+            self._v4_train_route_ok[tid] = True
+            cleaned.append(s)
+        # Sostituisci il contenuto della lista in-place cosi' anche gli
+        # altri riferimenti (es. cache) vedono la versione cleaned.
+        segs.clear()
+        segs.extend(cleaned)
+        self._v4_verified_pool_ids.add(id(segs))
+        return segs
 
     @staticmethod
     def _api_time_to_local_hhmm(api_ts: str) -> str:
@@ -2491,19 +2603,25 @@ class AutoBuilder:
         # Cache hit 0ms per treni gia' visti nel LV; solo treni unici SAB/DOM
         # hanno costo API ~600ms. Corregge gli orari sballati del parser DB
         # (es. 10569 PAV->ALE dep 08:05 DB vs 09:05 reale).
-        try:
-            if sab_turns:
-                print(f"\n  Post-verify SAB...")
-                self._verify_turn_via_api(sab_cal)
-                # Reload sab_turns dopo verify (entry["summary"] potrebbe essere
-                # stato sostituito da validator.validate_day)
-                sab_turns = _extract_turns(sab_cal)
-            if dom_turns:
-                print(f"  Post-verify DOM...")
-                self._verify_turn_via_api(dom_cal)
-                dom_turns = _extract_turns(dom_cal)
-        except Exception as e:
-            print(f"  Post-verify SAB/DOM saltata: {e}")
+        # Path v4: pool gia' pre-verificato prima dell'enumerate_seeds,
+        # quindi nessuna verifica post-generazione necessaria (salva 3s
+        # per SAB + 3s per DOM).
+        if self._use_v4_assembler:
+            print(f"\n  Post-verify SAB/DOM: SKIP (v4 pool pre-verificato)")
+        else:
+            try:
+                if sab_turns:
+                    print(f"\n  Post-verify SAB...")
+                    self._verify_turn_via_api(sab_cal)
+                    # Reload sab_turns dopo verify (entry["summary"] potrebbe essere
+                    # stato sostituito da validator.validate_day)
+                    sab_turns = _extract_turns(sab_cal)
+                if dom_turns:
+                    print(f"  Post-verify DOM...")
+                    self._verify_turn_via_api(dom_cal)
+                    dom_turns = _extract_turns(dom_cal)
+            except Exception as e:
+                print(f"  Post-verify SAB/DOM saltata: {e}")
 
         # Merge: per ogni giornata LV, pesca la corrispondente SAB e DOM
         days = []
