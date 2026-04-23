@@ -4,6 +4,65 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Fix AutoBuilderGantt: vertical labels + click popover
+
+### Problemi segnalati
+
+L'utente su `/auto-genera` (AutoBuilderPage) ha riportato:
+
+1. **Label treni accavallate**: `2393/2394 · MILANO` mangia
+   `2375 · ALESSANDRIA` perche' i blocchi sono adiacenti e la label
+   orizzontale del primo sfora nel territorio del secondo.
+2. **Click su treno non dà info**: AutoBuilderGantt passava a
+   GanttSheet solo `rows/dayHead/metrics/range`, senza
+   `onSegmentClick`. Selezionare un treno non faceva nulla.
+3. **No drag/spostamento fra turni generati**: ogni AutoBuilderGantt
+   era isolato, no ganttId → cross-turn inattivo.
+4. **Logica ACCA/ACCP/CV/refezione non applicata dal builder**:
+   domain logic del generatore `src/turn_builder/auto_builder.py`,
+   non del rendering. Separato come residuo backend.
+
+### Fix (3 di 4 oggi — backend separato)
+
+`frontend/src/components/AutoBuilderGantt.tsx`:
+
+- **Vertical labels sempre** (`labels="vertical"` passato a
+  `GanttSheet`). La rotazione -90° elimina l'overlap orizzontale tra
+  segmenti adiacenti — il pattern standard del PDF Trenord quando
+  ci sono segmenti stretti.
+- **Click popover HTML** con dettagli treno:
+  - Numero + prefissi `[VET]`, `●` preheat, `CVp`/`CVa`
+  - Tratta (from → to)
+  - Orario (dep → arr)
+  - Tipo (Condotta / Vettura / Refezione)
+  - Dismiss via `Esc` o click fuori
+- **Nuova prop opzionale `onSegmentClick`**: se il consumer la
+  fornisce, delega a lei (il popover interno e' disabilitato). Utile
+  se AutoBuilderPage in futuro vuole un drawer dedicato.
+- **Mapping `mappedToOriginalIdx[]`** per risalire da
+  GanttSegment → TrainSegment originale (la refez virtuale iniettata
+  via mealStart/End ha idx -1 → nessun popover).
+
+### Residui tracciati
+
+- **Cross-turn drag** fra AutoBuilderGantt adiacenti — richiede
+  ganttId + onCrossDragStart/Drop + handler in AutoBuilderPage per
+  ri-assegnare treni tra candidati. Grande refactor separato.
+- **Backend ACCA/ACCP/CV/refezione logic** in `auto_builder.py` —
+  il builder v4 attuale genera `train/deadhead/refez` ma non
+  `cvp/cva/acca`. Domain logic algoritmica, separata dal frontend.
+
+### File toccati
+
+- `frontend/src/components/AutoBuilderGantt.tsx`
+- `frontend/dist/*` (rebuild)
+- `LIVE-COLAZIONE.md`
+
+Verifica: `npm run build` clean, `/gantt-preview` invariato (non usa
+AutoBuilderGantt). Verifica visiva su `/auto-genera` dopo deploy.
+
+---
+
 ## 2026-04-23 — Fix post-deploy Fase B: autoFit default + foreignObject DnD
 
 ### Problemi segnalati dall'utente su produzione

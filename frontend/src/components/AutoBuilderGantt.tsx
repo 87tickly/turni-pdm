@@ -2,22 +2,15 @@
  * AutoBuilderGantt — visualizzazione orizzontale (Gantt-like) dei turni
  * generati dall'auto-builder.
  *
- * MIGRATO (23/04/2026) alla base `GanttSheet` v3 (falsa riga PDF Trenord,
- * vedi `docs/HANDOFF-gantt-v3.md`). Props pubbliche invariate rispetto
- * alla versione legacy — mappatura internal dei segmenti da
- * `TrainSegment` al tipo `GanttSegment`.
+ * MIGRATO (23/04/2026) alla base `GanttSheet` v3 (falsa riga PDF Trenord).
+ * Mappa internamente `TrainSegment` → `GanttSegment`.
  *
- * Mappatura:
- *   seg.is_deadhead === true               → kind "dh"  (vettura tratteggiata)
- *   seg.is_refezione === true              → kind "refez"
- *   seg.is_preheat  === true (se presente) → preheat: true sul kind "cond"
- *   altrimenti                             → kind "cond" (condotta)
- *
- * Se `mealStart` / `mealEnd` sono forniti e nessun segmento ha
- * `is_refezione`, viene iniettato un segmento virtuale refez al tempo
- * indicato (compatibilita' con API legacy).
+ * Update 23/04/2026 (pm): label verticali forzate (segmenti spesso
+ * adiacenti → label orizzontali si accavallavano). Click su segmento
+ * apre popover HTML con dettagli treno (numero, tratta, orari,
+ * preheat/CV). Click fuori o Esc chiude.
  */
-import { useMemo } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { TrainSegment } from "@/lib/api"
 import { GanttSheet } from "@/components/gantt/GanttSheet"
 import type { GanttSegment, GanttRow } from "@/components/gantt/types"
@@ -29,6 +22,7 @@ interface Props {
   endTime?: string
   mealStart?: string
   mealEnd?: string
+  onSegmentClick?: (seg: TrainSegment, index: number) => void
 }
 
 
@@ -54,12 +48,48 @@ export function AutoBuilderGantt({
   endTime,
   mealStart,
   mealEnd,
+  onSegmentClick,
 }: Props) {
+  const [popover, setPopover] = useState<{
+    seg: TrainSegment
+    index: number
+    x: number
+    y: number
+  } | null>(null)
+
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  const closePopover = useCallback(() => setPopover(null), [])
+
+  // Esc + click fuori dal popover chiudono
+  useEffect(() => {
+    if (!popover) return
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setPopover(null)
+    }
+    const onClick = (ev: MouseEvent) => {
+      const pop = document.getElementById("auto-builder-popover")
+      if (pop && pop.contains(ev.target as Node)) return
+      setPopover(null)
+    }
+    document.addEventListener("keydown", onKey)
+    document.addEventListener("mousedown", onClick)
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.removeEventListener("mousedown", onClick)
+    }
+  }, [popover])
+
   const view = useMemo(() => {
     if (!segments || segments.length === 0) return null
 
     // ─── Mapping TrainSegment → GanttSegment ───
-    const mapped: GanttSegment[] = segments.map((seg) => {
+    // mappedToOriginalIdx[i] = index della TrainSegment sorgente in
+    // `segments`, oppure -1 se il segment e' virtuale (es. refez
+    // iniettata).
+    const mapped: GanttSegment[] = []
+    const mappedToOriginalIdx: number[] = []
+    segments.forEach((seg, origIdx) => {
       const s = seg as TrainSegment & {
         is_refezione?: boolean
         is_preheat?: boolean
@@ -68,7 +98,7 @@ export function AutoBuilderGantt({
       }
       const isRefez = Boolean(s.is_refezione)
       const isDH = !isRefez && Boolean(s.is_deadhead)
-      return {
+      mapped.push({
         kind: isRefez ? "refez" : isDH ? "dh" : "cond",
         train_id: s.train_id,
         from_station: s.from_station,
@@ -78,14 +108,13 @@ export function AutoBuilderGantt({
         preheat: s.is_preheat,
         cvp: s.cvp,
         cva: s.cva,
-      }
+      })
+      mappedToOriginalIdx.push(origIdx)
     })
 
     // Inietta refezione virtuale se mealStart/End presenti e nessuna refez nei dati
     const hasRefez = mapped.some((s) => s.kind === "refez")
     if (!hasRefez && mealStart && mealEnd) {
-      // Trova stazione in cui cade la refezione (per label): usa la
-      // stazione di arrivo del segmento precedente al mealStart, se esiste.
       const mealStartMin = timeToMin(mealStart)
       let pivotStation = segments[0]?.from_station ?? ""
       for (const s of segments) {
@@ -100,12 +129,16 @@ export function AutoBuilderGantt({
         dep_time: mealStart,
         arr_time: mealEnd,
       }
-      // Inserisci ordinato per dep_time
       const insertAt = mapped.findIndex(
         (s) => timeToMin(s.dep_time) > mealStartMin,
       )
-      if (insertAt === -1) mapped.push(refezSeg)
-      else mapped.splice(insertAt, 0, refezSeg)
+      if (insertAt === -1) {
+        mapped.push(refezSeg)
+        mappedToOriginalIdx.push(-1)
+      } else {
+        mapped.splice(insertAt, 0, refezSeg)
+        mappedToOriginalIdx.splice(insertAt, 0, -1)
+      }
     }
 
     // ─── Range orario ───
@@ -141,6 +174,7 @@ export function AutoBuilderGantt({
 
     return {
       rows: [row],
+      mappedToOriginalIdx,
       dayHead: {
         num: 0,
         pres: presentationTime || segments[0].dep_time,
@@ -159,13 +193,43 @@ export function AutoBuilderGantt({
 
   if (!view) return null
 
+  const handleSegmentClick = (seg: GanttSegment, _rowIdx: number) => {
+    const segIdx = view.rows[0].segments.indexOf(seg)
+    if (segIdx < 0) return
+    const origIdx = view.mappedToOriginalIdx[segIdx]
+    if (origIdx < 0) {
+      // Segmento virtuale (refez iniettata) — niente info da mostrare
+      return
+    }
+    const origSeg = segments[origIdx]
+    // Se il consumer fornisce onSegmentClick, delega tutto a lui
+    if (onSegmentClick) {
+      onSegmentClick(origSeg, origIdx)
+      return
+    }
+    // Default: mostra popover interno
+    const rect = containerRef.current?.getBoundingClientRect()
+    // Centro popover rispetto al container (l'utente dovra' solo cliccare
+    // sul blocco e il popover apparira' in alto a sinistra del container).
+    // Posizionamento preciso sul segmento richiederebbe le coordinate x
+    // del segment rect — accettabile questo fallback semplice per ora.
+    setPopover({
+      seg: origSeg,
+      index: origIdx,
+      x: rect ? 16 : 0,
+      y: rect ? 16 : 0,
+    })
+  }
+
   return (
     <div
+      ref={containerRef}
       className="overflow-x-auto"
       style={{
         backgroundColor: "var(--color-surface-container-low)",
         borderRadius: 8,
         padding: "4px 4px",
+        position: "relative",
       }}
     >
       <GanttSheet
@@ -174,9 +238,110 @@ export function AutoBuilderGantt({
         metrics={view.metrics}
         range={view.range}
         palette="hybrid"
-        labels="auto"
+        labels="vertical"
         minutes="hhmm"
+        onSegmentClick={handleSegmentClick}
       />
+
+      {popover && (
+        <div
+          id="auto-builder-popover"
+          style={{
+            position: "absolute",
+            left: popover.x,
+            top: popover.y,
+            zIndex: 40,
+            minWidth: 240,
+            maxWidth: 320,
+            padding: "10px 12px",
+            background: "var(--color-surface-container-lowest, #FEFEFD)",
+            boxShadow:
+              "0 12px 32px rgba(11,13,16,.18), 0 2px 8px rgba(11,13,16,.08)",
+            fontFamily: "var(--font-sans, Inter)",
+            fontSize: 12,
+            lineHeight: 1.5,
+            color: "var(--color-on-surface-strong, #0A1322)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              justifyContent: "space-between",
+              marginBottom: 6,
+              paddingBottom: 6,
+              boxShadow: "inset 0 -1px 0 var(--color-ghost, #E1E5EC)",
+            }}
+          >
+            <span
+              style={{
+                fontFamily: "var(--font-mono, 'JetBrains Mono', monospace)",
+                fontSize: 14,
+                fontWeight: 700,
+                color: "var(--color-brand, #0062CC)",
+              }}
+            >
+              {popover.seg.is_deadhead ? "[VET] " : ""}
+              {(popover.seg as TrainSegment & { is_refezione?: boolean }).is_refezione
+                ? "REFEZ"
+                : popover.seg.train_id}
+              {(popover.seg as TrainSegment & { is_preheat?: boolean }).is_preheat ? " ●" : ""}
+              {(popover.seg as TrainSegment & { cvp?: boolean }).cvp ? " · CVp" : ""}
+              {(popover.seg as TrainSegment & { cva?: boolean }).cva ? " · CVa" : ""}
+            </span>
+            <button
+              onClick={closePopover}
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--color-on-surface-quiet, #6B7280)",
+                fontSize: 14,
+                lineHeight: 1,
+                padding: "2px 4px",
+              }}
+              aria-label="Chiudi"
+            >
+              ×
+            </button>
+          </div>
+          <div
+            style={{
+              fontFamily: "var(--font-mono, 'JetBrains Mono', monospace)",
+              fontSize: 11.5,
+            }}
+          >
+            <div style={{ marginBottom: 2 }}>
+              <span style={{ color: "var(--color-on-surface-quiet, #6B7280)" }}>
+                Tratta:{" "}
+              </span>
+              <strong>{popover.seg.from_station}</strong>
+              {" → "}
+              <strong>{popover.seg.to_station}</strong>
+            </div>
+            <div style={{ marginBottom: 2 }}>
+              <span style={{ color: "var(--color-on-surface-quiet, #6B7280)" }}>
+                Orario:{" "}
+              </span>
+              <strong>{popover.seg.dep_time}</strong>
+              {" → "}
+              <strong>{popover.seg.arr_time}</strong>
+            </div>
+            <div>
+              <span style={{ color: "var(--color-on-surface-quiet, #6B7280)" }}>
+                Tipo:{" "}
+              </span>
+              <strong>
+                {popover.seg.is_deadhead
+                  ? "Vettura (deadhead)"
+                  : (popover.seg as TrainSegment & { is_refezione?: boolean }).is_refezione
+                  ? "Refezione"
+                  : "Condotta"}
+              </strong>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
