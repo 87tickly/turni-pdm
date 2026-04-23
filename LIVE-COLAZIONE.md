@@ -4,6 +4,63 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Chiusura sessione: docs/GANTT-GUIDE.md
+
+Fine sessione 2026-04-23. Creata nuova guida consolidata
+`docs/GANTT-GUIDE.md` (~520 righe, 21 sezioni) che sintetizza tutte le
+regole di creazione di un Gantt in ARTURO prodotte oggi:
+
+- Filosofia (no nero puro, no card arrotondate, asse 24h continuo,
+  densità > decorazione)
+- Architettura (GanttSheet monolitico + types.ts + tokens.ts)
+- Tipi pubblici (GanttSegment, GanttRow, GanttMetrics, GanttDayHead)
+- 5 kind di segmento (cond / dh / refez / scomp / sleep) con
+  rendering per ognuno
+- Flag speciali (preheat, cvp, cva, suspect_reason)
+- Design tokens completi (dimensioni + colori + palette)
+- Asse orario + overnight + range extended per FR
+- Label auto-vertical, minuti HH:MM / duration / off
+- Colonne sinistra (variante + meta) / destra (metriche + warn)
+- Multi-variante impilata (LMXGV + S + D)
+- 21 edge case documentati
+- Interazioni (hover/click/context-menu) + drag & drop (non portato)
+- Come aggiungere un nuovo wrapper (es. migrare PdcGanttV2)
+- Anti-patterns (10 cose da non fare)
+- Checklist di merge
+- Stato attuale dei componenti Gantt nel progetto
+
+La guida referenzia (senza duplicare) `HANDOFF-gantt-v3.md`,
+`PROMPT-claude-design-gantt.md`, `HANDOFF-claude-design.md`, e punta
+a `frontend/src/components/gantt/` come source of truth tecnica.
+
+### Stato fine sessione
+
+Commit pushati oggi:
+```
+0806455 Cablaggio backend /api/calendario-agente (2° residuo)
+2aa617b Migra AutoBuilderGantt a base Gantt v3 (GanttSheet)
+7b9766a Claude Design handoff #3: Step 0 Abilitazioni con corridoi
+0e08ccb Claude Design handoff #2: Gantt v3 preview
+6d77fff Claude Design handoff #1: Sidebar + Calendario agente
+fecc59f Docs: 3 prompt Claude Design per redesign UI/UX
+68a2b6a Fix bug: rimuovi cicli vettura-vettura inutili
+2600374..f37be6d Step 1-10/10: piano builder v4 completato
+```
+
+pytest 209/209. npm build 1762 modules OK.
+
+Residui aperti per prossima sessione:
+- Migrazione `PdcGanttV2` a base Gantt v3 (più rischioso: drawer +
+  context menu + toggle lista/Gantt in produzione)
+- Stati `fr` / `uncov` / `leave` / `locked` nel calendario agente
+  (richiedono dati backend non ancora modellati)
+- Drawer dettaglio giornata (click cella) nel calendario agente
+- Assegnazione matricola → turno → data (nuova tabella DB)
+- `suspect_reason` esposto in API auto-builder per dispatcher override
+- Drag & drop Gantt (richiede validazione backend + normative riposi)
+
+---
+
 ## 2026-04-23 — Calendario agente: cablaggio backend /api/calendario-agente
 
 ### Contesto
