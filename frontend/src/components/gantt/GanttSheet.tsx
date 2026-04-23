@@ -235,42 +235,10 @@ export function GanttSheet({
           })}
         </g>
 
-        {/* Timeline click/drop zone — foreignObject per DnD affidabile.
-            Copre l'intera riga (non solo la banda della barra) cosi' il
-            drop cross-turn accetta il rilascio ovunque, non solo nella
-            striscia 20px attorno alla barra. */}
-        {(onTimelineClick || onCrossDrop) && rows.map((_, i) => {
-          const yRowTop =
-            GANTT_LAYOUT.AXIS_Y + i * rowH
-          const bind = ix.bindTimeline()
-          return (
-            <foreignObject
-              key={`timeline-zone-${i}`}
-              x={GANTT_LAYOUT.COL_LEFT}
-              y={yRowTop}
-              width={axisW}
-              height={rowH}
-              style={{ overflow: "visible" }}
-            >
-              <div
-                // @ts-expect-error xmlns richiesto in foreignObject
-                xmlns="http://www.w3.org/1999/xhtml"
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  cursor: bind.cursor,
-                }}
-                onClick={onTimelineClick ? (ev) => bind.onClick(ev as unknown as React.MouseEvent, i) : undefined}
-                onDragOver={bind.onDragOver}
-                onDrop={
-                  bind.onDrop
-                    ? (ev) => bind.onDrop?.(ev as unknown as React.DragEvent, i)
-                    : undefined
-                }
-              />
-            </foreignObject>
-          )
-        })}
+        {/* Timeline click/drop zone + hit area segmenti sono gestiti da
+            HTML overlay fuori dall'SVG (workaround Safari: HTML5 DnD
+            non funziona bene dentro <foreignObject>). Vedi <div> overlay
+            dopo lo </svg>. */}
 
         {/* ═══ Colonna sinistra (label variante + meta) ═══ */}
         {rows.map((row, i) => {
@@ -489,36 +457,7 @@ export function GanttSheet({
                       tabIndex={segBind.tabIndex}
                     />
 
-                    {/* Resize handles — solo se onSegmentDrag fornito e
-                        segment e' di tipo cond/dh (ha range editabile) */}
-                    {onSegmentDrag && (seg.kind === "cond" || seg.kind === "dh") && (
-                      <>
-                        <rect
-                          x={x1}
-                          y={yBarTop}
-                          width={6}
-                          height={barHeight}
-                          fill="transparent"
-                          style={{ cursor: "ew-resize" }}
-                          onMouseDown={(ev) => {
-                            ev.stopPropagation()
-                            ix.startDrag(ev, i, si, "resize-start")
-                          }}
-                        />
-                        <rect
-                          x={x2 - 6}
-                          y={yBarTop}
-                          width={6}
-                          height={barHeight}
-                          fill="transparent"
-                          style={{ cursor: "ew-resize" }}
-                          onMouseDown={(ev) => {
-                            ev.stopPropagation()
-                            ix.startDrag(ev, i, si, "resize-end")
-                          }}
-                        />
-                      </>
-                    )}
+                    {/* Resize handles sono in HTML overlay (sotto </svg>) */}
                   </g>
                 )
               })}
@@ -526,12 +465,188 @@ export function GanttSheet({
           )
         })}
 
-        {/* Drop slot indicator (cross-day target durante dragover) — se
-            servisse, si posizionerebbe qui in SVG. Per ora lo slot e'
-            HTML (vedi sotto overlay). */}
       </svg>
 
       {/* ═══ HTML overlays ═══ */}
+
+      {/* Hit overlay: divs HTML nativi (non foreignObject) cosi' click,
+          hover, HTML5 DnD funzionano ovunque inclusa Safari. Il div
+          wrapper ha pointer-events=none, solo i children "auto". */}
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: totalW,
+          height: svgH,
+          pointerEvents: "none",
+        }}
+      >
+        {/* Timeline drop/click zone per ogni row */}
+        {(onTimelineClick || onCrossDrop) &&
+          rows.map((_, i) => {
+            const yRowTop = GANTT_LAYOUT.AXIS_Y + i * rowH
+            const bind = ix.bindTimeline()
+            return (
+              <div
+                key={`timeline-zone-${i}`}
+                style={{
+                  position: "absolute",
+                  left: GANTT_LAYOUT.COL_LEFT,
+                  top: yRowTop,
+                  width: axisW,
+                  height: rowH,
+                  cursor: bind.cursor,
+                  pointerEvents: "auto",
+                }}
+                onClick={
+                  onTimelineClick ? (ev) => bind.onClick(ev, i) : undefined
+                }
+                onDragOver={bind.onDragOver}
+                onDrop={bind.onDrop ? (ev) => bind.onDrop?.(ev, i) : undefined}
+              />
+            )
+          })}
+
+        {/* Hit area per ogni segment (on top della timeline zone) */}
+        {rows.map((row, i) => {
+          const yBarTop =
+            GANTT_LAYOUT.AXIS_Y + i * rowH + GANTT_LAYOUT.LABEL_BAND
+          return row.segments.map((seg, si) => {
+            let depM = timeToMin(seg.dep_time)
+            let arrM = timeToMin(seg.arr_time)
+            if (arrM < depM) arrM += 1440
+            if (depM < hStart * 60 - 60) depM += 1440
+            if (arrM < hStart * 60) arrM += 1440
+            const isThisSegDragging =
+              isDragging &&
+              dragState?.rowIdx === i &&
+              dragState?.segIdx === si
+            let x1 = xFor(depM)
+            let x2 = xFor(arrM)
+            if (isThisSegDragging && dragState) {
+              x1 = xFor(dragState.currentDepMin)
+              x2 = xFor(dragState.currentArrMin)
+            }
+            const w = Math.max(x2 - x1, 2)
+            const segBind = ix.bindSegment(i, si)
+
+            const tipParts: string[] = []
+            if (seg.preheat) tipParts.push("● preriscaldo")
+            if (seg.kind === "dh") tipParts.push("[vettura]")
+            if (seg.kind === "refez") tipParts.push("REFEZ")
+            if (seg.kind === "scomp") tipParts.push("S.COMP")
+            if (seg.cvp) tipParts.push("CVp")
+            if (seg.cva) tipParts.push("CVa")
+            tipParts.push(seg.train_id)
+            tipParts.push(
+              `· ${seg.from_station || "—"} ${seg.dep_time} → ${seg.to_station || "—"} ${seg.arr_time}`,
+            )
+            if (seg.suspect_reason) tipParts.push(`· ⚠ ${seg.suspect_reason}`)
+            const tip = tipParts.join(" ")
+
+            const handleClick = (ev: React.MouseEvent) => {
+              if (!onAction || hideActionBar) {
+                ev.stopPropagation()
+                onSegmentClick?.(seg, i)
+                return
+              }
+              segBind.onClick(ev)
+            }
+
+            // In Safari, segmenti molto stretti (<12px) rendono il drag
+            // difficile — allarghiamo il hit area di +6px ciascun lato
+            const hitPad = Math.max(0, 6 - w / 2)
+
+            return (
+              <div
+                key={`hit-${i}-${si}`}
+                title={tip}
+                draggable={segBind.draggable}
+                tabIndex={segBind.tabIndex}
+                style={{
+                  position: "absolute",
+                  left: x1 - hitPad,
+                  top: yBarTop - 16,
+                  width: w + 2 * hitPad,
+                  height: barHeight + 32,
+                  cursor: segBind.draggable
+                    ? "grab"
+                    : interactionsEnabled
+                    ? "pointer"
+                    : "default",
+                  pointerEvents: "auto",
+                  // Trasparente: il visual e' gia' reso dentro l'SVG sotto
+                  background: "transparent",
+                  userSelect: "none",
+                }}
+                onClick={handleClick}
+                onContextMenu={(ev) => {
+                  ev.preventDefault()
+                  onSegmentContextMenu?.(seg, i, ev)
+                }}
+                onMouseDown={
+                  interactionsEnabled ? segBind.onMouseDown : undefined
+                }
+                onKeyDown={segBind.onKeyDown}
+                onDragStart={segBind.onDragStart}
+                onDragEnd={segBind.onDragEnd}
+              />
+            )
+          })
+        })}
+
+        {/* Resize handles HTML — solo se onSegmentDrag fornito */}
+        {onSegmentDrag &&
+          rows.map((row, i) => {
+            const yBarTop =
+              GANTT_LAYOUT.AXIS_Y + i * rowH + GANTT_LAYOUT.LABEL_BAND
+            return row.segments.map((seg, si) => {
+              if (seg.kind !== "cond" && seg.kind !== "dh") return null
+              let depM = timeToMin(seg.dep_time)
+              let arrM = timeToMin(seg.arr_time)
+              if (arrM < depM) arrM += 1440
+              if (depM < hStart * 60 - 60) depM += 1440
+              if (arrM < hStart * 60) arrM += 1440
+              const x1 = xFor(depM)
+              const x2 = xFor(arrM)
+              return (
+                <span key={`resize-${i}-${si}`}>
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: x1,
+                      top: yBarTop,
+                      width: 6,
+                      height: barHeight,
+                      cursor: "ew-resize",
+                      pointerEvents: "auto",
+                    }}
+                    onMouseDown={(ev) => {
+                      ev.stopPropagation()
+                      ix.startDrag(ev, i, si, "resize-start")
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: x2 - 6,
+                      top: yBarTop,
+                      width: 6,
+                      height: barHeight,
+                      cursor: "ew-resize",
+                      pointerEvents: "auto",
+                    }}
+                    onMouseDown={(ev) => {
+                      ev.stopPropagation()
+                      ix.startDrag(ev, i, si, "resize-end")
+                    }}
+                  />
+                </span>
+              )
+            })
+          })}
+      </div>
 
       {/* Action bar (selected state) */}
       {actionBarState && !hideActionBar && (
@@ -798,69 +913,8 @@ function SegmentGroup(props: SegProps) {
   }
 }
 
-function SegHit({
-  x1,
-  w,
-  yBarTop,
-  barH,
-  tip,
-  onClick,
-  onContextMenu,
-  onMouseDown,
-  onKeyDown,
-  onDragStart,
-  onDragEnd,
-  draggable,
-  tabIndex,
-}: {
-  x1: number
-  w: number
-  yBarTop: number
-  barH: number
-  tip: string
-  onClick: (ev: React.MouseEvent) => void
-  onContextMenu: (ev: React.MouseEvent) => void
-  onMouseDown?: (ev: React.MouseEvent) => void
-  onKeyDown?: (ev: React.KeyboardEvent) => void
-  onDragStart?: (ev: React.DragEvent) => void
-  onDragEnd?: (ev: React.DragEvent) => void
-  draggable?: boolean
-  tabIndex?: number
-}) {
-  // foreignObject wrapping un <div> HTML: l'HTML5 DnD su SVG rect e'
-  // inaffidabile cross-browser. Il pattern con foreignObject + div e'
-  // quello usato originariamente da PdcGanttV2 v1 e funziona ovunque.
-  return (
-    <foreignObject
-      x={x1}
-      y={yBarTop - 16}
-      width={w}
-      height={barH + 32}
-      style={{ overflow: "visible" }}
-    >
-      <div
-        // @ts-expect-error xmlns e' richiesto dentro foreignObject per SSR
-        xmlns="http://www.w3.org/1999/xhtml"
-        title={tip}
-        draggable={draggable}
-        tabIndex={tabIndex}
-        style={{
-          width: "100%",
-          height: "100%",
-          // grab se il blocco e' trascinabile (cross-day) o resize-able
-          // (onMouseDown presente). pointer negli altri casi (click → popover).
-          cursor: draggable ? "grab" : onMouseDown ? "grab" : "pointer",
-        }}
-        onClick={onClick}
-        onContextMenu={onContextMenu}
-        onMouseDown={onMouseDown}
-        onKeyDown={onKeyDown}
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
-      />
-    </foreignObject>
-  )
-}
+// SegHit rimosso: hit area e' gestita da div HTML assoluto nel
+// container wrapper (workaround Safari foreignObject + HTML5 DnD).
 
 function ScompBar(p: SegProps) {
   const { seg, x1, x2, w, yBarTop, yBarMid, barH, isSelected } = p
@@ -909,21 +963,7 @@ function ScompBar(p: SegProps) {
           pointerEvents="none"
         />
       )}
-      <SegHit
-        x1={x1}
-        w={w}
-        yBarTop={yBarTop}
-        barH={barH}
-        tip={`S.COMP · ${seg.train_id} · ${seg.dep_time} → ${seg.arr_time}`}
-        onClick={p.onClick}
-        onContextMenu={p.onContextMenu}
-        onMouseDown={p.onMouseDown}
-        onKeyDown={p.onKeyDown}
-        onDragStart={p.onDragStart}
-        onDragEnd={p.onDragEnd}
-        draggable={p.draggable}
-        tabIndex={p.tabIndex}
-      />
+      {/* Hit area gestita da HTML overlay fuori dall'SVG */}
     </g>
   )
 }
@@ -967,21 +1007,6 @@ function SleepBar(p: SegProps) {
           pointerEvents="none"
         />
       )}
-      <SegHit
-        x1={x1}
-        w={w}
-        yBarTop={yBarTop}
-        barH={barH}
-        tip={`🌙 Dormita · ${seg.train_id} · ${seg.dep_time} → ${seg.arr_time} (giorno dopo)`}
-        onClick={p.onClick}
-        onContextMenu={p.onContextMenu}
-        onMouseDown={p.onMouseDown}
-        onKeyDown={p.onKeyDown}
-        onDragStart={p.onDragStart}
-        onDragEnd={p.onDragEnd}
-        draggable={p.draggable}
-        tabIndex={p.tabIndex}
-      />
     </g>
   )
 }
@@ -1042,21 +1067,6 @@ function RefezBar(p: SegProps) {
           {labelText}
         </text>
       )}
-      <SegHit
-        x1={x1}
-        w={w}
-        yBarTop={yBarTop}
-        barH={barH}
-        tip={`REFEZ · ${seg.from_station} · ${seg.dep_time} → ${seg.arr_time}`}
-        onClick={p.onClick}
-        onContextMenu={p.onContextMenu}
-        onMouseDown={p.onMouseDown}
-        onKeyDown={p.onKeyDown}
-        onDragStart={p.onDragStart}
-        onDragEnd={p.onDragEnd}
-        draggable={p.draggable}
-        tabIndex={p.tabIndex}
-      />
     </g>
   )
 }
@@ -1106,14 +1116,7 @@ function TrainBar(p: SegProps) {
     ? `● Preriscaldo ${seg.dep_time}`
     : null
 
-  const tipParts = [
-    seg.preheat ? "● preriscaldo · " : "",
-    isDH ? "[vettura] " : "",
-    seg.train_id,
-    ` · ${seg.from_station} ${seg.dep_time} → ${seg.to_station} ${seg.arr_time}`,
-    isSuspect ? ` · ⚠ ${seg.suspect_reason}` : "",
-  ]
-  const tip = tipParts.join("")
+  // Tip generato dal HTML overlay esterno; niente <title> SVG qui.
 
   return (
     <g>
@@ -1412,21 +1415,6 @@ function TrainBar(p: SegProps) {
         </text>
       )}
 
-      <SegHit
-        x1={x1}
-        w={w}
-        yBarTop={yBarTop}
-        barH={barH}
-        tip={tip}
-        onClick={p.onClick}
-        onContextMenu={p.onContextMenu}
-        onMouseDown={p.onMouseDown}
-        onKeyDown={p.onKeyDown}
-        onDragStart={p.onDragStart}
-        onDragEnd={p.onDragEnd}
-        draggable={p.draggable}
-        tabIndex={p.tabIndex}
-      />
     </g>
   )
 }

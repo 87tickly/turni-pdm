@@ -4,6 +4,90 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Refactor GanttSheet: hit area HTML overlay (workaround Safari)
+
+### Problema diagnosticato
+
+Su Safari (browser dell'utente visibile nelle screenshot) l'HTML5
+Drag & Drop **non funziona** quando il `draggable=true` e' su un
+`<div>` annidato dentro un `<foreignObject>` SVG. Questo e' un bug
+WebKit noto (https://bugs.webkit.org/show_bug.cgi?id=135379) che
+non si risolve con `pointer-events=none` sui rect SVG sottostanti.
+
+Sintomi:
+- Cursor `grab` non si vede
+- `dragstart` event non si attiva
+- Drag cross-turn impossibile
+
+### Fix
+
+Refactor hit area da `<foreignObject>` a **HTML overlay
+assoluto** esterno all'SVG, posizionato nel container `<div>` che
+wrappa l'`<svg>`.
+
+`frontend/src/components/gantt/GanttSheet.tsx`:
+- Rimosso componente `SegHit` (foreignObject-based) e tutte le
+  chiamate dentro `ScompBar`, `SleepBar`, `RefezBar`, `TrainBar`
+- Rimosso foreignObject timeline click/drop zone
+- Rimosse le `<rect>` resize handles SVG (anche loro problematiche
+  su Safari con mousedown/touch)
+- Aggiunto un `<div>` wrapper con `position: absolute` nel
+  container, dopo l'`<svg>`, con 3 strati:
+  1. **Timeline drop/click zone** per ogni row (se
+     `onTimelineClick` o `onCrossDrop`)
+  2. **Hit area segmenti** — un `<div>` assoluto per ogni segment
+     alla stessa posizione del visual SVG, con:
+     - `title={tip}` per tooltip nativo
+     - `draggable={bind.draggable}` + `onDragStart`/`onDragEnd`
+     - `cursor: grab` quando trascinabile
+     - `onClick` dispatch a `onSegmentClick` (legacy) o
+       `segBind.onClick` (selection + action bar)
+     - `hitPad`: seg molto stretti (<12px) allargati di 6px/lato
+       per facilitare il drag
+  3. **Resize handles** HTML (6px sx/dx del segment) per
+     `onSegmentDrag`
+- Container `<div>` outer ha `pointer-events: none`, solo i
+  children hanno `pointer-events: auto` → SVG visual resta
+  interamente visibile, i div overlay catturano eventi
+
+Tutto il visual resta nell'SVG (barre, label, pill ACCp/ACCa,
+metriche, selected ring, ecc.) — l'overlay e' invisibile
+(background: transparent). Il layering ha senso:
+- SVG visual sotto
+- HTML hit area sopra (cattura interazioni)
+
+### Metriche column piu' larga
+
+Segnalazione utente: "06h06 03h25 0 no —" accavallati a destra.
+`COL_RIGHT` aumentato da 168px a 220px (5 metriche × ~44px = 220,
+contro le ~31px precedenti insufficienti per valori come "06h06").
+
+### Fix preliminare: use_v4=true forzato
+
+Prima di questo refactor, avevo anche identificato che backend
+default `use_v4: bool = False` bypassa il path v4 assembler che
+annota `accp_min/acca_min/cv_*`. Frontend ora forza `use_v4: true`
+nella request `/build-auto-weekly` cosi' i campi arrivano sempre.
+
+### Verifica
+
+- `npm run build` clean (1764 moduli, 549 kB)
+- `/gantt-preview`: 4 SVG, 43 hit div absolute-positioned, tutti
+  con `draggable="false"` + `cursor="default"` (AutoBuilderGantt
+  non passa callback DnD → no regressione)
+- No console errors
+
+### File toccati
+
+- `frontend/src/components/gantt/tokens.ts` (COL_RIGHT 220)
+- `frontend/src/components/gantt/GanttSheet.tsx` (refactor)
+- `frontend/src/lib/api.ts` (BuildAutoRequest.use_v4)
+- `frontend/src/pages/AutoBuilderPage.tsx` (force use_v4=true)
+- `frontend/dist/*` (rebuild)
+- `LIVE-COLAZIONE.md`
+
+---
+
 ## 2026-04-23 — Root cause #4: backend use_v4=False → nessun accp/acca/cv sui segments
 
 ### La diagnosi vera

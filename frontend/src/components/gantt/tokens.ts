@@ -5,7 +5,7 @@
 
 export const GANTT_LAYOUT = {
   COL_LEFT: 108,          // label giornata a sinistra
-  COL_RIGHT: 168,         // colonna metriche a destra
+  COL_RIGHT: 220,         // colonna metriche a destra (5 metriche × ~44px)
   PX_PER_HOUR: 46,        // densita' asse orario
   LABEL_BAND: 62,         // banda sopra la barra per label verticali + accessori
   MINUTES_BAND: 24,       // banda sotto la barra per HH:MM / durata
