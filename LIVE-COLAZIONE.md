@@ -4,6 +4,63 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Revert use_v4 + fix serialize_segments + post-process backend
+
+### Problema
+
+Dopo forzatura `use_v4=true` frontend, `/auto-genera` si bloccava
+al 97%: path v4 (seed_enumerator + day_assembler + ARTURO Live
+verification per 5×3 varianti) troppo lento in prod. Utente ha
+pensato che l'app fosse rotta.
+
+### Root cause piu' profondo scoperto
+
+`services/segments.py::serialize_segments()` **droppava silenziosamente
+TUTTI i campi annotati** (accp_min, acca_min, cv_before_min,
+cv_after_min, is_preheat, is_refezione, material_turn_id, day_index).
+Anche abilitando use_v4 il frontend riceveva seg con solo
+train_id/stazioni/tempi. Gli altri campi esistevano nel backend ma
+venivano stripped dalla serializzazione.
+
+### Fix
+
+1. **Revert use_v4=true** in AutoBuilderPage → torna default v3
+   (veloce, stabile, testato)
+2. **`services/segments.py` esteso**: `serialize_segments()` ora
+   preserva i campi opzionali (accp_min, acca_min, cv_*, gap_*,
+   material_turn_id, day_index) quando presenti, + i flag
+   (is_preheat, is_refezione) se true. Payload gonfia solo quando
+   annotato.
+3. **`api/builder.py::_annotate_segments_with_accessori_cv()`**
+   (NEW): chiama `accessori.apply_accessori()` + `cv_registry.detect_cv()`
+   + `compute_cv_split(same_pdc=True)` sui segmenti di un DaySummary
+   *dopo* la generazione v3. Cache material_segments per (mtid,
+   day_index) per evitare N query. Safe: skippa se gia' annotato
+   (path v4) o se manca material_turn_id. Chiamata in
+   `_serialize_summary()` prima della serializzazione.
+
+### Risultato atteso
+
+- Generazione turno veloce (v3 classico)
+- Popover/Gantt mostra ACCp/ACCa quando il seg ha un giro materiale
+  valido e gap ≥ 65min
+- Label CVp/CVa appaiono dove il gap materiale < 65min (same_pdc,
+  turno interno)
+
+### Verifica
+
+- `pytest tests/` → **209/209 OK** — zero regressione backend
+- npm run build clean
+
+### File toccati
+
+- `frontend/src/pages/AutoBuilderPage.tsx` (revert use_v4)
+- `services/segments.py` (extend serialize_segments)
+- `api/builder.py` (post-processing helper + call)
+- `LIVE-COLAZIONE.md`
+
+---
+
 ## 2026-04-23 — Fix visual/interaction post-refactor HTML overlay
 
 ### Segnalazioni utente

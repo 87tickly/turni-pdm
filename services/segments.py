@@ -43,15 +43,37 @@ def dedup_segments(segments: list[dict]) -> list[dict]:
 
 
 def serialize_segments(segments) -> list[dict]:
-    """Serializza segmenti in formato JSON-safe."""
+    """Serializza segmenti in formato JSON-safe.
+
+    Include campi di annotazione del day_assembler/accessori/cv_registry
+    se presenti sui segmenti (accp_min, acca_min, cv_before_min,
+    cv_after_min, is_preheat, is_refezione, gap_before, gap_after,
+    material_turn_id, day_index). Senza questi campi il frontend non
+    puo' mostrare pill ACCp/ACCa/CV nel Gantt."""
     result = []
     for seg in segments:
-        result.append({
+        item = {
             "train_id": seg_get(seg, "train_id", "?"),
             "from_station": seg_get(seg, "from_station", ""),
             "to_station": seg_get(seg, "to_station", ""),
             "dep_time": seg_get(seg, "dep_time", ""),
             "arr_time": seg_get(seg, "arr_time", ""),
             "is_deadhead": seg_get(seg, "is_deadhead", False),
-        })
+        }
+        # Campi opzionali: inclusi SOLO se non vuoti/default, per non
+        # gonfiare il payload JSON su segmenti non annotati.
+        for opt_key in (
+            "accp_min", "acca_min",
+            "cv_before_min", "cv_after_min",
+            "gap_before", "gap_after",
+            "material_turn_id", "day_index",
+        ):
+            val = seg_get(seg, opt_key, None)
+            if val is not None:
+                item[opt_key] = val
+        for flag_key in ("is_preheat", "is_refezione"):
+            val = seg_get(seg, flag_key, False)
+            if val:
+                item[flag_key] = True
+        result.append(item)
     return result

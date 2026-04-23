@@ -230,11 +230,16 @@ export function AutoBuilderPage() {
     try {
       // build-auto-weekly: ritorna N giornate del turno materiale, ciascuna
       // con le 3 varianti LMXGV/S/D come nel PDF originale Trenord
-      // use_v4=true abilita il path assembler (annota accp_min/acca_min/
-      // cv_before_min/cv_after_min sui segments). Senza questo flag il
-      // backend usa v3 che produce segments senza campi accessori → il
-      // Gantt non mostra i pill ACCp/ACCa/CV.
-      const res = await buildAutoWeekly({ deposito, days: nDays, use_v4: true })
+      // NB: use_v4 disabilitato (default False) perche' il path v4
+      // causa hang al 97% nel deploy prod (probabile timeout su
+      // verifiche live.arturo.travel / costo computazionale seed
+      // enumeration + day_assembler per 5 giornate × 3 varianti).
+      // Conseguenza: accp_min/acca_min/cv_before_min/cv_after_min
+      // non vengono annotati sui segments → popover senza sezioni
+      // ACCp/ACCa/CV. Residuo: aggiungere backend post-processing
+      // che chiama apply_accessori() anche sulla path v3 senza
+      // rallentare la generazione.
+      const res = await buildAutoWeekly({ deposito, days: nDays })
       setProgress(100)
       setProgressPhase("Completato")
       setResult(res)

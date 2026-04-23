@@ -2,18 +2,99 @@
 Router costruzione turni automatici, calendario, turno settimanale.
 """
 
+from datetime import date as _date
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from api.deps import get_db
 from src.database.db import Database
 from src.turn_builder.auto_builder import AutoBuilder
+from src.turn_builder import accessori as accessori_mod
+from src.turn_builder import cv_registry
 from src.validator.rules import TurnValidator, _fmt_min
 from services.segments import dedup_segments, serialize_segments
 from services.timeline import build_timeline_blocks
 from src.constants import DEPOSITI
 
 router = APIRouter()
+
+
+def _annotate_segments_with_accessori_cv(summary, db, day_date=None):
+    """Annota accp_min/acca_min/cv_before_min/cv_after_min sui segmenti
+    di un DaySummary *dopo* la generazione (path v3). Evita di dover
+    abilitare use_v4 (piu' lento a causa del day_assembler full-stack).
+
+    Safe: se il backend ha gia' annotato (path v4) o se manca
+    material_turn_id, i seg vengono lasciati come sono.
+    """
+    if not summary or not summary.segments:
+        return
+    day_date = day_date or _date.today()
+    # Cache giro materiale per (mtid, day_index) per evitare N query
+    _material_cache: dict = {}
+
+    def _get_mat_segs(mtid, dix):
+        key = (mtid, dix)
+        if key not in _material_cache:
+            try:
+                all_segs = db.get_all_segments(day_index=dix) or []
+            except Exception:
+                all_segs = []
+            _material_cache[key] = [
+                s for s in all_segs
+                if s.get("material_turn_id") == mtid
+            ]
+        return _material_cache[key]
+
+    def _is_refez(seg):
+        if isinstance(seg, dict):
+            return bool(seg.get("is_refezione", False))
+        return bool(getattr(seg, "is_refezione", False))
+
+    # Step 1: annota accp_min/acca_min
+    for seg in summary.segments:
+        if not isinstance(seg, dict):
+            continue
+        if _is_refez(seg):
+            seg.setdefault("accp_min", 0)
+            seg.setdefault("acca_min", 0)
+            continue
+        if "accp_min" in seg and "acca_min" in seg:
+            continue  # gia' annotato
+        mtid = seg.get("material_turn_id")
+        dix = seg.get("day_index", 0)
+        if mtid is None:
+            continue  # non ho modo di risalire al giro materiale
+        mat_segs = _get_mat_segs(mtid, dix) or [seg]
+        try:
+            res = accessori_mod.apply_accessori(mat_segs, seg, day_date)
+            seg["accp_min"] = res["accp_min"]
+            seg["acca_min"] = res["acca_min"]
+            if res.get("gap_before") is not None:
+                seg["gap_before"] = res["gap_before"]
+            if res.get("gap_after") is not None:
+                seg["gap_after"] = res["gap_after"]
+        except Exception:
+            pass
+
+    # Step 2: CV interni (same_pdc=True)
+    real_seq = [s for s in summary.segments
+                if isinstance(s, dict) and not _is_refez(s)]
+    for i in range(len(real_seq) - 1):
+        prev_s, next_s = real_seq[i], real_seq[i + 1]
+        if "cv_after_min" in prev_s or "cv_before_min" in next_s:
+            continue
+        try:
+            cv = cv_registry.detect_cv(prev_s, next_s)
+            if cv is not None:
+                cva, cvp = cv_registry.compute_cv_split(
+                    cv["gap_min"], same_pdc=True,
+                )
+                prev_s["cv_after_min"] = cva
+                next_s["cv_before_min"] = cvp
+        except Exception:
+            pass
 
 
 # ── Request models ──────────────────────────────────────────────
@@ -46,7 +127,13 @@ class BuildWeeklyRequest(BaseModel):
 # ── Helpers ─────────────────────────────────────────────────────
 
 def _serialize_summary(s, deposito, db):
-    """Serializza un DaySummary con timeline per risposte build-auto."""
+    """Serializza un DaySummary con timeline per risposte build-auto.
+
+    Se i segmenti non sono gia' stati annotati (path v3), calcola qui
+    accp_min/acca_min/cv_before_min/cv_after_min cosi' il frontend puo'
+    mostrare pill ACCp/ACCa/CV nel Gantt.
+    """
+    _annotate_segments_with_accessori_cv(s, db)
     timeline = build_timeline_blocks(s, deposito=deposito, db=db)
     return {
         "prestazione": _fmt_min(s.prestazione_min),
