@@ -229,17 +229,16 @@ export function AutoBuilderPage() {
     const t0 = performance.now()
     try {
       // build-auto-weekly: ritorna N giornate del turno materiale, ciascuna
-      // con le 3 varianti LMXGV/S/D come nel PDF originale Trenord
-      // NB: use_v4 disabilitato (default False) perche' il path v4
-      // causa hang al 97% nel deploy prod (probabile timeout su
-      // verifiche live.arturo.travel / costo computazionale seed
-      // enumeration + day_assembler per 5 giornate × 3 varianti).
-      // Conseguenza: accp_min/acca_min/cv_before_min/cv_after_min
-      // non vengono annotati sui segments → popover senza sezioni
-      // ACCp/ACCa/CV. Residuo: aggiungere backend post-processing
-      // che chiama apply_accessori() anche sulla path v3 senza
-      // rallentare la generazione.
-      const res = await buildAutoWeekly({ deposito, days: nDays })
+      // con le 3 varianti LMXGV/S/D come nel PDF originale Trenord.
+      // use_v4=true (riabilitato 23/04/2026 dopo optimizations backend):
+      //   - _verify_turn_via_api async-batch (da 45s sync a ~3s parallel)
+      //   - max_seeds 200→50 nel seed_enumerator
+      //   - _v4_material_cache e _v4_load_day_cache promosse ad attributi
+      //     AutoBuilder (cross-variant LV/SAB/DOM)
+      // Garantisce annotazione accp_min/acca_min/cv_*/is_preheat/
+      // is_refezione sui segments via day_assembler (architettura
+      // centrata sulla condotta, non catene dal deposito).
+      const res = await buildAutoWeekly({ deposito, days: nDays, use_v4: true })
       setProgress(100)
       setProgressPhase("Completato")
       setResult(res)

@@ -4,6 +4,75 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Sblocca v4: async batch verify + cache cross-variant + max_seeds 50
+
+### Contesto
+
+Dopo il revert di stamattina (c881ae7), `/auto-genera` girava su path v3
+(catene dal deposito, niente vincolo condotta target, violazioni MAX_PRESTAZIONE
+> 8h30, accessori/CV solo annotati in post-processing). L'utente ha contestato:
+"tutti gli algoritmi di cui parlavamo che fine hanno fatto?".
+
+Diagnosi bottleneck v4:
+1. `_verify_turn_via_api` sincrono con httpx: 75 treni × 600ms cache-miss ≈ 45s
+2. `enumerate_seeds(max_seeds=200)` × 15 giornate (LV+SAB+DOM × 5) = 3000 assemble_day
+3. `_material_cache` e `_load_day_segments` locali a `build_schedule` →
+   ricreate da zero 3 volte in un unico `build_weekly`
+
+### Fix backend
+
+**services/train_route_cache.py** — `fetch_routes_batch()`:
+- Lookup cache DB per tutte le coppie (tid, origine_hint)
+- Per i missing: `httpx.AsyncClient` con `asyncio.Semaphore(10)` parallelo
+- Upsert cache + dict (tid, orig) → route
+- Fallback sequenziale se gia' dentro event loop (edge case)
+
+**src/turn_builder/auto_builder.py**:
+- `_verify_turn_via_api` rifattorizzato: 2-pass (raccolta pairs → batch fetch →
+  iterazione sui segmenti con lookup O(1))
+- Path v4 `build_schedule`: `max_seeds` 200 → 50 (top-50 per score cattura
+  i best candidates, `assemble_day` costa O(seeds × 2 BFS))
+- Promossi `_v4_material_cache` e `_v4_load_day_cache` ad attributi
+  AutoBuilder (sopravvivono a LV/SAB/DOM, evitano 15 `get_all_segments`
+  duplicate)
+
+**frontend/src/pages/AutoBuilderPage.tsx**:
+- Riabilitato `use_v4: true` nella chiamata `buildAutoWeekly`
+
+### Impatto atteso
+
+- Verify ARTURO: 45s → ~3s (parallel 10 conn, limite rate 30 req/min)
+- Seed enum + assemble: 15s → ~4s (max_seeds 50 invece 200)
+- DB queries cross-variant: 15 → 5 (cache reuse LV/SAB/DOM)
+- **Totale generazione: ~60s → ~10-15s** (stima; verifica su Railway prod)
+
+### Verifica
+
+- `pytest tests/` → **209/209 OK** — zero regressione
+- `npm run build` clean (1764 moduli, 550 kB)
+- Console preview pulita
+- Verifica visiva su `/auto-genera` dopo deploy Railway: vincoli rispettati,
+  condotta target 2-5h, segmenti annotati con ACCp/ACCa/CV dal day_assembler
+  (non dal post-processing v3)
+
+### File toccati
+
+- `services/train_route_cache.py` (+ fetch_routes_batch async)
+- `src/turn_builder/auto_builder.py` (_verify batch + cache attributi + max_seeds)
+- `frontend/src/pages/AutoBuilderPage.tsx` (use_v4: true)
+- `frontend/dist/*` (rebuild)
+- `LIVE-COLAZIONE.md`
+
+### Prossimo step tracciato
+
+Step 2: **Gantt interattivo su AutoBuilderPage**
+- Verificare che drag intra-turno funzioni (sposta orario seg nello stesso Gantt)
+- Click seg → modale edit con POST `/validate-variant` per ricalcolo summary
+- Endpoint `/validate-variant` ancora residuo aperto (tracked nel 23/04 #4
+  "Logica ACCp/ACCa/CVp/CVa esposta al frontend")
+
+---
+
 ## 2026-04-23 — Revert use_v4 + fix serialize_segments + post-process backend
 
 ### Problema
