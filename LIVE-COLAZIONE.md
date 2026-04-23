@@ -4,6 +4,61 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Step 7/10: FR candidate + registry pdc_fr_approved
+
+### Regola di business
+
+Quando una giornata non trova rientro hop 1 ne' hop 2, scala di fallback:
+
+  1. Stazione finale in `fr_stations` (gia' approvata per questo PdC)
+     -> FR valida, `is_fr=True`, `fr_candidate=False`
+  2. Stazione in `fr_candidate_stations` (suggerita ma non approvata)
+     -> FR proposta, `is_fr=True`, `fr_candidate=True` (la UI chiedera'
+     approvazione a Step 10)
+  3. Altrimenti -> None (giornata non chiudibile; Step 10 proporra'
+     taxi come ulteriore fallback)
+
+### Implementazione
+
+`src/database/db.py`:
+- Nuova tabella `pdc_fr_approved(pdc_id, station, approved_at, notes)`
+  con UNIQUE(pdc_id, station) e indice su pdc_id.
+
+`src/turn_builder/fr_registry.py` (NEW):
+- `list_approved(conn, pdc_id)` -> set di stazioni approvate
+- `approve(conn, pdc_id, station, notes)` -> INSERT OR IGNORE
+- `revoke(conn, pdc_id, station)`
+- `approve_batch(conn, pdc_id, stations)` -> int (nuove approvazioni)
+
+`src/turn_builder/day_assembler.py`:
+- Nuovo parametro `fr_candidate_stations: set` (default vuoto)
+- Campi aggiuntivi nel dict di ritorno: `fr_candidate: bool`,
+  `fr_station: str` (solo se `is_fr=True`)
+- Se rientro fallisce, controlla prima approvate poi candidate,
+  marca di conseguenza.
+
+### Verifica
+
+`tests/test_fr_step7.py` (NEW, 10 test):
+- fr_registry: approve, list, revoke, approve_batch, idempotenza,
+  normalizzazione case, isolamento tra PdC
+- day_assembler: FR approvata (not candidate), FR candidata, nessuna
+  FR (scartata), rientro disponibile (FR non attiva)
+
+Pytest: **181/181** (171 + 10 nuovi). Zero regressioni.
+
+### File modificati
+
+- `src/database/db.py` (tabella pdc_fr_approved)
+- `src/turn_builder/fr_registry.py` (NEW)
+- `src/turn_builder/day_assembler.py` (parametro + flag)
+- `tests/test_fr_step7.py` (NEW)
+- `LIVE-COLAZIONE.md`
+
+pytest 181/181.
+
+---
+
 ## 2026-04-23 — Step 6/10: integrazione accessori + CV in day_assembler
 
 ### Contesto

@@ -197,6 +197,7 @@ def assemble_day(
     used_train_ids: set = None,
     allow_fr_end: bool = True,
     fr_stations: set = None,
+    fr_candidate_stations: set = None,
     day_date: Optional[date] = None,
     get_material_segments: Optional[Callable[[int, int], list]] = None,
 ) -> Optional[dict]:
@@ -241,6 +242,10 @@ def assemble_day(
     """
     if day_date is None:
         day_date = date.today()
+
+    # Step 7: stazioni FR candidate (non ancora approvate, possono
+    # diventare FR valide dopo approvazione utente).
+    fr_candidates = {s.upper() for s in (fr_candidate_stations or set())}
     dep = (deposito or "").upper().strip()
     if not dep or not seed or not seed.get("trains"):
         return None
@@ -312,6 +317,7 @@ def assemble_day(
         retur = []
         returns_depot = True
         is_fr = False
+        fr_candidate = False
     else:
         # Regola hop (22/04/2026): prova hop=1, fallback hop=2 solo se vuoto.
         # depart_after usa MIN_CHANGE_MIN (10') dopo arrivo seed.
@@ -338,12 +344,24 @@ def assemble_day(
                 s["is_deadhead"] = True
             returns_depot = True
             is_fr = False
+            fr_candidate = False
         else:
-            # Nessun rientro trovato. Accetta solo se FR legittimo
+            # Nessun rientro trovato. Scala di fallback (Step 7):
+            #   1. Stazione in FR gia' approvata (fr_stations) -> FR valida
+            #   2. Stazione in FR candidata (fr_candidate_stations) -> FR
+            #      marcata come "da approvare" (l'utente decidera' dopo)
+            #   3. Altrimenti -> None (giornata non chiudibile; Step 10
+            #      proporra' taxi di rientro come ulteriore fallback)
             if allow_fr_end and seed_to in fr:
                 retur = []
                 returns_depot = False
                 is_fr = True
+                fr_candidate = False
+            elif allow_fr_end and seed_to in fr_candidates:
+                retur = []
+                returns_depot = False
+                is_fr = True
+                fr_candidate = True
             else:
                 return None  # impossibile chiudere
 
@@ -480,4 +498,6 @@ def assemble_day(
         "n_cv": n_cv,
         "returns_depot": returns_depot,
         "is_fr": is_fr,
+        "fr_candidate": fr_candidate,
+        "fr_station": seed_to if is_fr else None,
     }

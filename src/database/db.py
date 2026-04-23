@@ -399,6 +399,26 @@ class Database:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_train_allocation_train ON train_allocation(train_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_train_allocation_depot ON train_allocation(deposito)")
 
+        # ── PdC FR approvate (Step 7, 23/04/2026) ──
+        # Tabella delle stazioni FR (dormita) autorizzate per PdC specifico.
+        # Popolata dall'utente dopo approvazione delle candidate generate
+        # dall'algoritmo. Le stazioni qui presenti bypassano la marcatura
+        # "candidata" e diventano direttamente FR valide.
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS pdc_fr_approved (
+                id {pk},
+                pdc_id TEXT NOT NULL,
+                station TEXT NOT NULL,
+                approved_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                notes TEXT DEFAULT '',
+                UNIQUE(pdc_id, station)
+            )
+        """)
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pdc_fr_approved_pdc "
+            "ON pdc_fr_approved(pdc_id)"
+        )
+
         # ── CV Ledger (Step 5, 23/04/2026) ──
         # Registro condiviso persistente per i Cambi Volante tra due treni
         # consecutivi dello stesso materiale operati da PdC diversi. Il
