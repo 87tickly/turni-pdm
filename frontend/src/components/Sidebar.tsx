@@ -11,6 +11,7 @@ import {
   Search,
   CalendarRange,
   Bed,
+  BarChart3,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Logo } from "./Logo"
@@ -33,6 +34,7 @@ const dataItems = [
 const opsItems = [
   { to: "/auto-genera", icon: Sparkles, label: "Genera da materiale" },
   { to: "/calendario-agente", icon: CalendarRange, label: "Calendario agente" },
+  { to: "/gantt-preview", icon: BarChart3, label: "Gantt v3 · preview" },
   { to: "/builder", icon: PlusCircle, label: "Nuovo turno" },
   { to: "/fr-approvati", icon: Bed, label: "Dormite FR" },
   { to: "/import", icon: Upload, label: "Import" },

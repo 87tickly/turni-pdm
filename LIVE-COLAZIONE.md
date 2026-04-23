@@ -4,6 +4,133 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Claude Design handoff #2: Gantt v3 (falsa riga PDF Trenord)
+
+### Contesto
+
+Secondo handoff Claude Design del prompt `PROMPT-claude-design-gantt.md`.
+Bundle: `LLxXeJR7clQYBIDprXfziQ`. Include `HANDOFF-gantt-v3.md`,
+`screen-gantt-v3.html` (SVG monolitico JS), `gantt-v3.css`.
+
+Il deliverable e' un **Gantt SVG** che riprende l'aspetto del foglio
+turno PDF Trenord (barre nere sottili, label verticali, metriche a
+destra, asse 24h continuo, multi-variante impilato) pur mantenendo
+interattivita' web (hover tooltip, click placeholder drawer).
+
+### Implementazione
+
+#### Tokens CSS (`frontend/src/index.css`)
+
+Nuovo blocco `:root` con palette "Ibrido":
+- `--gantt-bar-cond` #0B6AA8 (blu petrolio, NON nero puro per coerenza DS)
+- `--gantt-bar-dh-bg`, `--gantt-bar-dh-line` (vettura tratteggiata)
+- `--gantt-refez` ambra, `--gantt-sleep` viola, `--gantt-fr` accent
+- `--gantt-cvp/cva/preheat` per accessori
+- `--gantt-suspect` rosso per vetture in cerchio (bug risolto in
+  `cycle_optimizer.py`, commit 68a2b6a)
+- Dimensioni: `--gantt-px-per-hour 46px`, `--gantt-bar-h 20px`,
+  `--gantt-col-left 108px`, `--gantt-col-right 168px`.
+
+#### Nuova cartella `frontend/src/components/gantt/`
+
+- `types.ts` — `GanttSegment`, `GanttRow`, `GanttMetrics`,
+  `GanttDayHead`, `GanttPalette`, `GanttLabelsMode`, `GanttMinutesMode`.
+- `tokens.ts` — costanti JS `GANTT_LAYOUT`, `GANTT_COLORS`,
+  `timeToMin`, `minToTime`.
+- `GanttSheet.tsx` — **componente SVG monolitico** (~520 righe)
+  implementato 1:1 dalla JS del mockup. Features:
+  - Asse orario 24h continuo (range custom per overnight)
+  - Tick ogni ora + mezzore opzionali (`grid30`)
+  - Label variante a sinistra (LMXGV / S / D / SD / G6 · LMXGV)
+  - Colonna metriche a destra (Lav/Cct/Km/Not/Rip) con pallino `warn`
+  - 5 kind di segmento (cond / dh / refez / scomp / sleep) ciascuno
+    con sub-render dedicato
+  - Label auto-vertical per barre < 60px
+  - Minuti HH:MM o durata sotto barra
+  - Vetture sospette: fill rosso + border tratteggiato rosso + ⚠
+  - Preheat: bullet ●, CVp/CVa: striscia verticale + label accessorio
+  - Click/context-menu handler come props (cablaggio drawer esterno)
+
+La scelta "SVG monolitico" rispetto ai 7 file dell'handoff originale
+e' pragmatica per React (un componente = una source of truth, niente
+context/props drilling); l'API pubblica (`GanttSheet` props) e' la
+stessa.
+
+#### Pagina showcase `GanttPreviewPage.tsx`
+
+Nuova pagina `/gantt-preview` (accessibile da sidebar sotto Operazioni
+come "Gantt v3 · preview"). Contiene 4 varianti dimostrative prese 1:1
+dal mockup Claude Design:
+
+- **A** · giornata singola 4 treni (uscita auto-builder)
+- **B** · LMXGV + S + D impilate, con 2 vetture sospette e `warn` su D
+- **C** · S.COMP giornata intera
+- **D** · FR dormita Alessandria + ripartenza giorno dopo in 3
+  varianti (LMXGV · S · D), con CVp e preheat
+
+Include tweaks panel inline (altezza barra, modalita' label, modalita'
+minuti, toggle sospette, griglia 30 min) e callout "Vetture sospette"
+che referenzia il fix commit 68a2b6a.
+
+#### Sidebar
+
+Aggiunta voce "Gantt v3 · preview" con icona `BarChart3` sotto
+Operazioni (ordine: Genera · Calendario agente · **Gantt v3 preview** ·
+Nuovo turno · Dormite FR · Import).
+
+#### Handoff documentation
+
+`docs/HANDOFF-gantt-v3.md` copiato nel repo per consultazione futura
+(tipi completi, 10 edge case, esempio input → rendering, checklist
+merge).
+
+### Verifica
+
+- `npm run build` OK: 1761 modules transformed (+3 file gantt),
+  537 kB JS, 63 kB CSS
+- Preview dev avviato: login page renderizza pulita, **zero errori
+  console**
+- TypeScript strict pass: tutti i tipi `verbatimModuleSyntax`
+  correttamente `import type`
+
+### Residui dichiarati
+
+1. **`AutoBuilderGantt.tsx` e `PdcGanttV2.tsx` NON riscritti** in
+   questo step. L'handoff prevede che entrambi usino `GanttSheet`
+   come base, ma la riscrittura richiede:
+   - Test di regressione su hover/click/right-click/drawer/
+     context-menu per i turni reali in produzione
+   - Cablaggio dei dati esistenti (segments con `is_deadhead`,
+     `material_turn_id`, `is_refezione`, ecc.) al formato `GanttSegment`
+   - Rischio alto di regressione sulle schermate piu' usate
+   La pagina `/gantt-preview` serve come "beta" che il dispatcher
+   puo' valutare prima della migrazione produzione.
+2. **Campo `suspect_reason`** non ancora esposto dal backend — il
+   `cycle_optimizer` (commit 68a2b6a) rimuove i cicli silenziosamente.
+   L'handoff propone di esporlo così il dispatcher vede le vetture
+   sospette prima della rimozione (opzione override).
+3. **Drag & drop / snap** del mockup (cambio orario, cambio variante)
+   non portato nel React: e' un'interazione complessa che richiede
+   design separato (quando spostare un segmento di turno PdC ha impatti
+   normativi sui riposi tra turni).
+4. **Palette switching** (`hybrid` / `mono` / `brand`) e' supportata
+   nei tipi ma non implementata visivamente oltre il default "hybrid".
+
+### File modificati
+
+- `frontend/src/index.css` (tokens Gantt v3)
+- `frontend/src/components/gantt/types.ts` (NEW)
+- `frontend/src/components/gantt/tokens.ts` (NEW)
+- `frontend/src/components/gantt/GanttSheet.tsx` (NEW)
+- `frontend/src/pages/GanttPreviewPage.tsx` (NEW)
+- `frontend/src/App.tsx` (route `/gantt-preview`)
+- `frontend/src/components/Sidebar.tsx` (voce "Gantt v3 · preview")
+- `frontend/dist/*` (rebuild bundle)
+- `docs/HANDOFF-gantt-v3.md` (NEW, dall'handoff Claude Design)
+- `LIVE-COLAZIONE.md`
+
+---
+
 ## 2026-04-23 — Claude Design handoff #1: Sidebar + Calendario agente
 
 ### Contesto

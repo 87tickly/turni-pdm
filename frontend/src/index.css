@@ -180,6 +180,45 @@
 }
 
 /* ──────────────────────────────────────────────────────────────
+ * Gantt v3 — falsa riga PDF Trenord (handoff HANDOFF-gantt-v3.md §2)
+ * No NERO puro: ink = var(--color-on-surface-strong) #0A1322
+ * ────────────────────────────────────────────────────────────── */
+:root {
+  /* Condotta — blu petrolio (brand-secondary) */
+  --gantt-bar-cond:        #0B6AA8;
+  --gantt-bar-cond-ink:    #084F7F;
+  /* Vettura (deadhead) — contorno tratteggiato */
+  --gantt-bar-dh-line:     #4E6A85;
+  --gantt-bar-dh-bg:       #E9EEF5;
+  /* Refezione — ambra */
+  --gantt-refez:           #D97706;
+  --gantt-refez-ink:       #B45309;
+  /* S.COMP — grigio tenue con pattern dots */
+  --gantt-scomp:           #6C7488;
+  /* FR dormita — viola */
+  --gantt-sleep:           #5B21B6;
+  --gantt-sleep-bg:        rgb(91 33 182 / 0.10);
+  --gantt-sleep-soft:      rgb(91 33 182 / 0.18);
+  --gantt-fr:              #7C3AED;
+  /* Accessori (CVp / CVa / Preriscaldo) */
+  --gantt-cvp:             #B45309;
+  --gantt-cva:             #6B21A8;
+  --gantt-preheat:         #0062CC;
+  /* Sospetto (vetture in cerchio) */
+  --gantt-suspect:         #DC2626;
+  /* Ink derivati (non nero puro) */
+  --gantt-ink-60:          #3E4C67;
+  --gantt-ink-40:          #6C7488;
+  /* Dimensioni (override con style inline da React) */
+  --gantt-px-per-hour:     46px;
+  --gantt-bar-h:           20px;
+  --gantt-col-left:        108px;
+  --gantt-col-right:       168px;
+  --gantt-label-band:      62px;
+  --gantt-minutes-band:    24px;
+}
+
+/* ──────────────────────────────────────────────────────────────
  * Calendario agente — token dedicati (handoff Claude Design
  * HANDOFF-calendario-agente.md §4)
  * ────────────────────────────────────────────────────────────── */
