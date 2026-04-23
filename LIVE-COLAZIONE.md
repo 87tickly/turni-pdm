@@ -4,6 +4,125 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Implementazione gantt interactions (Fase B)
+
+### Deliverable
+
+Estesa base `GanttSheet` v3 con layer interazioni opt-in. Riscritto
+`PdcGanttV2` da 1400 righe a ~330 righe come wrapper di compatibilità.
+I 3 consumer (`PdcPage`, `PdcBuilderPage`, `PdcDepotPage`) NON richiedono
+modifiche: il wrapper mantiene la stessa API legacy.
+
+### File modificati
+
+- `frontend/src/components/gantt/types.ts` — aggiunti `GanttAction` (8
+  valori), `CrossDragPayload`, `CROSS_DAY_MIME`, `DragKind`,
+  `SegmentDragChange`, `GanttInteractionCallbacks` interface
+- `frontend/src/components/gantt/tokens.ts` — aggiunti 7 nuovi token
+  (`SELECTED_RING`, `SELECTED_SHADOW`, `DRAG_GHOST_BORDER`, `DROP_SLOT`,
+  `DROP_SLOT_HALO`, `ACTION_BAR_BG`, `STICKY_TIME_BG`)
+- `frontend/src/components/gantt/interactions.ts` (NEW, ~480 righe) —
+  hook `useGanttInteractions` con:
+  - Drag intra-Gantt: mousedown + globali mousemove/mouseup, threshold
+    4px, snap 5min, kind move/resize-start/resize-end
+  - Cross-day HTML5 DnD: MIME `application/x-colazione-block`, payload
+    serializzato, flow source→target→remove atomico, reject se
+    ganttId+rowIdx match
+  - Timeline click (add-block): cursor crosshair, snap a granulo minuti
+  - Action bar state: single-click → selezione; Esc o click fuori SVG
+    → deseleziona; `hideActionBar=true` → fallback a onSegmentClick
+  - Keyboard: Tab/Enter/Space su segment → onSegmentClick
+  - `startDrag` esportato per consentire resize handle bindings esterni
+  - `ACTION_BAR_CONFIG` export (8 icone + 3 separatori, ordine fisso)
+- `frontend/src/components/gantt/GanttSheet.tsx` — estesa con:
+  - 10 props opt-in ereditate da `GanttInteractionCallbacks`
+  - Wrapper `<div>` container per HTML overlays
+  - Hook `useGanttInteractions` invocato sempre (noop se nessuna
+    callback)
+  - Timeline click/drop zones su ogni row (solo se callback fornite)
+  - Ghost back-reference durante drag (rect semitrasparente posizione
+    originale + bordo tratteggiato brand alla posizione corrente)
+  - Selected ring + shadow kinetic su segment selezionato
+  - Resize handle `6px` ai bordi per segmenti cond/dh se `onSegmentDrag`
+  - `ActionBarOverlay` HTML component: 8 bottoni, separatori verticali
+    dopo 3/5/7, clamp ai bordi via CSS var `--arrow-x`, animazione
+    keyframe `ganttActionBarIn` 140ms cubic-bezier
+  - `StickyTimeTooltip` HTML durante drag: `dep → arr` real-time su
+    `#0A1322` bg
+- `frontend/src/components/PdcGanttV2.tsx` — **riscritto da 1400 a 330
+  righe** come wrapper:
+  - Mappa `PdcBlock[]` → `GanttSegment[]` fondendo `cv_partenza`/
+    `cv_arrivo` nel treno adiacente tramite flag `cvp`/`cva`
+  - Mantiene mapping bidirezionale `segIdx ↔ blockIdx` per convertire
+    indici nei callback
+  - Forward callback legacy → nuove API GanttSheet:
+    - `onBlocksChange` ← `onSegmentDrag` (con CVp/CVa linked che
+      seguono)
+    - `onCrossDayDragStart/Drop/Remove` ← `onCrossDragStart/Drop/Remove`
+      con rebuild del `block` nel payload
+    - `onAction` 1:1 con conversione segIdx → blockIdx
+    - `onBlockClick` ← `onSegmentClick` (per `hideActionBar=true` o
+      consumer che non passano `onAction`)
+  - Placeholder "Disponibile · riposo a casa" preservato per row vuota
+  - Props legacy `debug`, `depot`, `height` mantenute (ignorate dalla
+    nuova implementazione — zero regressione di interfaccia)
+
+### Consumer invariati
+
+- `frontend/src/pages/PdcPage.tsx` — non modificato
+- `frontend/src/pages/PdcBuilderPage.tsx` — non modificato
+- `frontend/src/pages/PdcDepotPage.tsx` — non modificato
+
+Le props e gli import restano identici. La migrazione avviene
+trasparentemente nel wrapper.
+
+### Verifica
+
+- `npm run build` → clean (1764 moduli, 541 kB gzipped 149 kB)
+- Preview server: `/gantt-preview` renderizza 4 `<GanttSheet>` senza
+  console errors
+- `/pdc` renderizza sidebar + pagina vuota (nessun turno nel DB devtest
+  usato per lo smoke test — corretto)
+- `/pdc/new` renderizza editor senza errori
+
+**Limite test**: non avendo dati PdC nel DB devtest, non ho potuto
+verificare visivamente drag/cross-day/action bar con turni reali.
+Smoke test "codice monta + niente regressione di compile" passato.
+La prossima volta che apri `/pdc` con un turno reale, verifica:
+
+- Action bar compare al click su un segmento (se `onAction` fornito e
+  `hideActionBar=false`)
+- Drag di un treno sposta il blocco con snap 5min, orari aggiornano
+- Cross-day drag fra giornate impilate (su `PdcBuilderPage`) sposta
+  il blocco + eventuali CVp/CVa linked
+- Delete via action bar funziona (`onAction("delete", ...)`)
+
+### Residui
+
+- **Auto-scroll durante drag** fuori viewport non implementato (dichiarato
+  "migliorato" nell'handoff, ma è lavoro extra che non blocca niente)
+- **Keyboard Tab** fra segmenti funziona ma visual focus state potrebbe
+  essere più marcato
+- **Drop-slot indicator** (riga verticale sull'asse target durante
+  cross-drag) non renderizzato — il feedback attuale è il cursor
+  `grabbing` + snap automatico al drop
+- **`suspect_reason` dal backend** — già passabile tramite
+  `seg.suspect_reason`, il builder v4 lo calcola internamente ma
+  non lo espone ancora in API → resta residuo separato (#5 dei
+  residui iniziali)
+
+### File toccati
+
+- `frontend/src/components/gantt/types.ts`
+- `frontend/src/components/gantt/tokens.ts`
+- `frontend/src/components/gantt/interactions.ts` (NEW)
+- `frontend/src/components/gantt/GanttSheet.tsx`
+- `frontend/src/components/PdcGanttV2.tsx`
+- `frontend/dist/*` (rebuild)
+- `LIVE-COLAZIONE.md`
+
+---
+
 ## 2026-04-23 — Handoff Claude Design: gantt interactions (estratto)
 
 ### Contesto

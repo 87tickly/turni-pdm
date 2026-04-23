@@ -32,6 +32,14 @@ export const GANTT_COLORS = {
   INK: "var(--color-on-surface-strong, #0A1322)",
   INK_60: "var(--gantt-ink-60, #3E4C67)",
   INK_40: "var(--gantt-ink-40, #6C7488)",
+  // Interactions layer
+  SELECTED_RING: "#22C55E",
+  SELECTED_SHADOW: "0 3px 8px rgba(34,197,94,.35)",
+  DRAG_GHOST_BORDER: "#0062CC",
+  DROP_SLOT: "#0062CC",
+  DROP_SLOT_HALO: "rgb(0 98 204 / 0.12)",
+  ACTION_BAR_BG: "var(--color-surface-container-lowest, #FEFEFD)",
+  STICKY_TIME_BG: "#0A1322",
 } as const
 
 export function timeToMin(hhmm: string): number {

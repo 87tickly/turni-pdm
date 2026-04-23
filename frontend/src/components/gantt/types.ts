@@ -52,3 +52,56 @@ export interface GanttDayHead {
 export type GanttPalette = "hybrid" | "mono" | "brand"
 export type GanttLabelsMode = "auto" | "vertical" | "horizontal"
 export type GanttMinutesMode = "hhmm" | "duration" | "off"
+
+// ─── Interactions layer (opt-in) ───────────────────────────────
+
+export type GanttAction =
+  | "edit"
+  | "move"
+  | "duplicate"
+  | "link"
+  | "warn"
+  | "detail"
+  | "history"
+  | "delete"
+
+export interface CrossDragPayload {
+  ganttId: string
+  seg: GanttSegment
+  rowIdx: number
+  segIdx: number
+  // CVp/CVa linkati al treno padrone (seguono durante drag)
+  linkedCvp?: GanttSegment
+  linkedCva?: GanttSegment
+}
+
+export const CROSS_DAY_MIME = "application/x-colazione-block"
+
+export type DragKind = "move" | "resize-start" | "resize-end"
+
+export interface SegmentDragChange {
+  dep_time?: string
+  arr_time?: string
+}
+
+export interface GanttInteractionCallbacks {
+  onSegmentDrag?: (
+    rowIdx: number,
+    segIdx: number,
+    changes: SegmentDragChange,
+  ) => void
+  onTimelineClick?: (hour: number, minute: number, rowIdx: number) => void
+  onCrossDragStart?: (p: CrossDragPayload) => void
+  onCrossDrop?: (
+    p: CrossDragPayload,
+    targetGanttId: string,
+    dropTime: { hour: number; minute: number; rowIdx: number },
+  ) => void
+  onCrossRemove?: (segIdx: number, withLinkedCvs: boolean) => void
+  onAction?: (
+    action: GanttAction,
+    seg: GanttSegment,
+    rowIdx: number,
+    segIdx: number,
+  ) => void
+}
