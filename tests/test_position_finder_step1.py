@@ -118,6 +118,8 @@ def test_day_assembler_fallback_chain():
         seed=seed, deposito="ALE", all_day_segments=all_day,
     )
     assert result is not None
-    # Ho 2 segmenti posizionamento (hop=2) + 1 produttivo
+    # Step 2 ha aggiunto la refezione automatica: 2 posizionamento (hop=2)
+    # + 1 produttivo + 1 refezione = 4 segmenti totali.
     assert result["n_positioning"] == 2
-    assert len(result["segments"]) == 3
+    assert len(result["segments"]) == 4
+    assert any(s.get("is_refezione") for s in result["segments"])

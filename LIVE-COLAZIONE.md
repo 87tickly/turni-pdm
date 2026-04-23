@@ -4,6 +4,90 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Step 2/10: fase C refezione in day_assembler
+
+### Contesto
+
+Completamento della fase C del modello v4 (seed + posizionamento +
+**refezione** + rientro + validazione) che era documentata nel docstring
+di `day_assembler.py` ma non implementata: la refezione non veniva
+piazzata da nessuna parte.
+
+### Implementazione
+
+`src/turn_builder/day_assembler.py`:
+- Import costanti refezione da `src/constants.py`: `MEAL_MIN`,
+  `MEAL_WINDOW_1_START/END` (11:30-15:30), `MEAL_WINDOW_2_START/END`
+  (18:30-22:30). Valori letti dalla config aziendale attiva.
+- Nuovi helper:
+  - `_seg_is_refezione(seg)`: True se `is_refezione=True` sul segmento
+  - `_refez_fits_in_window(start, duration)`: True se l'intervallo cade
+    interamente in una finestra contrattuale
+  - `_make_refez_segment(station, start)`: crea segmento virtuale REFEZ
+    di 30' ancorato a stazione (non e' ne' condotta ne' vettura)
+  - `_find_refez_start_in_gap(earliest, latest)`: cerca lo start piu'
+    presto disponibile dentro il gap che cada in finestra (clamp al
+    bordo finestra se earliest < w_start)
+  - `_try_gap_slot(prev_seg, next_seg, slot_num)`: piazzamento refez
+    nel gap tra due segmenti (slot 1/2/3)
+  - `_try_place_refezione(pos, prod, rit, deposito)`: orchestra i 5
+    slot in ordine di preferenza
+
+### I 5 slot in ordine di preferenza
+
+1. Dentro il gap tra i due treni del seed (se seed=2 treni)
+2. Tra posizionamento e seed
+3. Tra seed e rientro
+4. All'inizio del turno (posizione fissa: 40' prima di first_dep)
+5. Alla fine del turno (posizione fissa: 10' dopo last_arr)
+
+**Gap minimo per slot 1/2/3**: `GAP_AFTER_ARR(10) + MEAL_MIN(30) +
+GAP_BEFORE_DEP(10) = 50'`.
+**Slot 4/5**: ancoraggio fisso, devono cadere in finestra as-is.
+
+Se nessuno dei 5 slot vale → `assemble_day` ritorna None (giornata
+scartata). Regola coerente con richiesta utente: "la refezione sempre
+posta... Se nessuno spazio valido → giornata scartata".
+
+### Integrazione in assemble_day
+
+Dopo aver costruito posizionamento + seed + rientro, chiamo
+`_try_place_refezione`. In base allo slot trovato inserisco il segmento
+refezione nella posizione giusta della sequenza ordinata.
+
+Calcolo condotta aggiornato: esclude sia i segmenti deadhead sia i
+segmenti refezione (`condotta_min` non conta la pausa).
+
+### Verifica
+
+`tests/test_day_assembler_step2.py` (NEW, 8 test):
+- Slot 1 con seed 2 treni e gap in finestra → refez tra t1 e t2
+- Slot 2 con posizionamento + seed → refez tra pos e seed, clamp a 11:30
+- Slot 3 con seed + rientro → refez tra seed e rientro
+- Slot 4 con turno che inizia tardi in finestra → refez all'inizio
+- Slot 5 con turno che termina in finestra → refez alla fine
+- Scenario no-slot → giornata scartata (None)
+- Preferenza slot 1 vs slot 3 quando entrambi attivabili
+- Finestra sera 18:30-22:30 funzionante per slot 1
+
+`tests/test_position_finder_step1.py` aggiornato: il test Step 1
+`test_day_assembler_fallback_chain` ora verifica anche la presenza del
+segmento refez aggiunto automaticamente (4 segmenti totali = 2 pos + 1
+seed + 1 refez).
+
+Pytest: **125/125** (117 + 8 nuovi). Zero regressioni.
+
+### File modificati
+
+- `src/turn_builder/day_assembler.py` (fase C implementata)
+- `tests/test_day_assembler_step2.py` (NEW)
+- `tests/test_position_finder_step1.py` (aggiornato segmenti attesi)
+- `LIVE-COLAZIONE.md`
+
+pytest 125/125. npm build non richiesto.
+
+---
+
 ## 2026-04-23 — Step 1/10: vincoli base v4 raffinati (hop + gap minimo)
 
 ### Contesto

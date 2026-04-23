@@ -21,7 +21,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ..validator.rules import _time_to_min
+from ..validator.rules import _time_to_min, _min_to_time
+from ..constants import (
+    MEAL_MIN,
+    MEAL_WINDOW_1_START, MEAL_WINDOW_1_END,
+    MEAL_WINDOW_2_START, MEAL_WINDOW_2_END,
+)
 from . import position_finder
 
 
@@ -30,9 +35,25 @@ PRESENTATION_MIN = 15  # 15' di accessori iniziali prima del primo segmento
 END_MIN = 10           # 10' di accessori finali dopo l'ultimo segmento
 MAX_DAY_DURATION = 520  # 8h40 max prestazione (vincolo contrattuale ~8h30)
 
+# Step 2 (23/04/2026) — fase C refezione
+# Richiesta utente: refezione sempre posta, almeno 10' dopo arrivo di un
+# treno (o dopo ACCa/ACCp quando cableremo gli accessori a Step 6).
+# Se nessuno dei 5 slot rispetta le finestre contrattuali, la giornata
+# viene scartata.
+REFEZ_GAP_AFTER_ARR = 10   # min 10' dopo arrivo treno precedente
+REFEZ_GAP_BEFORE_DEP = 10  # min 10' tra fine refezione e partenza treno successivo
+REFEZ_WINDOWS = [
+    (MEAL_WINDOW_1_START, MEAL_WINDOW_1_END),  # 11:30-15:30
+    (MEAL_WINDOW_2_START, MEAL_WINDOW_2_END),  # 18:30-22:30
+]
+
 
 def _seg_is_deadhead(seg: dict) -> bool:
     return bool(seg.get("is_deadhead", False))
+
+
+def _seg_is_refezione(seg: dict) -> bool:
+    return bool(seg.get("is_refezione", False))
 
 
 def _seg_duration(seg: dict) -> int:
@@ -41,6 +62,128 @@ def _seg_duration(seg: dict) -> int:
     if arr < dep:
         arr += 1440
     return arr - dep
+
+
+def _refez_fits_in_window(start_min: int, duration: int = MEAL_MIN) -> bool:
+    """True se [start_min, start_min+duration] cade interamente in una
+    delle finestre contrattuali di refezione."""
+    end_min = start_min + duration
+    for w_start, w_end in REFEZ_WINDOWS:
+        if start_min >= w_start and end_min <= w_end:
+            return True
+    return False
+
+
+def _make_refez_segment(station: str, start_min: int,
+                         duration: int = MEAL_MIN) -> dict:
+    """Crea un segmento virtuale di refezione. Non e' condotta ne' vettura:
+    e' una pausa in stazione di durata fissa (30' standard)."""
+    return {
+        "train_id": "REFEZ",
+        "from_station": station,
+        "to_station": station,
+        "dep_time": _min_to_time(start_min),
+        "arr_time": _min_to_time(start_min + duration),
+        "material_turn_id": None,
+        "is_deadhead": False,
+        "is_refezione": True,
+    }
+
+
+def _find_refez_start_in_gap(earliest_min: int,
+                              latest_min: int) -> Optional[int]:
+    """Cerca il minuto di inizio refezione dentro [earliest, latest] tale
+    che la refezione intera [start, start+MEAL_MIN] cada dentro una delle
+    finestre contrattuali. Preferenza: prima finestra cronologicamente
+    disponibile, start piu' presto possibile entro quella finestra.
+    Ritorna None se nessuna soluzione."""
+    if earliest_min > latest_min:
+        return None
+    best = None
+    for w_start, w_end in REFEZ_WINDOWS:
+        # La refezione puo' iniziare in [max(earliest, w_start),
+        #                                 min(latest, w_end - MEAL_MIN)]
+        t_min = max(earliest_min, w_start)
+        t_max = min(latest_min, w_end - MEAL_MIN)
+        if t_min <= t_max:
+            if best is None or t_min < best:
+                best = t_min
+    return best
+
+
+def _try_gap_slot(prev_seg: dict, next_seg: dict,
+                   slot_num: int) -> Optional[dict]:
+    """Tenta di piazzare la refezione nel gap tra due segmenti adiacenti.
+    Usato per slot 1, 2, 3."""
+    prev_arr = _time_to_min(prev_seg["arr_time"])
+    next_dep = _time_to_min(next_seg["dep_time"])
+    if next_dep < prev_arr:
+        next_dep += 1440
+    earliest = prev_arr + REFEZ_GAP_AFTER_ARR
+    latest = next_dep - REFEZ_GAP_BEFORE_DEP - MEAL_MIN
+    start = _find_refez_start_in_gap(earliest, latest)
+    if start is None:
+        return None
+    station = (prev_seg.get("to_station", "") or "").upper()
+    return {"segment": _make_refez_segment(station, start),
+            "slot": slot_num}
+
+
+def _try_place_refezione(positioning: list, productive: list,
+                          retur: list, deposito: str) -> Optional[dict]:
+    """
+    Prova a piazzare la refezione in uno dei 5 slot possibili, in ordine
+    di preferenza (richiesta utente 22-23/04/2026):
+
+      1. Dentro il gap tra i due treni del seed (se seed=2 treni)
+      2. Tra posizionamento e seed
+      3. Tra seed e rientro
+      4. All'inizio del turno (se cade in finestra)
+      5. Alla fine del turno (se cade in finestra)
+
+    Per slot 1/2/3 la refezione puo' scorrere dentro il gap per trovare
+    una posizione dentro finestra. Per slot 4/5 la posizione e' fissa
+    (ancorata al primo/ultimo segmento) e deve cadere in finestra "as is".
+
+    Ritorna:
+      dict {"segment": <refez_seg>, "slot": <1|2|3|4|5>} se trovato
+      None se nessuno slot valido (giornata da scartare)
+    """
+    # Slot 1: dentro il seed (solo se seed=2 treni)
+    if len(productive) == 2:
+        result = _try_gap_slot(productive[0], productive[1], 1)
+        if result:
+            return result
+
+    # Slot 2: tra posizionamento e seed
+    if positioning:
+        result = _try_gap_slot(positioning[-1], productive[0], 2)
+        if result:
+            return result
+
+    # Slot 3: tra seed e rientro
+    if retur:
+        result = _try_gap_slot(productive[-1], retur[0], 3)
+        if result:
+            return result
+
+    # Slot 4: all'inizio del turno (posizione fissa, ancorata al primo seg)
+    first_seg = positioning[0] if positioning else productive[0]
+    first_dep = _time_to_min(first_seg["dep_time"])
+    start4 = first_dep - REFEZ_GAP_BEFORE_DEP - MEAL_MIN
+    if start4 >= 0 and _refez_fits_in_window(start4):
+        station = (first_seg.get("from_station", "") or deposito).upper()
+        return {"segment": _make_refez_segment(station, start4), "slot": 4}
+
+    # Slot 5: alla fine del turno (posizione fissa, ancorata all'ultimo seg)
+    last_seg = retur[-1] if retur else productive[-1]
+    last_arr = _time_to_min(last_seg["arr_time"])
+    start5 = last_arr + REFEZ_GAP_AFTER_ARR
+    if _refez_fits_in_window(start5):
+        station = (last_seg.get("to_station", "") or deposito).upper()
+        return {"segment": _make_refez_segment(station, start5), "slot": 5}
+
+    return None
 
 
 def assemble_day(
@@ -187,8 +330,33 @@ def assemble_day(
             else:
                 return None  # impossibile chiudere
 
-    # --- ASSEMBLA SEQUENZA ORDINATA ---
-    all_segments = positioning + productive + retur
+    # --- FASE C: REFEZIONE (Step 2, 23/04/2026) ---
+    # La refezione e' OBBLIGATORIA. Se non c'e' slot valido, la giornata
+    # viene scartata.
+    refez_result = _try_place_refezione(positioning, productive, retur, dep)
+    if refez_result is None:
+        return None
+    refez_seg = refez_result["segment"]
+    refez_slot = refez_result["slot"]
+
+    # --- ASSEMBLA SEQUENZA ORDINATA (refezione inserita nello slot giusto) ---
+    if refez_slot == 1:
+        # Dentro il seed: tra productive[0] e productive[1]
+        all_segments = positioning + [productive[0], refez_seg, productive[1]] + retur
+    elif refez_slot == 2:
+        # Tra posizionamento e seed
+        all_segments = positioning + [refez_seg] + productive + retur
+    elif refez_slot == 3:
+        # Tra seed e rientro
+        all_segments = positioning + productive + [refez_seg] + retur
+    elif refez_slot == 4:
+        # All'inizio del turno
+        all_segments = [refez_seg] + positioning + productive + retur
+    elif refez_slot == 5:
+        # Alla fine del turno
+        all_segments = positioning + productive + retur + [refez_seg]
+    else:
+        all_segments = positioning + productive + retur  # fallback difensivo
 
     # Calcoli sommari
     first_dep_min = (_time_to_min(all_segments[0]["dep_time"])
@@ -201,9 +369,9 @@ def assemble_day(
     # Prestazione = presentation + (last_arr - first_dep) + end
     prestazione_min = last_arr_min - first_dep_min + PRESENTATION_MIN + END_MIN
 
-    # Condotta = solo segmenti produttivi (no deadhead)
+    # Condotta = solo segmenti produttivi (no deadhead, no refezione)
     condotta_min = sum(_seg_duration(s) for s in all_segments
-                       if not _seg_is_deadhead(s))
+                       if not _seg_is_deadhead(s) and not _seg_is_refezione(s))
 
     # Vincolo hard: prestazione <= 8h40 ~ 520 min (slack sul 8h30 contratto)
     if prestazione_min > MAX_DAY_DURATION:
