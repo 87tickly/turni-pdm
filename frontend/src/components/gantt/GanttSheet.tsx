@@ -873,6 +873,7 @@ function ScompBar(p: SegProps) {
         height={barH + 4}
         fill={GANTT_COLORS.SCOMP}
         opacity={0.12}
+        pointerEvents="none"
       />
       <line
         x1={x1}
@@ -882,6 +883,7 @@ function ScompBar(p: SegProps) {
         stroke={GANTT_COLORS.SCOMP}
         strokeWidth={1}
         strokeDasharray="2 3"
+        pointerEvents="none"
       />
       <text
         x={(x1 + x2) / 2}
@@ -939,6 +941,7 @@ function SleepBar(p: SegProps) {
         stroke={GANTT_COLORS.SLEEP}
         strokeWidth={1}
         rx={2}
+        pointerEvents="none"
       />
       <text
         x={(x1 + x2) / 2}
@@ -996,6 +999,7 @@ function RefezBar(p: SegProps) {
         height={barH * 0.5}
         fill={GANTT_COLORS.REFEZ}
         rx={1}
+        pointerEvents="none"
       />
       {isSelected && (
         <rect
@@ -1129,7 +1133,8 @@ function TrainBar(p: SegProps) {
         />
       )}
 
-      {/* Barra base */}
+      {/* Barra base — pointer-events=none cosi' gli eventi (cursor,
+          click, drag) sono gestiti solo dal SegHit foreignObject in cima */}
       <rect
         x={x1}
         y={yBarTop}
@@ -1137,6 +1142,7 @@ function TrainBar(p: SegProps) {
         height={barH}
         fill={fill}
         opacity={isDragging ? 0.85 : 1}
+        pointerEvents="none"
       />
 
       {/* Drag ghost border (durante drag) */}
@@ -1165,6 +1171,7 @@ function TrainBar(p: SegProps) {
           stroke={strokeColor}
           strokeWidth={isSuspect ? 1.2 : 1}
           strokeDasharray="3 2.5"
+          pointerEvents="none"
         />
       )}
       {/* Preheat bullet */}

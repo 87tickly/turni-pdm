@@ -230,7 +230,11 @@ export function AutoBuilderPage() {
     try {
       // build-auto-weekly: ritorna N giornate del turno materiale, ciascuna
       // con le 3 varianti LMXGV/S/D come nel PDF originale Trenord
-      const res = await buildAutoWeekly({ deposito, days: nDays })
+      // use_v4=true abilita il path assembler (annota accp_min/acca_min/
+      // cv_before_min/cv_after_min sui segments). Senza questo flag il
+      // backend usa v3 che produce segments senza campi accessori → il
+      // Gantt non mostra i pill ACCp/ACCa/CV.
+      const res = await buildAutoWeekly({ deposito, days: nDays, use_v4: true })
       setProgress(100)
       setProgressPhase("Completato")
       setResult(res)

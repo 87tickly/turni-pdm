@@ -4,6 +4,73 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Root cause #4: backend use_v4=False → nessun accp/acca/cv sui segments
+
+### La diagnosi vera
+
+Dopo il commit `e31e487` l'utente ha testato e riportato "non
+funziona niente: no pill ACCp/ACCa, no label CVp/CVa, cursor non e'
+grab, drag non funziona".
+
+Tutto il mio frontend era corretto (verificato sul bundle live:
+contiene `accp_min`, `acca_min`, `cv_before_min`, `cv_after_min`).
+Il problema era **backend**:
+
+- `api/builder.py` definisce `BuildAutoRequest.use_v4: bool = False`
+  come default
+- Quando `use_v4=False`, `AutoBuilder` segue il **path v3** (greedy +
+  genetic + SA) che **non chiama `day_assembler.assemble_day()`**
+- Solo il path v4 invoca `day_assembler` con il callback
+  `get_material_segments`, che e' quello che **annota accp_min /
+  acca_min / cv_before_min / cv_after_min sui segments** (vedi
+  `src/turn_builder/auto_builder.py:1301-1345`)
+- Il frontend non passava `use_v4` nella request → backend restava su
+  v3 → segments ritornavano senza campi accessori → il mio rendering
+  frontend `(seg.accp_min ?? 0) > 0` era sempre falso → **niente pill**
+
+Questo e' consistente con lo screenshot del popover utente (commit
+precedente): la sezione "Accessori" non appariva mai perche' i campi
+erano undefined.
+
+### Fix 1: abilita use_v4 dal frontend
+
+`frontend/src/lib/api.ts`:
+- `BuildAutoRequest` ora include `use_v4?: boolean` (opzionale)
+
+`frontend/src/pages/AutoBuilderPage.tsx`:
+- `buildAutoWeekly({ deposito, days: nDays, use_v4: true })` — forza
+  sempre il path v4 cosi' la response include accessori + CV
+
+### Fix 2: pointer-events none sui rect visuali
+
+Secondo sospetto: su Safari/alcuni Chromium, il rect SVG base poteva
+intercettare eventi prima del foreignObject HTML sovrastante, bloccando
+cursor grab e HTML5 DnD.
+
+`frontend/src/components/gantt/GanttSheet.tsx`:
+- `pointer-events="none"` aggiunto sui rect visuali (base bar, DH
+  dashed border, ScompBar bg, SleepBar rect, RefezBar pill)
+- Solo il foreignObject HTML finale gestisce eventi → cursor grab,
+  click, HTML5 DnD tutti sulla singola superficie coerente
+
+### Verifica
+
+- `npm run build` clean
+- `/gantt-preview` invariato (4 SVG, 43 foreignObject, no console
+  errors)
+- Verifica su `/auto-genera` dopo deploy Railway (sia dati ACCp/CV
+  che cursor/drag cross-turn)
+
+### File toccati
+
+- `frontend/src/lib/api.ts`
+- `frontend/src/pages/AutoBuilderPage.tsx`
+- `frontend/src/components/gantt/GanttSheet.tsx`
+- `frontend/dist/*` (rebuild)
+- `LIVE-COLAZIONE.md`
+
+---
+
 ## 2026-04-23 — Fix AutoBuilderGantt: axis 00-24, ACCp/ACCa/CV sul Gantt, grab cursor, drop zone larga
 
 ### Segnalazioni post-deploy del primo #4

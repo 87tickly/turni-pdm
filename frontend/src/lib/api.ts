@@ -1032,6 +1032,11 @@ export interface BuildAutoRequest {
   days: number // numero giornate lavorative
   day_type?: "LV" | "SAB" | "DOM" // backend default "LV"; in futuro auto dal calendario
   accessory_type?: string
+  // v4 assembler path (seed + position + day_assembler). Annota
+  // accp_min/acca_min/cv_before_min/cv_after_min sui segments.
+  // Backend default False per retrocompatibilita', il frontend lo
+  // force-abilita cosi' la UI vede tutti i campi accessori.
+  use_v4?: boolean
 }
 
 export interface BuildAutoEntry {
