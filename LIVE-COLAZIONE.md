@@ -4,6 +4,87 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Migrazione AutoBuilderGantt → base Gantt v3
+
+### Contesto
+
+Primo dei residui dichiarati in Gantt v3 handoff (§10 checklist di merge):
+"`AutoBuilderGantt.tsx` riscritto per usare `<GanttSheet>`. Props
+invariate."
+
+### Implementazione
+
+`frontend/src/components/AutoBuilderGantt.tsx` — riscritto (~155 righe,
+da ~290 precedenti). Props pubbliche **invariate**:
+
+```ts
+interface Props {
+  segments: TrainSegment[]
+  presentationTime?: string
+  endTime?: string
+  mealStart?: string
+  mealEnd?: string
+}
+```
+
+Cambi interni:
+- Delega il rendering a `<GanttSheet>` (la stessa base usata in
+  `/gantt-preview`)
+- Mapping `TrainSegment → GanttSegment`:
+  - `is_deadhead === true` → kind `"dh"` (vettura tratteggiata)
+  - `is_refezione === true` (runtime field) → kind `"refez"` ambra
+  - `is_preheat === true` → `preheat` flag sul `cond` (bullet ● + 80')
+  - `cvp` / `cva` (runtime) → propagati come prefisso label
+  - default → kind `"cond"` (condotta blu petrolio #0B6AA8)
+- Iniezione automatica segmento refez se `mealStart`/`mealEnd` sono
+  forniti e nessun segmento ha `is_refezione` (compat API legacy).
+  Stazione pivot = `to_station` dell'ultimo arrivo ≤ mealStart.
+- Range orario auto-calcolato come prima
+  (`[startHour, endHour]` dal range presentation/end).
+- Metriche colonna destra: `Lav` = durata totale, `Cct` = somma condotta
+  reale, `Km` = 0 (non esposto oggi), `Not` = "no", `Rip` = "—"
+  (AutoBuilderPage mostra gia' le metriche nell'header giornata, qui
+  e' piu' compatto).
+
+### Impatto visivo
+
+Tutti i blocchi giornata di `AutoBuilderPage` ora usano il rendering
+v3:
+- Barre sottili 20px (vs 36px precedenti) → piu' denso
+- Blu petrolio `#0B6AA8` invece di blu brand pieno → piu' arioso
+- Label treno auto-vertical sotto 60px di larghezza
+- Minuti HH:MM sotto ogni barra
+- Tratteggio per vetture, ambra per refez, bullet ● per preriscaldo
+- Griglia oraria continua con tick sulla linea asse
+
+### Verifica
+
+- `npm run build` OK: 1762 modules, 545 kB JS, 63 kB CSS
+- Preview dev avviato: login pulita, **zero errori console**
+- TypeScript strict pass
+- API pubblica `AutoBuilderGantt` invariata — `AutoBuilderPage.tsx`
+  non richiede modifiche
+
+### Residui
+
+- **PdcGanttV2 non ancora migrato**: stesso pattern, piu' complesso per
+  drawer + context menu + modalita' lista vs Gantt. Prossimo step.
+- **Click handler** verso drawer non cablato in `AutoBuilderPage` (non
+  lo era neanche prima). `GanttSheet` espone `onSegmentClick`, basta
+  wire-up quando serve.
+- Il flag `is_refezione`/`is_preheat`/`cvp`/`cva` devono essere esposti
+  dal backend in `TrainSegment` per sfruttare il nuovo rendering a
+  pieno. Oggi sono accessibili via cast runtime (`as any`); quando
+  saranno in API tipizzata, il mapping funzionera' senza cast.
+
+### File modificati
+
+- `frontend/src/components/AutoBuilderGantt.tsx` (riscritto)
+- `frontend/dist/*` (rebuild)
+- `LIVE-COLAZIONE.md`
+
+---
+
 ## 2026-04-23 — Claude Design handoff #3: Step 0 Abilitazioni (corridoi)
 
 ### Contesto
