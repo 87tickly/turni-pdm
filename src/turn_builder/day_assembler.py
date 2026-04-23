@@ -136,21 +136,24 @@ def _try_gap_slot(prev_seg: dict, next_seg: dict,
 def _try_place_refezione(positioning: list, productive: list,
                           retur: list, deposito: str) -> Optional[dict]:
     """
-    Prova a piazzare la refezione in uno dei 5 slot possibili, in ordine
-    di preferenza (richiesta utente 22-23/04/2026):
+    Prova a piazzare la refezione.
 
+    Ordine di preferenza (slot interni al lavoro):
       1. Dentro il gap tra i due treni del seed (se seed=2 treni)
       2. Tra posizionamento e seed
       3. Tra seed e rientro
-      4. All'inizio del turno (se cade in finestra)
-      5. Alla fine del turno (se cade in finestra)
 
-    Per slot 1/2/3 la refezione puo' scorrere dentro il gap per trovare
-    una posizione dentro finestra. Per slot 4/5 la posizione e' fissa
-    (ancorata al primo/ultimo segmento) e deve cadere in finestra "as is".
+    Slot 4 (inizio turno) e slot 5 (fine turno) sono OPERATIVAMENTE
+    INACCETTABILI per turni strutturati: un macchinista non fa la
+    refezione appena arrivato al deposito o dopo aver chiuso il
+    servizio. Vengono usati SOLO come estremo rimedio per giornate
+    degenerate (seed isolato di 1 treno, no posizionamento, no rientro)
+    dove gli slot 1-3 non sono strutturalmente possibili. Nei turni
+    reali con pos+seed+ret, se slot 1-3 non chiudono la giornata viene
+    scartata e il builder ritenta con un seed diverso.
 
     Ritorna:
-      dict {"segment": <refez_seg>, "slot": <1|2|3|4|5>} se trovato
+      dict {"segment": <refez_seg>, "slot": <1|2|3|4|5>}
       None se nessuno slot valido (giornata da scartare)
     """
     # Slot 1: dentro il seed (solo se seed=2 treni)
@@ -171,8 +174,14 @@ def _try_place_refezione(positioning: list, productive: list,
         if result:
             return result
 
+    # Turno strutturato: scarta invece di usare slot 4/5 inaccettabili
+    is_structured = bool(positioning) or bool(retur) or len(productive) >= 2
+    if is_structured:
+        return None
+
+    # Seed isolato (1 treno, no pos, no ret): slot 4/5 come ultima risorsa
     # Slot 4: all'inizio del turno (posizione fissa, ancorata al primo seg)
-    first_seg = positioning[0] if positioning else productive[0]
+    first_seg = productive[0]
     first_dep = _time_to_min(first_seg["dep_time"])
     start4 = first_dep - REFEZ_GAP_BEFORE_DEP - MEAL_MIN
     if start4 >= 0 and _refez_fits_in_window(start4):
@@ -180,7 +189,7 @@ def _try_place_refezione(positioning: list, productive: list,
         return {"segment": _make_refez_segment(station, start4), "slot": 4}
 
     # Slot 5: alla fine del turno (posizione fissa, ancorata all'ultimo seg)
-    last_seg = retur[-1] if retur else productive[-1]
+    last_seg = productive[-1]
     last_arr = _time_to_min(last_seg["arr_time"])
     start5 = last_arr + REFEZ_GAP_AFTER_ARR
     if _refez_fits_in_window(start5):
@@ -385,10 +394,10 @@ def assemble_day(
         # Tra seed e rientro
         all_segments = positioning + productive + [refez_seg] + retur
     elif refez_slot == 4:
-        # All'inizio del turno
+        # All'inizio turno (solo per seed isolato: no pos, no ret, seed=1)
         all_segments = [refez_seg] + positioning + productive + retur
     elif refez_slot == 5:
-        # Alla fine del turno
+        # Alla fine turno (solo per seed isolato)
         all_segments = positioning + productive + retur + [refez_seg]
     else:
         all_segments = positioning + productive + retur  # fallback difensivo

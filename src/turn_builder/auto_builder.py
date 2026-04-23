@@ -2161,8 +2161,11 @@ class AutoBuilder:
                 "day_type": day_type,
                 "ai_score": final_score,
                 "ai_attempts": NUM_RESTARTS,
-                "ai_version": "v3",
-                "ai_phases": "restart+genetic+SA",
+                "ai_version": "v4" if self._use_v4_assembler else "v3",
+                "ai_phases": (
+                    "seed+position+assembler" if self._use_v4_assembler
+                    else "restart+genetic+SA"
+                ),
                 "weekly_hours_total": round(weekly_hours_total, 1),
                 "weekly_hours_min": WEEKLY_HOURS_MIN / 60,
                 "weekly_hours_target": WEEKLY_HOURS_TARGET / 60,

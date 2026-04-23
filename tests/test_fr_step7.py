@@ -141,8 +141,10 @@ def test_fr_ne_approvata_ne_candidata_scartata():
 def test_rientro_disponibile_non_attiva_fr():
     # Esiste un segmento di rientro ASTI->ALE. Anche se ASTI e' in
     # fr_candidate_stations, il rientro viene preferito (FR = fallback).
+    # Ret dep 13:30 così c'è gap 60min per slot 3 refez (turno strutturato,
+    # niente fallback slot 4/5).
     seed_t = _seg("S1", "ALE", "ASTI", "11:00", "12:30")
-    ret = _seg("R1", "ASTI", "ALE", "13:00", "14:00")
+    ret = _seg("R1", "ASTI", "ALE", "13:30", "14:30")
     seed = _seed([seed_t], "ALE", "ASTI", 11 * 60, 12 * 60 + 30, 90)
     result = day_assembler.assemble_day(
         seed=seed, deposito="ALE", all_day_segments=[seed_t, ret],

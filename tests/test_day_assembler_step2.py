@@ -114,14 +114,14 @@ def test_slot3_between_seed_and_return():
 
 
 # ---------------------------------------------------------------------------
-# Slot 4 — all'inizio del turno
+# Slot 4 — all'inizio del turno (solo seed isolato)
 # ---------------------------------------------------------------------------
 
 def test_slot4_at_start_of_turn():
     # Turno parte 13:00. Refezione termina 12:50, inizia 12:20. Cade in
     # finestra 11:30-15:30 → slot 4.
     # Seed 1 treno direttamente dal deposito, nessun posizionamento,
-    # nessun rientro. Gap interni non disponibili. Slot 1-3 non scattano.
+    # nessun rientro. Seed isolato → slot 4 permesso come ultima risorsa.
     seed_t = _seg("S1", "ALE", "ALE", "13:00", "14:00")
     seed = _make_seed([seed_t], "ALE", "ALE",
                       13 * 60, 14 * 60, 60)
@@ -140,16 +140,13 @@ def test_slot4_at_start_of_turn():
 
 
 # ---------------------------------------------------------------------------
-# Slot 5 — alla fine del turno
+# Slot 5 — alla fine del turno (solo seed isolato)
 # ---------------------------------------------------------------------------
 
 def test_slot5_at_end_of_turn():
-    # Seed 1 treno termina a ALE 14:20. Slot 1 non applicabile (seed=1).
-    # Slot 2/3 non applicabili (no pos, no ret). Slot 4: first_dep=13:00,
-    # refez start 12:20 che cade in finestra -> slot 4 preferito su slot 5.
-    # Per forzare slot 5 uso un seed che inizi fuori finestra (prima che
-    # il refez possa cadere in finestra con anticipo 40'): inizio 10:00,
-    # refez start 9:20 NON in finestra 11:30-15:30.
+    # Seed mattutino isolato (no pos, no ret). Slot 4 first_dep=10:00 →
+    # start=9:20 fuori finestra. Slot 5: last_arr=14:20+10=14:30 dentro
+    # finestra → accetta.
     seed_t = _seg("S1", "ALE", "ALE", "10:00", "14:20")
     seed = _make_seed([seed_t], "ALE", "ALE",
                       10 * 60, 14 * 60 + 20, 260)
@@ -164,6 +161,31 @@ def test_slot5_at_end_of_turn():
     assert segs[1].get("is_refezione") is True
     assert segs[1]["dep_time"] == "14:30"  # 14:20 + 10
     assert segs[1]["arr_time"] == "15:00"
+
+
+# ---------------------------------------------------------------------------
+# NUOVO: slot 4/5 NON accettabili per turno strutturato (pos+seed+ret)
+# Richiesta 23/04/2026: se la giornata ha struttura reale e slot 1-3 non
+# chiudono, scartare invece di usare 4/5 (refez all'estremo del turno).
+# ---------------------------------------------------------------------------
+
+def test_structured_turn_no_slot45_fallback():
+    # Turno "realistico": seed MI→ALE, positioning ALE→MI, no CV.
+    # Strutturato → se slot 1-3 non chiudono, ritorna None.
+    # Qui costruisco uno scenario dove slot 2 non chiude (gap troppo
+    # piccolo) e slot 3 non esiste (seed_to == deposito).
+    pos_seg = _seg("P1", "ALE", "MI", "12:00", "12:55")
+    seed_t = _seg("S1", "MI", "ALE", "13:00", "14:00")
+    seed = _make_seed([seed_t], "MI", "ALE",
+                      13 * 60, 14 * 60, 60)
+    result = day_assembler.assemble_day(
+        seed=seed, deposito="ALE",
+        all_day_segments=[pos_seg, seed_t],
+    )
+    # Gap pos arr (12:55) → seed dep (13:00) = 5 min, troppo stretto per
+    # slot 2 (serve almeno 50 min). Slot 3 non esiste. Seed=1 treno.
+    # Turno strutturato (ha positioning) → scartato (no fallback slot 4/5).
+    assert result is None
 
 
 # ---------------------------------------------------------------------------
