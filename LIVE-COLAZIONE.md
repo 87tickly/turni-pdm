@@ -4,6 +4,82 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Step 4/10: modulo accessori (ACCp/ACCa da giro materiale)
+
+### Regola di business
+
+Richiesta utente 23/04/2026: gli accessori NON si applicano
+automaticamente a inizio/fine giornata. Si applicano guardando il
+**giro materiale**: se un treno ha un gap >= 65 minuti prima (dopo)
+nel suo giro, riceve ACCp (ACCa) pieno. Sotto soglia: accessorio 0
+(non c'e' tempo fisico).
+
+### Valori (modificabili dopo generazione dall'utente)
+
+```
+ACCp condotta (preparazione mezzo)           : 40 min
+ACCp condotta con preriscaldo (dic-feb only) : 80 min
+ACCp vettura (salgo come passeggero)         : 15 min
+ACCa condotta (spegnimento mezzo)            : 40 min
+ACCa vettura (scendo e basta)                : 10 min
+```
+
+CVp/CVa (cambio volante) sono un caso diverso (gap < 65 min, split tra
+due PdC): saranno implementati a Step 5 in un modulo separato con
+registro persistente.
+
+### Implementazione
+
+`src/turn_builder/accessori.py` (NEW, 140 righe):
+- `GAP_THRESHOLD_MIN = 65`
+- Costanti valore accessori
+- `compute_material_gaps(material_segments, target)` -> (gap_before,
+  gap_after). None se bordo giorno (primo/ultimo del giro materiale).
+  Ordina per `seq` (ordine ufficiale parser PDF) con fallback a
+  dep_time per evitare ambiguita' overnight.
+- `determine_accessori(segment, gap_before, gap_after, day_date)` ->
+  {accp_min, acca_min}. Applica preriscaldo 80' solo se segmento
+  is_preheat AND data in periodo dic-feb (via `preheat_calendar`).
+- `apply_accessori(material_segments, target, day_date)` -> orchestra
+  tutto, ritorna anche i gap grezzi per debug/log.
+
+Il modulo filtra automaticamente i segmenti virtuali refezione
+(is_refezione=True) dal giro materiale.
+
+### Verifica
+
+`tests/test_accessori_step4.py` (NEW, 14 test):
+- Gap primo/ultimo segmento del giorno (None)
+- Gap centrale con 3 segmenti
+- Segmento refezione virtuale ignorato nel calcolo gap
+- Gestione overnight tramite campo `seq` (parser PDF)
+- Condotta/vettura con gap ampio -> accessori standard
+- Gap sotto soglia -> accessorio 0
+- Preriscaldo inverno = 80, estate = 40
+- Boundary 64 vs 65 min
+- Orchestratore full flow + sanity costanti
+
+Pytest: **147/147** (133 + 14 nuovi). Zero regressioni.
+
+### Residuo / prossimi step
+
+- Step 5: modulo CV con registro condiviso persistente (tabella DB
+  `cv_ledger`) per gap < 65 min tra due treni consecutivi stesso
+  materiale operati da PdC diversi.
+- Step 6: cablare `accessori.apply_accessori` + `cv_registry` dentro
+  `day_assembler.assemble_day` cosi che `prestazione_min` includa i
+  tempi accessori reali.
+
+### File modificati
+
+- `src/turn_builder/accessori.py` (NEW)
+- `tests/test_accessori_step4.py` (NEW)
+- `LIVE-COLAZIONE.md`
+
+pytest 147/147.
+
+---
+
 ## 2026-04-23 — Step 3/10: calendario preriscaldo
 
 ### Contesto
