@@ -4,6 +4,110 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Claude Design handoff #1: Sidebar + Calendario agente
+
+### Contesto
+
+L'utente ha portato i 3 prompt Claude Design scritti ieri in `docs/PROMPT-claude-design-*.md`
+su claude.ai/design. Il primo handoff completato copre 2 delle 3 aree del
+prompt `PROMPT-claude-design-navigation.md`: **Sidebar redesign** e
+**Calendario agente** (nuova pagina con griglia PdC x 28gg).
+
+L'handoff bundle e' stato fornito via link API interno. Implementato
+pixel-perfect seguendo `docs/HANDOFF-calendario-agente.md` (copiato
+nel repo per tracciabilita').
+
+### Modifiche
+
+**`frontend/src/index.css`**:
+- 3 utility classes per le celle calendario: `.bg-fr-gradient`
+  (viola per FR notturno), `.bg-uncov-hatch` (diagonale rossa per
+  scoperti), `.bg-leave-hatch` (diagonale neutra per ferie/permessi).
+
+**`frontend/src/components/Sidebar.tsx`** (riscritta):
+- Rimosso voce "Cerca treni" (funzione accessibile via `⌘K`)
+- Rimosso voce "Calendario" (vecchia pagina, sostituita)
+- Aggiunto "Calendario agente" con icona `CalendarRange`
+- Aggiunto "Dormite FR" con icona `Bed` (integrazione Step 10)
+- Riordinato in 2 sezioni con divisori tonal (no-line rule):
+  - **Dati**: Dashboard · Turni Materiale · Turni PdC
+  - **Operazioni**: Genera da materiale · Calendario agente ·
+    Nuovo turno · Dormite FR · Import
+- `<NavItem>` estratto come sotto-componente per ridurre duplicazione
+- Rationale: flusso dispatcher = prima lettura dati, poi azioni
+
+**`frontend/src/pages/CalendarAgentePage.tsx`** (NEW, 600 righe):
+- Topbar meta con Periodo/Deposito/PdC visualizzati + bottoni Esporta/Alert
+- Page header + filtri: navigator mese, pill Deposito/Matricole/Stato, search
+- Mini-KPIs: Coperture/Scoperti/FR candidate
+- Legenda con 6 stati cella
+- Griglia CSS principale: `180px + repeat(28, 72px)` con sticky corner
+  - Week bands (4 settimane ISO)
+  - Day header con L/M/X/G/V/S/D + numero giorno + tinto weekend + today cerchio brand
+  - PdC cell (sticky left) con codice + nome + matricola
+  - 7 tipi di cella implementati: work (codice + ore), rest (R fade),
+    fr (gradient viola), scomp (azzurro tenue), uncov (hatch rosso),
+    leave (hatch neutro), selected (brand blu)
+  - Support `span` multi-giorno per ferie/scoperti consecutivi
+- Footer con totali e bottone "Assegna giornata"
+- Click cella -> selected, ri-click toggle (placeholder drawer)
+
+Dati attualmente **mock** (7 PdC, dati realistici presi dal mockup
+Claude Design). L'endpoint backend `/api/calendario-agente`
+(`getAgendaGrid`) non e' ancora implementato — residuo dichiarato.
+
+**`frontend/src/App.tsx`**:
+- Rimossa route `/treni` (TrainSearchPage non piu' importata)
+- Rimossa route `/calendario` (CalendarPage eliminata)
+- Aggiunta route `/calendario-agente` -> CalendarAgentePage
+
+**Eliminati**:
+- `frontend/src/pages/TrainSearchPage.tsx`
+- `frontend/src/pages/CalendarPage.tsx`
+
+**`docs/HANDOFF-calendario-agente.md`** (NEW): copia dell'handoff
+Claude Design, nel repo per futura consultazione (backend endpoint,
+tipi TS completi, interazioni Drawer/Drag/Shift+click).
+
+### Verifica
+
+- `npm run build` OK: 1758 modules transformed, 511 kB JS, 63 kB CSS
+- Preview dev avviato: login page renderizza pulita, **zero errori
+  console**
+- La pagina `/calendario-agente` e' dietro auth gate (Layout protected)
+  quindi non testabile da preview senza backend attivo — ma TypeScript
+  compila, route registrata, no import residui di TrainSearchPage o
+  CalendarPage.
+
+### Residui dichiarati
+
+1. **Endpoint backend** `/api/calendario-agente` da implementare
+   (specifica completa in `docs/HANDOFF-calendario-agente.md` §8).
+   La pagina ora mostra dati mock; la sostituzione con fetch reale e'
+   1 cambio di fixture.
+2. **Drawer dettaglio giornata** (click cella) ancora placeholder —
+   al momento solo selezione visiva. Riuso pattern `TrainDetailDrawer`
+   pianificato.
+3. **Interazioni avanzate**: double-click re-assign inline, drag per
+   spostare, Shift+click range bulk — rinviati a fase 2.
+4. **Handoff #2 (Abilitazioni + Rotabili)** e **#3 (Gantt stile PDF)**
+   non ancora ricevuti da Claude Design. I prompt sono pronti in
+   `docs/PROMPT-claude-design-*.md`.
+
+### File modificati
+
+- `frontend/src/index.css` (3 utility classes)
+- `frontend/src/components/Sidebar.tsx` (riscritta)
+- `frontend/src/pages/CalendarAgentePage.tsx` (NEW)
+- `frontend/src/App.tsx` (route aggiornate)
+- `frontend/src/pages/TrainSearchPage.tsx` (ELIMINATO)
+- `frontend/src/pages/CalendarPage.tsx` (ELIMINATO)
+- `frontend/dist/*` (rebuild)
+- `docs/HANDOFF-calendario-agente.md` (NEW)
+- `LIVE-COLAZIONE.md`
+
+---
+
 ## 2026-04-23 — Fix bug: vetture circolari inutili (cycle_optimizer)
 
 ### Bug segnalato dall'utente

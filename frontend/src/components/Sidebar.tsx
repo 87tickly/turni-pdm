@@ -1,15 +1,16 @@
 import { NavLink } from "react-router-dom"
 import {
   LayoutDashboard,
-  Search,
   ClipboardList,
   PlusCircle,
-  Calendar,
   Train,
   Upload,
   Settings,
   LogOut,
   Sparkles,
+  Search,
+  CalendarRange,
+  Bed,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Logo } from "./Logo"
@@ -21,16 +22,76 @@ interface SidebarProps {
   onOpenPalette?: () => void
 }
 
-const navItems = [
+// Dati — lettura dello stato esistente
+const dataItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/treni", icon: Search, label: "Cerca treni" },
   { to: "/turni", icon: ClipboardList, label: "Turni Materiale" },
-  { to: "/builder", icon: PlusCircle, label: "Nuovo turno" },
-  { to: "/calendario", icon: Calendar, label: "Calendario" },
   { to: "/pdc", icon: Train, label: "Turni PdC" },
+]
+
+// Operazioni — motore automatico, controllo, interventi manuali
+const opsItems = [
   { to: "/auto-genera", icon: Sparkles, label: "Genera da materiale" },
+  { to: "/calendario-agente", icon: CalendarRange, label: "Calendario agente" },
+  { to: "/builder", icon: PlusCircle, label: "Nuovo turno" },
+  { to: "/fr-approvati", icon: Bed, label: "Dormite FR" },
   { to: "/import", icon: Upload, label: "Import" },
 ]
+
+function SectionDivider({ label }: { label: string }) {
+  return (
+    <div
+      className="px-3 pt-3 pb-1 text-[9.5px] font-bold uppercase tracking-[0.12em]"
+      style={{ color: "var(--color-on-surface-quiet)" }}
+    >
+      {label}
+    </div>
+  )
+}
+
+function NavItem({
+  to,
+  icon: Icon,
+  label,
+}: {
+  to: string
+  icon: typeof LayoutDashboard
+  label: string
+}) {
+  return (
+    <NavLink
+      to={to}
+      end={to === "/"}
+      className={({ isActive }) =>
+        cn(
+          "relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-all duration-150",
+          isActive
+            ? "text-brand"
+            : "text-muted-foreground hover:text-foreground"
+        )
+      }
+      style={({ isActive }) =>
+        isActive
+          ? { backgroundColor: "var(--color-surface-container-high)" }
+          : undefined
+      }
+    >
+      {({ isActive }) => (
+        <>
+          {isActive && (
+            <span
+              aria-hidden="true"
+              className="absolute left-0.5 top-1/2 -translate-y-1/2 h-3.5 w-0.5 rounded-full"
+              style={{ backgroundColor: "var(--color-dot)" }}
+            />
+          )}
+          <Icon size={15} strokeWidth={1.8} />
+          {label}
+        </>
+      )}
+    </NavLink>
+  )
+}
 
 export function Sidebar({ username, isAdmin, onLogout, onOpenPalette }: SidebarProps) {
   const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform)
@@ -44,7 +105,7 @@ export function Sidebar({ username, isAdmin, onLogout, onOpenPalette }: SidebarP
         <Logo size="sm" />
       </div>
 
-      {/* Quick search (apre CommandPalette) */}
+      {/* Quick search (apre CommandPalette) — rimpiazza Cerca treni */}
       {onOpenPalette && (
         <div className="px-2 mb-2">
           <button
@@ -73,74 +134,24 @@ export function Sidebar({ username, isAdmin, onLogout, onOpenPalette }: SidebarP
         </div>
       )}
 
-      {/* Navigation */}
-      <nav className="flex-1 px-2 space-y-0.5">
-        {navItems.map(({ to, icon: Icon, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === "/"}
-            className={({ isActive }) =>
-              cn(
-                "relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-all duration-150",
-                isActive
-                  ? "text-brand"
-                  : "text-muted-foreground hover:text-foreground"
-              )
-            }
-            style={({ isActive }) =>
-              isActive
-                ? { backgroundColor: "var(--color-surface-container-high)" }
-                : undefined
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && (
-                  <span
-                    aria-hidden="true"
-                    className="absolute left-0.5 top-1/2 -translate-y-1/2 h-3.5 w-0.5 rounded-full"
-                    style={{ backgroundColor: "var(--color-dot)" }}
-                  />
-                )}
-                <Icon size={15} strokeWidth={1.8} />
-                {label}
-              </>
-            )}
-          </NavLink>
-        ))}
+      {/* Navigation con divisori tonal (No-Line rule) */}
+      <nav className="flex-1 overflow-y-auto">
+        <SectionDivider label="Dati" />
+        <div className="px-2 space-y-0.5">
+          {dataItems.map(({ to, icon, label }) => (
+            <NavItem key={to} to={to} icon={icon} label={label} />
+          ))}
+        </div>
 
-        <div className="pt-4">
-          <NavLink
-            to="/impostazioni"
-            className={({ isActive }) =>
-              cn(
-                "relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-all duration-150",
-                isActive
-                  ? "text-brand"
-                  : "text-muted-foreground hover:text-foreground"
-              )
-            }
-            style={({ isActive }) =>
-              isActive
-                ? { backgroundColor: "var(--color-surface-container-high)" }
-                : undefined
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && (
-                  <span
-                    aria-hidden="true"
-                    className="absolute left-0.5 top-1/2 -translate-y-1/2 h-3.5 w-0.5 rounded-full"
-                    style={{ backgroundColor: "var(--color-dot)" }}
-                  />
-                )}
-                <Settings size={15} strokeWidth={1.8} />
-                Impostazioni
-              </>
-            )}
-          </NavLink>
+        <SectionDivider label="Operazioni" />
+        <div className="px-2 space-y-0.5">
+          {opsItems.map(({ to, icon, label }) => (
+            <NavItem key={to} to={to} icon={icon} label={label} />
+          ))}
+        </div>
+
+        <div className="px-2 pt-4">
+          <NavItem to="/impostazioni" icon={Settings} label="Impostazioni" />
         </div>
       </nav>
 

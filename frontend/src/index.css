@@ -178,3 +178,25 @@
 .animate-pulse-dot {
   animation: pulse-dot 2s ease-in-out infinite;
 }
+
+/* ──────────────────────────────────────────────────────────────
+ * Calendario agente — token dedicati (handoff Claude Design
+ * HANDOFF-calendario-agente.md §4)
+ * ────────────────────────────────────────────────────────────── */
+.bg-fr-gradient {
+  background: linear-gradient(135deg, #3B1773 0%, #5B21B6 100%);
+}
+.bg-uncov-hatch {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgb(220 38 38 / 0.14) 0, rgb(220 38 38 / 0.14) 4px,
+    rgb(220 38 38 / 0.06) 4px, rgb(220 38 38 / 0.06) 8px
+  );
+}
+.bg-leave-hatch {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--color-surface-container) 0, var(--color-surface-container) 4px,
+    var(--color-surface-container-lowest) 4px, var(--color-surface-container-lowest) 8px
+  );
+}

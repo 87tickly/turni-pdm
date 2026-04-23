@@ -2,10 +2,9 @@ import { BrowserRouter, Routes, Route } from "react-router-dom"
 import { Layout } from "@/components/Layout"
 import { LoginPage } from "@/pages/LoginPage"
 import { DashboardPage } from "@/pages/DashboardPage"
-import { TrainSearchPage } from "@/pages/TrainSearchPage"
 import { ShiftsPage } from "@/pages/ShiftsPage"
 import { BuilderPage } from "@/pages/BuilderPage"
-import { CalendarPage } from "@/pages/CalendarPage"
+import { CalendarAgentePage } from "@/pages/CalendarAgentePage"
 import { ImportPage } from "@/pages/ImportPage"
 import { PdcPage } from "@/pages/PdcPage"
 import { PdcBuilderPage } from "@/pages/PdcBuilderPage"
@@ -21,10 +20,9 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route element={<Layout />}>
           <Route index element={<DashboardPage />} />
-          <Route path="treni" element={<TrainSearchPage />} />
           <Route path="turni" element={<ShiftsPage />} />
           <Route path="builder" element={<BuilderPage />} />
-          <Route path="calendario" element={<CalendarPage />} />
+          <Route path="calendario-agente" element={<CalendarAgentePage />} />
           <Route path="pdc" element={<PdcPage />} />
           <Route path="pdc/new" element={<PdcBuilderPage />} />
           <Route path="pdc/edit" element={<PdcBuilderPage />} />
