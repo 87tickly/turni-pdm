@@ -4,6 +4,49 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Step 3/10: calendario preriscaldo
+
+### Contesto
+
+Step piccolo e isolato. Fornisce la primitiva `is_preheat_period(date)`
+che sara' usata a Step 4/6 per decidere quando applicare il valore ACCp
+maggiorato (80 min) ai segmenti marcati con `●NUMERO` nel PDF.
+
+Richiesta utente: preriscaldo rinforzato attivo da 1 dicembre a fine
+febbraio incluso. Fuori da questo periodo, un treno marcato `●` si
+tratta come condotta normale (ACCp = 40 min).
+
+### Implementazione
+
+`src/turn_builder/preheat_calendar.py` (NEW, 35 righe):
+- `PREHEAT_MONTHS = frozenset({12, 1, 2})`
+- `is_preheat_period(d: date) -> bool` — check puro di mese
+- `preheat_period_label(d) -> str` — "INVERNO" / "ESTATE" per UI/log
+
+Modulo isolato, zero dipendenze dal resto del progetto.
+
+### Verifica
+
+`tests/test_preheat_calendar_step3.py` (NEW, 8 test):
+- Bordi periodo: 1 dic True, 30 nov False
+- 28 feb True (anno non bisestile)
+- 29 feb True (anno bisestile 2028)
+- 1 mar False
+- Tutti i mesi estivi (apr-ott) False
+- Costante PREHEAT_MONTHS stabile per dipendenti esterni
+
+Pytest: **133/133** (125 + 8 nuovi).
+
+### File modificati
+
+- `src/turn_builder/preheat_calendar.py` (NEW)
+- `tests/test_preheat_calendar_step3.py` (NEW)
+- `LIVE-COLAZIONE.md`
+
+pytest 133/133.
+
+---
+
 ## 2026-04-23 — Step 2/10: fase C refezione in day_assembler
 
 ### Contesto
