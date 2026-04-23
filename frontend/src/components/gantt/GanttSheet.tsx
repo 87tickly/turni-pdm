@@ -510,8 +510,6 @@ export function GanttSheet({
 
         {/* Hit area per ogni segment (on top della timeline zone) */}
         {rows.map((row, i) => {
-          const yBarTop =
-            GANTT_LAYOUT.AXIS_Y + i * rowH + GANTT_LAYOUT.LABEL_BAND
           return row.segments.map((seg, si) => {
             let depM = timeToMin(seg.dep_time)
             let arrM = timeToMin(seg.arr_time)
@@ -554,9 +552,11 @@ export function GanttSheet({
               segBind.onClick(ev)
             }
 
-            // In Safari, segmenti molto stretti (<12px) rendono il drag
-            // difficile — allarghiamo il hit area di +6px ciascun lato
-            const hitPad = Math.max(0, 6 - w / 2)
+            // Hit area: padding generoso orizzontale (≥24px) per seg
+            // stretti + intera rowH verticale cosi' il click/drag parte
+            // anche sopra la banda label e sotto i minuti.
+            const hitPad = Math.max(6, 12 - w / 2)
+            const yRowTop = GANTT_LAYOUT.AXIS_Y + i * rowH
 
             return (
               <div
@@ -567,16 +567,15 @@ export function GanttSheet({
                 style={{
                   position: "absolute",
                   left: x1 - hitPad,
-                  top: yBarTop - 16,
+                  top: yRowTop,
                   width: w + 2 * hitPad,
-                  height: barHeight + 32,
+                  height: rowH,
                   cursor: segBind.draggable
                     ? "grab"
                     : interactionsEnabled
                     ? "pointer"
                     : "default",
                   pointerEvents: "auto",
-                  // Trasparente: il visual e' gia' reso dentro l'SVG sotto
                   background: "transparent",
                   userSelect: "none",
                 }}
@@ -1206,7 +1205,9 @@ function TrainBar(p: SegProps) {
         </g>
       )}
 
-      {/* Label treno */}
+      {/* Label treno — vertical label e' SEMPRE sopra il blocco nella
+          banda label (background chiaro). Quindi testo sempre scuro
+          per leggibilita', non bianco. */}
       {wantVertical ? (
         <g
           transform={`translate(${(x1 + x2) / 2}, ${yBarTop - 6}) rotate(-90)`}
@@ -1218,7 +1219,7 @@ function TrainBar(p: SegProps) {
             dominantBaseline="central"
             fontSize={10.5}
             fontWeight={700}
-            fill={isDH ? GANTT_COLORS.INK : "#ffffff"}
+            fill={GANTT_COLORS.INK}
             style={{
               fontFamily: "var(--font-mono, 'JetBrains Mono', monospace)",
             }}
@@ -1233,7 +1234,7 @@ function TrainBar(p: SegProps) {
               dominantBaseline="central"
               fontSize={9}
               fontWeight={500}
-              fill={isDH ? GANTT_COLORS.INK_60 : "rgba(255,255,255,0.85)"}
+              fill={GANTT_COLORS.INK_60}
               style={{
                 fontFamily: "var(--font-mono, 'JetBrains Mono', monospace)",
               }}
@@ -1320,57 +1321,83 @@ function TrainBar(p: SegProps) {
         </g>
       )}
 
-      {/* ACCp / ACCa — pill orizzontali appoggiate ai bordi della barra */}
-      {(seg.accp_min ?? 0) > 0 && (
-        <g pointerEvents="none">
-          <rect
-            x={x1 - 22}
-            y={yBarTop + barH / 2 - 6}
-            width={20}
-            height={12}
-            rx={2}
-            fill="var(--color-surface-container-lowest, #FEFEFD)"
-            stroke={GANTT_COLORS.PREHEAT}
-            strokeWidth={0.6}
-          />
-          <text
-            x={x1 - 12}
-            y={yBarTop + barH / 2 + 3}
-            textAnchor="middle"
-            fontSize={8}
-            fontWeight={700}
-            fill={GANTT_COLORS.PREHEAT}
-            style={{ fontFamily: "var(--font-mono, monospace)" }}
-          >
-            +{seg.accp_min}&apos;
-          </text>
-        </g>
-      )}
-      {(seg.acca_min ?? 0) > 0 && (
-        <g pointerEvents="none">
-          <rect
-            x={x2 + 2}
-            y={yBarTop + barH / 2 - 6}
-            width={20}
-            height={12}
-            rx={2}
-            fill="var(--color-surface-container-lowest, #FEFEFD)"
-            stroke={GANTT_COLORS.PREHEAT}
-            strokeWidth={0.6}
-          />
-          <text
-            x={x2 + 12}
-            y={yBarTop + barH / 2 + 3}
-            textAnchor="middle"
-            fontSize={8}
-            fontWeight={700}
-            fill={GANTT_COLORS.PREHEAT}
-            style={{ fontFamily: "var(--font-mono, monospace)" }}
-          >
-            +{seg.acca_min}&apos;
-          </text>
-        </g>
-      )}
+      {/* ACCp — barra semitrasparente prima del blocco principale,
+          lunga quanto i minuti accessori di preparazione. Etichetta
+          "ACCp NN'" sopra, in stile ausiliaria. Come nel PDF Trenord. */}
+      {(seg.accp_min ?? 0) > 0 && (() => {
+        const pxPerMin = GANTT_LAYOUT.PX_PER_HOUR / 60
+        const accpW = (seg.accp_min ?? 0) * pxPerMin
+        const accpX = x1 - accpW
+        return (
+          <g pointerEvents="none">
+            <rect
+              x={accpX}
+              y={yBarTop}
+              width={accpW}
+              height={barH}
+              fill={GANTT_COLORS.PREHEAT}
+              opacity={0.16}
+            />
+            <line
+              x1={accpX}
+              x2={x1}
+              y1={yBarTop + barH / 2}
+              y2={yBarTop + barH / 2}
+              stroke={GANTT_COLORS.PREHEAT}
+              strokeWidth={1}
+              strokeDasharray="2 2"
+            />
+            <text
+              x={accpX + accpW / 2}
+              y={yBarTop - 4}
+              textAnchor="middle"
+              fontSize={9}
+              fontWeight={700}
+              fill={GANTT_COLORS.PREHEAT}
+              style={{ fontFamily: "var(--font-mono, monospace)" }}
+            >
+              ACCp {seg.accp_min}&apos;
+            </text>
+          </g>
+        )
+      })()}
+      {/* ACCa — barra semitrasparente dopo il blocco */}
+      {(seg.acca_min ?? 0) > 0 && (() => {
+        const pxPerMin = GANTT_LAYOUT.PX_PER_HOUR / 60
+        const accaW = (seg.acca_min ?? 0) * pxPerMin
+        return (
+          <g pointerEvents="none">
+            <rect
+              x={x2}
+              y={yBarTop}
+              width={accaW}
+              height={barH}
+              fill={GANTT_COLORS.PREHEAT}
+              opacity={0.16}
+            />
+            <line
+              x1={x2}
+              x2={x2 + accaW}
+              y1={yBarTop + barH / 2}
+              y2={yBarTop + barH / 2}
+              stroke={GANTT_COLORS.PREHEAT}
+              strokeWidth={1}
+              strokeDasharray="2 2"
+            />
+            <text
+              x={x2 + accaW / 2}
+              y={yBarTop - 4}
+              textAnchor="middle"
+              fontSize={9}
+              fontWeight={700}
+              fill={GANTT_COLORS.PREHEAT}
+              style={{ fontFamily: "var(--font-mono, monospace)" }}
+            >
+              ACCa {seg.acca_min}&apos;
+            </text>
+          </g>
+        )
+      })()}
 
       {/* CVp / CVa minuti — etichetta specifica se presente il valore
           (oltre al flag cvp/cva gia' renderizzato come striscia verticale) */}

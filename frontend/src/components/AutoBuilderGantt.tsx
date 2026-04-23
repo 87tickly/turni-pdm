@@ -84,8 +84,8 @@ export function AutoBuilderGantt({
   segments,
   presentationTime,
   endTime,
-  mealStart,
-  mealEnd,
+  mealStart: _mealStart,
+  mealEnd: _mealEnd,
   onSegmentClick,
   ganttId,
   onCrossDragStart,
@@ -154,34 +154,11 @@ export function AutoBuilderGantt({
       mappedToOriginalIdx.push(origIdx)
     })
 
-    // Inietta refezione virtuale se mealStart/End presenti e nessuna refez nei dati
-    const hasRefez = mapped.some((s) => s.kind === "refez")
-    if (!hasRefez && mealStart && mealEnd) {
-      const mealStartMin = timeToMin(mealStart)
-      let pivotStation = segments[0]?.from_station ?? ""
-      for (const s of segments) {
-        const arr = timeToMin(s.arr_time)
-        if (arr <= mealStartMin) pivotStation = s.to_station
-      }
-      const refezSeg: GanttSegment = {
-        kind: "refez",
-        train_id: `REFEZ ${pivotStation}`,
-        from_station: pivotStation,
-        to_station: pivotStation,
-        dep_time: mealStart,
-        arr_time: mealEnd,
-      }
-      const insertAt = mapped.findIndex(
-        (s) => timeToMin(s.dep_time) > mealStartMin,
-      )
-      if (insertAt === -1) {
-        mapped.push(refezSeg)
-        mappedToOriginalIdx.push(-1)
-      } else {
-        mapped.splice(insertAt, 0, refezSeg)
-        mappedToOriginalIdx.splice(insertAt, 0, -1)
-      }
-    }
+    // NB: non iniettiamo piu' una refez virtuale da mealStart/mealEnd:
+    // il backend spesso restituisce mealStart come BORDO finestra pranzo
+    // (11:30) non come slot effettivo → il rendering finiva fuori dal
+    // turno. Se il backend popola una refez reale nei segments[], la
+    // renderizziamo regolarmente. Altrimenti nessun marker.
 
     // ─── Range orario ───
     // Richiesta utente 23/04/2026: asse sempre 00-24, non auto-fit —
@@ -233,7 +210,7 @@ export function AutoBuilderGantt({
       },
       range: [startHour, endHour] as [number, number],
     }
-  }, [segments, presentationTime, endTime, mealStart, mealEnd])
+  }, [segments, presentationTime, endTime])
 
   if (!view) return null
 

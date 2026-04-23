@@ -4,6 +4,76 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Fix visual/interaction post-refactor HTML overlay
+
+### Segnalazioni utente
+
+Dopo refactor HTML overlay, utente riporta:
+1. "non capisco dove sia la difficoltà nell inserire una barra in piu
+   per indicare degli accessori" → ACCp/ACCa pill "+40'" non erano
+   chiari, vuole barra dedicata come nel PDF
+2. "refezioni sul gant è inserita da una parte e sul riepilogo da
+   un altra" → REFEZ nel Gantt a ~11:50 ma lista treni dalle 13:58
+3. "le scritte sono in bianco e non si vedono" → label verticali
+   in vertical mode `fill="#ffffff"` mostrate sopra il blocco su
+   background chiaro (label band) → invisibili
+4. "non si può interagire con il gant è tutto bloccato" → hit area
+   troppo stretta, difficile da prendere con il cursor
+
+### Fix
+
+`frontend/src/components/gantt/GanttSheet.tsx`:
+
+1. **Label verticali sempre scure** (fix #3)
+   - Rimossa logica `fill={isDH ? INK : "#ffffff"}` per label rotated -90°
+   - La label e' SEMPRE sopra il blocco nella banda label (background
+     chiaro). `fill: GANTT_COLORS.INK` per la main label,
+     `GANTT_COLORS.INK_60` per sub → leggibili sempre
+
+2. **Barra accessori dedicata** (fix #1) — stile PDF Trenord
+   - Pill `+40'` rimpiazzati da una RECT semitrasparente prima/dopo
+     il blocco, lunga quanto i minuti accessori (es. 40min * 46/60px =
+     31px), con fill brand opacity 16% + line dashed al centro +
+     label "ACCp 40'" sopra. Visivamente estende il blocco dimostrando
+     il tempo effettivo occupato
+   - Stessa logica per ACCa a destra del blocco
+
+3. **Hit area su rowH intera** (fix #4)
+   - Prima: `top: yBarTop - 16, height: barHeight + 32` → ~52px
+     (solo attorno alla barra)
+   - Ora: `top: yRowTop, height: rowH` → 114px (label band + bar
+     + minutes + gap). L'utente puo' cliccare/trascinare anche sulle
+     label sopra/sotto
+   - Hit padding orizzontale alzato a 12px per lato (da 6px) per
+     segmenti stretti
+
+`frontend/src/components/AutoBuilderGantt.tsx`:
+
+4. **Rimossa injection virtuale refez** (fix #2)
+   - `mealStart`/`mealEnd` non vengono piu' usati per iniettare un
+     segmento refez virtuale: il backend restituisce `meal_start`
+     come BORDO finestra pranzo (es. 11:30), non come slot reale →
+     veniva renderizzata FUORI dal turno. Ora se il backend popola
+     una refez vera in `segments[]` la renderizziamo regolarmente,
+     altrimenti nessun marker (meglio del disallineamento)
+   - Props `mealStart`/`mealEnd` restano per API compat ma renamed
+     a `_mealStart`/`_mealEnd` (unused)
+
+### Verifica
+
+- `npm run build` clean (1764 moduli, 549 kB)
+- `/gantt-preview`: 4 SVG, 43 hit div absolute, dimensione 38×114px
+  (rowH), no console errors
+
+### File toccati
+
+- `frontend/src/components/gantt/GanttSheet.tsx`
+- `frontend/src/components/AutoBuilderGantt.tsx`
+- `frontend/dist/*`
+- `LIVE-COLAZIONE.md`
+
+---
+
 ## 2026-04-23 — Refactor GanttSheet: hit area HTML overlay (workaround Safari)
 
 ### Problema diagnosticato
