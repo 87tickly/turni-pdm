@@ -8,12 +8,12 @@
  * sticky header di settimana e giorno. Celle con 7 stati: work, rest,
  * fr, scomp, uncov, leave, locked.
  *
- * I dati sono mock in questa versione (endpoint /api/calendario-agente
- * non ancora implementato backend-side — residuo tracciato in
- * LIVE-COLAZIONE.md). La struttura dei tipi e delle chiamate e' gia'
- * pronta per il cablaggio.
+ * Dati: fetch reale da `/api/calendario-agente` (router backend creato
+ * in sessione 2026-04-23). Quando il DB non ha ancora turni PdC importati,
+ * il componente fa fallback sul dataset MOCK_ROWS per mantenere visibile
+ * il design.
  */
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   ChevronLeft,
   ChevronRight,
@@ -26,39 +26,19 @@ import {
   Info,
   Plus,
   X,
+  Loader2,
+  AlertTriangle,
 } from "lucide-react"
+import {
+  getCalendarioAgente,
+  type AgentCellState,
+  type AgentGridCell,
+  type AgentGridRow,
+} from "@/lib/api"
 
 
-// ─────────────────────────────────────────────────────────────
-// Tipi (da HANDOFF-calendario-agente.md §3)
-// ─────────────────────────────────────────────────────────────
-
-type AgentCellState =
-  | "work"
-  | "rest"
-  | "fr"
-  | "scomp"
-  | "uncov"
-  | "leave"
-  | "locked"
-
-interface AgentGridCell {
-  date: string
-  state: AgentCellState
-  span?: number
-  turno_code?: string
-  prestazione_min?: number
-  lock_reason?: string
-}
-
-interface AgentGridRow {
-  pdc_id: number
-  pdc_code: string
-  display_name: string
-  matricola: string
-  totals: { work: number; rest: number; uncov: number; hours_min: number }
-  cells: AgentGridCell[]
-}
+// I tipi AgentCellState / AgentGridCell / AgentGridRow sono ora in
+// lib/api.ts (condivisi col backend response schema). Importati sopra.
 
 
 // ─────────────────────────────────────────────────────────────
@@ -72,9 +52,9 @@ function mockCell(state: AgentCellState, code?: string, hm?: string,
   return {
     date: "",
     state,
-    turno_code: code,
-    prestazione_min: min || undefined,
-    span,
+    turno_code: code ?? null,
+    prestazione_min: min || null,
+    span: span ?? null,
   }
 }
 
@@ -89,6 +69,7 @@ function buildMockRow(code: string, name: string, matricola: string,
     pdc_code: code,
     display_name: name,
     matricola,
+    deposito: "MILANO",
     totals: { work, rest, uncov, hours_min: hours },
     cells,
   }
@@ -304,38 +285,8 @@ const MOCK_ROWS: AgentGridRow[] = [
 // Griglia giorni: 28 giorni (4 settimane ISO)
 // ─────────────────────────────────────────────────────────────
 
-const WEEK_BANDS = [
-  "Sett. 14 · 30 mar — 5 apr",
-  "Sett. 15 · 6 — 12 apr",
-  "Sett. 16 · 13 — 19 apr",
-  "Sett. 17 · 20 — 26 apr",
-]
-
-const DAY_ROW: {
-  dow: string
-  dnum: number
-  wknd?: boolean
-  today?: boolean
-  m?: boolean
-}[] = [
-  // Week 14
-  { dow: "L", dnum: 30 }, { dow: "M", dnum: 31 },
-  { dow: "X", dnum: 1, m: true }, { dow: "G", dnum: 2 },
-  { dow: "V", dnum: 3 }, { dow: "S", dnum: 4, wknd: true },
-  { dow: "D", dnum: 5, wknd: true },
-  // Week 15
-  { dow: "L", dnum: 6 }, { dow: "M", dnum: 7 }, { dow: "X", dnum: 8 },
-  { dow: "G", dnum: 9 }, { dow: "V", dnum: 10 },
-  { dow: "S", dnum: 11, wknd: true }, { dow: "D", dnum: 12, wknd: true },
-  // Week 16
-  { dow: "L", dnum: 13 }, { dow: "M", dnum: 14 }, { dow: "X", dnum: 15 },
-  { dow: "G", dnum: 16 }, { dow: "V", dnum: 17 },
-  { dow: "S", dnum: 18, wknd: true }, { dow: "D", dnum: 19, wknd: true },
-  // Week 17
-  { dow: "L", dnum: 20 }, { dow: "M", dnum: 21 }, { dow: "X", dnum: 22 },
-  { dow: "G", dnum: 23, today: true }, { dow: "V", dnum: 24 },
-  { dow: "S", dnum: 25, wknd: true }, { dow: "D", dnum: 26, wknd: true },
-]
+// DAY_ROW e WEEK_BANDS sono calcolati dinamicamente dalla startDate
+// nel componente principale (buildDayRow / buildWeekBands).
 
 
 // ─────────────────────────────────────────────────────────────
@@ -651,19 +602,159 @@ function Cell({
 // Page component
 // ─────────────────────────────────────────────────────────────
 
+// Calcola il lunedi' della settimana della data data (locale-safe).
+function startOfWeekMonday(d: Date): Date {
+  const x = new Date(d)
+  const day = x.getDay()          // 0=Dom .. 6=Sab
+  const diff = (day + 6) % 7      // giorni da lunedi'
+  x.setDate(x.getDate() - diff)
+  x.setHours(0, 0, 0, 0)
+  return x
+}
+
+function isoDate(d: Date): string {
+  return (
+    d.getFullYear() +
+    "-" +
+    String(d.getMonth() + 1).padStart(2, "0") +
+    "-" +
+    String(d.getDate()).padStart(2, "0")
+  )
+}
+
+const MONTH_NAMES_IT = [
+  "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
+  "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre",
+]
+const DOW_LETTERS: ("L" | "M" | "X" | "G" | "V" | "S" | "D")[] =
+  ["L", "M", "X", "G", "V", "S", "D"]
+
+interface DayMeta {
+  dow: string
+  dnum: number
+  wknd?: boolean
+  today?: boolean
+  m?: boolean          // primo del mese
+  iso: string          // "YYYY-MM-DD"
+  week: number         // ISO week number (semplificato)
+}
+
+/** Genera i 28 giorni + le settimane-banner a partire dalla data di inizio. */
+function buildDayRow(start: Date, days: number): DayMeta[] {
+  const out: DayMeta[] = []
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start)
+    d.setDate(start.getDate() + i)
+    const idx = (d.getDay() + 6) % 7       // 0=L..6=D
+    const isToday = d.getTime() === today.getTime()
+    out.push({
+      dow: DOW_LETTERS[idx],
+      dnum: d.getDate(),
+      wknd: idx >= 5,
+      today: isToday,
+      m: d.getDate() === 1,
+      iso: isoDate(d),
+      week: Math.floor(i / 7),
+    })
+  }
+  return out
+}
+
+function buildWeekBands(days: DayMeta[]): string[] {
+  const bands: string[] = []
+  for (let w = 0; w < Math.ceil(days.length / 7); w++) {
+    const slice = days.slice(w * 7, w * 7 + 7)
+    if (slice.length === 0) break
+    const a = slice[0], b = slice[slice.length - 1]
+    const aName = MONTH_NAMES_IT[Number(a.iso.slice(5, 7)) - 1]
+      .slice(0, 3).toLowerCase()
+    const bName = MONTH_NAMES_IT[Number(b.iso.slice(5, 7)) - 1]
+      .slice(0, 3).toLowerCase()
+    bands.push(
+      `Sett. ${w + 1} · ${a.dnum} ${aName} — ${b.dnum} ${bName}`,
+    )
+  }
+  return bands
+}
+
+
 export function CalendarAgentePage() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [query, setQuery] = useState("")
+  // Future: rendi depositoFilter settabile via dropdown nella topbar
+  const [depositoFilter] = useState<string>("")
+  const [fetchedRows, setFetchedRows] = useState<AgentGridRow[] | null>(null)
+  const [fetching, setFetching] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+  const [usingMock, setUsingMock] = useState(false)
+
+  // Start = lunedi' della settimana 4 settimane fa, cosi' la "oggi" cade
+  // circa a meta' del range.
+  const [startDate, setStartDate] = useState<Date>(() => {
+    const d = new Date()
+    d.setDate(d.getDate() - 21)    // 3 settimane indietro
+    return startOfWeekMonday(d)
+  })
+
+  const DAY_COUNT = 28
+
+  // Recupera dati dal backend. Fallback su MOCK_ROWS se l'endpoint
+  // non restituisce righe (es. DB senza turni PdC importati).
+  useEffect(() => {
+    let cancelled = false
+    setFetching(true)
+    setFetchError(null)
+    getCalendarioAgente({
+      start: isoDate(startDate),
+      days: DAY_COUNT,
+      deposito: depositoFilter || undefined,
+    })
+      .then((r) => {
+        if (cancelled) return
+        if (r.rows && r.rows.length > 0) {
+          setFetchedRows(r.rows)
+          setUsingMock(false)
+        } else {
+          // DB vuoto — usiamo il mock per tenere il design visibile
+          setFetchedRows(null)
+          setUsingMock(true)
+        }
+      })
+      .catch((e) => {
+        if (cancelled) return
+        setFetchError(e instanceof Error ? e.message : String(e))
+        setFetchedRows(null)
+        setUsingMock(true)
+      })
+      .finally(() => {
+        if (!cancelled) setFetching(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [startDate, depositoFilter])
+
+  // Giorni e week-bands calcolati dinamicamente dalla startDate
+  const dayRow: DayMeta[] = useMemo(
+    () => buildDayRow(startDate, DAY_COUNT),
+    [startDate],
+  )
+  const weekBands = useMemo(() => buildWeekBands(dayRow), [dayRow])
+
+  // Base rows: real fetch, oppure mock se vuoto/errore
+  const baseRows: AgentGridRow[] = fetchedRows ?? MOCK_ROWS
 
   const rows = useMemo(() => {
-    if (!query.trim()) return MOCK_ROWS
+    if (!query.trim()) return baseRows
     const q = query.toLowerCase()
-    return MOCK_ROWS.filter((r) =>
+    return baseRows.filter((r) =>
       r.pdc_code.toLowerCase().includes(q) ||
       r.display_name.toLowerCase().includes(q) ||
       r.matricola.includes(q)
     )
-  }, [query])
+  }, [query, baseRows])
 
   const totalHoursMin = rows.reduce((a, r) => a + r.totals.hours_min, 0)
   const totalUncov = rows.reduce((a, r) => a + r.totals.uncov, 0)
@@ -671,6 +762,17 @@ export function CalendarAgentePage() {
     (a, r) => a + r.cells.filter((c) => c.state === "fr").length,
     0,
   )
+
+  const monthLabel =
+    MONTH_NAMES_IT[startDate.getMonth()] + " " + startDate.getFullYear()
+
+  function shiftMonths(delta: number) {
+    setStartDate((prev) => {
+      const d = new Date(prev)
+      d.setDate(d.getDate() + delta * 28)
+      return startOfWeekMonday(d)
+    })
+  }
 
   return (
     <div
@@ -705,7 +807,7 @@ export function CalendarAgentePage() {
             <span className="text-[11.5px]"
               style={{ color: "var(--color-on-surface-strong)",
                 fontFamily: "var(--font-mono, monospace)" }}>
-              apr 2026 · 28gg
+              {monthLabel.toLowerCase().slice(0, 3)} {startDate.getFullYear()} · {DAY_COUNT}gg
             </span>
           </div>
           <div className="flex flex-col">
@@ -726,7 +828,7 @@ export function CalendarAgentePage() {
             <span className="text-[11.5px]"
               style={{ color: "var(--color-on-surface-strong)",
                 fontFamily: "var(--font-mono, monospace)" }}>
-              {rows.length} / {MOCK_ROWS.length}
+              {rows.length} / {baseRows.length}
             </span>
           </div>
         </div>
@@ -772,7 +874,10 @@ export function CalendarAgentePage() {
                 className="inline-flex items-center gap-1 rounded-md overflow-hidden"
                 style={{ backgroundColor: "var(--color-surface-container)" }}
               >
-                <button className="px-1.5 py-1 opacity-70 hover:opacity-100">
+                <button
+                  onClick={() => shiftMonths(-1)}
+                  className="px-1.5 py-1 opacity-70 hover:opacity-100"
+                >
                   <ChevronLeft size={14} strokeWidth={2} />
                 </button>
                 <span
@@ -782,14 +887,21 @@ export function CalendarAgentePage() {
                     fontFamily: "var(--font-mono, monospace)",
                   }}
                 >
-                  Aprile 2026
+                  {monthLabel}
                 </span>
-                <button className="px-1.5 py-1 opacity-70 hover:opacity-100">
+                <button
+                  onClick={() => shiftMonths(1)}
+                  className="px-1.5 py-1 opacity-70 hover:opacity-100"
+                >
                   <ChevronRight size={14} strokeWidth={2} />
                 </button>
               </div>
 
-              <FilterPill icon={MapPin} label="Deposito" value="Milano C.le" />
+              <FilterPill
+                icon={MapPin}
+                label="Deposito"
+                value={depositoFilter || "tutti"}
+              />
               <FilterPill icon={Users} label="Matricole" value="tutte" />
               <FilterPill icon={Filter} label="Stato" value="tutti" />
 
@@ -829,6 +941,42 @@ export function CalendarAgentePage() {
             <MiniKpi label="FR candidate" value={totalFr} color="#6D28D9" />
           </div>
         </div>
+
+        {/* Data source banner (fetch status) */}
+        {(fetching || fetchError || usingMock) && (
+          <div
+            className="mt-3 flex items-center gap-2 px-3 py-2 rounded-md text-[11.5px]"
+            style={{
+              backgroundColor: fetchError
+                ? "var(--color-destructive-container, rgba(220,38,38,0.08))"
+                : usingMock
+                ? "var(--color-warning-container, rgba(234,88,12,0.08))"
+                : "var(--color-surface-container-low)",
+              color: fetchError
+                ? "var(--color-destructive, #C33A3A)"
+                : usingMock
+                ? "var(--color-warning, #C76A12)"
+                : "var(--color-on-surface-muted)",
+            }}
+          >
+            {fetching ? (
+              <>
+                <Loader2 size={13} className="animate-spin" />
+                Caricamento calendario…
+              </>
+            ) : fetchError ? (
+              <>
+                <AlertTriangle size={13} />
+                Errore: {fetchError}. Mostro dati demo.
+              </>
+            ) : (
+              <>
+                <Info size={13} />
+                Nessun turno PdC attivo nel DB per {depositoFilter || "il range"}: mostro dati demo. Importa un PDF turno PdC per popolare.
+              </>
+            )}
+          </div>
+        )}
 
         {/* Legend */}
         <div className="flex items-center gap-4 mt-4 flex-wrap">
@@ -900,7 +1048,7 @@ export function CalendarAgentePage() {
                   gridTemplateColumns: "repeat(4, 1fr)",
                 }}
               >
-                {WEEK_BANDS.map((label, i) => (
+                {weekBands.map((label, i) => (
                   <div
                     key={i}
                     className="px-2 py-1 text-[10px] font-semibold"
@@ -919,7 +1067,7 @@ export function CalendarAgentePage() {
               </div>
 
               {/* Day cells header */}
-              {DAY_ROW.map((d, i) => (
+              {dayRow.map((d, i) => (
                 <div
                   key={i}
                   className="flex flex-col items-center justify-center py-1"
@@ -1045,7 +1193,7 @@ export function CalendarAgentePage() {
                 }}>
                   {rows.length} PdC
                 </strong>{" "}
-                di {MOCK_ROWS.length} visualizzati
+                di {baseRows.length} visualizzati
               </div>
               <div>
                 Ore totali settimana ·{" "}

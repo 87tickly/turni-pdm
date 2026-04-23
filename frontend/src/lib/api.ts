@@ -1186,3 +1186,52 @@ export async function removeMateriale(deposito: string, material_type: string) {
     { material_type },
   )
 }
+
+// ── Calendario agente ─────────────────────────────────────────────
+
+export type AgentCellState =
+  | "work" | "rest" | "fr" | "scomp" | "uncov" | "leave" | "locked"
+
+export interface AgentGridCell {
+  date: string                // ISO "YYYY-MM-DD"
+  state: AgentCellState
+  span?: number | null
+  turno_code?: string | null
+  prestazione_min?: number | null
+  lock_reason?: string | null
+}
+
+export interface AgentGridTotals {
+  work: number
+  rest: number
+  uncov: number
+  hours_min: number
+}
+
+export interface AgentGridRow {
+  pdc_id: number
+  pdc_code: string
+  display_name: string
+  matricola: string
+  deposito: string
+  totals: AgentGridTotals
+  cells: AgentGridCell[]
+}
+
+export interface AgentGridResponse {
+  range_start: string
+  range_days: number
+  deposito: string | null
+  rows: AgentGridRow[]
+}
+
+export async function getCalendarioAgente(params: {
+  start: string     // "YYYY-MM-DD"
+  days?: number     // default 28
+  deposito?: string
+}) {
+  const qs = new URLSearchParams({ start: params.start })
+  if (params.days) qs.set("days", String(params.days))
+  if (params.deposito) qs.set("deposito", params.deposito)
+  return api.get<AgentGridResponse>(`/api/calendario-agente?${qs}`)
+}

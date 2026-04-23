@@ -4,6 +4,118 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Calendario agente: cablaggio backend /api/calendario-agente
+
+### Contesto
+
+Secondo dei residui dichiarati nel handoff Calendario agente (§8):
+"Backend — nuovo endpoint `GET /calendario-agente`". Oggi la pagina
+`/calendario-agente` mostrava dati mock frontend-side; ora fa fetch
+reale con fallback al mock quando il DB non ha turni PdC.
+
+### Backend — nuovo router
+
+`api/calendario_agente.py` (NEW, 220 righe):
+- `GET /api/calendario-agente?start=YYYY-MM-DD&days=28&deposito=X`
+- Response schema `AgentGridResponse` da HANDOFF §3 (`pdc_id`,
+  `pdc_code`, `display_name`, `matricola`, `deposito`, `totals`,
+  `cells[]`)
+- Clamp `days` a `[1, 62]`; `start` parsed con 400 se invalid
+- Filtro deposito case-insensitive (UPPER su impianto)
+- Fallback robusto: se la colonna `superseded_by_import_id` non esiste
+  (migrazione vecchia), nessun filtro "attivi"
+
+Logica espansione ciclo:
+- Per ogni `pdc_turn` attivo del deposito:
+  - Carica `pdc_turn_day` (day_number + periodicita + is_disponibile +
+    lavoro_min + …)
+  - Per ogni giorno del range: weekday_letter via `weekday_for_periodicity`
+    (usa `italian_holidays.py` esistente, ritorna 'L'/'M'/'X'/'G'/'V'/
+    'S'/'D' con festivi = 'D')
+  - Seleziona il `pdc_turn_day` con periodicita' compatibile
+    (preferenza: match esatto di lettera, poi match inclusivo tipo
+    'LMXGVSD')
+- Cella:
+  - `is_disponibile=1` → state=`scomp`, code=`<turno> · S.COMP`
+  - Match con giornata → state=`work`, code=`<turno> G<day_number>`
+  - Nessun match → state=`rest`
+
+Stati `fr`/`uncov`/`leave`/`locked` restano placeholder futuri: `fr`
+richiede campo sul turn_day (Step 7 builder v4), `uncov`/`locked`
+richiedono validator cross-day, `leave` richiede tabella assegnazioni
+matricole che non esiste ancora.
+
+### Backend — registrazione
+
+`server.py`:
+- Import + `app.include_router(calendario_agente_router, prefix="/api")`
+
+### Backend — test
+
+`tests/test_calendario_agente.py` (NEW, 6 test TestClient FastAPI):
+- Smoke `GET /api/calendario-agente` → 200 con rows (vuote se DB vuoto)
+- Clamp `days` max 62 e min 1
+- Deposito filter case-insensitive
+- Data invalida → 400 (HTTPException in endpoint)
+- Struttura row/cells valida (skip se DB vuoto)
+
+Pytest: **209/209** (203 + 6 nuovi). Zero regressioni.
+
+### Frontend — fetcher
+
+`frontend/src/lib/api.ts`:
+- Nuovi tipi esportati: `AgentCellState`, `AgentGridCell`,
+  `AgentGridRow`, `AgentGridTotals`, `AgentGridResponse`
+- `getCalendarioAgente({start, days?, deposito?})` → fetch tipizzata
+
+### Frontend — pagina cablata
+
+`frontend/src/pages/CalendarAgentePage.tsx`:
+- Rimossi tipi locali duplicati, uso quelli di `lib/api.ts`
+- `useEffect` per fetch su cambio di `startDate`/`depositoFilter`
+- **Fallback automatico a MOCK_ROWS** se il backend restituisce 0 righe
+  o fallisce → il design resta visibile anche a DB vuoto (utile per
+  demo)
+- **Banner di stato** in alto (loading / mock-in-use / error) sopra
+  la legenda
+- Navigazione mese funzionante: bottoni chevron `<` / `>` ruotano la
+  `startDate` di ±28 giorni con snap al lunedi'
+- `dayRow` e `weekBands` **dinamici** (calcolati da `startDate`):
+  - `buildDayRow(start, 28)` → lettera weekday, numero giorno, weekend
+    tint, today highlight, marker `m` sul primo del mese
+  - `buildWeekBands(days)` → etichette "Sett. N · DD mmm — DD mmm"
+- Header "apr 2026 · 28gg" ora mostra il mese reale e conteggio
+
+### Residui
+
+1. **Assegnazione matricola → turno → data** non esiste ancora nel DB;
+   il backend espande ogni `pdc_turn` come una riga ma `matricola` e
+   `display_name` sono placeholder (`""` e il codice turno). Quando
+   sara' implementato, basta joinare la tabella assegnazioni.
+2. **Stati FR/uncov/leave/locked** ancora non popolati (vedi
+   endpoint §commenti). Nessun impatto frontend perche' i component
+   cella supportano gia' tutti gli stati.
+3. **Drawer dettaglio giornata** (click cella) resta placeholder
+   (`selected` toggle) — richiederebbe un secondary endpoint
+   `GET /calendario-agente/{pdc_id}/day/{date}` con blocchi Gantt.
+4. **Filtro deposito UI**: oggi il `depositoFilter` e' una variabile
+   di stato ma senza dropdown interattivo; la pagina carica tutti i
+   turni del DB di default.
+
+### File modificati
+
+- `api/calendario_agente.py` (NEW)
+- `server.py` (import + include_router)
+- `tests/test_calendario_agente.py` (NEW)
+- `frontend/src/lib/api.ts` (tipi + getCalendarioAgente)
+- `frontend/src/pages/CalendarAgentePage.tsx` (fetch + stati + nav mese)
+- `frontend/dist/*` (rebuild)
+- `LIVE-COLAZIONE.md`
+
+pytest 209/209. npm build OK.
+
+---
+
 ## 2026-04-23 — Migrazione AutoBuilderGantt → base Gantt v3
 
 ### Contesto
