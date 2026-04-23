@@ -235,43 +235,37 @@ export function GanttSheet({
           })}
         </g>
 
-        {/* Timeline click zone (opt-in via onTimelineClick) */}
-        {onTimelineClick && rows.map((_, i) => {
+        {/* Timeline click/drop zone — foreignObject per DnD affidabile */}
+        {(onTimelineClick || onCrossDrop) && rows.map((_, i) => {
           const y =
             GANTT_LAYOUT.AXIS_Y + i * rowH + GANTT_LAYOUT.LABEL_BAND
           const bind = ix.bindTimeline()
           return (
-            <rect
+            <foreignObject
               key={`timeline-zone-${i}`}
               x={GANTT_LAYOUT.COL_LEFT}
               y={y - 10}
               width={axisW}
               height={barHeight + 20}
-              fill="transparent"
-              style={{ cursor: bind.cursor }}
-              onClick={(ev) => bind.onClick(ev, i)}
-              onDragOver={bind.onDragOver}
-              onDrop={bind.onDrop ? (ev) => bind.onDrop?.(ev, i) : undefined}
-            />
-          )
-        })}
-
-        {/* Cross-day drop zone (senza onTimelineClick, ma con onCrossDrop) */}
-        {!onTimelineClick && onCrossDrop && rows.map((_, i) => {
-          const y =
-            GANTT_LAYOUT.AXIS_Y + i * rowH + GANTT_LAYOUT.LABEL_BAND
-          const bind = ix.bindTimeline()
-          return (
-            <rect
-              key={`dropzone-${i}`}
-              x={GANTT_LAYOUT.COL_LEFT}
-              y={y - 10}
-              width={axisW}
-              height={barHeight + 20}
-              fill="transparent"
-              onDragOver={bind.onDragOver}
-              onDrop={bind.onDrop ? (ev) => bind.onDrop?.(ev, i) : undefined}
-            />
+              style={{ overflow: "visible" }}
+            >
+              <div
+                // @ts-expect-error xmlns richiesto in foreignObject
+                xmlns="http://www.w3.org/1999/xhtml"
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  cursor: bind.cursor,
+                }}
+                onClick={onTimelineClick ? (ev) => bind.onClick(ev as unknown as React.MouseEvent, i) : undefined}
+                onDragOver={bind.onDragOver}
+                onDrop={
+                  bind.onDrop
+                    ? (ev) => bind.onDrop?.(ev as unknown as React.DragEvent, i)
+                    : undefined
+                }
+              />
+            </foreignObject>
           )
         })}
 
@@ -830,26 +824,36 @@ function SegHit({
   draggable?: boolean
   tabIndex?: number
 }) {
+  // foreignObject wrapping un <div> HTML: l'HTML5 DnD su SVG rect e'
+  // inaffidabile cross-browser. Il pattern con foreignObject + div e'
+  // quello usato originariamente da PdcGanttV2 v1 e funziona ovunque.
   return (
-    <rect
+    <foreignObject
       x={x1}
       y={yBarTop - 16}
       width={w}
       height={barH + 32}
-      fill="transparent"
-      style={{ cursor: onMouseDown ? "grab" : "pointer" }}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      onMouseDown={onMouseDown}
-      onKeyDown={onKeyDown}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      // @ts-expect-error draggable su SVG rect supportato dai browser moderni
-      draggable={draggable}
-      tabIndex={tabIndex}
+      style={{ overflow: "visible" }}
     >
-      <title>{tip}</title>
-    </rect>
+      <div
+        // @ts-expect-error xmlns e' richiesto dentro foreignObject per SSR
+        xmlns="http://www.w3.org/1999/xhtml"
+        title={tip}
+        draggable={draggable}
+        tabIndex={tabIndex}
+        style={{
+          width: "100%",
+          height: "100%",
+          cursor: onMouseDown ? "grab" : "pointer",
+        }}
+        onClick={onClick}
+        onContextMenu={onContextMenu}
+        onMouseDown={onMouseDown}
+        onKeyDown={onKeyDown}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+      />
+    </foreignObject>
   )
 }
 

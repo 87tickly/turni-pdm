@@ -4,6 +4,69 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Fix post-deploy Fase B: autoFit default + foreignObject DnD
+
+### Problemi segnalati dall'utente su produzione
+
+Dopo deploy di commit `6349b56` l'utente ha testato su railway e
+riportato:
+
+1. **Range Gantt sempre 24h piene** anche per giornate corte
+   (es. block 17:56→19:41 renderizzato schiacciato su asse 0-24) →
+   "il secondo screen è ancora vecchio"
+2. **Drag / cross-day non funzionanti** — "il movimento è solo
+   orizzontale e anche volendo muoverlo verticalmente, non apre
+   abbastanze schermate per interagire"
+
+### Diagnosi
+
+1. **autoFit default errato nel wrapper**: avevo mantenuto
+   `autoFit=false` come default per "zero regressione interfaccia",
+   ma in realtà il comportamento vecchio di `PdcGanttV2` era asse
+   fisso 3→27 (~24h), visivamente equivalente al mio 0→24. Il
+   risultato: nessun miglioramento UX rispetto a prima. Gli unici
+   consumer che ottenevano autoFit erano quelli che lo passavano
+   esplicitamente (PdcPage).
+2. **HTML5 DnD su SVG `<rect>` inaffidabile cross-browser**:
+   Safari (e alcuni Chromium builds) non emettono correttamente
+   `dragstart`/`dragend` su elementi SVG nativi. Il pattern
+   originale di `PdcGanttV2` v1 usava `<foreignObject>` +
+   HTML `<div>` proprio per aggirare questo. Io avevo messo
+   `draggable` + handler direttamente su SVG `<rect>` con un
+   `@ts-expect-error` ottimistico → cross-day drag inoperante.
+
+### Fix applicati
+
+1. `frontend/src/components/PdcGanttV2.tsx` — `autoFit = true`
+   default. I consumer (PdcBuilderPage + PdcDepotPage) che non
+   passano la prop ora ottengono zoom automatico sulla giornata
+   (segment + padding 30min, min 4h, max 48h).
+2. `frontend/src/components/gantt/GanttSheet.tsx` — `SegHit`
+   riscritto con `<foreignObject>` + HTML `<div>`:
+   - `draggable`, `onDragStart`/`onDragEnd` ora su elemento HTML
+     nativo → funziona su tutti i browser
+   - `title` su div invece di `<title>` SVG (tooltip equivalente)
+   - Stesso pattern per la timeline zone (drop target)
+   - Unificata la "timeline zone" e la "dropzone" separate in un
+     unico elemento `<foreignObject>` condizionale
+
+### Verifica
+
+- `npm run build` clean (1764 moduli, 541 kB)
+- `/gantt-preview` su localhost: 4 SVG, 43 foreignObject, tutti con
+  `draggable="false"` (AutoBuilderGantt non passa callback DnD → 0
+  regressione), `title` attr popolato correttamente
+- Zero console errors
+
+### File toccati
+
+- `frontend/src/components/PdcGanttV2.tsx`
+- `frontend/src/components/gantt/GanttSheet.tsx`
+- `frontend/dist/*` (rebuild)
+- `LIVE-COLAZIONE.md`
+
+---
+
 ## 2026-04-23 — Implementazione gantt interactions (Fase B)
 
 ### Deliverable

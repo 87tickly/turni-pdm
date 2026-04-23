@@ -166,7 +166,7 @@ export function PdcGanttV2({
   snapMinutes = 5,
   dragThresholdPx = 4,
   hideActionBar = false,
-  autoFit = false,
+  autoFit = true,
 }: PdcGanttV2Props) {
   const view = useMemo<{
     mapped: MappedView
