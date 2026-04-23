@@ -399,6 +399,35 @@ class Database:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_train_allocation_train ON train_allocation(train_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_train_allocation_depot ON train_allocation(deposito)")
 
+        # ── CV Ledger (Step 5, 23/04/2026) ──
+        # Registro condiviso persistente per i Cambi Volante tra due treni
+        # consecutivi dello stesso materiale operati da PdC diversi. Il
+        # modulo src/turn_builder/cv_registry.py scrive/legge qui per
+        # garantire copertura completa del gap (zero minuti scoperti) anche
+        # tra generazioni di turni separate nel tempo.
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS cv_ledger (
+                id {pk},
+                material_turn_id INTEGER NOT NULL,
+                day_index INTEGER NOT NULL,
+                train_in_id TEXT NOT NULL,
+                train_out_id TEXT NOT NULL,
+                train_in_arr_min INTEGER NOT NULL,
+                train_out_dep_min INTEGER NOT NULL,
+                tm_min INTEGER,
+                cva_pdc_id TEXT,
+                cva_min INTEGER DEFAULT 0,
+                cvp_pdc_id TEXT,
+                cvp_min INTEGER DEFAULT 0,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(material_turn_id, day_index, train_in_id, train_out_id)
+            )
+        """)
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cv_ledger_lookup "
+            "ON cv_ledger(material_turn_id, day_index)"
+        )
+
         # ── Cache rotte treno verificate via live.arturo.travel ──
         # Per ogni (train_id, origine_hint) salviamo le fermate reali
         # cosi' arricchiamo il DB con dati certificati. La prima query e'

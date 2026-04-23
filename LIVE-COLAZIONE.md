@@ -4,6 +4,87 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Step 5/10: CV registry con memoria condivisa persistente
+
+### Regola di business
+
+Richiesta utente 22-23/04/2026: tra due treni consecutivi dello stesso
+materiale con gap < 65 min (sotto soglia accessori pieni) c'e' un
+Cambio Volante. Se i treni vengono operati da PdC **diversi** (turni
+generati in momenti separati), il tempo del CV va **spartito** tra i
+due con memoria condivisa persistente, cosi':
+
+- cva_min + cvp_min == gap_totale  (copertura completa)
+- min 10' per lato (vincolo operativo)
+- se stesso PdC: cva = gap, cvp = 0 (tutto al PdC unico)
+
+### Implementazione
+
+`src/turn_builder/cv_registry.py` (NEW, 230 righe):
+- `ensure_schema(conn)`: crea tabella `cv_ledger` idempotente
+- `detect_cv(prev_seg, next_seg)`: ritorna dict CV se condizioni
+  soddisfatte (stesso materiale, train_id diverso, 10 <= gap < 65),
+  None altrimenti
+- `compute_cv_split(gap_min, same_pdc)`: split Tm. Default 50/50 con
+  min 10/lato; stesso PdC -> tutto uno
+- `register_cv_side(conn, cv, side, pdc_id, duration_min)`: registra
+  UN lato del CV su SQLite. INSERT OR IGNORE + UPDATE lato specifico.
+  Se entrambi i lati sono popolati, calcola e scrive `tm_min` (momento
+  di subentro).
+- `read_cv(conn, ...)`: lettura stato corrente
+- `validate_coverage(state, expected_gap)`: check copertura completa
+
+`src/database/db.py`:
+- Aggiunta creazione tabella `cv_ledger` nello schema iniziale (sotto
+  train_allocation). Stesso DDL del modulo, IF NOT EXISTS -> idempotente.
+  Indice di lookup su (material_turn_id, day_index).
+
+### Schema cv_ledger
+
+```
+material_turn_id, day_index, train_in_id, train_out_id   <- chiave
+train_in_arr_min, train_out_dep_min                       <- fatti
+tm_min                                                     <- momento subentro
+cva_pdc_id, cva_min, cvp_pdc_id, cvp_min                  <- i 2 lati
+updated_at
+UNIQUE(material_turn_id, day_index, train_in_id, train_out_id)
+```
+
+### Verifica
+
+`tests/test_cv_registry_step5.py` (NEW, 16 test):
+- detect_cv: gap 30 OK, gap 65 no (accessori pieni), gap 5 no (troppo
+  stretto), materiale diverso no, stesso train_id no, materiale None no
+- compute_cv_split: same_pdc, 50/50, gap minimo 20, sotto 20 degrada,
+  raise su gap < 10
+- register_cv_side: registra un lato (Tm=None), registra entrambi
+  (Tm calcolato = arr + cva), update non duplica
+- read_cv miss -> None, ensure_schema idempotente
+
+Memoria condivisa verificata nel test `test_register_both_sides_tm_
+calcolato`: PdC A registra prima, poi PdC B legge il registro per
+sapere quanto ha preso A e si assegna il complemento (20+20 = 40 gap,
+Tm = 660+20 = 680 = 11:20).
+
+Pytest: **163/163** (147 + 16 nuovi). Zero regressioni.
+
+### Residuo / prossimi step
+
+- Step 6: cablare `accessori.apply_accessori` + `cv_registry` dentro
+  `day_assembler.assemble_day` cosi che la `prestazione_min` rifletta
+  i tempi reali (ACCp/ACCa + CV) e non solo presentation/end flat.
+
+### File modificati
+
+- `src/turn_builder/cv_registry.py` (NEW)
+- `src/database/db.py` (aggiunta tabella cv_ledger allo schema)
+- `tests/test_cv_registry_step5.py` (NEW)
+- `LIVE-COLAZIONE.md`
+
+pytest 163/163.
+
+---
+
 ## 2026-04-23 — Step 4/10: modulo accessori (ACCp/ACCa da giro materiale)
 
 ### Regola di business
