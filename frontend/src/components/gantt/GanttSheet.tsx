@@ -564,21 +564,37 @@ export function GanttSheet({
                 title={tip}
                 draggable={segBind.draggable}
                 tabIndex={segBind.tabIndex}
-                style={{
-                  position: "absolute",
-                  left: x1 - hitPad,
-                  top: yRowTop,
-                  width: w + 2 * hitPad,
-                  height: rowH,
-                  cursor: segBind.draggable
-                    ? "grab"
-                    : interactionsEnabled
-                    ? "pointer"
-                    : "default",
-                  pointerEvents: "auto",
-                  background: "transparent",
-                  userSelect: "none",
-                }}
+                className="gantt-hit-area"
+                style={
+                  {
+                    position: "absolute",
+                    left: x1 - hitPad,
+                    top: yRowTop,
+                    width: w + 2 * hitPad,
+                    height: rowH,
+                    cursor: segBind.draggable
+                      ? "grab"
+                      : interactionsEnabled
+                      ? "pointer"
+                      : "default",
+                    pointerEvents: "auto",
+                    // Bordo 1px sottile semi-trasparente cosi' l'utente
+                    // SA dove cliccare/trascinare. Piu' marcato su hover.
+                    background: "rgba(0,98,204,0.02)",
+                    border: segBind.draggable
+                      ? "1px dashed rgba(0,98,204,0.28)"
+                      : "1px dashed transparent",
+                    borderRadius: 2,
+                    userSelect: "none",
+                    // Safari: necessario per abilitare HTML5 DnD su div
+                    // senza contenuto (WebKit: <div draggable> richiede
+                    // questo override per iniziare dragstart)
+                    WebkitUserDrag: "element",
+                    // Evita long-press selection su touch
+                    WebkitTouchCallout: "none",
+                    WebkitUserSelect: "none",
+                  } as React.CSSProperties
+                }
                 onClick={handleClick}
                 onContextMenu={(ev) => {
                   ev.preventDefault()
@@ -590,7 +606,26 @@ export function GanttSheet({
                 onKeyDown={segBind.onKeyDown}
                 onDragStart={segBind.onDragStart}
                 onDragEnd={segBind.onDragEnd}
-              />
+                onMouseEnter={(ev) => {
+                  if (segBind.draggable) {
+                    ;(ev.currentTarget as HTMLDivElement).style.background =
+                      "rgba(0,98,204,0.08)"
+                  }
+                }}
+                onMouseLeave={(ev) => {
+                  ;(ev.currentTarget as HTMLDivElement).style.background =
+                    "rgba(0,98,204,0.02)"
+                }}
+              >
+                {/* Contenuto invisibile: Safari richiede innerHTML non
+                    vuoto per iniziare il drag da un div trasparente */}
+                <span
+                  aria-hidden="true"
+                  style={{ display: "block", width: "100%", height: "100%" }}
+                >
+                  &nbsp;
+                </span>
+              </div>
             )
           })
         })}
