@@ -4,6 +4,105 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — v4 quality: slot refez + scoring gap morto + pre-verify pool
+
+### Contesto
+
+Dopo il commit 092c8d1 (sblocca v4 veloce), l'utente ha testato su Railway
+e ha riportato: "continua a non funzionare molto bene". Screenshot turno
+Alessandria Giornata 1 LMXGV con 6 problemi:
+
+1. PREST 9h08 supera 8h30 (violazione MAX_PRESTAZIONE)
+2. REFEZ alle 19:51-20:21 → alla FINE del turno dopo tutto il lavoro
+3. Posizionamento 11:41-12:55 PAVIA + gap morto di 70 min prima del seed
+4. Start turno 11:26 (mezzogiorno, troppo tardi per un PdC)
+5. Treno 10065 con rotta DB errata (MI.ROG→AL vs reale MI.CADORNA→VARESE)
+6. Gantt non interagibile (ancora da verificare in prod)
+
+### Fix (3 commit separati)
+
+#### Commit 7ea677d — day_assembler slot 4/5 + ai_version dinamico
+`day_assembler._try_place_refezione`:
+- Slot 4 (inizio turno) e Slot 5 (fine turno): accettati SOLO se la
+  giornata e' "seed isolato" (1 treno, no pos, no ret). Per turni
+  strutturati (pos+seed+ret o seed multi-treno) se slot 1-3 non
+  chiudono la giornata viene SCARTATA (builder ritenta con altro seed).
+- Fix bug operativo: la refezione non puo' piu' capitare a fine turno
+  dopo la chiusura del servizio.
+
+`auto_builder.py::_meta`: ai_version ora e' "v4" se use_v4_assembler,
+"v3" altrimenti. Risolve ambiguita' per frontend (prima hardcoded "v3"
+anche quando v4 girava).
+
+#### Commit 2858575 — v4 scoring: gap morto + bias orario + prestazione
+`day_assembler.assemble_day` restituisce:
+- `positioning_gap_min`: gap tra arr ultimo posizionamento e dep seed
+- `return_gap_min`: gap tra arr seed e dep rientro
+
+`auto_builder.py` scoring v4 aggiornato:
+- penalty (gap_pos - 30) * 4 per gap morto > 30 min
+- penalty (gap_ret - 30) * 4 idem per rientro
+- penalty (first_dep_h - 10) * 40 se partenza oltre le 10:00
+- penalty (last_arr_h - 20) * 30 se fine oltre le 20:00
+- penalty (prestazione - 420) * 1.5 se oltre le 7h (target 7h, hard 8h30)
+- Rimosso bonus n_positioning * 80 (incentivava posizionamenti inutili)
+
+Turno tipico PdC reale ora preferito: partenza 5:00-10:00, prestazione
+~7h max 8h30, fine < 20:00, gap morto < 30 min.
+
+#### Commit 094fbbc — v4 pre-verify pool ARTURO
+Nuovo metodo `AutoBuilder._v4_prefetch_pool(segs)`:
+- `fetch_routes_batch` (async 10 conn) su tutte le coppie (tid, from_st)
+- Per ogni seg:
+  - api_status not_found → DROP (treno inesistente)
+  - fermate_segment None (rotta mismatch) → DROP (dati DB corrotti,
+    e.g. 10065 MI.ROG→AL quando rotta reale e' MI.CADORNA→VARESE)
+  - orari API diff > 2min → SOVRASCRIVI dep/arr in-place
+- Cache su id(segs) + train_id per non rifare lo stesso pool.
+
+Integrato nel path v4 subito dopo `_load_day_segments` (sia pool con
+abilitazione sia pool unfiltered per pos/return). Cleaned in-place così
+la cache `_v4_load_day_cache` vede la versione pulita.
+
+`_verify_turn_via_api` post-generazione ora e' SKIPPATO quando
+use_v4=True (in build_schedule e build_weekly): pool gia' validato.
+Risparmio ~6s per run settimanale.
+
+### Root cause del bug "prestazione 9h08"
+
+Prima: DB con orari sbagliati → assemble_day decide con dep 13:05 →
+prestazione 8h20 (ok, < 520min) → verify post-gen sovrascrive a 14:05
+(+60min) → validator ri-calcola → prestazione 9h08 > 8h30 → violazione.
+
+Dopo: pre-verify pool → dep gia' corretto a 14:05 PRIMA di enumerate
+seeds → assemble_day vede 14:05 → score basso per gap morto 70min →
+seed diverso preferito.
+
+### Verifica
+
+- `pytest tests/` → 210/210 OK (+1 test nuovo `test_structured_turn_no_slot45_fallback`)
+- Verifica visiva su `/auto-genera` dopo deploy Railway
+
+### Residui
+
+- **#6 Gantt interagibile**: drag cross-turn e' cablato (ganttId +
+  onCrossDrop in AutoBuilderPage), ma utente lamenta che non funziona.
+  Sospetto: bug Safari/Chromium specifico o UX non evidente. Prossimo
+  step: verificare in produzione dopo deploy e se ancora ko, aggiungere
+  drawer/modal click→edit con azioni (sposta in altro turno, elimina,
+  toggle vettura/condotta) come alternativa robusta al drag.
+
+### File toccati
+
+- `src/turn_builder/day_assembler.py` (slot refez + gap metrics)
+- `src/turn_builder/auto_builder.py` (pre-verify pool + scoring v4 +
+  ai_version + skip verify post-gen)
+- `tests/test_day_assembler_step2.py` (test slot 4/5 + nuovo strutturato)
+- `tests/test_fr_step7.py` (gap ret ampliato per slot 3)
+- `LIVE-COLAZIONE.md`
+
+---
+
 ## 2026-04-23 — Sblocca v4: async batch verify + cache cross-variant + max_seeds 50
 
 ### Contesto
