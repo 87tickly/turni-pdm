@@ -1377,11 +1377,30 @@ class AutoBuilder:
                         acc_end = ACCESSORY_RULES.get("default_end", 8)
                         if assembled["last_arr_min"] + acc_end + EXTRA_END_MIN > max_end:
                             continue
-                    # Scoring day_assembler-level
+                    # Scoring day_assembler-level (23/04/2026 qualita' turno):
+                    #   + bonus rientro deposito
+                    #   - penalty |condotta - target|
+                    #   - penalty gap morto positioning > 30 min (spreco)
+                    #   - penalty gap morto return > 30 min
+                    #   - penalty inizio troppo tardi (PdC che parte dopo 10:00)
+                    #   - penalty fine troppo tardi (turno che chiude dopo 20:00)
+                    #   - penalty prestazione alta (preferisce turni brevi)
                     sc = 0.0
                     sc += 1200 if assembled["returns_depot"] else -400
                     sc -= abs(assembled["condotta_min"] - TARGET_CONDOTTA_MIN) * 2
-                    sc += assembled["n_positioning"] * 80  # bonus diversita'
+                    # Gap morto pos (es. aspetto 1h tra vettura e condotta)
+                    pos_gap = assembled.get("positioning_gap_min", 0)
+                    sc -= max(0, pos_gap - 30) * 4
+                    ret_gap = assembled.get("return_gap_min", 0)
+                    sc -= max(0, ret_gap - 30) * 4
+                    # Bias orario: partenza mattutina preferita
+                    first_dep_h = assembled["first_dep_min"] // 60
+                    sc -= max(0, first_dep_h - 10) * 40
+                    # Penalty fine tardo
+                    last_arr_h = assembled["last_arr_min"] // 60
+                    sc -= max(0, last_arr_h - 20) * 30
+                    # Penalty prestazione alta (target ~7h = 420 min)
+                    sc -= max(0, assembled["prestazione_min"] - 420) * 1.5
                     if sc > best_score:
                         best_score = sc
                         best_day = assembled

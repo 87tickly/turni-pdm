@@ -492,6 +492,26 @@ def assemble_day(
     day_from = (all_segments[0].get("from_station", "") or "").upper() if all_segments else dep
     day_to = (all_segments[-1].get("to_station", "") or "").upper() if all_segments else dep
 
+    # Gap morto tra fine posizionamento e inizio seed produttivo
+    # (tempo in cui il PdC e' gia' posizionato ma aspetta il primo treno
+    # condotta). Valore di qualita': > 30 min = spreco.
+    if positioning:
+        pos_arr_min = _time_to_min(positioning[-1]["arr_time"])
+        if pos_arr_min > seed_first_dep:
+            pos_arr_min -= 1440  # overnight
+        positioning_gap_min = seed_first_dep - pos_arr_min
+    else:
+        positioning_gap_min = 0
+
+    # Gap morto tra fine seed e inizio rientro (analogo)
+    if retur:
+        ret_dep_min = _time_to_min(retur[0]["dep_time"])
+        if ret_dep_min < seed_last_arr:
+            ret_dep_min += 1440  # overnight
+        return_gap_min = ret_dep_min - seed_last_arr
+    else:
+        return_gap_min = 0
+
     return {
         "segments": all_segments,
         "from_station": day_from,
@@ -504,6 +524,8 @@ def assemble_day(
         "acca_boundary_min": acca_boundary,
         "n_positioning": len(positioning),
         "n_return": len(retur),
+        "positioning_gap_min": positioning_gap_min,
+        "return_gap_min": return_gap_min,
         "n_cv": n_cv,
         "returns_depot": returns_depot,
         "is_fr": is_fr,
