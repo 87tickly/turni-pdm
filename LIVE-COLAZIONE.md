@@ -4,6 +4,93 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Fix bug: vetture circolari inutili (cycle_optimizer)
+
+### Bug segnalato dall'utente
+
+Screenshot Giornata 1:
+```
+LMXGV Feriale ALE->ALE   15:34 -> 22:57   CCT 2.6h  PREST 7.4h
+
+10062     ALE -> MI     (prod, 15:49-17:08)
+2375 (v)  MI -> ALE     (vettura, 17:25-18:44)    <-- inutile
+2381 (v)  ALE -> MI     (vettura, 19:16-20:35)    <-- inutile
+2383     MI -> ALE      (prod, 21:25-22:44)
+```
+
+Le due vetture (2375 + 2381) formano un cerchio MI->ALE->MI che cancella
+se stesso. Il PdC avrebbe dovuto semplicemente aspettare a Milano tra le
+17:08 e le 21:25 (con eventuale refezione). Il warning
+`WEEKLY_HOURS_HIGH` (59h sett) era conseguenza diretta di queste ore
+sprecate in vettura inutile.
+
+### Diagnosi
+
+Il builder legacy (path non-v4) concatena piu' "blocchi prod+rientro"
+nella stessa giornata. Dopo prod1 (10062) aggiunge un rientro (2375).
+Poi trova prod2 (2383) interessante e costruisce positioning (2381) per
+raggiungerlo. Non rileva che rientro_blocco1 + positioning_blocco2 sono
+esattamente un cerchio che si cancella.
+
+### Fix
+
+`src/turn_builder/cycle_optimizer.py` (NEW, 100 righe):
+- `find_redundant_cycles(segments)`: identifica coppie consecutive
+  (i, i+1) di segmenti deadhead tali che seg_i va X->Y e seg_i+1
+  torna Y->X (con X != Y).
+- `remove_redundant_cycles(segments)`: rimuove le coppie e ripete il
+  pass fino a stabilita' (gestisce catene lunghe).
+
+Regola STRETTA: solo coppie strettamente consecutive. Non rimuove
+cicli separati da una refezione in mezzo (intenzionale: la refez
+potrebbe essere vincolata ad una stazione specifica).
+
+`src/turn_builder/auto_builder.py`:
+- Nuovo metodo `_cleanup_redundant_cycles(calendar)` chiamato prima del
+  `return calendar` in `build_schedule`. Per ogni giornata:
+  1. Applica `remove_redundant_cycles` ai segmenti
+  2. Se almeno una coppia e' rimossa, rivalida la giornata con
+     `validator.validate_day` (aggiorna prestazione, condotta, refez)
+  3. Sostituisce `entry["summary"]`
+
+Cablaggio centrale: si applica sia al path v4 che al legacy. Il fix
+beneficia tutte le giornate future.
+
+### Verifica
+
+`tests/test_cycle_optimizer.py` (NEW, 8 test):
+- **Caso utente reale** (10062 + 2375v + 2381v + 2383): rimuove le 2
+  vetture, lascia solo le 2 condotte
+- Sequenza pulita senza cicli: invariata
+- Due condotte opposte A->B + B->A: NON rimosse (sono lavoro)
+- Vettura singola senza gemello: invariata
+- Ciclo con refezione in mezzo: NON rimosso (regola stretta)
+- Indici restituiti da find_redundant_cycles
+- Due cicli non sovrapposti consecutivi: entrambi rimossi
+- Self-loop X->X: non considerato ciclo
+
+Pytest: **203/203** (195 + 8 nuovi).
+
+### Impatto atteso sul bug segnalato
+
+Sulla Giornata 1 screenshot:
+- Segmenti: 4 -> 2
+- Prestazione: 7.4h -> ~4.7h (-2h38 stimati, durata delle 2 vetture)
+- Settimana: 59h -> ~49h stimati (meno WEEKLY_HOURS_HIGH a -11h)
+- Warning `WARN_DATA_MISMATCH` del treno 10062 resta (bug dati sorgente,
+  non algoritmico; da affrontare separatamente)
+
+### File modificati
+
+- `src/turn_builder/cycle_optimizer.py` (NEW)
+- `src/turn_builder/auto_builder.py` (cablaggio _cleanup_redundant_cycles)
+- `tests/test_cycle_optimizer.py` (NEW)
+- `LIVE-COLAZIONE.md`
+
+pytest 203/203.
+
+---
+
 ## 2026-04-23 — Step 10/10: UI dormite + taxi + non-chiudibili (FINALE)
 
 ### Obiettivo

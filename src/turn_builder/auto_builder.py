@@ -1523,7 +1523,30 @@ class AutoBuilder:
         # ── VINCOLO 62H RIPOSO TOTALE ──
         self._validate_total_rest(calendar)
 
+        # ── Post-processing: rimuovi cicli vettura-vettura inutili ──
+        # (bug utente 23/04/2026: prod + vett X->Y + vett Y->X + prod
+        #  produceva vetture inutili. Pulizia centrale qui.)
+        self._cleanup_redundant_cycles(calendar)
+
         return calendar
+
+    def _cleanup_redundant_cycles(self, calendar: list) -> None:
+        """Per ogni giornata del calendario, rimuove coppie vettura-vettura
+        che formano un cerchio X->Y + Y->X consecutivi. Se qualche segmento
+        viene rimosso, ricalcola il summary per aggiornare prestazione,
+        condotta e refezione."""
+        from .cycle_optimizer import remove_redundant_cycles
+        for entry in calendar:
+            summary = entry.get("summary")
+            if not summary or not getattr(summary, "segments", None):
+                continue
+            cleaned, n_removed = remove_redundant_cycles(summary.segments)
+            if n_removed > 0:
+                new_sum = self.validator.validate_day(
+                    cleaned, deposito=self.deposito,
+                )
+                self._fix_meal_timing(new_sum)
+                entry["summary"] = new_sum
 
     def _select_from_pool(self, pool: list[list[dict]],
                           randomize: bool = False) -> DaySummary:
