@@ -1290,10 +1290,26 @@ class AutoBuilder:
             #  PATH v4: seed produttivo + posizionamento + assembler
             # ═════════════════════════════════════════════════════
             if self._use_v4_assembler:
+                from datetime import date as _date
                 from . import seed_enumerator
                 from . import day_assembler
                 from src.constants import ALLOWED_FR_STATIONS_DEFAULT
                 fr_set = {s.upper() for s in ALLOWED_FR_STATIONS_DEFAULT}
+                # Step 9 (23/04/2026): callback per accessori da giro materiale.
+                # Cache su (mtid, day_index) per evitare N query.
+                _material_cache: dict = {}
+                def _get_material_segments(mtid, dix):
+                    key = (mtid, dix)
+                    if key not in _material_cache:
+                        all_segs = self.db.get_all_segments(day_index=dix) or []
+                        _material_cache[key] = [
+                            s for s in all_segs
+                            if s.get("material_turn_id") == mtid
+                        ]
+                    return _material_cache[key]
+                # Data di generazione: usata per periodo preriscaldo dic-feb.
+                # In futuro l'utente potra' passarla via request; per ora oggi.
+                _v4_day_date = _date.today()
                 # Carica segmenti: abilitati SI, zona NO (per FLOZ/MLCE ecc.)
                 raw_segs = self._load_day_segments(
                     db_day, 0, day_indices_for_day,
@@ -1325,6 +1341,8 @@ class AutoBuilder:
                         seed, self.deposito, unf_segs,
                         used_train_ids=self._used_trains_global,
                         fr_stations=fr_set,
+                        day_date=_v4_day_date,
+                        get_material_segments=_get_material_segments,
                     )
                     if assembled is None:
                         continue

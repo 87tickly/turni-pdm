@@ -4,6 +4,76 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Step 9/10: cablaggio /api/build-auto al nuovo flusso v4
+
+### Cosa era gia' in place
+
+Il parametro `use_v4: bool` della request + flag `use_v4_assembler` in
+AutoBuilder esistevano. Il path "v4" in `auto_builder.py` chiamava gia'
+`day_assembler.assemble_day`, ma senza i raffinamenti degli Step 4-7.
+
+### Modifiche Step 9
+
+`src/turn_builder/auto_builder.py` (path v4):
+- Aggiunta callback `_get_material_segments(mtid, dix)` con cache
+  interna per evitare query DB duplicate
+- Passata a `day_assembler.assemble_day` come `get_material_segments=...`
+- Passata `day_date=date.today()` per abilitare il calendario preriscaldo
+  (Step 3) sulla condotta con simbolo `●`
+
+Ora le chiamate a `assemble_day` dal path v4 beneficiano di:
+- ACCp/ACCa calcolati dal giro materiale (Step 4)
+- Preriscaldo 80 min in dic-feb (Step 3 + 4)
+- CV interni rilevati e annotati (Step 6)
+- FR candidate (Step 7) gia' supportate via parametro
+
+### Nuovo router API — FR approvals
+
+`api/fr_approvals.py` (NEW):
+- `GET    /api/pdc/{pdc_id}/fr-approved` lista stazioni approvate
+- `POST   /api/pdc/{pdc_id}/fr-approved` approva stazione (body
+  {station, notes})
+- `POST   /api/pdc/{pdc_id}/fr-approved/batch` approva N stazioni
+- `DELETE /api/pdc/{pdc_id}/fr-approved/{station}` revoca approvazione
+
+Montato in `server.py` con prefix `/api`.
+
+Useremo questi endpoint dal frontend a Step 10 per il pannello
+"Dormite proposte" post-generazione.
+
+### Verifica
+
+`tests/test_cablaggio_step9.py` (NEW, 6 test):
+- Lista FR approvate vuota iniziale per nuovo PdC (uuid unique)
+- POST approve + GET list
+- POST batch (added=3 nuovi, added=1 con 2 duplicati)
+- DELETE revoke
+- POST con station vuota -> 400
+- Smoke test /build-auto con use_v4=True: non crasha
+
+Uso `pdc_id` generati via uuid in ogni test per isolamento dal DB reale.
+
+Pytest: **195/195** (189 + 6 nuovi). Zero regressioni.
+
+### Residuo (Step 10)
+
+- UI frontend: pannello dormite con approve/revoke per stazione
+- UI frontend: rilevamento non-chiudibili + bottone taxi
+- Endpoint taxi (proporre durata/costo stimato)
+
+### File modificati
+
+- `src/turn_builder/auto_builder.py` (cablaggio day_date +
+  get_material_segments nel path v4)
+- `api/fr_approvals.py` (NEW)
+- `server.py` (include router fr_approvals)
+- `tests/test_cablaggio_step9.py` (NEW)
+- `LIVE-COLAZIONE.md`
+
+pytest 195/195.
+
+---
+
 ## 2026-04-23 — Step 8/10: week_assembler (orchestrazione ciclo 5+2)
 
 ### Contesto
