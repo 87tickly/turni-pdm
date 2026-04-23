@@ -4,6 +4,70 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-23 — Step 1/10: vincoli base v4 raffinati (hop + gap minimo)
+
+### Contesto
+
+Avvio del piano a 10 step condiviso con utente per portare l'architettura
+v4 (seed_enumerator + position_finder + day_assembler) a diventare il
+builder principale, al posto di `auto_builder.py` legacy (smantellamento
+previsto in Step 9).
+
+Step 1 e' il piu' piccolo: tocca solo 2 costanti v4 + la logica di
+fallback nel day_assembler. Zero modifiche al builder legacy.
+
+### Modifiche
+
+`src/turn_builder/position_finder.py`:
+- `MAX_HOPS: 3 -> 1` (default conservativo)
+- `MAX_HOPS_FALLBACK: 2` (nuova costante, usata dal chiamante come fallback)
+- `MIN_CHANGE_MIN: 5 -> 10` (gap minimo tra treni concatenati)
+- Docstring aggiornato a riflettere la nuova regola
+
+`src/turn_builder/day_assembler.py`:
+- POSIZIONAMENTO: prima chiamata `find_position_path(max_hops=1)`, se
+  `pos_options` vuoto, riprova con `max_hops=2`. Se ancora vuoto, None.
+- RIENTRO: stesso pattern con `find_return_path`.
+- Cambio verso primo seed / depart after fine seed passati da `5` a
+  `position_finder.MIN_CHANGE_MIN` per coerenza (ora = 10 min).
+
+### Regole di business rispettate
+
+- "Max 1 hop in vettura; al massimo 2 se sei proprio obbligato" (richiesta
+  utente 22/04/2026). Il day_assembler prova sempre prima hop=1, ricade
+  su hop=2 solo se hop=1 vuoto.
+- "Gap tra un treno e il successivo: min 10 min" (era 5).
+
+### Verifica
+
+`tests/test_position_finder_step1.py` (NEW, 5 test):
+- Costanti aggiornate correttamente
+- hop=1 usato quando il percorso diretto e' disponibile (no preferenza 2-hop)
+- Fallback hop=2 attiva quando hop=1 restituisce vuoto
+- Gap di 8 min rifiutato, gap di 10 min esatti accettato
+- day_assembler costruisce turno completo con posizionamento 2-hop via fallback
+
+Pytest completo: **117/117 passati** (112 + 5 nuovi). Zero regressioni.
+
+### Residuo noto
+
+La verifica "numero hop medi su ALE produzione pre/post" non e' fattibile
+in questo step: l'endpoint `/api/build-auto` usa ancora `auto_builder.py`
+legacy, non i moduli v4. Sara' misurabile a Step 9 quando cablera' la
+nuova architettura al flusso principale. Residuo tracciato esplicitamente,
+non nascosto.
+
+### File modificati
+
+- `src/turn_builder/position_finder.py` (costanti + docstring)
+- `src/turn_builder/day_assembler.py` (fallback hop=1->hop=2 in pos + rit)
+- `tests/test_position_finder_step1.py` (NEW)
+- `LIVE-COLAZIONE.md`
+
+pytest 117/117. npm build non richiesto (no frontend changes).
+
+---
+
 ## 2026-04-22 — Step 19: enrichment full-PDF + 7 nuove linee ALE abilitate
 
 ### Feedback utente (correzione del mio errore)

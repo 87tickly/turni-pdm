@@ -6,26 +6,32 @@ Il PdC sale come passeggero (vettura) su 1-3 treni concatenati per
 raggiungere la stazione di inizio del seed produttivo (posizionamento)
 o per tornare al deposito dopo il seed (rientro).
 
-Richiesta utente: max 3 hop (1 hop = 1 treno vettura, 2 = 2 treni
-concatenati, 3 = 3 treni).
+Richiesta utente (22/04/2026): max 1 hop di norma, fallback a 2 hop solo
+se 1 hop non trova nulla. Mai oltre 2 hop (erano 3 prima).
 
 Algoritmo: BFS sui segmenti del giorno, con vincoli:
 - arrivo a destinazione entro time_target
-- gap tra treni >= MIN_CHANGE_MIN (5')
+- gap tra treni >= MIN_CHANGE_MIN (10')
 - gap tra treni <= MAX_HOP_WAIT (60') per evitare catene troppo lunghe
 - max N hop
 
 Output: lista di opzioni ordinate per arrivo crescente (prima opzione =
 percorso che arriva prima).
+
+NOTA sulla strategia hop: questo modulo espone la primitiva di ricerca;
+la logica "prova hop=1, se vuoto fallback hop=2" e' nel chiamante
+(day_assembler), che conosce la regola di business. Qui teniamo
+MAX_HOPS=1 come default conservativo.
 """
 from __future__ import annotations
 
 from ..validator.rules import _time_to_min
 
 
-# Parametri (richiesta utente: max 3 hop)
-MAX_HOPS = 3
-MIN_CHANGE_MIN = 5  # 5' min tra un treno e il successivo
+# Parametri (richiesta utente 22/04/2026: max 1 hop, fallback 2)
+MAX_HOPS = 1
+MAX_HOPS_FALLBACK = 2  # solo se hop=1 non trova risultati
+MIN_CHANGE_MIN = 10  # 10' min tra un treno e il successivo
 MAX_HOP_WAIT = 60   # 60' max attesa tra 2 hop consecutivi (default, posizionamento)
 # Per il RIENTRO a deposito la tolleranza e' piu' ampia: il PdC puo' aspettare
 # il prossimo treno utile, non puo' "scappare a piedi". Scala per fascia oraria.
@@ -55,7 +61,7 @@ def find_position_path(
         to_station: stazione di arrivo (es. inizio seed)
         arrive_by_min: orario massimo di arrivo (minuti dalla mezzanotte)
         depart_after_min: orario minimo di partenza (default 0)
-        max_hops: max numero di treni concatenati (default 3)
+        max_hops: max numero di treni concatenati (default 1, fallback 2)
         exclude_train_ids: train_id da NON usare (gia' bloccati)
         max_hop_wait: attesa max (min) tra 2 hop consecutivi. Default 60'
             (posizionamento stretto). find_return_path lo innalza per

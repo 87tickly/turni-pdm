@@ -100,16 +100,29 @@ def assemble_day(
         # Nessun posizionamento necessario
         positioning = []
     else:
+        # Regola hop (22/04/2026): prova hop=1, fallback hop=2 solo se vuoto.
+        # arrive_by usa MIN_CHANGE_MIN (10') per il cambio verso il primo seed.
         pos_options = position_finder.find_position_path(
             all_day_segments,
             from_station=dep,
             to_station=seed_from,
-            arrive_by_min=seed_first_dep - 5,  # 5' cambio al primo seed
+            arrive_by_min=seed_first_dep - position_finder.MIN_CHANGE_MIN,
             depart_after_min=0,
             exclude_train_ids=used,
+            max_hops=position_finder.MAX_HOPS,
         )
         if not pos_options:
-            return None  # impossibile posizionare
+            pos_options = position_finder.find_position_path(
+                all_day_segments,
+                from_station=dep,
+                to_station=seed_from,
+                arrive_by_min=seed_first_dep - position_finder.MIN_CHANGE_MIN,
+                depart_after_min=0,
+                exclude_train_ids=used,
+                max_hops=position_finder.MAX_HOPS_FALLBACK,
+            )
+        if not pos_options:
+            return None  # impossibile posizionare nemmeno con fallback
         # Scegli il posizionamento che arriva piu' tardi possibile
         # (riduce tempo morto) ma rispetta il vincolo arrive_by
         positioning = max(
@@ -140,13 +153,25 @@ def assemble_day(
         returns_depot = True
         is_fr = False
     else:
+        # Regola hop (22/04/2026): prova hop=1, fallback hop=2 solo se vuoto.
+        # depart_after usa MIN_CHANGE_MIN (10') dopo arrivo seed.
         ret_options = position_finder.find_return_path(
             all_day_segments,
             from_station=seed_to,
             deposito=dep,
-            depart_after_min=seed_last_arr + 5,
+            depart_after_min=seed_last_arr + position_finder.MIN_CHANGE_MIN,
             exclude_train_ids=used,
+            max_hops=position_finder.MAX_HOPS,
         )
+        if not ret_options:
+            ret_options = position_finder.find_return_path(
+                all_day_segments,
+                from_station=seed_to,
+                deposito=dep,
+                depart_after_min=seed_last_arr + position_finder.MIN_CHANGE_MIN,
+                exclude_train_ids=used,
+                max_hops=position_finder.MAX_HOPS_FALLBACK,
+            )
         if ret_options:
             retur = ret_options[0]  # primo = arrivo piu' presto
             for s in retur:
