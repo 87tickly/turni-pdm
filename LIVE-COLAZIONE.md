@@ -4,6 +4,69 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-24 — Builder "normativa-first" collegato a /auto-genera
+
+### Contesto
+
+Richiesta utente: il turno PdC generato da `/auto-genera` deve
+rispettare TUTTE le regole di `docs/NORMATIVA-PDC.md`, non solo
+alcune. L'AutoBuilder genetico storico non applica la normativa
+completa (ACCp 40' §3.3, REFEZ §4.1, PK §4.4, CV §5/§6, vetture §7,
+FIOz §8.5, FR §10, metodo §14, unicità §15, …).
+
+### Modifiche
+
+**Nuovo `src/turn_builder/build_from_material.py`**: pipeline
+completa che traduce una richiesta (deposito + n giornate + day_type)
+in un calendario conforme:
+1. Per ogni giornata, fetch segmenti DB (`db.get_all_segments(day_index=N)`)
+2. Raggruppa per `material_turn_id`
+3. Classifica ogni segment DB come `COMMERCIALE | VUOTO_I | VUOTO_U`
+   via prefisso "U" / suffisso "i" (§8.7 / §1)
+4. Chiama `cover_material()` (implementazione completa
+   ALGORITMO-BUILDER.md: §11.8, §4.1, §9.2, §15, §3, §6, §14)
+5. Sceglie il primo PdC valido assegnato al deposito richiesto
+6. Converte eventi PdC (condotta + vettura) in dict segmenti DB-like
+7. Invoca `TurnValidator.validate_day(segs)` → `DaySummary` formato
+   consumato dal frontend
+8. Accumula treni usati per evitare doppioni (§15 cross-day)
+
+**`api/builder.py`**:
+- `BuildAutoRequest` aggiunge campo `use_normativa: bool = True`
+- `/build-auto`: se `use_normativa=True`, usa
+  `build_schedule_from_material()` invece di `AutoBuilder`
+- `/build-auto-weekly`: idem, invocato 3 volte per varianti
+  (LMXGV/S/D) → composizione `days[].variants[].summary`
+
+### Comportamento v1
+
+Pipeline deterministica e semplice:
+- Per ciascuna giornata prende il primo materiale + primo PdC che
+  sopravvive ai vincoli rigidi (cap prestazione §11.8, cap condotta,
+  CV §9.2)
+- Turni prodotti sono corti (1-2 segmenti) ma **100% conformi** — è
+  la base onesta da cui migliorare
+
+### Test
+
+- `/build-auto` `deposito=ALESSANDRIA, days=3, use_normativa=true` →
+  200 OK, 3 TURN + 2 REST, 0 violazioni
+- `/build-auto-weekly` `deposito=ALESSANDRIA, days=5` → 200 OK, 5
+  giorni × 3 varianti popolate, turni 1-2h prestazione, 0 violazioni
+
+### Prossimi step (raffinamenti)
+
+1. Scelta PdC: oggi greedy = primo valido. Migliorare con score
+   (condotta più alta, più segmenti, copertura del materiale).
+2. Gestione `scomp_duration_min` per varianti con S.COMP.
+3. Materiale vuoto `U****` / `****i`: il parser PDF oggi non li
+   marca. Serve estensione parser o classificazione retrospettiva dai
+   train_id nel DB (prefisso U, suffisso i) — già fatto client-side
+   in `_classify_kind`, ma dipende dai dati reali del DB.
+4. §10 FR (fuori residenza): gestire quando il PdC chiude fuori sede.
+
+---
+
 ## 2026-04-24 — §9.2 CV in stazioni ammesse integrato in cv_registry
 
 ### Contesto

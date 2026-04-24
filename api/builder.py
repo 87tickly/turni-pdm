@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from api.deps import get_db
 from src.database.db import Database
 from src.turn_builder.auto_builder import AutoBuilder
+from src.turn_builder.build_from_material import build_schedule_from_material
 from src.turn_builder import accessori as accessori_mod
 from src.turn_builder import cv_registry
 from src.validator.rules import TurnValidator, _fmt_min
@@ -109,6 +110,11 @@ class BuildAutoRequest(BaseModel):
     # e posizionamenti reali, ma puo' lasciare giornate vuote se il dataset
     # non e' sufficiente. Default False (usa v3 piu' tollerante).
     use_v4: bool = False
+    # Pipeline "normativa-first": genera turni PdC applicando TUTTE le
+    # regole di docs/NORMATIVA-PDC.md tramite src/turn_builder/material_to_pdc.
+    # Default True (nuovo flow). Impostare False per usare il vecchio
+    # AutoBuilder genetico/SA (backwards-compat temporaneo).
+    use_normativa: bool = True
 
 
 class BuildAutoAllRequest(BaseModel):
@@ -175,17 +181,27 @@ def build_auto(req: BuildAutoRequest):
                 db.clear_train_allocation(req.deposito)
             except Exception:
                 pass
-        builder = AutoBuilder(db, deposito=req.deposito,
-                              use_v4_assembler=req.use_v4)
         used = db.get_used_train_ids(day_type=req.day_type)
-        calendar = builder.build_schedule(
-            n_workdays=req.days,
-            day_type=req.day_type,
-            exclude_trains=used,
-        )
+        if req.use_normativa:
+            # Pipeline conforme NORMATIVA-PDC.md §3/§4/§5/§6/§9/§11/§15
+            calendar = build_schedule_from_material(
+                db, deposito=req.deposito,
+                n_workdays=req.days, day_type=req.day_type,
+                exclude_trains=set(used) if used else set(),
+            )
+            builder = None
+        else:
+            builder = AutoBuilder(db, deposito=req.deposito,
+                                  use_v4_assembler=req.use_v4)
+            calendar = builder.build_schedule(
+                n_workdays=req.days,
+                day_type=req.day_type,
+                exclude_trains=used,
+            )
         # Registra i treni usati nel turno come "allocati" a questo deposito
         try:
-            builder.commit_allocations(calendar)
+            if builder is not None:
+                builder.commit_allocations(calendar)
         except Exception:
             pass
 
@@ -377,15 +393,10 @@ def build_auto_weekly(req: BuildAutoRequest):
     """
     Versione di /build-auto che per ogni giornata del turno materiale
     produce 3 varianti (LMXGV, S, D) come nel PDF originale Trenord.
-    Esempio di output per giornata:
-      {
-        "day_number": 5,
-        "variants": [
-          {"variant_type": "LMXGV", "summary": {...full...}, "is_scomp": false},
-          {"variant_type": "S", "summary": {...}, "is_scomp": false},
-          {"variant_type": "D", "is_scomp": true, "scomp_duration_min": 360},
-        ]
-      }
+
+    Se `use_normativa=True` (default) usa la pipeline conforme
+    NORMATIVA-PDC.md (material_to_pdc) per ogni variante. Altrimenti
+    usa l'AutoBuilder genetico/SA.
     """
     db = get_db()
     try:
@@ -394,6 +405,51 @@ def build_auto_weekly(req: BuildAutoRequest):
                 db.clear_train_allocation(req.deposito)
             except Exception:
                 pass
+
+        if req.use_normativa:
+            # Per ogni variante day_type, genera un calendar indipendente
+            out_days: list[dict] = []
+            calendars_by_type: dict[str, list[dict]] = {}
+            for day_type in ("LV", "SAB", "DOM"):
+                calendars_by_type[day_type] = build_schedule_from_material(
+                    db, deposito=req.deposito,
+                    n_workdays=req.days, day_type=day_type,
+                )
+            variant_map = {"LMXGV": "LV", "S": "SAB", "D": "DOM"}
+            for day_num in range(1, req.days + 1):
+                variants = []
+                for variant_type, day_type in variant_map.items():
+                    cal = calendars_by_type[day_type]
+                    entry = next(
+                        (e for e in cal if e.get("type") == "TURN" and e.get("day") == day_num),
+                        None,
+                    )
+                    summary_obj = entry.get("summary") if entry else None
+                    v_entry = {
+                        "variant_type": variant_type,
+                        "day_type": day_type,
+                        "is_scomp": False,
+                        "scomp_duration_min": 0,
+                    }
+                    if summary_obj is not None:
+                        v_entry["summary"] = _serialize_summary(
+                            summary_obj, req.deposito, db
+                        )
+                    else:
+                        v_entry["summary"] = None
+                        v_entry["last_station"] = ""
+                    variants.append(v_entry)
+                out_days.append({
+                    "day_number": day_num,
+                    "variants": variants,
+                })
+            return {
+                "workdays_requested": req.days,
+                "deposito": req.deposito,
+                "days": out_days,
+                "weekly_stats": {},
+            }
+
         builder = AutoBuilder(db, deposito=req.deposito,
                               use_v4_assembler=req.use_v4)
         result = builder.build_weekly_schedule(
