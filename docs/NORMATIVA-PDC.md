@@ -280,6 +280,19 @@ prevista. Formalizzata nel turno.
 
 **Dove**: ovunque sia consentito.
 
+**Quando è obbligatoria**: la REFEZ è obbligatoria **solo se la
+prestazione del turno supera 6 ore** (360 min). Se la prestazione è
+≤ 6h, la REFEZ non è richiesta anche se il turno attraversa la
+finestra oraria. Viceversa, se la prestazione è > 6h, la REFEZ
+**deve** essere pianificata dentro una delle due finestre.
+
+**Conseguenza per il builder**: quando sta componendo un PdC,
+controlla la prestazione proiettata:
+- Se ≤ 360' → REFEZ facoltativa.
+- Se > 360' → pianifica REFEZ 30' dentro una finestra. Se non trova
+  slot compatibili (gap ≥ 30' in finestra), il candidato turno è
+  **scartato** per violazione di normativa.
+
 **NON confondere con**: un semplice buco. REFEZ è formale, ha durata
 e finestra specifiche; il buco no.
 
@@ -928,6 +941,40 @@ Le regole **preferenziali** sono:
 - Primo giorno post-riposo non inizia mattino (§11.2)
 - Ultimo giorno pre-riposo finisce entro le 15:00 (§11.3)
 
+### 11.8 Prestazione massima variabile per orario presa servizio
+
+**Regola rigida**: il tetto di prestazione del turno **non è unico**
+— dipende dall'orario di presa servizio.
+
+| Orario presa servizio | Prestazione max |
+|-----------------------|-----------------|
+| **01:00 – 04:59** | **7h** (420 min) |
+| **05:00 – 00:59** | **8h30** (510 min) |
+
+**Perché**: i turni che iniziano nel cuore della notte (01:00-04:59)
+sono più gravosi → tetto ridotto. Dalle 05:00 in poi torna a 8h30.
+
+**Quando si applica**: **sempre**. È il vincolo rigido di prestazione
+che sostituisce il "510 min" standard quando l'orario di presa
+servizio cade nella finestra 01:00-04:59.
+
+**Conseguenza per il builder**:
+- Leggere l'**orario di presa servizio** proposto.
+- Se cade in 01:00-04:59 → cap prestazione = 420' e valutare tutti
+  i successivi con questo limite.
+- Altrimenti → cap prestazione = 510'.
+- Il vincolo REFEZ (§4.1, > 6h = 360') resta invariato e agisce in
+  parallelo.
+
+**Esempio** (PdC 1 di P1 turno materiale 1130): presa servizio
+04:10, ACCp FIOz a partire dalle 04:45. Finestra 01:00-04:59 →
+**prestazione max 7h = fine turno ≤ 11:10**.
+
+**NON confondere con**: il riposo tra giornate §11.5 (14h dopo
+turno che finisce 00:01-01:00, 16h dopo notturno 00:01-05:00). Quelle
+sono regole di **riposo post-turno**; questa è regola di **durata
+massima del turno stesso**.
+
 ---
 
 ## 12. Tempi e orari reali (fonte API)
@@ -1128,7 +1175,8 @@ carta e matita, sia che lo generi il builder automatico.
 Il builder — o il ragionamento manuale — procede in questo ordine:
 
 1. **Vincoli rigidi del turno singolo** (non negoziabili):
-   - Prestazione ≤ 8h30 (510 min), ≤ 7h se notturno (vedi §11, §1).
+   - Prestazione ≤ 8h30 (510 min) **se presa servizio 05:00-00:59**;
+     ≤ 7h (420 min) **se presa servizio 01:00-04:59** (§11.8).
    - Condotta ≤ 5h30 (330 min).
    - REFEZ 30' dentro finestra 11:30–15:30 o 18:30–22:30 (§4.1).
    - Accessori corretti (§3) sui segmenti in condotta.

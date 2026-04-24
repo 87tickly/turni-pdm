@@ -4,6 +4,61 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-24 — ALGORITMO-BUILDER.md + §4.1 REFEZ soglia + §11.8 prestazione max variabile
+
+### Contesto
+
+Dopo aver consolidato tutta la normativa (§1–§15) in sessione
+precedente, l'utente ha chiesto di **formalizzare la logica come
+algoritmo implementabile** nel programma.
+
+### Fix al NORMATIVA-PDC.md
+
+**§4.1 Quando REFEZ è obbligatoria (nuovo)**: solo se
+`prestazione > 360'` (6h). Sotto i 360' la REFEZ è facoltativa anche
+se il turno attraversa la finestra 11:30–15:30 o 18:30–22:30.
+
+**§11.8 Prestazione max variabile (nuovo)**: il tetto di prestazione
+dipende dall'orario di presa servizio:
+- presa servizio **01:00–04:59** → **7h** (420')
+- presa servizio **05:00–00:59** → **8h30** (510')
+
+I turni notturni hanno tetto ridotto per gravosità.
+
+### Nuovo documento: `docs/ALGORITMO-BUILDER.md`
+
+Specifica formale dell'algoritmo builder in pseudo-codice:
+- §1 Input/Output tipizzati (Segmento, PdC, EventoPdC)
+- §2 Top-level greedy di copertura pool materiale (§15 unicità)
+- §3 Costruzione singolo PdC (presa servizio, cap prestazione
+  §11.8, loop condotta, gap handling §6, chiusura turno §7/§9)
+- §4 Sotto-procedure: scegli_deposito, calcola_accp (§8.5 FIOz),
+  scegli_gap (§6), chiudi_turno (CV/ACCa/FR)
+- §5 Validazione finale con vincoli rigidi (§14.2)
+- §6 Strategia greedy + miglioramento multi-tentativo opzionale
+- §7 Edge case (pernotto fuori, materiale senza U-numero, CV Tirano,
+  cap 7h forza PdC corti, TAXI MI.PG-FIOz §8.5.1)
+- §8 Mapping funzioni → moduli Python (auto_builder, validator,
+  arturo_client, constants)
+
+### Regola operativa #5-bis in CLAUDE.md
+
+Aggiunta regola: leggi `docs/ALGORITMO-BUILDER.md` quando lavori su
+`src/turn_builder/auto_builder.py`.
+
+### Prossimi step (implementazione)
+
+1. Creare `src/constants.py::NORMATIVA_*` con tutti i valori
+   rigidi (330, 420, 510, 360, finestre REFEZ, 40' ACCp, 7' FIOz).
+2. Riscrivere `src/turn_builder/auto_builder.py` seguendo §3 e §4
+   dell'ALGORITMO-BUILDER.
+3. Portare la logica gap §6 in `src/validator/rules.py::gap_rule`.
+4. Portare la validazione finale §5 in
+   `src/validator/rules.py::validate_pdc`.
+5. Test end-to-end su turno materiale 1130 P1 (letto in sessione).
+
+---
+
 ## 2026-04-24 — NORMATIVA-PDC §12-15 + semantica suffisso "i" + metodo PdC
 
 ### Contesto
