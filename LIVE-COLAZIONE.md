@@ -4,6 +4,47 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-24 — Gantt: rimuovi bordo tratteggiato permanente hit area
+
+### Contesto
+
+Screenshot utente: linee verticali tratteggiate blu su tutta l'altezza
+della riga, allineate ai segmenti. Sovrapposte ad ogni treno delle 5
+giornate, visivamente formavano "colonne" tratteggiate che
+rumoreggiavano tutta la lettura del Gantt. L'utente: "devono sparire,
+non servono, danno informazioni che dovrebbero stare sul singolo treno".
+
+### Root cause
+
+`GanttSheet.tsx` line 584-586: le hit area (div overlay per drag/click
+sui segmenti) avevano `border: 1px dashed rgba(0,98,204,0.28)` quando
+il segmento era draggabile. Altezza = rowH (114px) → contorno
+tratteggiato alto quanto la riga per ogni segmento. Introdotto come
+"affordance di drag" ma troppo invasivo con 5+ segmenti/riga.
+
+### Fix
+
+`frontend/src/components/gantt/GanttSheet.tsx`:
+- Bordo hit area: `1px dashed rgba(0,98,204,0.28)` → `1px solid transparent`.
+- Background riposo: `rgba(0,98,204,0.02)` → `transparent`.
+- Background hover: invariato (`rgba(0,98,204,0.08)` on mouseEnter).
+- Background leave: aggiornato a `transparent` per coerenza.
+
+Draggabilita' ora segnalata solo da `cursor: grab` + tint di background
+all'hover del singolo segmento. Niente rumore visivo permanente.
+
+### Verifica
+
+- HMR pulito, 43/43 hit area con border `1px solid transparent`.
+- Build produzione OK (vite 195ms).
+- Verifica visiva con dati reali su `/auto-genera` dopo deploy.
+
+### File toccati
+
+- `frontend/src/components/gantt/GanttSheet.tsx` (hit area style)
+
+---
+
 ## 2026-04-24 — Gantt: nascondi ACCp/ACCa text su vetture (anti-overlap)
 
 ### Contesto

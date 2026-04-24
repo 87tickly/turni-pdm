@@ -578,12 +578,12 @@ export function GanttSheet({
                       ? "pointer"
                       : "default",
                     pointerEvents: "auto",
-                    // Bordo 1px sottile semi-trasparente cosi' l'utente
-                    // SA dove cliccare/trascinare. Piu' marcato su hover.
-                    background: "rgba(0,98,204,0.02)",
-                    border: segBind.draggable
-                      ? "1px dashed rgba(0,98,204,0.28)"
-                      : "1px dashed transparent",
+                    // Hit area trasparente: la draggabilita' e'
+                    // indicata dal cursor: grab + evidenziazione background
+                    // all'hover (onMouseEnter). Nessun bordo tratteggiato
+                    // permanente — rumoroso visivamente con righe multiple.
+                    background: "transparent",
+                    border: "1px solid transparent",
                     borderRadius: 2,
                     userSelect: "none",
                     // Safari: necessario per abilitare HTML5 DnD su div
@@ -614,7 +614,7 @@ export function GanttSheet({
                 }}
                 onMouseLeave={(ev) => {
                   ;(ev.currentTarget as HTMLDivElement).style.background =
-                    "rgba(0,98,204,0.02)"
+                    "transparent"
                 }}
               >
                 {/* Contenuto invisibile: Safari richiede innerHTML non
