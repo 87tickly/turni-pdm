@@ -32,18 +32,18 @@ omette ciò che non serve. Ma l'ordine è sempre questo.
 
 ## Indice
 
-1. [Glossario sigle](#1-glossario-sigle) — in corso
-2. [Depositi PdC per linea](#2-depositi-pdc-per-linea) — *TODO*
-3. [Accessori (ACCp, ACCa) e presa/fine servizio](#3-accessori-accp-acca-e-presafine-servizio) — in corso
-4. [Pause: REFEZ, buco, pausa in vettura, PK](#4-pause-refez-buco-pausa-in-vettura-pk) — in corso
-5. [Cambio Volante (CVp / CVa)](#5-cambio-volante-cvp--cva) — in corso
-6. [Scelta fra CV / ACC / PK in base al gap](#6-scelta-fra-cv--acc--pk-in-base-al-gap) — in corso
-7. [Vetture e rientro a deposito](#7-vetture-e-rientro-a-deposito) — *TODO*
-8. [Materiale vuoto (numeri U****)](#8-materiale-vuoto-numeri-u) — *TODO*
+1. [Glossario sigle](#1-glossario-sigle) — chiuso
+2. [Depositi PdC per linea](#2-depositi-pdc-per-linea) — chiuso
+3. [Accessori (ACCp, ACCa) e presa/fine servizio](#3-accessori-accp-acca-e-presafine-servizio) — chiuso
+4. [Pause: REFEZ, buco, pausa in vettura, PK](#4-pause-refez-buco-pausa-in-vettura-pk) — chiuso
+5. [Cambio Volante (CVp / CVa)](#5-cambio-volante-cvp--cva) — chiuso
+6. [Scelta fra CV / ACC / PK in base al gap](#6-scelta-fra-cv--acc--pk-in-base-al-gap) — chiuso
+7. [Vetture e rientro a deposito](#7-vetture-e-rientro-a-deposito) — chiuso
+8. [Materiale vuoto (numeri U****)](#8-materiale-vuoto-numeri-u) — chiuso
 9. [Spezzare i treni (CV intermedi)](#9-spezzare-i-treni-cv-intermedi) — chiuso
 10. [FR e pernotti](#10-fr-e-pernotti) — chiuso
 11. [Ciclo settimanale e contesto turno](#11-ciclo-settimanale-e-contesto-turno) — chiuso
-12. [Tempi vettura reali tra stazioni](#12-tempi-vettura-reali-tra-stazioni) — *TODO*
+12. [Tempi vettura reali tra stazioni](#12-tempi-vettura-reali-tra-stazioni) — *TODO* (popolamento dinamico da ARTURO Live)
 
 ---
 
@@ -61,14 +61,14 @@ significato → dove compare.
 | **MIcl** | Milano Centrale | Stazione **RFI**. Usata anche da PdC MI.PG. |
 | **MIpg / MIPG** | Milano Porta Garibaldi | **Deposito PdC** principale Trenord. |
 | **MIGP** | Milano Greco Pirelli | Impianto/stazione di servizio. |
-| **MCPTC** | *Da confermare* | Letta nel turno 1130 (Lv5) in prossimità di Mi.Certosa. Probabile sigla di impianto. |
+| **MCPTC** | Indicazione aziendale "materiale in manutenzione" | Segnala che il materiale si trova all'interno di Fiorenza o di un altro impianto di manutenzione. |
 
 ### Segmenti del turno
 
 | Sigla | Significato | Note |
 |-------|-------------|------|
 | **U\*\*\*\*** | Materiale vuoto | Numero che inizia per "U" (es. U8335, U8192). Treno senza passeggeri per posizionamento dal deposito Trenord a stazione RFI (o viceversa). |
-| **\*\*\*\*i** | *Da confermare* | Suffisso "i" (es. 28335i, 28371i). Sospetto: treno "interno" o di trasferimento. |
+| **\*\*\*\*i** | Marker materiale uscito da Fiorenza | Il suffisso "i" identifica treni commerciali il cui materiale è **uscito da Fiorenza come materiale vuoto** (es. 28335i, 28371i, 28301i). Non ha un valore simbolico proprio — è un'etichetta per riconoscere l'origine del materiale. |
 | **●** | Preriscaldo | Tempi maggiorati ACCp 80' (dic-feb). |
 | **ACCp** | Accessorio in partenza | Preparazione **del treno** (condotta). Vedi §3. |
 | **ACCa** | Accessorio in arrivo | Spegnimento **del treno** (condotta). Vedi §3. |
@@ -82,7 +82,7 @@ significato → dove compare.
 | Sigla | Significato | Note |
 |-------|-------------|------|
 | **6AS** | Vettura codice 6AS | Treno su cui il PdC viaggia come passeggero. Es: 6AS MI.PG→Fiorenza. |
-| **VOCTAXI** | Vettura occasionale in taxi | Usato quando manca un treno utile. Taxi ammesso **solo di notte** o **al limite 8h30 prestazione**. |
+| **VOCTAXI** | Vettura occasionale in taxi | Rientro in taxi. Per le regole di quando scatta vedi §7.2 (ordine di priorità). |
 | **MM** | Metropolitana | Mezzo di rientro a deposito quando in servizio. |
 
 *Sigle mancanti saranno aggiunte man mano che l'utente le introduce.*
@@ -93,13 +93,22 @@ significato → dove compare.
 
 ### 2.1 Lista depositi Trenord (da dropdown applicativo)
 
-25 depositi PdC configurati (screenshot 24/04/2026):
+25 voci PdC configurate nel dropdown del builder (screenshot
+24/04/2026):
 
 ALESSANDRIA · ARONA · BERGAMO · BRESCIA · COLICO · COMO · CREMONA ·
 DOMODOSSOLA · FIORENZA · GALLARATE · GARIBALDI_ALE ·
 GARIBALDI_CADETTI · GARIBALDI_TE · GRECO_TE · GRECO_S9 · LECCO ·
 LUINO · MANTOVA · MORTARA · PAVIA · PIACENZA · SONDRIO · TREVIGLIO ·
 VERONA · VOGHERA
+
+**Nota su MORTARA**: è una voce selezionabile come **contesto di
+generazione turni**, ma **non è un deposito abitato da PdC
+residenti**. Non c'è personale di macchina che "vive" a Mortara.
+È nella lista perché i materiali vi sostano la notte e lì avvengono
+CV (deroga, vedi §9.2) e dormite FR (vedi §10.2). TIRANO, che ha
+lo stesso status di "non-deposito" per i PdC, **non è** nella lista
+del dropdown.
 
 ### 2.2 Mia comprensione attuale (IPOTESI, da correggere)
 
@@ -297,10 +306,23 @@ specifiche e va dichiarata nel turno; la pausa in vettura no.
 ### 4.4 PK (Parking)
 
 **Regola**: il **materiale viene messo in sicurezza** (parcheggiato)
-dal PdC durante una pausa. Il PK **dimezza** i tempi accessori: il
-PdC mette in sicurezza il mezzo (più veloce dello spegnimento
-completo), va a mangiare/fare pausa, poi riparte **con lo stesso
-materiale**.
+dal PdC durante una pausa. Il PdC mette in sicurezza il mezzo (più
+veloce dello spegnimento completo), va a mangiare/fare pausa, poi
+riparte **con lo stesso materiale**.
+
+**Valori**:
+
+| Voce | Minuti |
+|------|--------|
+| **PK in arrivo** | **20' minimo** (adattabili se c'è più spazio tra i treni) |
+| **PK in partenza** | **20' minimo** (adattabili se c'è più spazio tra i treni) |
+
+I 20' sono la **soglia minima** operativa. Se il gap tra due treni è
+maggiore, il PK può estendersi fino a occupare la pausa, ma **mai
+sotto i 20'**.
+
+Rispetto all'ACC standard (40' + 40' = 80'), il PK standard è
+**20' + 20' = 40'** → accessori effettivamente dimezzati.
 
 **Dove si applica**: **ovunque sia consentito** — stazioni RFI,
 depositi, anche **soste notturne** previo accordo con RFI.
@@ -318,18 +340,21 @@ chiave rispetto al CV. Vedi §5 e §6.
 treno arriva → PK in arrivo → REFEZ o buco → PK in partenza → treno parte
 ```
 
-**Esempio** (treno 23333 a MI.PG):
+**Esempio** (treno 23333 a MI.PG, gap minimo):
 
 | Ora | Evento |
 |-----|--------|
 | 12:00 | Arrivo treno 23333 a MI.PG |
-| 12:00–12:20 | PK in arrivo (20') — sostituisce ACCa 40' |
+| 12:00–12:20 | PK in arrivo (20' minimo) — sostituisce ACCa 40' |
 | 12:20–12:50 | REFEZ (30') |
-| 12:50–13:20 | PK in partenza (30') — sostituisce ACCp 40' |
-| 13:20 | Partenza con lo stesso materiale |
+| 12:50–13:10 | PK in partenza (20' minimo) — sostituisce ACCp 40' |
+| 13:10 | Partenza con lo stesso materiale |
 
-Totale gap: 1h20. Con ACCa + REFEZ + ACCp sarebbero stati 40+30+40 =
-1h50. Il PK risparmia ~30 min al PdC.
+Totale gap: 1h10. Con ACCa + REFEZ + ACCp sarebbero stati 40+30+40 =
+1h50. Il PK risparmia 40 min al PdC.
+
+Se tra i due treni c'è più tempo (es. gap totale 2h), i PK possono
+estendersi (es. 30' + 30') per coprire meglio lo spazio.
 
 **NON confondere con**: CV. PK = stesso materiale, stesso PdC, pausa
 in mezzo. CV = scambio di materiale tra PdC diversi, mezzo acceso.
@@ -369,6 +394,13 @@ fine CVa del turno A = inizio CVp del turno B
 **Esempio**: turno A arriva alle 12:30 e ha CVa 20' → fine CVa 12:50.
 Il turno B deve avere CVp che inizia **esattamente alle 12:50** per
 permettere l'incontro tra i due PdC.
+
+**Nessun range numerico predefinito**: il builder non deve imporre
+un min/max sui tempi CVp/CVa. I valori emergono dalla compatibilità
+dei due turni coinvolti. Unica regola operativa: se l'incontro
+fisico tra i due PdC **non è possibile** (per sforamento 8h30 di
+uno dei due turni, o qualsiasi altra ragione operativa), allora il
+CV **non si può fare** e si ripiega sul **PK** (vedi §6).
 
 ### 5.3 CVp (cambio volante in partenza)
 
@@ -445,28 +477,34 @@ Sigle specifiche che incontriamo nei turni:
 
 ### 7.2 Priorità mezzi per il rientro passivo a sede
 
-**Regola**: dopo l'ultimo tratto produttivo del turno, il PdC deve
-rientrare al proprio deposito (§2.3). La scelta del mezzo passivo
-segue una scala di priorità fissa:
+**Regola generale**: la priorità è sempre **vettura di rientro**.
+MM e taxi sono alternative che scattano solo in casi specifici.
 
-1. **Vettura** (treno commerciale). Si controlla via **API ARTURO
-   Live** (`live.arturo.travel`) se esistono treni passeggeri utili
-   che coprono il tragitto stazione-arrivo → deposito sede.
-2. **MM** (metropolitana). Si usa quando:
-   - nessuna vettura utile è disponibile, **oppure**
-   - le vetture disponibili sforerebbero il limite **8h30** di
-     prestazione totale del turno.
-3. **VOCTAXI** (taxi). Si usa quando **non esiste nessun
-   spostamento convenzionale** (né vettura né MM):
-   - es. deposito periferico senza MM (Cremona, Sondrio, Colico…),
-   - es. orari notturni fuori esercizio MM,
-   - es. tragitti per cui non passa nessun treno passeggero utile.
+**Obiettivo operativo**: **non sforare mai le 8h30** di prestazione
+totale. Il mezzo di rientro viene scelto per far rispettare questo
+limite.
+
+**Ordine**:
+
+1. **Vettura di rientro** (treno commerciale). Si controlla via API
+   ARTURO Live (`live.arturo.travel`) se esiste un treno passeggeri
+   utile. **Prima scelta sempre**.
+2. **MM** (metropolitana). Si usa se la vettura di rientro
+   **sforerebbe le 8h30** di prestazione **e** il deposito si trova
+   in una località servita dalla MM (tipico: Milano). La MM è una
+   "scorciatoia" per non sforare il limite.
+3. **Taxi (VOCTAXI)**. Si usa in **tutti gli altri casi**: nessuna
+   vettura utile, nessuna MM disponibile, orari notturni, oppure
+   qualunque altra condizione in cui serve non sforare le 8h30.
 
 **Esempio** (PdC MI.PG che finisce il turno a Mi.C.LE):
-1. Prima scelta: prendere una vettura Mi.C.LE → MI.PG se disponibile
-   entro il budget 8h30.
-2. Se non c'è o sfora: MM Mi.C.LE → MI.PG.
-3. Se MM fuori esercizio (notte): VOCTAXI.
+1. Vettura Mi.C.LE → MI.PG se esiste e rientra nelle 8h30.
+2. Se la vettura sfora → MM Mi.C.LE → MI.PG (Milano è servita da MM).
+3. Se MM fuori esercizio o indisponibile → VOCTAXI.
+
+**Deposito periferico (es. Cremona, Sondrio, Colico)**: se la vettura
+sfora le 8h30 e non c'è MM, si va **direttamente a taxi** (si salta
+lo step 2).
 
 ### 7.3 Condotta come "rientro produttivo" (NON è priorità passiva)
 
