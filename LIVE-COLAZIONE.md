@@ -4,6 +4,42 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-24 — Gantt: nascondi ACCp/ACCa text su vetture (anti-overlap)
+
+### Contesto
+
+Screenshot utente su Gantt: vettura 11274 MORTARA + condotta 10070 MILANO
+ROGOREDO. Etichette `ACCp 15'`, `ACCa 10'`, `ACCp 40'` sovrapposte tra
+loro e col numero treno verticale → illeggibili.
+
+Regola utente: "le vetture non hanno bisogno di ACCp o ACCa, ma l'inizio
+15' prima è giusto indicarlo".
+
+### Fix
+
+`frontend/src/components/gantt/GanttSheet.tsx` (TrainBar):
+- Le barre semi-trasparenti ACCp/ACCa + linea tratteggiata restano
+  sempre visibili (indicatore dei 15'/10' prima/dopo).
+- I testi `ACCp NN'` e `ACCa NN'` ora sono gated su `!isDH` → mostrati
+  solo per condotta, nascosti sulle vetture.
+- Motivazione: sulle vetture il testo accessorio sovrapponeva il numero
+  treno verticale e l'ACCa di un segmento collideva col ACCp del
+  successivo (stessa banda Y sopra la barra).
+
+### Verifica
+
+- HMR pulito su `/gantt-preview`, nessun errore console.
+- Preview page non ha dati con accp_min/acca_min → non esercita il
+  case, ma il diff e' minimale (solo wrap `{!isDH && ...}` attorno al
+  `<text>` gia' esistente, rect+line invariati).
+- Verifica visiva completa su `/auto-genera` dopo deploy Railway.
+
+### File toccati
+
+- `frontend/src/components/gantt/GanttSheet.tsx` (2 blocchi ACCp + ACCa)
+
+---
+
 ## 2026-04-23 — v4 quality: slot refez + scoring gap morto + pre-verify pool
 
 ### Contesto

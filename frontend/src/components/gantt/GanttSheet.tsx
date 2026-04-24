@@ -1358,7 +1358,9 @@ function TrainBar(p: SegProps) {
 
       {/* ACCp — barra semitrasparente prima del blocco principale,
           lunga quanto i minuti accessori di preparazione. Etichetta
-          "ACCp NN'" sopra, in stile ausiliaria. Come nel PDF Trenord. */}
+          "ACCp NN'" sopra SOLO per condotta (le vetture hanno solo
+          l'indicatore visivo, senza ACCp/ACCa per non sovrapporre al
+          numero treno verticale). Come nel PDF Trenord. */}
       {(seg.accp_min ?? 0) > 0 && (() => {
         const pxPerMin = GANTT_LAYOUT.PX_PER_HOUR / 60
         const accpW = (seg.accp_min ?? 0) * pxPerMin
@@ -1382,21 +1384,24 @@ function TrainBar(p: SegProps) {
               strokeWidth={1}
               strokeDasharray="2 2"
             />
-            <text
-              x={accpX + accpW / 2}
-              y={yBarTop - 4}
-              textAnchor="middle"
-              fontSize={9}
-              fontWeight={700}
-              fill={GANTT_COLORS.PREHEAT}
-              style={{ fontFamily: "var(--font-mono, monospace)" }}
-            >
-              ACCp {seg.accp_min}&apos;
-            </text>
+            {!isDH && (
+              <text
+                x={accpX + accpW / 2}
+                y={yBarTop - 4}
+                textAnchor="middle"
+                fontSize={9}
+                fontWeight={700}
+                fill={GANTT_COLORS.PREHEAT}
+                style={{ fontFamily: "var(--font-mono, monospace)" }}
+              >
+                ACCp {seg.accp_min}&apos;
+              </text>
+            )}
           </g>
         )
       })()}
-      {/* ACCa — barra semitrasparente dopo il blocco */}
+      {/* ACCa — barra semitrasparente dopo il blocco. Etichetta testuale
+          solo per condotta (stessa ragione di ACCp). */}
       {(seg.acca_min ?? 0) > 0 && (() => {
         const pxPerMin = GANTT_LAYOUT.PX_PER_HOUR / 60
         const accaW = (seg.acca_min ?? 0) * pxPerMin
@@ -1419,17 +1424,19 @@ function TrainBar(p: SegProps) {
               strokeWidth={1}
               strokeDasharray="2 2"
             />
-            <text
-              x={x2 + accaW / 2}
-              y={yBarTop - 4}
-              textAnchor="middle"
-              fontSize={9}
-              fontWeight={700}
-              fill={GANTT_COLORS.PREHEAT}
-              style={{ fontFamily: "var(--font-mono, monospace)" }}
-            >
-              ACCa {seg.acca_min}&apos;
-            </text>
+            {!isDH && (
+              <text
+                x={x2 + accaW / 2}
+                y={yBarTop - 4}
+                textAnchor="middle"
+                fontSize={9}
+                fontWeight={700}
+                fill={GANTT_COLORS.PREHEAT}
+                style={{ fontFamily: "var(--font-mono, monospace)" }}
+              >
+                ACCa {seg.acca_min}&apos;
+              </text>
+            )}
           </g>
         )
       })()}
