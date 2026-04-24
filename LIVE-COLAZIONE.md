@@ -4,6 +4,78 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-24 — ACCp/ACCa vs vettura PdC + hover tooltip ricco
+
+### Contesto
+
+Utente ha notato su Railway:
+1. ACCp 40' di una condotta si sovrapponeva visualmente a una vettura
+   PdC immediatamente precedente (screenshot 10574 PAVIA → 10577).
+   Regola operativa: "gli accessori non possono accavallarsi a una
+   vettura" (il PdC fisicamente non puo' essere su un treno
+   passeggero e contemporaneamente preparare il treno successivo).
+2. Passando sopra ai blocchi del Gantt non appare nessun dettaglio:
+   solo un title HTML nativo scarno ("10208 · ML 06:52 → MRT 07:26").
+
+### Fix 1 — backend accessori vs gap PdC
+
+`src/turn_builder/day_assembler.py::assemble_day`:
+
+Il modulo `accessori.py` calcola ACCp/ACCa guardando SOLO il GIRO
+MATERIALE (rotazione del treno). Puo' assegnare ACCp=40 a una condotta
+che nella rotazione del suo treno ha gap >=65 min, ma nel TURNO PdC
+quella stessa condotta e' preceduta da una vettura che arriva pochi
+minuti prima. Risultato: accessori impossibili fisicamente.
+
+Nuovo step post-`apply_accessori`: itera sulle coppie consecutive di
+segmenti reali (non-refez) del PdC. Se `acca(prev) + accp(next)` supera
+`gap_pdc = next.dep - prev.arr`, azzera entrambi. Il passaggio viene
+poi correttamente modellato dal `cv_registry` (CV se gap idoneo) o
+resta senza accessori.
+
+Scelta di design: azzeriamo invece di clippare proporzionalmente —
+cosi' evitiamo ambiguita' tra scenario ACC parziale e CV, e l'utente
+vede chiaramente "questo e' un CV" (etichetta CVp/CVa) invece di
+"ACCp di 7 min" (numero fittizio).
+
+Test: 210/210 passano.
+
+### Fix 2 — hover tooltip ricco su Gantt
+
+`frontend/src/components/gantt/GanttSheet.tsx`:
+
+Nuovo componente `HoverTooltip` + state `hoverSeg` gestito dai
+listener onMouseEnter/onMouseLeave delle hit area. Al passaggio del
+mouse mostra, centrato-sopra il segmento, un pannello scuro con:
+- Numero treno (preheat ●, CVp/CVa prefix)
+- Tipo segmento (Condotta / Vettura / Refezione / S.COMP / Dormita)
+- Tratta + orari + durata (es. "ML 06:52 → MRT 07:26 · 0h34")
+- ACCp/ACCa minuti se > 0
+- CVp/CVa minuti se > 0
+- Eventuale motivo "suspect" (vettura sospetta)
+
+Posizionamento: absolute relativo al .gantt-sheet-container, centrato
+orizzontalmente sulla hit area, traslato sopra al bordo (`translate(-50%,
+-100%)`). z-index 50 per stare sopra a barre/azioni ma sotto
+all'ActionBarOverlay se attivo. Soppresso durante drag.
+
+Mantiene anche l'attributo `title` nativo come fallback a11y.
+
+### Verifica
+
+- Backend: 210/210 pytest.
+- Frontend: tsc --noEmit pulito, build vite OK (552 kB), dispatch
+  mouseover in preview genera tooltip con testo atteso
+  ("10208 Condotta ML 06:52 → MRT 07:26 · 0h34").
+- Verifica visiva su `/auto-genera` dopo deploy Railway.
+
+### File toccati
+
+- `src/turn_builder/day_assembler.py` (clip accessori su gap PdC)
+- `frontend/src/components/gantt/GanttSheet.tsx` (HoverTooltip)
+
+---
+
 ## 2026-04-24 — Gantt: rimuovi bordo tratteggiato permanente hit area
 
 ### Contesto

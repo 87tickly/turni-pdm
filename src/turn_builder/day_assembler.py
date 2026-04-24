@@ -432,6 +432,31 @@ def assemble_day(
             seg["accp_min"] = res["accp_min"]
             seg["acca_min"] = res["acca_min"]
 
+    # --- Regola utente (24/04/2026): accessori non possono accavallarsi
+    # tra segmenti consecutivi del PdC.
+    # Il modulo accessori guarda solo il GIRO MATERIALE: puo' assegnare
+    # ACCp=40 a un treno di condotta che nella rotazione materiale ha
+    # gap >=65, ma nel PdC quello stesso treno e' preceduto da una
+    # vettura che arriva pochi minuti prima. Fisicamente il PdC non puo'
+    # essere su una vettura-passeggero e preparare un altro treno.
+    # Fix: se acca(prev) + accp(next) > gap_PdC reale, azzeriamo
+    # entrambi. Il passaggio diventa un CV (rilevato piu' sotto dal
+    # cv_registry) o semplicemente un salto senza accessori.
+    real_seq_for_clip = [s for s in all_segments if not _seg_is_refezione(s)]
+    for i in range(len(real_seq_for_clip) - 1):
+        prev_s = real_seq_for_clip[i]
+        next_s = real_seq_for_clip[i + 1]
+        prev_arr = _time_to_min(prev_s.get("arr_time", "00:00"))
+        next_dep = _time_to_min(next_s.get("dep_time", "00:00"))
+        if next_dep < prev_arr:
+            next_dep += 1440
+        gap_pdc = next_dep - prev_arr
+        acca = prev_s.get("acca_min", 0) or 0
+        accp = next_s.get("accp_min", 0) or 0
+        if acca + accp > gap_pdc:
+            prev_s["acca_min"] = 0
+            next_s["accp_min"] = 0
+
     # ACCp del primo segmento REALE (non refez) + ACCa dell'ultimo REALE.
     # Se il primo segmento e' una refez (slot 4), la refez copre l'ingresso:
     # NON aggiungiamo ACCp separato. Stesso ragionamento per la coda.

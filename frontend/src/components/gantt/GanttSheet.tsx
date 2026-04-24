@@ -10,7 +10,7 @@
  * comportamento e' identico alla versione precedente (sola resa).
  * Vedi `docs/HANDOFF-gantt-v3-interactions.md` per lo spec completo.
  */
-import { useMemo, useRef } from "react"
+import { useMemo, useRef, useState } from "react"
 import type {
   GanttSegment,
   GanttRow,
@@ -140,6 +140,17 @@ export function GanttSheet({
 
   // Stato derivato: siamo in drag attivo?
   const isDragging = !!dragState?.active
+
+  // Hover tooltip state — mostra dettagli ricchi (treno, tratta, orari,
+  // accessori, CV, preheat, suspect) quando l'utente passa sopra un
+  // segmento. Richiesta utente 24/04: il native title era troppo scarno.
+  const [hoverSeg, setHoverSeg] = useState<{
+    seg: GanttSegment
+    rowIdx: number
+    segIdx: number
+    x: number
+    y: number
+  } | null>(null)
 
   return (
     <div
@@ -611,10 +622,25 @@ export function GanttSheet({
                     ;(ev.currentTarget as HTMLDivElement).style.background =
                       "rgba(0,98,204,0.08)"
                   }
+                  // Tooltip ricco posizionato al centro-alto del segmento
+                  const target = ev.currentTarget as HTMLDivElement
+                  const container = containerRef.current
+                  if (container) {
+                    const tRect = target.getBoundingClientRect()
+                    const cRect = container.getBoundingClientRect()
+                    setHoverSeg({
+                      seg,
+                      rowIdx: i,
+                      segIdx: si,
+                      x: tRect.left - cRect.left + tRect.width / 2,
+                      y: tRect.top - cRect.top,
+                    })
+                  }
                 }}
                 onMouseLeave={(ev) => {
                   ;(ev.currentTarget as HTMLDivElement).style.background =
                     "transparent"
+                  setHoverSeg(null)
                 }}
               >
                 {/* Contenuto invisibile: Safari richiede innerHTML non
@@ -682,6 +708,11 @@ export function GanttSheet({
           })}
       </div>
 
+      {/* Hover tooltip ricco — dettagli segmento (richiesta utente 24/04) */}
+      {hoverSeg && !isDragging && (
+        <HoverTooltip hover={hoverSeg} />
+      )}
+
       {/* Action bar (selected state) */}
       {actionBarState && !hideActionBar && (
         <ActionBarOverlay
@@ -711,6 +742,128 @@ export function GanttSheet({
   )
 }
 
+
+// ─────────────────────────────────────────────────────────────
+// Hover tooltip HTML overlay — dettagli segmento al passaggio mouse
+// ─────────────────────────────────────────────────────────────
+
+function HoverTooltip({
+  hover,
+}: {
+  hover: {
+    seg: GanttSegment
+    rowIdx: number
+    segIdx: number
+    x: number
+    y: number
+  }
+}) {
+  const { seg, x, y } = hover
+  const isDH = seg.kind === "dh"
+  const isRefez = seg.kind === "refez"
+  const isScomp = seg.kind === "scomp"
+  const isSleep = seg.kind === "sleep"
+  const tipoLabel = isRefez
+    ? "Refezione"
+    : isScomp
+    ? "S.COMP"
+    : isSleep
+    ? "Dormita FR"
+    : isDH
+    ? "Vettura"
+    : "Condotta"
+
+  // Durata in minuti → stringa
+  const [dh, dm] = seg.dep_time.split(":").map(Number)
+  const [ah, am] = seg.arr_time.split(":").map(Number)
+  let durMin = (ah * 60 + am) - (dh * 60 + dm)
+  if (durMin < 0) durMin += 1440
+  const durStr = `${Math.floor(durMin / 60)}h${String(durMin % 60).padStart(2, "0")}`
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: x,
+        top: Math.max(0, y - 8),
+        transform: "translate(-50%, -100%)",
+        zIndex: 50,
+        minWidth: 220,
+        maxWidth: 300,
+        padding: "8px 10px",
+        background: "#0B1220",
+        color: "#F3F6FB",
+        borderRadius: 6,
+        boxShadow: "0 8px 24px rgba(11,13,16,.28)",
+        fontFamily: "var(--font-sans, Inter)",
+        fontSize: 11.5,
+        lineHeight: 1.5,
+        pointerEvents: "none",
+      }}
+    >
+      <div
+        style={{
+          fontFamily: "var(--font-mono, monospace)",
+          fontSize: 13,
+          fontWeight: 700,
+          marginBottom: 4,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          gap: 8,
+        }}
+      >
+        <span>
+          {seg.preheat ? "● " : ""}
+          {seg.cvp ? "CVp " : seg.cva ? "CVa " : ""}
+          {seg.train_id}
+        </span>
+        <span style={{ fontSize: 10, opacity: 0.65, fontWeight: 500 }}>
+          {tipoLabel}
+        </span>
+      </div>
+      <div style={{ opacity: 0.85, marginBottom: 2 }}>
+        <strong>{seg.from_station || "—"}</strong> {seg.dep_time}
+        {" → "}
+        <strong>{seg.to_station || "—"}</strong> {seg.arr_time}
+        <span style={{ opacity: 0.6 }}> · {durStr}</span>
+      </div>
+      {((seg.accp_min ?? 0) > 0 || (seg.acca_min ?? 0) > 0) && (
+        <div style={{ opacity: 0.75, fontSize: 11 }}>
+          {(seg.accp_min ?? 0) > 0 && (
+            <span>ACCp {seg.accp_min}&apos;</span>
+          )}
+          {(seg.accp_min ?? 0) > 0 && (seg.acca_min ?? 0) > 0 && " · "}
+          {(seg.acca_min ?? 0) > 0 && (
+            <span>ACCa {seg.acca_min}&apos;</span>
+          )}
+        </div>
+      )}
+      {((seg.cv_before_min ?? 0) > 0 || (seg.cv_after_min ?? 0) > 0) && (
+        <div style={{ opacity: 0.75, fontSize: 11 }}>
+          {(seg.cv_before_min ?? 0) > 0 && (
+            <span>CVp {seg.cv_before_min}&apos;</span>
+          )}
+          {(seg.cv_before_min ?? 0) > 0 && (seg.cv_after_min ?? 0) > 0 && " · "}
+          {(seg.cv_after_min ?? 0) > 0 && (
+            <span>CVa {seg.cv_after_min}&apos;</span>
+          )}
+        </div>
+      )}
+      {seg.suspect_reason && (
+        <div
+          style={{
+            marginTop: 4,
+            color: "#FCA5A5",
+            fontSize: 11,
+          }}
+        >
+          ⚠ {seg.suspect_reason}
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ─────────────────────────────────────────────────────────────
 // Action bar HTML overlay
