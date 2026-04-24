@@ -52,11 +52,12 @@ class TestTimeUtils:
         with pytest.raises(ValueError):
             hhmm_to_min("12:60")
 
-    def test_min_invalid(self):
-        with pytest.raises(ValueError):
-            min_to_hhmm(-1)
-        with pytest.raises(ValueError):
-            min_to_hhmm(1440)
+    def test_min_normalize(self):
+        """min_to_hhmm normalizza modulo 24h (accetta negativi/oltre-giorno)."""
+        assert min_to_hhmm(-1) == "23:59"
+        assert min_to_hhmm(-15) == "23:45"
+        assert min_to_hhmm(1440) == "00:00"
+        assert min_to_hhmm(1440 + 30) == "00:30"
 
 
 # ---------------------------------------------------------------------------
