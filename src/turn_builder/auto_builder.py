@@ -40,7 +40,21 @@ from ..constants import (
     FR_MAX_PRESTAZIONE_RIENTRO_MIN,
     WEEKLY_REST_MIN_H,
     WEEKLY_HOURS_MIN, WEEKLY_HOURS_MAX, WEEKLY_HOURS_TARGET,
+    # NORMATIVA-PDC.md §11.8
+    CAP_7H_WINDOW_START_MIN,
+    CAP_7H_WINDOW_END_MIN,
+    CAP_7H_PRESTAZIONE_MIN,
 )
+
+
+def _cap_prestazione_for_presa(presa_min: int) -> int:
+    """NORMATIVA-PDC.md §11.8 — cap prestazione variabile.
+
+    Presa servizio in 01:00-04:59 → 7h (420'), altrimenti 8h30 (510').
+    """
+    if CAP_7H_WINDOW_START_MIN <= presa_min <= CAP_7H_WINDOW_END_MIN:
+        return CAP_7H_PRESTAZIONE_MIN
+    return MAX_PRESTAZIONE_MIN
 
 # ── Vincoli turno ──
 FIRST_DAY_MIN_START_HOUR = 13    # primo giorno: partenza dopo le 13:00
@@ -298,6 +312,17 @@ class AutoBuilder:
                 + EXTRA_START_MIN + EXTRA_END_MIN + MEAL_MIN)
 
     @staticmethod
+    def _cap_for_first_dep(first_dep: int) -> int:
+        """Cap prestazione §11.8 in base all'orario di presa servizio.
+
+        Presa servizio ≈ first_dep − accessori_start − extra_start.
+        """
+        presa = first_dep - ACCESSORY_RULES["default_start"] - EXTRA_START_MIN
+        # Normalizza negativo (turno che "tecnicamente" parte il giorno prima)
+        presa = presa % (24 * 60)
+        return _cap_prestazione_for_presa(presa)
+
+    @staticmethod
     def _seg_condotta(seg: dict) -> int:
         if seg.get("is_deadhead", False):
             return 0
@@ -464,7 +489,7 @@ class AutoBuilder:
             if arr_m < dep_m: arr_m += 1440
             span = arr_m - first_dep
             if span < 0: span += 1440
-            if (span + self._overhead) > MAX_PRESTAZIONE_MIN: continue
+            if (span + self._overhead) > self._cap_for_first_dep(first_dep): continue
             # In condotta solo se abilitato E condotta non sfora
             is_enabled = self._seg_abilitato(seg)
             seg_c = self._seg_condotta(seg)
@@ -568,7 +593,7 @@ class AutoBuilder:
                 span = p_arr - dh_dep
                 if span < 0:
                     span += 1440
-                if (span + self._overhead) > MAX_PRESTAZIONE_MIN:
+                if (span + self._overhead) > self._cap_for_first_dep(dh_dep):
                     continue
                 p_to = prod.get("to_station", "").upper()
                 if p_to == deposito:
@@ -648,7 +673,7 @@ class AutoBuilder:
             span = arr_m - first_dep
             if span < 0:
                 span += 1440
-            if (span + self._overhead) > MAX_PRESTAZIONE_MIN:
+            if (span + self._overhead) > self._cap_for_first_dep(first_dep):
                 continue
             cands2.append((gap, seg, s_cond, arr_m))
         cands2.sort(key=lambda t: t[0])
@@ -757,7 +782,7 @@ class AutoBuilder:
                     if arr_m < dep_m: arr_m += 1440
                     span = arr_m - first_dep
                     if span < 0: span += 1440
-                    if (span + self._overhead) > MAX_PRESTAZIONE_MIN: continue
+                    if (span + self._overhead) > self._cap_for_first_dep(first_dep): continue
                     cands.append((gap, seg, nc, arr_m))
 
                 if not cands:
@@ -2911,7 +2936,7 @@ class AutoBuilder:
             nc = rc + (dur if not is_dh else 0)
             fd = _time_to_min(selected[0]["dep_time"]) if selected else dep_m
             pp = (arr_m - fd) + oh
-            if pp > MAX_PRESTAZIONE_MIN:
+            if pp > self._cap_for_first_dep(fd):
                 if not selected: continue
                 else: break
             if nc > MAX_CONDOTTA_MIN:

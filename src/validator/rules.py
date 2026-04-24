@@ -29,7 +29,24 @@ from ..constants import (
     TEMPI_MEDI_RULES,
     FIXED_TRAVEL_TIMES,
     load_fr_stations,
+    # NORMATIVA-PDC §11.8 / §4.1
+    CAP_7H_WINDOW_START_MIN,
+    CAP_7H_WINDOW_END_MIN,
+    CAP_7H_PRESTAZIONE_MIN,
+    REFEZ_REQUIRED_ABOVE_MIN,
 )
+
+
+def prestazione_cap_for(presa_servizio_min: int) -> int:
+    """Cap prestazione massima dipendente dall'orario presa servizio.
+
+    NORMATIVA-PDC.md §11.8:
+    - Presa servizio 01:00-04:59 → 7h (420')
+    - Altrimenti → 8h30 (510')
+    """
+    if CAP_7H_WINDOW_START_MIN <= presa_servizio_min <= CAP_7H_WINDOW_END_MIN:
+        return CAP_7H_PRESTAZIONE_MIN
+    return MAX_PRESTAZIONE_MIN
 
 
 @dataclass
@@ -352,28 +369,10 @@ class TurnValidator:
         prestazione, pres_time, end_time = self.compute_prestazione(
             segments, acc_start=acc_start, acc_end=acc_end)
 
-        # Refezione: obbligatoria solo se condotta > 6h OPPURE se il turno
-        # copre le fasce 12:00-15:00 o 19:00-21:00
-        meal_required = False
-        if condotta > 360:  # > 6 ore
-            meal_required = True
-        else:
-            # Controlla se i treni coprono le fasce orarie dei pasti
-            for seg in segments:
-                dep_str = seg.get("dep_time", "") if isinstance(seg, dict) else seg.dep_time
-                arr_str = seg.get("arr_time", "") if isinstance(seg, dict) else seg.arr_time
-                dep_m = _time_to_min(dep_str) if dep_str else 0
-                arr_m = _time_to_min(arr_str) if arr_str else 0
-                if arr_m < dep_m:
-                    arr_m += 24 * 60
-                # Fascia pranzo 12:00-15:00
-                if dep_m < 15 * 60 and arr_m > 12 * 60:
-                    meal_required = True
-                    break
-                # Fascia cena 19:00-21:00
-                if dep_m < 21 * 60 and arr_m > 19 * 60:
-                    meal_required = True
-                    break
+        # Refezione: NORMATIVA-PDC.md §4.1 — obbligatoria SOLO se la
+        # prestazione supera 6h (360'). Sotto i 360' la REFEZ non è
+        # richiesta anche se il turno attraversa le finestre pasti.
+        meal_required = prestazione > REFEZ_REQUIRED_ABOVE_MIN
 
         if meal_required:
             meal_start, meal_end = self.find_meal_slot(segments)
@@ -440,12 +439,17 @@ class TurnValidator:
                 )
 
         # Vincoli
-        if prestazione > MAX_PRESTAZIONE_MIN:
+        # NORMATIVA-PDC.md §11.8: cap prestazione dipende dall'orario di
+        # presa servizio. 7h se cade in 01:00-04:59, altrimenti 8h30.
+        presa_min_for_cap = _time_to_min(pres_time) if pres_time else 0
+        cap_prestazione = prestazione_cap_for(presa_min_for_cap)
+        if prestazione > cap_prestazione:
             violations.append(
                 Violation(
                     "MAX_PRESTAZIONE",
                     f"Prestazione {_fmt_min(prestazione)} supera limite "
-                    f"{_fmt_min(MAX_PRESTAZIONE_MIN)}",
+                    f"{_fmt_min(cap_prestazione)} "
+                    f"(§11.8, presa servizio {pres_time})",
                 )
             )
 

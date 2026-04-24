@@ -4,6 +4,65 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-24 — Integrazione normativa §4.1/§11.8 dentro AutoBuilder esistente + rimozione V2 isolato
+
+### Contesto
+
+Feedback utente: avevo creato un builder isolato `/builder-v2` su una
+pagina separata, ma le nuove regole vanno applicate al **builder
+esistente** `AutoBuilder` che gira su `/auto-genera` e costruisce
+turni direttamente dai giri materiale. La linea Valtellina era solo
+un esempio, la normativa è generale.
+
+### Modifiche — regole dentro il flusso principale
+
+**`src/validator/rules.py`**:
+- Aggiunto `prestazione_cap_for(presa_min)` helper: 420 (7h) se presa
+  servizio cade in 01:00-04:59, altrimenti 510 (8h30) — NORMATIVA §11.8.
+- `validate_day`: il check `prestazione > MAX_PRESTAZIONE_MIN` ora
+  usa `prestazione_cap_for(presa)` → messaggio "§11.8, presa
+  servizio HH:MM".
+- Refezione: nuova logica `meal_required = prestazione > 360'`
+  (§4.1). Eliminato il vecchio bound su `condotta > 360` e su
+  "attraversamento fascia pranzo/cena" — ora solo soglia prestazione.
+
+**`src/turn_builder/auto_builder.py`**:
+- Aggiunto metodo `_cap_for_first_dep(first_dep)` che applica §11.8
+  al candidato turno in costruzione.
+- Sostituiti 5 check hard-coded `> MAX_PRESTAZIONE_MIN` con
+  `> self._cap_for_first_dep(first_dep)` (rientro in deposito,
+  posizionamento iniziale, pool catene, build loop, finalizzazione
+  v4).
+
+### Rimossa la pagina/endpoint V2 isolati
+
+- **Eliminati**: `api/builder_v2.py`, `frontend/src/pages/BuilderV2Page.tsx`.
+- **Ripulita sidebar**: tolta voce "Builder V2 (normativa)".
+- **Ripulito `frontend/src/lib/api.ts`**: rimossi tipi/fn
+  BuilderV2*.
+- **Ripulito `server.py`**: rimosso `include_router(builder_v2_router)`.
+- **Ripulito `frontend/src/App.tsx`**: rimossa route `/builder-v2`.
+
+### Verifica
+
+- Pagina `/auto-genera` si carica normalmente con ALESSANDRIA
+  preselezionato, voce V2 sparita dalla sidebar.
+- `pytest tests/test_validator.py tests/test_constants.py
+  tests/test_material_to_pdc_builder.py tests/test_material_to_pdc_types.py`
+  → **71/71 passati**.
+- Backend FastAPI riavviato: endpoint `/api/builder-v2/*` ritorna
+  404 come atteso.
+
+### Non toccato (rimane disponibile per test unitari)
+
+`src/turn_builder/material_to_pdc.py` e relativi test sono rimasti
+come libreria di utility pura (Segment, EventoPdC, PdC, MaterialPool,
+cover_material) — il documento ALGORITMO-BUILDER.md lo cita come
+implementazione riferimento. Non esposto da alcuna pagina/endpoint
+pubblico.
+
+---
+
 ## 2026-04-24 — Builder V2 end-to-end (step 3-9): backend + frontend funzionanti
 
 ### Contesto

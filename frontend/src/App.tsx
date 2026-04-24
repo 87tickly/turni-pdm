@@ -10,7 +10,6 @@ import { PdcPage } from "@/pages/PdcPage"
 import { PdcBuilderPage } from "@/pages/PdcBuilderPage"
 import { PdcDepotPage } from "@/pages/PdcDepotPage"
 import { AutoBuilderPage } from "@/pages/AutoBuilderPage"
-import { BuilderV2Page } from "@/pages/BuilderV2Page"
 import { FRApprovalsPage } from "@/pages/FRApprovalsPage"
 import { GanttPreviewPage } from "@/pages/GanttPreviewPage"
 import { SettingsPage } from "@/pages/SettingsPage"
@@ -30,7 +29,6 @@ export default function App() {
           <Route path="pdc/edit" element={<PdcBuilderPage />} />
           <Route path="pdc/depot/:impianto" element={<PdcDepotPage />} />
           <Route path="auto-genera" element={<AutoBuilderPage />} />
-          <Route path="builder-v2" element={<BuilderV2Page />} />
           <Route path="fr-approvati" element={<FRApprovalsPage />} />
           <Route path="gantt-preview" element={<GanttPreviewPage />} />
           <Route path="import" element={<ImportPage />} />
