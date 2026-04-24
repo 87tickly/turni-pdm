@@ -4,6 +4,54 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-24 — material_to_pdc.py tipi base (step 2)
+
+### Contesto
+
+Step 2 implementazione ALGORITMO-BUILDER: tipi dati del nuovo builder,
+senza logica di costruzione. Fondamenta per step 3 (build_single_pdc).
+
+### Nuovo file: `src/turn_builder/material_to_pdc.py`
+
+Tipi base:
+- `Segment` (dataclass frozen, hashable): un treno/materiale con
+  kind (COMMERCIALE / VUOTO_I / VUOTO_U), stazioni, orari in minuti.
+- `SegmentKind` enum con documentazione inline delle semantiche §1/§8.
+- `EventoPdC` (dataclass frozen): unità timeline PdC. Un solo record
+  polimorfico con campo `kind` EventoKind. Riduce boilerplate vs
+  gerarchia di classi.
+- `EventoKind` enum: PRESA_SERVIZIO, FINE_SERVIZIO, TAXI, VETTURA, MM,
+  ACCP, ACCA, CONDOTTA, PK_ARRIVO/PARTENZA, BUCO, REFEZ, CVA, CVP.
+- `PdC` (dataclass): deposito + lista eventi. Proprietà calcolate:
+  `prestazione_min`, `condotta_min`, `segmenti_usati`, `ha_refez`,
+  `presa/fine_servizio_min`.
+- `MaterialPool` (dataclass): implementa §15 no-doppioni con
+  `first()`, `remove()`, `next_same_material()`.
+- Utility `hhmm_to_min("04:10") → 250`, `min_to_hhmm(250) → "04:10"`.
+
+### Nuovo test: `tests/test_material_to_pdc_types.py`
+
+26 test organizzati in 6 classi, tutti passati:
+- `TestTimeUtils` — conversioni avanti/indietro + edge case
+- `TestSegment` — casi 28335i (VUOTO_I), 2812 (COMMERCIALE, durata 2h32),
+  U8335 (VUOTO_U, 7 min), repr, immutabilità
+- `TestMaterialPool` — pool inizializzata con P1 completo (8 segmenti),
+  first, remove, next_same_material che rispetta stazione/orario
+- `TestPdC` — PdC 1 S1 costruito a mano: prestazione 4h10, condotta
+  66', 3 segmenti usati, no REFEZ sotto 6h, PdC vuoto neutro
+- `TestPoolPdCIntegration` — dopo PdC 1 la pool scende da 8 a 5
+  segmenti (U8335/28335i/2812 rimossi)
+
+Nessuna regressione su test_constants + test_validator (29 passati).
+
+### Prossimo step (step 3)
+
+Implementare `build_single_pdc(primo_seg, pool, deposito)` in
+`material_to_pdc.py`: sequenza di passi §3 ALGORITMO-BUILDER.md.
+Prima versione senza ottimizzazione — greedy, lineare, chiara.
+
+---
+
 ## 2026-04-24 — Costanti normativa in config + ALGORITMO §8 aggiornato
 
 ### Contesto

@@ -392,9 +392,11 @@ opzionalmente override in `config/trenord.py`, riesportare in
 - [x] Normativa formalizzata (§1–§15 in `NORMATIVA-PDC.md`)
 - [x] Algoritmo formalizzato (questo documento)
 - [x] Costanti di normativa in `config/schema.py` + `src/constants.py`
-- [ ] Creare `src/turn_builder/material_to_pdc.py` con tipi (step 1)
-- [ ] Implementazione `build_single_pdc` (step 2)
-- [ ] Implementazione `scegli_gap` + `validate_pdc` (step 3)
-- [ ] Implementazione `copri_materiale` greedy (step 4)
-- [ ] Test end-to-end su turno materiale 1130 P1 (step 5)
-- [ ] Ottimizzazione multi-tentativo §6 (step 6, opzionale)
+- [x] `src/turn_builder/material_to_pdc.py` con tipi base (Segment,
+      EventoPdC, PdC, MaterialPool, utility `hhmm_to_min` / `min_to_hhmm`)
+- [x] Test tipi `tests/test_material_to_pdc_types.py` — 26 passati
+- [ ] Implementazione `build_single_pdc` (step 3)
+- [ ] Implementazione `scegli_gap` + `validate_pdc` (step 4)
+- [ ] Implementazione `copri_materiale` greedy (step 5)
+- [ ] Test end-to-end su turno materiale 1130 P1 (step 6)
+- [ ] Ottimizzazione multi-tentativo §6 (step 7, opzionale)
