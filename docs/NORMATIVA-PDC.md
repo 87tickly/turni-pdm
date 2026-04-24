@@ -614,14 +614,38 @@ sommano. Esempio temporale:
 | ACCp Fiorenza termina | 05:25 | Coincide con partenza traccia RFI |
 | Partenza 28335i da Mi.Certosa | 05:25 | Nessun gap. Vuoto "i" (§1). |
 
-**Esempio completo** (turno che inizia in vettura da MI.PG):
+**Esempio completo** (turno che inizia a Fiorenza, partendo da MI.PG):
 
 | Evento | Tempo |
 |--------|-------|
-| Presa servizio MI.PG (15' pre-vettura, §3.2) | 03:25 |
-| Vettura 6AS MI.PG → Fiorenza | 03:40 → ~04:05 (orari API) |
+| Presa servizio MI.PG (15' pre-taxi, §3.2) | 03:25 |
+| Taxi MI.PG → Fiorenza (durata stimata operativa, §8.5.1) | 03:40 → ~04:00 |
 | ACCp Fiorenza (include trasferimento U-numero) | 04:45 → 05:25 |
 | Partenza traccia RFI Mi.Certosa (es. 28335i, vuoto) | 05:25 |
+
+### 8.5.1 Trasferimento MI.PG → Fiorenza (TAXI obbligatorio per ora)
+
+**Regola**: ad oggi **non esistono tracce pubbliche** (né RFI né
+ARTURO) per il collegamento passivo MI.PG → Fiorenza. Per il
+posizionamento del PdC a inizio turno (e simmetricamente per il
+rientro a fine turno) si usa sempre un **TAXI**.
+
+**Perché**: la tratta è movimento aziendale interno Trenord, non
+pubblicata come traccia viaggiatori. L'API ARTURO non la restituisce.
+
+**Implicazione operativa**:
+- L'orario taxi è **inserito dall'operatore** (o stimato dal builder
+  con un tempo operativo di default), **non** letto da fonti.
+- Finché non esiste una sorgente affidabile, il builder tratta
+  questo collegamento come costo fisso in minuti (valore da
+  parametrizzare, inizialmente stimato).
+- **Futuro**: quando si troverà una fonte (es. orario interno
+  Trenord), questa §8.5.1 sarà aggiornata e il builder passerà
+  automaticamente alla fonte.
+
+**NON confondere con**: vetture reali (treni commerciali su cui il
+PdC viaggia passivo) — quelle sono sempre su API ARTURO. Qui si
+parla del solo collegamento aziendale MI.PG ↔ FIOz.
 
 ### 8.6 Impianti Trenord che generano materiale vuoto
 
@@ -950,6 +974,7 @@ usata per i treni real-time (vedi `services/arturo_client.py`, memory
 | Vuoto `U****` (FIOz↔MiCertosa) | **Calcolato** da §8.7 |
 | Vettura passiva (PdC a bordo commerciale) | **API ARTURO** |
 | Taxi / MM | **Inserita dall'operatore**, non pubblicata |
+| Collegamento MI.PG ↔ FIOz | **Sempre TAXI** (§8.5.1), no fonte pubblica |
 
 **Quando un dato non è disponibile** da nessuna di queste fonti,
 vale la regola di dominio scritta nella normativa (§8.5 per Fiorenza,
