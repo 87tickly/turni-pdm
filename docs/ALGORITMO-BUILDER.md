@@ -340,20 +340,50 @@ Lo `score` di una soluzione penalizza:
 
 ---
 
-## 8. Mapping implementazione (`src/turn_builder/`)
+## 8. Mapping implementazione
 
-| Funzione algoritmo | Modulo target |
-|--------------------|---------------|
-| `copri_materiale` | `auto_builder.py::copri_materiale()` (entry point) |
-| `costruisci_pdc_dal_segmento` | `auto_builder.py::build_single_pdc()` |
-| `scegli_deposito` | `auto_builder.py::pick_deposito()` |
-| `calcola_presa_servizio` | `auto_builder.py::presa_servizio()` |
-| `posizionamento` | `services/arturo_client.py::find_vettura()` + helpers |
-| `scegli_gap` | `src/validator/rules.py::gap_rule()` |
-| `pdc.valida()` | `src/validator/rules.py::validate_pdc()` |
+### 8.1 Moduli Python
 
-Le **costanti di normativa** (330 min condotta, 420/510 prestazione,
-finestre REFEZ, ecc.) vanno in `src/constants.py` come `NORMATIVA_*`.
+Il builder nuovo **NON** tocca `src/turn_builder/auto_builder.py` (2982
+righe, algoritmo genetico legacy che resta per retrocompatibilità).
+Sarà aggiunto un modulo separato:
+
+| Funzione algoritmo | Modulo target | Nota |
+|--------------------|---------------|------|
+| `copri_materiale` | `src/turn_builder/material_to_pdc.py::cover_material()` | NUOVO |
+| `costruisci_pdc_dal_segmento` | `src/turn_builder/material_to_pdc.py::build_single_pdc()` | NUOVO |
+| `scegli_deposito` | `src/turn_builder/material_to_pdc.py::pick_deposito()` | NUOVO |
+| `calcola_presa_servizio` | `src/turn_builder/material_to_pdc.py::presa_servizio()` | NUOVO |
+| `posizionamento` | `services/arturo_client.py::find_vettura()` + helpers | estendere |
+| `scegli_gap` | `src/validator/rules.py::gap_rule()` | estendere |
+| `pdc.valida()` | `src/validator/rules.py::validate_pdc()` | estendere |
+
+### 8.2 Costanti disponibili in `src/constants.py`
+
+Popolate via `config/schema.py` + `config/trenord.py`:
+
+| Costante | Valore Trenord | Riferimento |
+|----------|----------------|-------------|
+| `MAX_PRESTAZIONE_MIN` | 510 | §11.8 (standard 8h30) |
+| `MAX_CONDOTTA_MIN` | 330 | §14.2 (5h30) |
+| `CAP_7H_WINDOW_START_MIN` | 60 (01:00) | §11.8 |
+| `CAP_7H_WINDOW_END_MIN` | 299 (04:59) | §11.8 |
+| `CAP_7H_PRESTAZIONE_MIN` | 420 | §11.8 (7h notte) |
+| `REFEZ_REQUIRED_ABOVE_MIN` | 360 | §4.1 |
+| `MEAL_WINDOW_1_START/END` | 690/930 (11:30-15:30) | §4.1 |
+| `MEAL_WINDOW_2_START/END` | 1110/1350 (18:30-22:30) | §4.1 |
+| `MEAL_MIN` | 30 | §4.1 |
+| `ACCP_STANDARD_MIN` | 40 | §3.3 |
+| `ACCA_STANDARD_MIN` | 40 | §3.3 |
+| `ACCP_PRERISCALDO_MIN` | 80 | §3.3 (dic-feb ●) |
+| `IMPIANTO_TO_RFI_TRANSFER_MIN` | 7 | §8.5 / §8.7 (FIOz ↔ MiCertosa) |
+| `DEPOT_TO_IMPIANTO_TAXI_MIN` | 20 | §8.5.1 (stima MI.PG ↔ FIOz) |
+| `PRE_VETTURA_MIN` | 15 | §3.2 |
+| `POST_VETTURA_MIN` | 15 | §3.2 |
+
+Per aggiungere costanti: aggiornare `config/schema.py` (campo + default),
+opzionalmente override in `config/trenord.py`, riesportare in
+`src/constants.py`.
 
 ---
 
@@ -361,8 +391,10 @@ finestre REFEZ, ecc.) vanno in `src/constants.py` come `NORMATIVA_*`.
 
 - [x] Normativa formalizzata (§1–§15 in `NORMATIVA-PDC.md`)
 - [x] Algoritmo formalizzato (questo documento)
-- [ ] Implementazione `build_single_pdc` (step 1)
-- [ ] Implementazione `scegli_gap` + `validate_pdc` (step 2)
-- [ ] Implementazione `copri_materiale` greedy (step 3)
-- [ ] Test end-to-end su turno materiale 1130 P1 (step 4)
-- [ ] Ottimizzazione multi-tentativo §6 (step 5, opzionale)
+- [x] Costanti di normativa in `config/schema.py` + `src/constants.py`
+- [ ] Creare `src/turn_builder/material_to_pdc.py` con tipi (step 1)
+- [ ] Implementazione `build_single_pdc` (step 2)
+- [ ] Implementazione `scegli_gap` + `validate_pdc` (step 3)
+- [ ] Implementazione `copri_materiale` greedy (step 4)
+- [ ] Test end-to-end su turno materiale 1130 P1 (step 5)
+- [ ] Ottimizzazione multi-tentativo §6 (step 6, opzionale)

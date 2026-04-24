@@ -4,6 +4,53 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-24 — Costanti normativa in config + ALGORITMO §8 aggiornato
+
+### Contesto
+
+Primo step dell'implementazione ALGORITMO-BUILDER: portare i valori
+normativa nella configurazione aziendale, in modo che il builder nuovo
+(da scrivere dopo) attinga dalle costanti, non da magic number.
+
+### Modifiche
+
+**`config/schema.py`**: aggiunti campi
+- `cap_7h_window_start_min / cap_7h_window_end_min / cap_7h_prestazione_min` (§11.8)
+- `refez_required_above_min` (§4.1)
+- `accp_standard_min / acca_standard_min / accp_preriscaldo_min` (§3.3)
+- `impianto_to_rfi_transfer_min` (§8.5, §8.7 — 7' FIOz↔MiCertosa)
+- `depot_to_impianto_taxi_min` (§8.5.1 — 20' MI.PG↔FIOz)
+- `pre_vettura_min / post_vettura_min` (§3.2 — 15')
+
+**`config/trenord.py`**: dichiarazione esplicita dei valori Trenord
+(identici ai default dello schema, ma tracciati per audit).
+
+**`src/constants.py`**: esposti i nuovi campi come costanti pubbliche
+MAIUSCOLE (CAP_7H_WINDOW_*, REFEZ_REQUIRED_ABOVE_MIN, ACCP_*, ACCA_*,
+IMPIANTO_TO_RFI_TRANSFER_MIN, DEPOT_TO_IMPIANTO_TAXI_MIN, PRE/POST_VETTURA_MIN).
+
+**`docs/ALGORITMO-BUILDER.md`**:
+- §8.1 rivisto: decisione di NON toccare `auto_builder.py` legacy
+  (2982 righe genetico) — il builder nuovo andrà in un modulo
+  separato `src/turn_builder/material_to_pdc.py`.
+- §8.2 aggiunta: tabella con tutti i nomi costanti disponibili e
+  relativi valori Trenord.
+- §9 aggiornato: costanti marcate [x].
+
+### Verifica
+
+`python3 -c "from src import constants as C"` importa senza errori
+e riporta tutti i valori attesi. auto_builder + validator importano
+senza rotture.
+
+### Prossimo step
+
+Creare `src/turn_builder/material_to_pdc.py` con i **tipi base**
+(Segmento, EventoPdC, PdC) come dataclass. Nessuna logica ancora, solo
+struttura dati — step piccolo e testabile.
+
+---
+
 ## 2026-04-24 — ALGORITMO-BUILDER.md + §4.1 REFEZ soglia + §11.8 prestazione max variabile
 
 ### Contesto

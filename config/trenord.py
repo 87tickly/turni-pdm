@@ -84,4 +84,24 @@ TRENORD_CONFIG = CompanyConfig(
         "FIORENZA": "MILANO CADORNA",
         "COMO": "COMO SAN GIOVANNI",
     },
+
+    # ── Normativa PdC esplicitamente dichiarata per Trenord ──────
+    # (valori identici ai default schema; qui per tracciabilità).
+    # NORMATIVA-PDC.md §11.8 — prestazione max variabile
+    cap_7h_window_start_min=60,            # 01:00
+    cap_7h_window_end_min=4 * 60 + 59,     # 04:59
+    cap_7h_prestazione_min=420,            # 7h
+    # §4.1 — soglia REFEZ obbligatoria
+    refez_required_above_min=360,          # 6h
+    # §3.3 — accessori contrattuali condotta
+    accp_standard_min=40,
+    acca_standard_min=40,
+    accp_preriscaldo_min=80,               # ● dic-feb
+    # §8.5 / §8.7 — trasferimento impianto ↔ stazione RFI (U-numero)
+    impianto_to_rfi_transfer_min=7,        # FIOz → Mi.Certosa
+    # §8.5.1 — taxi deposito ↔ impianto (no tracce pubbliche)
+    depot_to_impianto_taxi_min=20,         # MI.PG ↔ FIOz
+    # §3.2 — finestre pre/post vettura
+    pre_vettura_min=15,
+    post_vettura_min=15,
 )

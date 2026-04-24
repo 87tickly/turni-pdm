@@ -56,9 +56,19 @@ class CompanyConfig:
     })
 
     # ── Limiti prestazione e condotta (normativa italiana) ────────
-    max_prestazione_min: int = 510       # 8h30
+    max_prestazione_min: int = 510       # 8h30 (presa servizio 05:00-00:59)
     max_condotta_min: int = 330          # 5h30
     meal_min: int = 30                   # refezione inclusa nella prestazione
+
+    # NORMATIVA-PDC.md §11.8: prestazione max ridotta a 7h se presa
+    # servizio cade nella finestra 01:00-04:59 (turno notte gravoso).
+    # Finestra espressa in minuti da mezzanotte (inclusa inizio, inclusa fine).
+    cap_7h_window_start_min: int = 60             # 01:00
+    cap_7h_window_end_min: int = 4 * 60 + 59      # 04:59
+    cap_7h_prestazione_min: int = 420             # 7h
+
+    # NORMATIVA-PDC.md §4.1: REFEZ obbligatoria solo se prestazione > 6h.
+    refez_required_above_min: int = 360           # 6h
 
     # Finestre orarie refezione
     meal_window_1_start: int = 11 * 60 + 30   # 11:30
@@ -73,6 +83,29 @@ class CompanyConfig:
     # ── Regole accessori ──────────────────────────────────────────
     accessory_default_start: int = 10
     accessory_default_end: int = 8
+
+    # NORMATIVA-PDC.md §3.3: valori ACCp/ACCa contrattuali sul treno
+    # (condotta). Indipendenti dai default scheduling sopra (che sono
+    # vecchie medie storiche). Vanno usati dal builder nuovo.
+    accp_standard_min: int = 40                   # §3.3
+    acca_standard_min: int = 40                   # §3.3
+    accp_preriscaldo_min: int = 80                # §3.3 (dic-feb)
+
+    # ── Impianti aziendali (materiale vuoto) ──────────────────────
+    # NORMATIVA-PDC.md §8.5, §8.7: trasferimento fisso fra impianto
+    # aziendale (Fiorenza) e stazione RFI (Mi.Certosa) per U-numero.
+    # 7 min, inclusi DENTRO l'ACCp (non sommati).
+    impianto_to_rfi_transfer_min: int = 7
+
+    # NORMATIVA-PDC.md §8.5.1: tempo taxi deposito ↔ impianto
+    # aziendale quando non esiste traccia pubblica. Stima operativa.
+    # Es. MI.PG ↔ FIOz.
+    depot_to_impianto_taxi_min: int = 20
+
+    # Finestra temporale di sicurezza prima della partenza vettura
+    # (§3.2): presa servizio = partenza_vettura − pre_vettura_min.
+    pre_vettura_min: int = 15
+    post_vettura_min: int = 15
 
     # ── Tempi medi (maggiorazione) ────────────────────────────────
     tempi_medi_default_extra: int = 4

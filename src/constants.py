@@ -24,6 +24,14 @@ MAX_PRESTAZIONE_MIN = _cfg.max_prestazione_min
 MAX_CONDOTTA_MIN = _cfg.max_condotta_min
 MEAL_MIN = _cfg.meal_min
 
+# NORMATIVA-PDC.md §11.8 — cap prestazione se presa servizio notte
+CAP_7H_WINDOW_START_MIN = _cfg.cap_7h_window_start_min
+CAP_7H_WINDOW_END_MIN = _cfg.cap_7h_window_end_min
+CAP_7H_PRESTAZIONE_MIN = _cfg.cap_7h_prestazione_min
+
+# NORMATIVA-PDC.md §4.1 — soglia REFEZ obbligatoria
+REFEZ_REQUIRED_ABOVE_MIN = _cfg.refez_required_above_min
+
 # Finestre orarie contrattuali per la refezione
 MEAL_WINDOW_1_START = _cfg.meal_window_1_start
 MEAL_WINDOW_1_END = _cfg.meal_window_1_end
@@ -113,6 +121,23 @@ FR_MAX_PER_28_DAYS = _cfg.fr_max_per_28_days
 # OPZIONI ACCESSORI (standard + maggiorati)
 # ---------------------------------------------------------------------------
 ACCESSORY_OPTIONS = dict(_cfg.accessory_options)
+
+# ---------------------------------------------------------------------------
+# NORMATIVA-PDC.md §3.3 — valori contrattuali ACCp/ACCa su condotta
+# ---------------------------------------------------------------------------
+ACCP_STANDARD_MIN = _cfg.accp_standard_min
+ACCA_STANDARD_MIN = _cfg.acca_standard_min
+ACCP_PRERISCALDO_MIN = _cfg.accp_preriscaldo_min
+
+# NORMATIVA-PDC.md §8.5 / §8.7 — trasferimento impianto ↔ stazione RFI
+IMPIANTO_TO_RFI_TRANSFER_MIN = _cfg.impianto_to_rfi_transfer_min
+
+# NORMATIVA-PDC.md §8.5.1 — taxi deposito ↔ impianto (no tracce)
+DEPOT_TO_IMPIANTO_TAXI_MIN = _cfg.depot_to_impianto_taxi_min
+
+# NORMATIVA-PDC.md §3.2 — finestre pre/post vettura
+PRE_VETTURA_MIN = _cfg.pre_vettura_min
+POST_VETTURA_MIN = _cfg.post_vettura_min
 
 # ---------------------------------------------------------------------------
 # TEMPI FISSI DI CONDOTTA (tratte a durata fissa, in minuti)
