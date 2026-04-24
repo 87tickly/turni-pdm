@@ -4,6 +4,86 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-24 — NORMATIVA-PDC §12-15 + semantica suffisso "i" + metodo PdC
+
+### Contesto
+
+Sessione dedicata a trasformare un turno materiale (il **1130**,
+linea Valtellina, 9 giornate + variante F5) in turni PdC partendo da
+P1. Durante la lettura sono emerse incongruenze della normativa
+attuale, che sono state corrette **prima** di passare alla
+progettazione PdC vera.
+
+### Fix al NORMATIVA-PDC.md
+
+**§1 Glossario — suffisso "i"**: corretto. Prima diceva "materiale
+uscito da Fiorenza". Ora: **"i" = materiale vuoto** (senza
+passeggeri, in generale). Si trova sia in testa giornata (vuoto da
+FIOz, es. 28335i) sia in coda giornata (vuoto per pernotto su
+stazione RFI, es. 28371i Tirano→Sondrio).
+
+**§8.2 Cambio numero**: riscritto il doppio livello di numerazione
+(`U****` aziendale invisibile + traccia RFI "i" visibile sul PDF).
+
+**§8.5 Preriscaldo/ACCp Fiorenza**: aggiunto esempio temporale
+esplicito. I 7 minuti di percorrenza FIOz→Mi.Certosa sono **dentro**
+i 40' di ACCp, non si sommano.
+
+**§8.7 Numerazione U\*\*\*\* (nuova)**: `U****` è numero aziendale
+Trenord, non traccia RFI, non interrogabile su ARTURO, non su PDF.
+Tempi FIOz↔Mi.Certosa = 7 min fissi, calcolati come
+`partenza_commerciale − 7` o `arrivo_commerciale + 7`.
+
+**§12 Tempi e orari reali (fonte API) (nuova, ex-TODO)**: in runtime
+gli orari dei commerciali si prendono da `live.arturo.travel` (non
+si stimano). Aggiunta tabella perimetro API (§12.1.1):
+- Commerciale → API ARTURO
+- Vuoto "i" (28335i, 28371i) → **solo PDF** (non esiste su ARTURO)
+- `U****` → calcolato da §8.7
+- Vettura → API ARTURO
+- Taxi / MM → inserito dall'operatore
+
+**§13 Lettura PDF turno materiale (nuova)**: come leggere gli orari
+dal PDF. Ore nella colonna in alto, minuti sotto la banda → `HH:MM`.
+Esempio P1 completo (8 segmenti) come riferimento.
+
+**§14 Metodo di progettazione PdC (nuova)**: un turno PdC si
+progetta **dai vincoli di normativa** (prestazione, condotta, REFEZ,
+riposo, FR), non dall'intuito geografico. I CV emergono dove i
+vincoli saturano, non dove "di solito si fa".
+
+**§15 Vincolo di unicità — no doppioni (nuova)**: ogni segmento
+(commerciale, "i", `U****`) assegnato a un PdC **esce dalla pool**
+disponibile. Pool vuota a fine giornata = coerenza. Pool non vuota =
+errore. Treno in due PdC = errore.
+
+### Lettura P1 turno materiale 1130 — cristallizzata
+
+| # | Treno | Da | A | Part. | Arr. | Tipo |
+|---|-------|-----|-----|-------|------|------|
+| 0 | U8335 | Fiorenza | Mi.Certosa | 05:18 | 05:25 | vuoto aziendale §8.7 |
+| 1 | 28335i | Mi.Certosa | Mi.C.LE | 05:25 | 05:45 | vuoto "i" testa |
+| 2 | 2812 | Mi.C.LE | Tirano | 06:20 | 08:52 | commerciale |
+| 3 | 2821 | Tirano | Mi.C.LE | 09:08 | 11:40 | commerciale |
+| 4 | 2824 | Mi.C.LE | Tirano | 12:20 | 14:52 | commerciale |
+| 5 | 2833 | Tirano | Mi.C.LE | 15:08 | 17:40 | commerciale |
+| 6 | 2836 | Mi.C.LE | Tirano | 18:20 | 20:52 | commerciale |
+| 7 | 28371i | Tirano | Sondrio | 21:25 | 22:00 | vuoto "i" coda (pernotto SO) |
+
+Impegno materiale: **05:18 → 22:00 = 16h42**. Richiede più PdC.
+Prossimo step: costruire PdC 1 applicando §14.
+
+### Prossimi step
+
+1. PdC 1 di P1: partire da vincoli §14, usare pool §15.
+2. PdC 2, 3, … fino a coprire tutto P1.
+3. Ripetere per P2–P9 (+ F5).
+4. Poi: adattare `src/turn_builder/auto_builder.py` alla normativa
+   aggiornata (niente più bias geografici, pool unicità, API per
+   orari, regole vuoti).
+
+---
+
 ## 2026-04-24 — ACCp/ACCa vs vettura PdC + hover tooltip ricco
 
 ### Contesto

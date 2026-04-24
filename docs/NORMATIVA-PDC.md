@@ -43,7 +43,10 @@ omette ciò che non serve. Ma l'ordine è sempre questo.
 9. [Spezzare i treni (CV intermedi)](#9-spezzare-i-treni-cv-intermedi) — chiuso
 10. [FR e pernotti](#10-fr-e-pernotti) — chiuso
 11. [Ciclo settimanale e contesto turno](#11-ciclo-settimanale-e-contesto-turno) — chiuso
-12. [Tempi vettura reali tra stazioni](#12-tempi-vettura-reali-tra-stazioni) — *TODO* (popolamento dinamico da ARTURO Live)
+12. [Tempi e orari reali (fonte API)](#12-tempi-e-orari-reali-fonte-api) — chiuso
+13. [Lettura PDF turno materiale](#13-lettura-pdf-turno-materiale) — chiuso
+14. [Metodo di progettazione PdC](#14-metodo-di-progettazione-pdc) — chiuso
+15. [Vincolo di unicità — no doppioni](#15-vincolo-di-unicit%C3%A0--no-doppioni) — chiuso
 
 ---
 
@@ -57,7 +60,7 @@ significato → dove compare.
 | Sigla | Significato | Note |
 |-------|-------------|------|
 | **FIOz** | Fiorenza | Deposito/impianto materiale **Trenord**. I treni "nascono" qui come materiale vuoto. |
-| **MIce** | Milano Certosa | Stazione **RFI**. Qui il materiale vuoto cambia numero e diventa commerciale. |
+| **MIce** | Milano Certosa | Stazione **RFI**. Qui il materiale vuoto `U****` cambia numero assumendo una traccia RFI (marcata "i" se ancora vuoto, vedi §1, oppure commerciale con passeggeri). |
 | **MIcl** | Milano Centrale | Stazione **RFI**. Usata anche da PdC MI.PG. |
 | **MIpg / MIPG** | Milano Porta Garibaldi | **Deposito PdC** principale Trenord. |
 | **MIGP** | Milano Greco Pirelli | Impianto/stazione di servizio. |
@@ -68,7 +71,7 @@ significato → dove compare.
 | Sigla | Significato | Note |
 |-------|-------------|------|
 | **U\*\*\*\*** | Materiale vuoto | Numero che inizia per "U" (es. U8335, U8192). Treno senza passeggeri per posizionamento dal deposito Trenord a stazione RFI (o viceversa). |
-| **\*\*\*\*i** | Marker materiale uscito da Fiorenza | Il suffisso "i" identifica treni commerciali il cui materiale è **uscito da Fiorenza come materiale vuoto** (es. 28335i, 28371i, 28301i). Non ha un valore simbolico proprio — è un'etichetta per riconoscere l'origine del materiale. |
+| **\*\*\*\*i** | Marker materiale vuoto | Il suffisso "i" identifica treni **il cui materiale è un vuoto** (senza passeggeri, o traccia tecnica di posizionamento/rientro). Esempi: 28335i (testa giornata, materiale da FIOz), 28371i (coda giornata, materiale che si posiziona per pernotto fuori Fiorenza). **Non** è specifico di Fiorenza — marca qualunque movimento vuoto, sia in uscita/rientro impianto aziendale sia tra stazioni RFI per posizionamento notturno. |
 | **●** | Preriscaldo | Tempi maggiorati ACCp 80' (dic-feb). |
 | **ACCp** | Accessorio in partenza | Preparazione **del treno** (condotta). Vedi §3. |
 | **ACCa** | Accessorio in arrivo | Spegnimento **del treno** (condotta). Vedi §3. |
@@ -532,24 +535,28 @@ inizia per "**U**" (es. U8335, U8192).
 **Quando si applica**: in testa e in coda al ciclo giornaliero del
 materiale. Il treno "nasce" all'impianto Trenord come materiale
 vuoto, si posiziona in stazione RFI, lì **cambia numero** e diventa
-**commerciale** (es. 28335i, 2812…). A fine giornata il ciclo si
-inverte: rientro da stazione RFI all'impianto come materiale vuoto.
+traccia RFI (es. 28335i Mi.Certosa → Mi.C.LE). A fine giornata il
+ciclo si inverte: rientro da stazione RFI all'impianto come materiale
+vuoto, eventualmente preceduto da una traccia "i" di posizionamento.
 
-### 8.2 Cambio numero (vuoto → commerciale)
+### 8.2 Cambio numero (aziendale → traccia RFI)
 
-**Esempio**:
+Il materiale vuoto può attraversare **due livelli di numerazione**:
 
-| Tratta | Numero |
-|--------|--------|
-| Fiorenza → Mi.Certosa | **U8335** (materiale vuoto) |
-| Mi.Certosa → Mi.C.LE (e oltre) | **28335i** (commerciale) |
+| Tratta | Numero | Natura |
+|--------|--------|--------|
+| Fiorenza → Mi.Certosa | **U8335** | Numero **aziendale** Trenord (§8.7). Invisibile su PDF e API. |
+| Mi.Certosa → Mi.C.LE | **28335i** | Traccia **RFI** marcata "i" (§1). Visibile su PDF, **non** su API (§12.1.1). Treno vuoto, senza passeggeri. |
 
 È lo **stesso materiale fisico**: al passaggio in stazione RFI cambia
-solo il numero ufficiale. Il PdC che sta conducendo continua.
+solo il numero. Il PdC che sta conducendo continua.
+
+**Nota**: in alcuni cicli il materiale vuoto diventa direttamente
+commerciale (senza tappa "i" intermedia). Dipende dalla giornata.
 
 Simmetrico al rientro: un treno che finisce a Mi.Certosa come
 commerciale (es. 28192) prosegue fino a Fiorenza come materiale
-vuoto (es. U8192).
+vuoto (es. U8192), oppure prima come traccia "i" e poi come U****.
 
 ### 8.3 Tempi di trasferimento
 
@@ -595,14 +602,26 @@ preriscaldo ● non esiste a Fiorenza**. I mezzi sono normalmente
 - Il PdC fa comunque **almeno 40 minuti di accessori** all'ingresso
   nel materiale (minimo operativo).
 
-**Esempio**:
+**I 7 minuti FIOz → Mi.Certosa sono INCLUSI negli accessori**: la
+percorrenza fisica del materiale vuoto dall'impianto alla stazione
+RFI dura **7 minuti fissi** ed è **dentro** i 40' di ACCp. Non si
+sommano. Esempio temporale:
+
+| Evento | T | Dettaglio |
+|--------|---|-----------|
+| ACCp Fiorenza inizia | 04:45 | |
+| Spostamento materiale FIOz → Mi.Certosa | 05:18–05:25 | 7' **dentro** i 40' ACCp |
+| ACCp Fiorenza termina | 05:25 | Coincide con partenza traccia RFI |
+| Partenza 28335i da Mi.Certosa | 05:25 | Nessun gap. Vuoto "i" (§1). |
+
+**Esempio completo** (turno che inizia in vettura da MI.PG):
 
 | Evento | Tempo |
 |--------|-------|
-| Presa servizio MI.PG | T |
-| Vettura 6AS → Fiorenza | +~25 min |
-| ACCp Fiorenza | **≥ 40'** (niente ● nemmeno in inverno) |
-| Condotta U-numero Fiorenza → Mi.Certosa | — |
+| Presa servizio MI.PG (15' pre-vettura, §3.2) | 03:25 |
+| Vettura 6AS MI.PG → Fiorenza | 03:40 → ~04:05 (orari API) |
+| ACCp Fiorenza (include trasferimento U-numero) | 04:45 → 05:25 |
+| Partenza traccia RFI Mi.Certosa (es. 28335i, vuoto) | 05:25 |
 
 ### 8.6 Impianti Trenord che generano materiale vuoto
 
@@ -610,6 +629,26 @@ preriscaldo ● non esiste a Fiorenza**. I mezzi sono normalmente
 nascono / a cui rientrano materiali vuoti. Tutti gli impianti PdC
 possono entrare e uscire da Fiorenza (soggetto alla §8.4 regola di
 coerenza).
+
+### 8.7 Numerazione U**** (numero aziendale)
+
+**Regola**: il numero `U****` (es. U8335, U8192) è un **numero
+aziendale Trenord**, **non** una traccia RFI. Conseguenze:
+
+- **Non appare sul PDF turno materiale** (che mostra solo tracce RFI,
+  §13.1).
+- **Non è interrogabile via API ARTURO Live** (`live.arturo.travel`
+  espone tracce commerciali; i vuoti sono movimenti interni). Vedi
+  §12.1 per il perimetro API.
+- **Non ha un orario pubblicato**: la sua durata operativa è la
+  percorrenza FIOz → stazione RFI, fissata a **7 min** (§8.5), e
+  vive **dentro** gli accessori (ACCp in uscita FIOz, ACCa in
+  rientro FIOz).
+
+**Implicazione**: il builder **non deve** chiedere all'API l'orario
+di un U-numero. Lo calcola così:
+- Uscita FIOz: `partenza_commerciale_MiCertosa − 7 min`
+- Rientro FIOz: `arrivo_commerciale_MiCertosa + 7 min`
 
 ---
 
@@ -867,6 +906,314 @@ Le regole **preferenziali** sono:
 
 ---
 
-## 12. Tempi vettura reali tra stazioni
+## 12. Tempi e orari reali (fonte API)
 
-*Sezione da popolare. Fonte: API ARTURO Live (`live.arturo.travel`).*
+### 12.1 Principio fondamentale
+
+**Regola**: in fase di sviluppo/runtime, **tutti gli orari reali** —
+partenza/arrivo treni commerciali, tempi tratta, tempi vettura fra
+stazioni — si prendono dall'**API ARTURO Live** (`live.arturo.travel`).
+Non si stimano, non si hard-codano, non si leggono a occhio dal PDF.
+
+**Quando si applica**:
+- Quando il builder deve schedulare segmenti (tempi veri, non stime).
+- Quando il builder deve inserire una vettura fra due punti (tempi
+  treno passeggero fra quelle stazioni).
+- Quando il validatore confronta prestazione/condotta sui numeri reali.
+
+**Come si applica**: stessa chiave API già integrata nel progetto e
+usata per i treni real-time (vedi `services/arturo_client.py`, memory
+`reference_arturo_live_api.md`).
+
+### 12.1.1 Perimetro API — cosa è interrogabile e cosa no
+
+**L'API ARTURO copre solo i treni commerciali con passeggeri**.
+**Non copre**:
+
+- **Treni con suffisso "i"** (§1, §13.1). Sono materiali vuoti
+  (senza passeggeri) e **non esistono** su ARTURO. Esempio: 28335i,
+  28371i. I loro orari si leggono **solo dal PDF** turno materiale
+  (§13.2).
+- **Materiali vuoti `U****`** (numero aziendale Trenord, §8.7).
+  Non sono pubblicati né su PDF né su API. Il builder li calcola
+  come 7 min fissi FIOz↔Mi.Certosa, inclusi negli accessori (§8.5).
+- **Movimenti taxi/MM interni** al deposito o fra depositi senza
+  traccia pubblica.
+- **Preparazioni e manovre** all'interno dell'impianto.
+
+**Regola operativa per orari**:
+
+| Tipo segmento | Fonte orario |
+|---------------|--------------|
+| Commerciale (numero senza "i", senza "U") | **API ARTURO** |
+| Vuoto "i" (es. 28335i, 28371i) | **PDF turno materiale** (§13.2) |
+| Vuoto `U****` (FIOz↔MiCertosa) | **Calcolato** da §8.7 |
+| Vettura passiva (PdC a bordo commerciale) | **API ARTURO** |
+| Taxi / MM | **Inserita dall'operatore**, non pubblicata |
+
+**Quando un dato non è disponibile** da nessuna di queste fonti,
+vale la regola di dominio scritta nella normativa (§8.5 per Fiorenza,
+§3 per accessori, ecc.). **Non inventare** orari.
+
+### 12.2 Ruolo del PDF turno materiale
+
+**Regola**: il PDF turno materiale serve a **identificare la
+sequenza** di treni del giro, **non** a leggere gli orari precisi.
+
+Gli orari visibili nel PDF (cifre sotto le bande, vedi §13) sono utili
+per:
+- Capire la **struttura temporale** (prima/dopo, gap grossi).
+- **Disambiguare** quale corsa si intende (se uno stesso numero ha
+  più tracce nel giorno).
+
+Ma il dato operativo per costruire un turno PdC **è sempre l'API**.
+
+### 12.3 Tempi vettura fra depositi
+
+**Regola**: non esiste una tabella statica dei tempi vettura fra
+depositi. Quando il builder inserisce un passivo (vettura/taxi/MM),
+richiede all'API il primo treno passeggero disponibile tra A e B nella
+finestra oraria richiesta e ne usa partenza/arrivo reali.
+
+**NON confondere con**: stime a naso ("Lecco-Milano ~1h"). Le stime
+servono solo in fase di ragionamento di carta; il codice non le usa.
+
+---
+
+## 13. Lettura PDF turno materiale
+
+### 13.1 Cosa mostra e cosa NON mostra
+
+**Regola**: il PDF turno materiale pubblicato mostra **solo le tracce
+commerciali emesse da RFI**. Non mostra i movimenti interni agli
+impianti Trenord (es. Fiorenza).
+
+**Il marker "i" indica un materiale vuoto**: ogni volta che sul turno
+materiale compare un numero marcato "**i**" (es. 28335i, 28371i),
+significa che **quel segmento è un vuoto** — senza passeggeri, o
+posizionamento tecnico del materiale. Può trovarsi:
+
+- **In testa giornata** (es. 28335i Mi.Certosa → Mi.C.LE): il materiale
+  è appena uscito da un impianto Trenord (tipicamente Fiorenza, §8.1).
+  Il passaggio FIOz → Mi.Certosa non compare nel PDF (è movimento
+  aziendale interno), ma esiste ed è condotto dal PdC (§8.4, §8.7).
+- **In coda giornata** (es. 28371i Tirano → Sondrio): il materiale si
+  posiziona per il pernotto fuori residenza. Nessun impianto Trenord
+  implicato, è un vuoto su rete RFI per lasciare il convoglio sul
+  binario notturno.
+- Altre collocazioni lungo il ciclo, ogni volta che il materiale si
+  muove senza servizio commerciale.
+
+**Implicazione sul PdC**:
+- Se la "i" è in **testa** al giro e il materiale proviene da un
+  impianto aziendale (FIOz), la **presa servizio reale** del PdC è
+  all'impianto; accessori ACCp lì (§8.5).
+- Se la "i" è in **coda** al giro e il materiale pernotta in
+  stazione RFI, il PdC conduce il vuoto come qualunque altro
+  segmento e l'ACCa si applica alla fine (o c'è CV / rientro in
+  vettura secondo §6 e §7).
+
+### 13.2 Scala oraria del PDF
+
+**Regola**: la scala oraria si legge in **due livelli**:
+
+1. **Ore intere**: stampate in alto, come intestazione di colonna
+   (es. `3   4   5   6   7   8   9   10 …`). Sono le ore del giorno.
+2. **Minuti**: stampati **sotto le bande nere** dei segmenti
+   condotta, a livello delle cifre minori (es. `25  45  20  52 8 …`).
+
+Per leggere l'orario di un punto (partenza o arrivo di un segmento):
+- si prende la **colonna ora** in cui cade la cifra minuto;
+- si compone `HH:MM`.
+
+**Esempio** (giornata P1 turno materiale 1130):
+
+| Punto | Ora colonna | Minuto sotto banda | Orario |
+|-------|-------------|---------------------|--------|
+| Partenza 28335i (Mi.Certosa) | 5 | 25 | **05:25** |
+| Arrivo 28335i (Mi.C.LE) | 5 | 45 | **05:45** |
+| Partenza 2812 (Mi.C.LE) | 6 | 20 | **06:20** |
+| Arrivo 2812 (Tirano) | 8 | 52 | **08:52** |
+
+**NON confondere con**: valori ACC/PK/gap. Le cifre sotto le bande
+sono **orari**, non durate. Le durate si calcolano per differenza
+(arrivo − partenza).
+
+### 13.3 Bande e segmenti
+
+**Regola**: ogni **banda nera orizzontale** sotto la riga oraria è un
+**segmento di treno commerciale** condotto. Il numero treno è stampato
+**sopra** la banda; le due cifre sotto la banda sono **minuto di
+partenza** (sinistra) e **minuto di arrivo** (destra).
+
+Tra due bande consecutive:
+- **Stessa colonna ora, cifre vicine** → cambio numero in stazione
+  con sosta breve (possibile CV o ACC+ACC, vedi §5–§6).
+- **Gap visibile** → pausa operativa (PK/REFEZ/buco, vedi §4).
+
+### 13.4 Flusso di lettura raccomandato
+
+Ordine operativo per trascrivere una giornata del turno materiale:
+
+1. Elencare tutti i **numeri treno** della giornata in ordine
+   spaziale (sinistra → destra).
+2. Per ciascun treno, leggere **partenza** e **arrivo** con la regola
+   §13.2 (colonna ora + cifra minuto).
+3. Se un treno è marcato "**i**" è un **materiale vuoto** (§1, §13.1):
+   - **In testa giornata** e il vuoto proviene da un impianto
+     aziendale (tipicamente FIOz): aggiungere mentalmente il
+     segmento U\*\*\*\* impianto → stazione-RFI-di-partenza (invisibile
+     sul PDF, 7' fissi per FIOz, vedi §8.7).
+   - **In coda giornata** per pernotto su stazione RFI (es. Sondrio,
+     Tirano): il segmento "i" è già visibile nel PDF con i suoi
+     orari, non c'è U-numero aggiuntivo a valle.
+4. **Non** stimare tempi tratta: usa l'API (§12.1) quando servono
+   valori numerici affidabili.
+
+**Esempio di trascrizione corretta** (P1 materiale 1130 completo):
+
+| # | Treno | Da | A | Partenza | Arrivo | Note |
+|---|-------|-----|-----|----------|--------|------|
+| 0 | U8335 | Fiorenza | Mi.Certosa | 05:18 | 05:25 | Invisibile (§13.1). 7' fissi dentro ACCp (§8.5, §8.7). |
+| 1 | 28335i | Mi.Certosa | Mi.C.LE | 05:25 | 05:45 | "i" di testa → materiale da FIOz |
+| 2 | 2812 | Mi.C.LE | Tirano | 06:20 | 08:52 | Commerciale, cambio numero |
+| 3 | 2821 | Tirano | Mi.C.LE | 09:08 | 11:40 | Commerciale, inversione Tirano |
+| 4 | 2824 | Mi.C.LE | Tirano | 12:20 | 14:52 | Commerciale |
+| 5 | 2833 | Tirano | Mi.C.LE | 15:08 | 17:40 | Commerciale |
+| 6 | 2836 | Mi.C.LE | Tirano | 18:20 | 20:52 | Commerciale |
+| 7 | 28371i | Tirano | Sondrio | 21:25 | 22:00 | "i" di coda → vuoto per pernotto Sondrio |
+
+---
+
+## 14. Metodo di progettazione PdC
+
+### 14.1 Principio fondamentale
+
+**Regola**: un turno PdC si progetta **partendo dai vincoli di
+normativa**, non dalla geografia della linea o dall'abitudine ("qui
+di solito si fa un CV"). I vincoli di normativa sono le condizioni
+che il turno **deve** soddisfare; la geografia è solo lo spazio in
+cui il turno esiste.
+
+**Quando si applica**: sempre, sia che il PdC lo scriva un umano con
+carta e matita, sia che lo generi il builder automatico.
+
+### 14.2 Ordine di applicazione dei vincoli
+
+Il builder — o il ragionamento manuale — procede in questo ordine:
+
+1. **Vincoli rigidi del turno singolo** (non negoziabili):
+   - Prestazione ≤ 8h30 (510 min), ≤ 7h se notturno (vedi §11, §1).
+   - Condotta ≤ 5h30 (330 min).
+   - REFEZ 30' dentro finestra 11:30–15:30 o 18:30–22:30 (§4.1).
+   - Accessori corretti (§3) sui segmenti in condotta.
+2. **Vincoli rigidi di ciclo** (legame con giornate adiacenti):
+   - Riposo intraturno 11h / 14h / 16h (§11.5).
+   - Riposo settimanale ≥ 62h (§11.4).
+3. **Vincoli di sede e deroghe**:
+   - Deposito PdC di appartenenza coerente con la linea (§2).
+   - CV solo in stazioni ammesse (§9.2).
+   - FR entro limiti 1/settimana, 3/28gg (§10).
+4. **Preferenze** (non rigide):
+   - Primo giorno post-riposo non mattino (§11.2).
+   - Ultimo giorno pre-riposo ≤ 15:00 (§11.3).
+
+Un candidato turno si costruisce rispettando il punto 1, poi il 2,
+poi il 3, e infine si **valuta** contro il 4.
+
+### 14.3 Cosa NON guida la progettazione
+
+- **NON** "lungo questa linea ci deve essere un CV a X" → i CV
+  emergono come conseguenza dei vincoli (prestazione/condotta che
+  saturano, cambio turno fra depositi), non come scelta a priori.
+- **NON** "di solito la mattina si va in Valtellina" → di solito è
+  descrittivo, non prescrittivo. La normativa prescrive.
+- **NON** "è comodo fare refezione a Lecco" → la REFEZ si fa dove
+  è ammessa e dentro la finestra oraria, sulla base di gap
+  operativi, non di comodità geografica.
+
+**NON confondere con**: conoscenza operativa (sapere che Tirano
+ammette CV per inversione, che Lecco è sede deposito) — quella è
+materiale d'ingresso alla normativa, non un sostituto. I fatti
+geografici **alimentano** i vincoli, non li rimpiazzano.
+
+### 14.4 Come si applica in pratica al caso P1
+
+Per costruire il PdC 1 di P1 si parte così:
+
+1. **Materiale**: conosciuto (segmenti commerciali + U-numero di
+   testa/coda).
+2. **Depositi PdC coinvolgibili**: MI.PG, Lecco, Sondrio (§2.1).
+3. **Primo candidato**: PdC MI.PG che prende a Fiorenza e spinge
+   il materiale finché **prestazione + condotta + REFEZ** restano
+   dentro i limiti (punto 1 di §14.2).
+4. Al punto in cui un vincolo sta per saturare, **lì** emerge la
+   necessità di un CV, in una stazione ammessa (§9.2). Prima di
+   allora, nessun CV arbitrario.
+5. Si valuta poi la compatibilità col ciclo (punto 2 di §14.2) e
+   con la sede (punto 3).
+
+**Esempio anti-pattern**: "il PdC 1 fa CV a Lecco perché Lecco è a
+metà strada" → sbagliato. Giusto: "il PdC 1 prosegue fino a X
+perché a X la condotta supera 5h30 / la prestazione supera 8h30 / è
+la prima stazione ammessa §9.2 oltre quel limite". Se quel limite
+cade a Lecco, ok; se cade a Tirano, è Tirano.
+
+---
+
+## 15. Vincolo di unicità — no doppioni
+
+### 15.1 Principio fondamentale
+
+**Regola**: ogni **segmento di treno** (commerciale o U-numero) del
+turno materiale si assegna a **un solo** PdC. Nessun treno può
+apparire in due PdC distinti dello stesso giorno.
+
+**Quando si applica**: sempre, sia nella generazione manuale sia
+nel builder automatico. Vale per l'intero ciclo giornaliero del
+materiale e anche per il collegamento fra giornate consecutive
+(P1 → P2 → …).
+
+### 15.2 Implementazione nel builder
+
+Il builder mantiene una **pool di segmenti disponibili** inizializzata
+con tutti i treni del turno materiale (più gli U-numeri di testa e
+coda, §8). Ogni volta che costruisce un PdC e gli assegna un
+segmento, **rimuove** quel segmento dalla pool. Al termine:
+
+- **Pool vuota** → coerente: tutto il materiale è coperto.
+- **Pool non vuota** → errore: ci sono treni orfani, serve un PdC
+  aggiuntivo o rivedere i confini dei PdC esistenti.
+- **Tentativo di usare un segmento già assegnato** → errore:
+  doppione, turno scartato.
+
+### 15.3 Cosa conta come "usato"
+
+Un segmento si considera usato quando compare nel PdC come:
+
+- **Condotta** (il PdC guida il treno).
+- **Vettura** (il PdC viaggia passivo a bordo di quel treno). Non
+  usabile per nessun altro ruolo in un altro PdC.
+- **CV in partenza / in arrivo** (il PdC prende o consegna il
+  mezzo): il segmento è "usato" per la parte di condotta che
+  precede/segue il CV — la sezione post-CV resta un "nuovo" segmento
+  assegnabile all'altro PdC.
+
+**NON confondere con**: un treno che viene spezzato da un CV (§9).
+In quel caso il treno conta **due volte** come segmento di condotta
+(prima parte per PdC-A, seconda per PdC-B). Non è un doppione, è
+una legittima divisione del segmento, autorizzata solo perché c'è
+un CV dichiarato in stazione ammessa (§9.2).
+
+### 15.4 Conseguenza sui materiali vuoti
+
+I **segmenti U-numero** (§8.7) seguono la stessa regola:
+
+- U\*\*\*\* di testa (FIOz → Mi.Certosa) va assegnato al **primo PdC**
+  della giornata, quello che prende servizio a Fiorenza (§8.4
+  coerenza).
+- U\*\*\*\* di coda (Mi.Certosa → FIOz) va assegnato all'**ultimo PdC**
+  che porta il materiale in RFI prima del rientro.
+- Se il materiale **pernotta fuori residenza** (es. a Sondrio), non
+  c'è U-numero di coda giornaliero: il materiale resta sul binario
+  e riparte il giorno dopo senza rientro FIOz.
