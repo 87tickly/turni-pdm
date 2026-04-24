@@ -4,6 +4,50 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-24 — §9.2 CV in stazioni ammesse integrato in cv_registry
+
+### Contesto
+
+Completata integrazione §9.2 (CV solo in stazioni ammesse) nel flow
+`/auto-genera`. §15 (no doppioni) era già coperto da
+`_verify_no_duplicates` in auto_builder.
+
+### Modifiche
+
+**`src/turn_builder/cv_registry.py`**:
+- Aggiunto set `CV_CAPOLINEA_INVERSIONE = {"TIRANO"}` e helper
+  `_build_cv_allowed_stations()` che deriva le stazioni §9.2-ammesse:
+  nomi depositi + stazioni collegate (depot_to_station) + capolinea
+  inversione.
+- `is_cv_station_allowed(name)` con normalizzazione `.upper().strip()`.
+- `detect_cv(prev, next)` ora verifica la stazione di incontro:
+  se non ammessa, ritorna None (il caller userà accessori/PK pieni).
+  Output arricchito con campo `cv_station`.
+
+**`tests/test_cv_registry_step5.py`**:
+- Stub `"ALE"/"MI"` sostituiti con "ALESSANDRIA"/"MILANO PORTA
+  GARIBALDI" per essere §9.2-compliant.
+- 4 nuovi test §9.2: stazione non ammessa (LECCO MAGGIANICO), TIRANO
+  capolinea, LECCO sede, MORTARA deroga.
+
+### Non coperto — prossimi step opzionali
+
+- Integrazione tra §9.2 e `auto_builder` quando c'è un gap < 65 min
+  in stazione non ammessa: oggi `detect_cv` ritorna None → il caller
+  dovrebbe applicare automaticamente accessori/PK, ma serve verifica
+  end-to-end che il builder gestisca il fallback.
+- §9.2 (cv_station) potrebbe diventare un campo persistito in
+  `cv_ledger` per reporting.
+
+### Test
+
+- `pytest tests/test_cv_registry_step5.py`: 20/20 verdi (erano 16,
+  +4 test §9.2).
+- Intero set precedente (validator, constants, material_to_pdc types
+  + E2E, accessori): nessuna regressione.
+
+---
+
 ## 2026-04-24 — Integrazione normativa §4.1/§11.8 dentro AutoBuilder esistente + rimozione V2 isolato
 
 ### Contesto

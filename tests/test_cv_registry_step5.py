@@ -43,8 +43,8 @@ def _seg(tid, frm, to, dep, arr, mtid=1, day_index=1):
 # ---------------------------------------------------------------------------
 
 def test_detect_cv_gap_30min_stesso_materiale():
-    prev = _seg("T1", "ALE", "MI", "10:00", "11:00")
-    nxt = _seg("T2", "MI", "ALE", "11:30", "12:30")
+    prev = _seg("T1", "ALESSANDRIA", "MILANO PORTA GARIBALDI", "10:00", "11:00")
+    nxt = _seg("T2", "MILANO PORTA GARIBALDI", "ALESSANDRIA", "11:30", "12:30")
     cv = detect_cv(prev, nxt)
     assert cv is not None
     assert cv["material_turn_id"] == 1
@@ -56,37 +56,77 @@ def test_detect_cv_gap_30min_stesso_materiale():
 def test_detect_cv_gap_65_accessori_pieni_no_cv():
     # Gap 65 min = soglia: esattamente a soglia si applicano gli accessori
     # pieni, NON un CV.
-    prev = _seg("T1", "ALE", "MI", "10:00", "11:00")
-    nxt = _seg("T2", "MI", "ALE", "12:05", "13:00")
+    prev = _seg("T1", "ALESSANDRIA", "MILANO PORTA GARIBALDI", "10:00", "11:00")
+    nxt = _seg("T2", "MILANO PORTA GARIBALDI", "ALESSANDRIA", "12:05", "13:00")
     cv = detect_cv(prev, nxt)
     assert cv is None
 
 
 def test_detect_cv_gap_troppo_piccolo_no_cv():
     # Gap 5 min < CV_MIN_PER_SIDE (10) -> nessun CV gestibile
-    prev = _seg("T1", "ALE", "MI", "10:00", "11:00")
-    nxt = _seg("T2", "MI", "ALE", "11:05", "12:00")
+    prev = _seg("T1", "ALESSANDRIA", "MILANO PORTA GARIBALDI", "10:00", "11:00")
+    nxt = _seg("T2", "MILANO PORTA GARIBALDI", "ALESSANDRIA", "11:05", "12:00")
     cv = detect_cv(prev, nxt)
     assert cv is None
 
 
 def test_detect_cv_materiale_diverso_no_cv():
-    prev = _seg("T1", "ALE", "MI", "10:00", "11:00", mtid=1)
-    nxt = _seg("T2", "MI", "ALE", "11:30", "12:30", mtid=2)
+    prev = _seg("T1", "ALESSANDRIA", "MILANO PORTA GARIBALDI", "10:00", "11:00", mtid=1)
+    nxt = _seg("T2", "MILANO PORTA GARIBALDI", "ALESSANDRIA", "11:30", "12:30", mtid=2)
     assert detect_cv(prev, nxt) is None
 
 
 def test_detect_cv_stesso_train_id_no_cv():
     # Stesso train_id = continuazione dello stesso treno, non CV
-    prev = _seg("T1", "ALE", "MI", "10:00", "11:00")
-    nxt = _seg("T1", "MI", "ALE", "11:30", "12:30")
+    prev = _seg("T1", "ALESSANDRIA", "MILANO PORTA GARIBALDI", "10:00", "11:00")
+    nxt = _seg("T1", "MILANO PORTA GARIBALDI", "ALESSANDRIA", "11:30", "12:30")
     assert detect_cv(prev, nxt) is None
 
 
 def test_detect_cv_materiale_none_no_cv():
-    prev = _seg("T1", "ALE", "MI", "10:00", "11:00", mtid=None)
-    nxt = _seg("T2", "MI", "ALE", "11:30", "12:30", mtid=None)
+    prev = _seg("T1", "ALESSANDRIA", "MILANO PORTA GARIBALDI", "10:00", "11:00", mtid=None)
+    nxt = _seg("T2", "MILANO PORTA GARIBALDI", "ALESSANDRIA", "11:30", "12:30", mtid=None)
     assert detect_cv(prev, nxt) is None
+
+
+# ---------------------------------------------------------------------------
+# NORMATIVA-PDC.md §9.2: CV ammesso solo in stazioni specifiche
+# ---------------------------------------------------------------------------
+
+def test_detect_cv_stazione_non_ammessa_no_cv():
+    """CV a stazione NON §9.2 → detect_cv ritorna None (il caller userà
+    accessori/PK). Es. LECCO MAGGIANICO è fermata intermedia senza
+    deposito, il CV lì NON è ammesso."""
+    prev = _seg("T1", "ALESSANDRIA", "LECCO MAGGIANICO", "10:00", "11:00")
+    nxt = _seg("T2", "LECCO MAGGIANICO", "ALESSANDRIA", "11:30", "12:30")
+    assert detect_cv(prev, nxt) is None
+
+
+def test_detect_cv_tirano_capolinea_inversione_ammesso():
+    """TIRANO è capolinea inversione §9.2.3 → CV ammesso."""
+    prev = _seg("T1", "MILANO CENTRALE", "TIRANO", "10:00", "12:30")
+    nxt = _seg("T2", "TIRANO", "MILANO CENTRALE", "12:55", "15:25")
+    cv = detect_cv(prev, nxt)
+    assert cv is not None
+    assert cv["cv_station"] == "TIRANO"
+
+
+def test_detect_cv_lecco_sede_deposito_ammesso():
+    """LECCO è sede deposito §9.2.1 → CV ammesso."""
+    prev = _seg("T1", "MILANO PORTA GARIBALDI", "LECCO", "10:00", "11:00")
+    nxt = _seg("T2", "LECCO", "TIRANO", "11:30", "13:30")
+    cv = detect_cv(prev, nxt)
+    assert cv is not None
+    assert cv["cv_station"] == "LECCO"
+
+
+def test_detect_cv_mortara_deroga_ammesso():
+    """MORTARA è deroga §9.2.2 → CV ammesso."""
+    prev = _seg("T1", "PAVIA", "MORTARA", "10:00", "11:00")
+    nxt = _seg("T2", "MORTARA", "ALESSANDRIA", "11:30", "12:30")
+    cv = detect_cv(prev, nxt)
+    assert cv is not None
+    assert cv["cv_station"] == "MORTARA"
 
 
 # ---------------------------------------------------------------------------
@@ -134,8 +174,8 @@ def test_split_gap_troppo_piccolo_raises():
 # ---------------------------------------------------------------------------
 
 def test_register_single_side(conn):
-    prev = _seg("T1", "ALE", "MI", "10:00", "11:00")
-    nxt = _seg("T2", "MI", "ALE", "11:40", "12:30")
+    prev = _seg("T1", "ALESSANDRIA", "MILANO PORTA GARIBALDI", "10:00", "11:00")
+    nxt = _seg("T2", "MILANO PORTA GARIBALDI", "ALESSANDRIA", "11:40", "12:30")
     cv = detect_cv(prev, nxt)
     assert cv is not None
 
@@ -151,8 +191,8 @@ def test_register_single_side(conn):
 def test_register_both_sides_tm_calcolato(conn):
     # Gap 40 min. PdC A prende 20 ACCa, PdC B prende 20 ACCp.
     # Tm = arr + cva = 660 + 20 = 680 (11:20)
-    prev = _seg("T1", "ALE", "MI", "10:00", "11:00")
-    nxt = _seg("T2", "MI", "ALE", "11:40", "12:30")
+    prev = _seg("T1", "ALESSANDRIA", "MILANO PORTA GARIBALDI", "10:00", "11:00")
+    nxt = _seg("T2", "MILANO PORTA GARIBALDI", "ALESSANDRIA", "11:40", "12:30")
     cv = detect_cv(prev, nxt)
     assert cv["gap_min"] == 40
 
@@ -177,8 +217,8 @@ def test_register_both_sides_tm_calcolato(conn):
 
 def test_update_esistente_non_duplica(conn):
     # Se lo stesso PdC riscrive il suo lato, la riga non si duplica
-    prev = _seg("T1", "ALE", "MI", "10:00", "11:00")
-    nxt = _seg("T2", "MI", "ALE", "11:30", "12:30")
+    prev = _seg("T1", "ALESSANDRIA", "MILANO PORTA GARIBALDI", "10:00", "11:00")
+    nxt = _seg("T2", "MILANO PORTA GARIBALDI", "ALESSANDRIA", "11:30", "12:30")
     cv = detect_cv(prev, nxt)
 
     register_cv_side(conn, cv, side="cva", pdc_id="PDC_A", duration_min=10)

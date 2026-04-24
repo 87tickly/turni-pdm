@@ -39,10 +39,59 @@ from typing import Optional
 
 from ..validator.rules import _time_to_min
 from .accessori import GAP_THRESHOLD_MIN
+from ..constants import DEPOSITI
 
 
 # Vincoli contratto (minimi per lato)
 CV_MIN_PER_SIDE = 10  # min 10' per lato (richiesta utente 23/04/2026)
+
+
+# NORMATIVA-PDC.md §9.2 — un CV può avvenire SOLO in:
+#   1. stazione sede deposito PdC (uno dei DEPOSITI)
+#   2. MORTARA (già nei DEPOSITI come deroga storica)
+#   3. stazione di capolinea inversione di marcia (es. TIRANO)
+#
+# Le stazioni nei segmenti sono nomi RFI tipo "MILANO PORTA GARIBALDI".
+# Alcuni DEPOSITI sono codici aziendali (es. GARIBALDI_ALE) che vanno
+# mappati via depot_to_station della configurazione aziendale.
+CV_CAPOLINEA_INVERSIONE: set[str] = {
+    "TIRANO",
+}
+
+
+def _build_cv_allowed_stations() -> set[str]:
+    """Set delle stazioni in cui è ammesso un CV (§9.2).
+
+    Combina:
+      - nomi deposito (quando coincidono con nome stazione: ALESSANDRIA,
+        PAVIA, BRESCIA…)
+      - stazioni collegate ai depositi aziendali via depot_to_station
+        (es. GARIBALDI_ALE → MILANO PORTA GARIBALDI)
+      - capolinea inversione (TIRANO).
+
+    Normalizzazione: .upper().strip() così il confronto è robusto.
+    """
+    from config.loader import get_active_config
+    cfg = get_active_config()
+    mapping = getattr(cfg, "depot_to_station", {}) or {}
+    s: set[str] = set()
+    for depot in DEPOSITI:
+        s.add(depot.upper().strip())
+        if depot in mapping:
+            s.add(mapping[depot].upper().strip())
+    for capolinea in CV_CAPOLINEA_INVERSIONE:
+        s.add(capolinea.upper().strip())
+    return s
+
+
+_CV_ALLOWED_STATIONS: set[str] = _build_cv_allowed_stations()
+
+
+def is_cv_station_allowed(station_name: str) -> bool:
+    """True se la stazione è §9.2-ammessa per un CV."""
+    if not station_name:
+        return False
+    return station_name.upper().strip() in _CV_ALLOWED_STATIONS
 
 
 SCHEMA_SQL = """
@@ -107,6 +156,14 @@ def detect_cv(prev_seg: dict, next_seg: dict) -> Optional[dict]:
     if prev_seg.get("day_index") != next_seg.get("day_index"):
         return None
 
+    # NORMATIVA-PDC.md §9.2: il CV può avvenire SOLO in stazioni ammesse
+    # (sedi deposito PdC, MORTARA, capolinea inversione). Se il punto
+    # di incontro non è ammesso, niente CV: il caller tratterà il gap
+    # come accessori pieni o PK.
+    cv_station = prev_seg.get("to_station") or next_seg.get("from_station", "")
+    if not is_cv_station_allowed(cv_station):
+        return None
+
     prev_arr = _time_to_min(prev_seg["arr_time"])
     next_dep = _time_to_min(next_seg["dep_time"])
     # overnight handling: se next_dep "precede" prev_arr assumiamo rollover
@@ -127,6 +184,7 @@ def detect_cv(prev_seg: dict, next_seg: dict) -> Optional[dict]:
         "train_in_arr_min": prev_arr,
         "train_out_dep_min": next_dep,
         "gap_min": gap,
+        "cv_station": (cv_station or "").upper().strip(),
     }
 
 
