@@ -33,6 +33,7 @@ const dataItems = [
 // Operazioni — motore automatico, controllo, interventi manuali
 const opsItems = [
   { to: "/auto-genera", icon: Sparkles, label: "Genera da materiale" },
+  { to: "/builder-v2", icon: Sparkles, label: "Builder V2 (normativa)" },
   { to: "/calendario-agente", icon: CalendarRange, label: "Calendario agente" },
   { to: "/gantt-preview", icon: BarChart3, label: "Gantt v3 · preview" },
   { to: "/builder", icon: PlusCircle, label: "Nuovo turno" },

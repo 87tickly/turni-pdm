@@ -4,6 +4,64 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-24 — Builder V2 end-to-end (step 3-9): backend + frontend funzionanti
+
+### Contesto
+
+Completata l'implementazione dell'ALGORITMO-BUILDER in un nuovo
+builder `src/turn_builder/material_to_pdc.py` + endpoint REST
+`/api/builder-v2/cover` + pagina frontend `/builder-v2` per test live
+su Railway.
+
+### Backend
+
+**`src/turn_builder/material_to_pdc.py`** — logica completa:
+- `cap_prestazione(presa_min)`: 420 se 01:00-04:59 (§11.8), else 510
+- `GapMode` + `gap_rule(gap_min)`: §6 tabella CV/PK/ACC
+- `build_single_pdc(primo_seg, pool, deposito, vettura_lookup)`:
+  posizionamento (taxi FIOz §8.5.1 / taxi fallback / accp diretto),
+  loop condotta con troncamento su cap prestazione/condotta/soglia
+  REFEZ, chiusura con CV §9.2 o ACCa + rientro passivo
+- `validate_pdc(pdc)`: prestazione/condotta/REFEZ check
+- `cover_material(segments, scegli_deposito, vettura_lookup)`: greedy
+  loop con pool §15
+
+**`api/builder_v2.py`** — router FastAPI `/api/builder-v2`:
+- POST `/cover` con payload `{materiale, deposito_preferito?}`
+- GET `/example/p1-1130` per pre-popolare UI con P1 reale
+
+### Frontend
+
+**`frontend/src/pages/BuilderV2Page.tsx`**: pagina con textarea JSON
+input + bottone "Carica esempio P1" + bottone "Genera PdC" + display
+card per ogni PdC (deposito, presa/fine, prestazione, condotta,
+violazioni, eventi cronologici colorati per tipo).
+
+**`frontend/src/App.tsx`**: route `/builder-v2`.
+**`frontend/src/components/Sidebar.tsx`**: voce "Builder V2 (normativa)".
+**`frontend/src/lib/api.ts`**: tipi + fn `builderV2Cover` e
+`builderV2ExampleP1`.
+
+### Verifica live sul preview
+
+Cliccato "Carica esempio P1" + "Genera PdC" sulla pagina
+`/builder-v2`. Risultato renderizzato: **7 PdC, 0 residui, 0
+violazioni**. Timeline eventi visibile con colori per tipo
+(taxi/ACCp/condotta/PK/BUCO/CVa/fine servizio).
+
+### Test (tutti verdi)
+
+- `tests/test_material_to_pdc_types.py`: 26 test tipi base
+- `tests/test_material_to_pdc_builder.py`: 16 test E2E builder
+- **42/42 passati**, nessuna regressione
+
+### Deploy Railway
+
+`npm run build` → `frontend/dist/` rigenerato (560KB JS, 66KB CSS).
+Commit + push → Railway deploy auto.
+
+---
+
 ## 2026-04-24 — material_to_pdc.py tipi base (step 2)
 
 ### Contesto

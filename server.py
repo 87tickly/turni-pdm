@@ -46,6 +46,7 @@ from api.dashboard import router as dashboard_router
 from api.abilitazioni import router as abilitazioni_router
 from api.fr_approvals import router as fr_approvals_router
 from api.calendario_agente import router as calendario_agente_router
+from api.builder_v2 import router as builder_v2_router
 
 app = FastAPI(
     title="Turni PDM API",
@@ -77,6 +78,7 @@ app.include_router(dashboard_router)
 app.include_router(abilitazioni_router)
 app.include_router(fr_approvals_router, prefix="/api")
 app.include_router(calendario_agente_router, prefix="/api")
+app.include_router(builder_v2_router)
 
 # Serve frontend: React build (frontend/dist/) in produzione, static/ come fallback
 # DOPO i router — così le API hanno priorità

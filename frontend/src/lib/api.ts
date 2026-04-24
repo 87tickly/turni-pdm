@@ -1250,3 +1250,58 @@ export async function getCalendarioAgente(params: {
   if (params.deposito) qs.set("deposito", params.deposito)
   return api.get<AgentGridResponse>(`/api/calendario-agente?${qs}`)
 }
+
+// ────────────────────────────────────────────────────────────────
+// Builder V2 — turno materiale → PdC rispettando NORMATIVA-PDC
+// ────────────────────────────────────────────────────────────────
+
+export interface BuilderV2SegmentIn {
+  numero: string
+  kind: "commerciale" | "vuoto_i" | "vuoto_u"
+  da_stazione: string
+  a_stazione: string
+  partenza: string  // HH:MM
+  arrivo: string    // HH:MM
+}
+
+export interface BuilderV2CoverRequest {
+  materiale: BuilderV2SegmentIn[]
+  deposito_preferito?: string
+}
+
+export interface BuilderV2EventoOut {
+  kind: string
+  inizio: string
+  fine: string
+  durata_min: number
+  stazione: string
+  stazione_a: string
+  treno: string
+  note: string
+}
+
+export interface BuilderV2PdCOut {
+  deposito: string
+  presa_servizio: string
+  fine_servizio: string
+  prestazione_min: number
+  condotta_min: number
+  cap_prestazione_min: number
+  eventi: BuilderV2EventoOut[]
+  violazioni: string[]
+}
+
+export interface BuilderV2CoverResponse {
+  pdc: BuilderV2PdCOut[]
+  residui_numeri: string[]
+  residui_count: number
+  violazioni_totali: number
+}
+
+export async function builderV2Cover(req: BuilderV2CoverRequest) {
+  return api.post<BuilderV2CoverResponse>(`/api/builder-v2/cover`, req)
+}
+
+export async function builderV2ExampleP1() {
+  return api.get<BuilderV2CoverRequest>(`/api/builder-v2/example/p1-1130`)
+}
