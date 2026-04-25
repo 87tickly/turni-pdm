@@ -4,6 +4,61 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-25 (later) — MODELLO-DATI.md v0.2: decisioni utente recepite
+
+### Contesto
+
+Utente ha letto draft v0.1 e risposto alle 5 domande aperte di §8.
+Decisioni recepite + 2 ricalibrature terminologiche/strutturali.
+
+### Modifiche al doc
+
+**§0 Decisioni v0.2 (nuova sezione in cima)**: tabella riepilogativa
+delle 6 decisioni prese (5 originali + 1 nuova su revisioni).
+
+**Rinomina terminologica** (utente preferisce italiano + termine
+ufficiale Trenord):
+- `rotazione_materiale` → `giro_materiale`
+- `rotazione_giornata` → `giro_giornata`
+- `rotazione_variante` → `giro_variante`
+- `rotazione_blocco` → `giro_blocco`
+
+**§LIV 1 — corsa_commerciale arricchita**:
+- aggiunto campo `valido_in_date` (json date[]) — decisione #1, lista
+  denormalizzata di date di circolazione, calcolata all'import PdE
+- aggiunto campo `azienda` — decisione #3, multi-tenancy default
+  'trenord'
+- aggiunta tabella sorella `corsa_materiale_vuoto` — decisione #2,
+  con campo `origine` (`importato_pde` | `generato_da_giro_materiale`
+  | `manuale`). I numeri 28183/93058/U316 NON sono nel PdE: vengono
+  generati dal nostro algoritmo di costruzione giro materiale.
+
+**§LIV 3b — turno_ct differito**: rimosse le tabelle CT da v0. Resta
+solo come "punto di estensione esplicito" — base struttura analoga a
+PdC con normativa contrattuale più leggera, da definire in v1.
+
+**§Entità trasversale revisione_turno (nuova)**: gestisce la validità
+12+ mesi con revisioni interne. Due "Turno 1100" con date diverse =
+revisioni dello stesso turno. Una sola revisione attiva per data.
+Storia preservata, query coerenti.
+
+**§8 risolto**: sezione "Domande aperte" → "Decisioni risolte (v0.2)"
+con riepilogo storico delle scelte.
+
+### Stato
+
+- Documento v0.2. Tutte le decisioni di scoping sono prese.
+- Diff: +132 / -54 righe rispetto a v0.1.
+- Modello pronto per la prossima fase: `docs/MIGRAZIONE-DATI.md`.
+
+### Prossimo step
+
+Utente conferma se v0.2 è da congelare o se vede altri punti da
+rivedere. Quando sblocca → si scrive `docs/MIGRAZIONE-DATI.md`
+(piano migrazione DB tabella per tabella, ancora senza codice).
+
+---
+
 ## 2026-04-25 — docs/MODELLO-DATI.md draft v0.1 (architettura ecosistema integrato)
 
 ### Contesto

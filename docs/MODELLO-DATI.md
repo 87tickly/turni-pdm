@@ -1,13 +1,28 @@
-# MODELLO DATI — Ecosistema ARTURO × Trenord (draft v0.1)
+# MODELLO DATI — Ecosistema ARTURO × Trenord (draft v0.2)
 
 > **Stato**: bozza in revisione con l'utente. Niente codice ancora.
 > Scopo: disegnare le entità e relazioni che reggono offerta commerciale,
-> giro materiale, turno PdC, turno CT, anagrafica personale e loop
+> giro materiale, turno PdC, anagrafica personale e loop
 > real-time, **prima** di toccare DB o codice.
 >
 > **Da leggere come**: una mappa, non una specifica finale. Ogni nome,
 > attributo o relazione è negoziabile. Quando il modello regge un caso
 > reale → si congela. Solo dopo si scrive codice.
+
+---
+
+## 0. Decisioni v0.2 (recepite dall'utente)
+
+Decisioni prese il 2026-04-25 dopo revisione v0.1:
+
+| Tema | Decisione |
+|------|-----------|
+| **Periodicità corsa** | **Strada A — denormalizzata**. All'import del PdE, per ogni corsa si calcola l'elenco completo di date in cui circola (`valido_in_date` JSON). Query SI/NO immediate. |
+| **Materiale vuoto** | Tabella sorella `corsa_materiale_vuoto`. **Non importato dal PdE — generato dal nostro algoritmo di costruzione giro materiale**. Campo `origine` traccia la provenienza. |
+| **Multi-tenancy `azienda`** | **Strada A — campo da subito**. Default `'trenord'`, predisposto per SAD/Trenitalia/Tper futuri senza riscrittura. |
+| **Turno CT** | **Differito**. Base struttura simile al PdC con piccole varianti contrattuali. In v0 si modella solo PdC, il modello CT è un punto di estensione esplicito (§3b di questo doc). |
+| **Anagrafica persone** | Minimo solido (persona + assegnazione + indisponibilità). |
+| **Validità 12+ mesi con revisioni** | Aggiunta entità `revisione_turno`: lega un turno PdC o un giro materiale a una versione datata. Due "Turno 1100" con date diverse = revisioni dello stesso turno, non turni separati. |
 
 ---
 
@@ -23,23 +38,27 @@ LIV 1   CORSA COMMERCIALE          ← PdE (Programma di Esercizio)
         cosa fa l'azienda davanti al cliente
                   │
                   v
-LIV 2   ROTAZIONE MATERIALE        ← turno materiale Trenord
+LIV 2   GIRO MATERIALE        ← turno materiale Trenord
         come gira il convoglio fisico per coprire le corse
                   │
                   v
-LIV 3a  TURNO PdC      LIV 3b  TURNO CT
-        chi guida              chi viaggia accompagnando
-                  │                  │
-                  └────────┬─────────┘
-                           v
+LIV 3   TURNO PdC                  ← turno personale di macchina
+        chi guida                    [LIV 3b TURNO CT differito a v1]
+                  │
+                  v
 LIV 4   PERSONA + ASSEGNAZIONE
         anagrafica, qualifiche, sede, indisponibilità,
         chi-fa-quale-giornata-in-quale-data
-                           │
-                           v
+                  │
+                  v
 LIV 5   ESERCIZIO REAL-TIME        ← ARTURO Live
         cosa sta succedendo ORA, ritardi, soppressioni
 ```
+
+**Nota CT**: il LIV 3b (turno_ct) è strutturalmente parallelo al LIV 3a
+(turno_pdc) — stesso scheletro, normativa più leggera. Si modellerà in
+v1 quando definiamo le differenze contrattuali. La piramide è
+predisposta per accoglierlo senza riscritture.
 
 **Regola di propagazione**: ogni livello inferiore tiene un riferimento
 chiave al livello superiore. Mai dati copiati. Le viste/query
@@ -47,7 +66,7 @@ ricostruiscono il dato denormalizzato a richiesta.
 
 ---
 
-## 2. Le 5 entità principali
+## 2. Le 4 entità principali (v0)
 
 ### LIV 1 — `corsa_commerciale`
 
@@ -81,6 +100,8 @@ Laveno, partenza 06:39, feriale, da X dicembre 2025 a Y dicembre 2026").
 | treno_garantito_festivo | bool | PdE col[123] | |
 | fascia_oraria | enum | PdE col[42] | FR, FNR |
 | (giorni_per_mese) | embed | PdE col[98..113] | calendar nativo |
+| **valido_in_date** | json date[] | **derivato all'import** | **dec. #1**: lista completa date di circolazione, es. `["2025-12-14", "2025-12-15", ...]`. Query "circola il D?" = lookup, no calcolo |
+| azienda | string | default `'trenord'` | **dec. #3**: multi-tenancy |
 
 **Composizione materiale richiesta** (9 combinazioni
 stagione × giorno-tipo): `categoria_posti`, `doppia_composizione`,
@@ -92,11 +113,39 @@ con (corsa_id, stagione, giorno_tipo) come chiave.
 di chi la guida né di che convoglio fisico la realizza. Quelli sono
 LIV 2 e LIV 3.
 
+#### `corsa_materiale_vuoto` *(tabella sorella)*
+
+**Decisione #2**: i treni di servizio (numeri come `28183`, `93058`,
+`U316`) **non sono nel PdE** — sono corse di posizionamento del
+materiale fisico, generate dal nostro algoritmo di costruzione del giro
+materiale. Per non confonderli con le corse commerciali vivono in una
+tabella separata.
+
+| Attributo | Tipo | Esempio |
+|-----------|------|---------|
+| id | PK | |
+| numero_treno_vuoto | string | "U316", "28183", "93058" |
+| stazione_origine | string | "FIORENZA" |
+| stazione_destinazione | string | "MILANO BOVISA" |
+| ora_partenza | time | |
+| ora_arrivo | time | |
+| min_tratta | int | |
+| km_tratta | float | |
+| **origine** | enum | `importato_pde` (raro), `generato_da_giro_materiale` (default), `manuale` |
+| giro_materiale_id | FK? | popolato se generato per uno specifico giro |
+| valido_in_date | json date[] | derivato come per `corsa_commerciale` |
+| azienda | string | default `'trenord'` |
+
+L'algoritmo di costruzione giro materiale, quando deve spostare il
+convoglio dal punto A al punto B per coprire la corsa successiva,
+**inventa** un `corsa_materiale_vuoto` con `origine='generato_da_giro_materiale'`
+e lo collega al `giro_blocco` corrispondente.
+
 ---
 
-### LIV 2 — `rotazione_materiale`
+### LIV 2 — `giro_materiale`
 
-L'unità del **come gira il convoglio fisico**. Una rotazione = un
+L'unità del **come gira il convoglio fisico**. Un giro materiale = un
 ciclo ripetitivo di N giornate per un singolo tipo materiale.
 
 | Attributo | Tipo | Esempio |
@@ -121,7 +170,7 @@ una riga per ogni pezzo del materiale e quanti pezzi servono in totale
 per coprire la rotazione (es. Turno 1100 → 2× npBDL, 10× nBC-clim,
 2× E464N, perché 2 giornate × 1 convoglio).
 
-#### `rotazione_giornata`
+#### `giro_giornata`
 
 Una giornata del ciclo (1, 2, ..., N). Astratta: descrive "il giorno-
 tipo G", indipendente da quale data calendario lo realizza.
@@ -129,10 +178,10 @@ tipo G", indipendente da quale data calendario lo realizza.
 | Attributo | Tipo | Esempio |
 |-----------|------|---------|
 | id | PK | |
-| rotazione_id | FK → rotazione_materiale | |
+| rotazione_id | FK → giro_materiale | |
 | numero_giornata | int | 1, 2, ... |
 
-#### `rotazione_variante`
+#### `giro_variante`
 
 Per ogni giornata, una o più varianti con calendario di applicabilità
 (LV/SAB/DOM/festivi/date specifiche). Una variante = una sequenza
@@ -141,13 +190,13 @@ ordinata di blocchi (corsa commerciale o materiale-vuoto-interno).
 | Attributo | Tipo | Esempio |
 |-----------|------|---------|
 | id | PK | |
-| rotazione_giornata_id | FK | |
+| giro_giornata_id | FK | |
 | variant_index | int | 0, 1, 2, ... |
 | validita_testo | string | "LV 1:5 esclusi 2-3-4/3" |
 | validita_dates_apply | json date[] | derivata, denormalizzata |
 | validita_dates_skip | json date[] | derivata, denormalizzata |
 
-#### `rotazione_blocco`
+#### `giro_blocco`
 
 Un singolo elemento della sequenza giornaliera della variante.
 
@@ -219,7 +268,7 @@ treno Y, refezione, accessori, CV, ecc.
 | tipo_evento | enum | CONDOTTA, VETTURA, REFEZ, ACCp, ACCa, CVp, CVa, PK |
 | corsa_commerciale_id | FK? | se evento è su corsa nota (CONDOTTA/VETTURA) |
 | materiale_vuoto_id | FK? | se evento è su treno vuoto |
-| rotazione_blocco_id | FK? | denormalizzato per join veloce |
+| giro_blocco_id | FK? | denormalizzato per join veloce |
 | stazione_da | string | |
 | stazione_a | string | |
 | ora_inizio | time | |
@@ -228,28 +277,21 @@ treno Y, refezione, accessori, CV, ecc.
 
 **Vincolo critico**: un blocco PdC di tipo CONDOTTA o VETTURA su una
 corsa commerciale **deve coincidere temporalmente** con un
-`rotazione_blocco` che copre quella stessa corsa. È quello che chiude
+`giro_blocco` che copre quella stessa corsa. È quello che chiude
 il triangolo PdE → MATERIALE → PdC.
 
 ---
 
-### LIV 3b — `turno_ct` (nuovo)
+### LIV 3b — `turno_ct` *(differito a v1)*
 
-L'unità del **chi viaggia accompagnando come Capotreno**. Struttura
-parallela a `turno_pdc` ma con normativa diversa (più semplice: niente
-condotta-max, niente cambio volante; restano refezione, ore
-settimanali, riposi).
+**Decisione utente (v0.2)**: il modello CT è strutturalmente analogo a
+`turno_pdc` con normativa contrattuale più leggera (niente condotta-max,
+niente CV; restano refezione, ore settimanali, riposi). Verrà definito
+in fase v1, dopo la definizione precisa delle differenze contrattuali.
 
-| Attributo | Tipo | Esempio |
-|-----------|------|---------|
-| id | PK | |
-| codice | string | |
-| impianto | string | "MILANO PORTA GARIBALDI" |
-| ciclo_giorni | int | |
-| ... | ... | (analogo a turno_pdc, semplificato) |
-
-`turno_ct_giornata` e `turno_ct_blocco` analoghi a PdC, con vincoli
-allentati (no condotta_min, sì lavoro_min).
+In v0 quindi: nessuna tabella CT viene creata. Le tabelle PdC sono
+disegnate in modo da essere replicabili pari-pari per CT con campi
+opzionali (es. `condotta_min` nullable). Punto di estensione esplicito.
 
 ---
 
@@ -318,6 +360,42 @@ L'unica cosa che potremmo persistere è un `evento_eccezione` (es. "il
 treno 10603 del 25/04 era guidato da Mario Rossi al posto di Luigi
 Bianchi") quando la realtà devia dalla pianificazione. Ma è opzionale
 e va ragionato dopo.
+
+---
+
+### Entità trasversale — `revisione_turno`
+
+**Decisione #5 (validità 12+ mesi con revisioni)**: i turni materiali
+e i turni PdC vengono pubblicati con validità lunga (es. 14/12/2025 →
+12/12/2026), ma **all'interno di quella validità** subiscono revisioni
+periodiche (es. il PDF "Turno Materiale Trenord dal 2/3/26" è una
+revisione del turno principale 2025-2026).
+
+Due turni con stesso codice (es. due "Turno 1100") ma date depositata
+diverse **non sono turni separati**: sono **revisioni dello stesso
+turno**. Il modello deve riflettere questo.
+
+| Attributo | Tipo | Esempio |
+|-----------|------|---------|
+| id | PK | |
+| target_tipo | enum | `giro_materiale`, `turno_pdc` |
+| target_id | FK | id del giro o del turno PdC |
+| versione | int | 1, 2, 3... ordine cronologico |
+| data_deposito | date | "2026-02-25" (PDF "Depositata il 25/02/2026") |
+| valida_da | date | "2026-03-02" |
+| valida_a | date | "2026-12-12" o NULL se ultima |
+| source_file | string | path PDF originale |
+| imported_at | datetime | |
+| note | string | descrizione cambiamenti rispetto a precedente |
+
+**Regola**: per ogni `target` e per una qualsiasi data D, esiste **una
+sola** revisione attiva (quella con `valida_da ≤ D ≤ valida_a` o
+`valida_a IS NULL`). Le query "qual è il turno 1100 il 15/04/2026?"
+risolvono automaticamente alla revisione corretta.
+
+Quando arriva una nuova revisione: la precedente non viene cancellata,
+ma chiusa (`valida_a` settato al giorno prima della nuova `valida_da`).
+Storia preservata, query coerenti.
 
 ---
 
@@ -399,10 +477,10 @@ corsa_commerciale {
 }
 ```
 
-### Esempio 2 — rotazione materiale Turno 1100
+### Esempio 2 — giro materiale Turno 1100
 
 ```
-rotazione_materiale {
+giro_materiale {
   id: 100
   numero_turno: "1100"
   validita_codice: "P"
@@ -415,21 +493,21 @@ rotazione_materiale {
   azienda: "trenord"
 }
 
-rotazione_giornata { id: 200, rotazione_id: 100, numero_giornata: 1 }
-rotazione_giornata { id: 201, rotazione_id: 100, numero_giornata: 2 }
+giro_giornata { id: 200, rotazione_id: 100, numero_giornata: 1 }
+giro_giornata { id: 201, rotazione_id: 100, numero_giornata: 2 }
 
-rotazione_variante {
+giro_variante {
   id: 300
-  rotazione_giornata_id: 200
+  giro_giornata_id: 200
   variant_index: 0
   validita_testo: "LV 1:5 esclusi 2-3-4/3"
 }
 
-rotazione_blocco { variante_id: 300, seq: 1, tipo_blocco: "corsa_commerciale",
+giro_blocco { variante_id: 300, seq: 1, tipo_blocco: "corsa_commerciale",
                    corsa_commerciale_id: <treno 10606>, ... }
-rotazione_blocco { variante_id: 300, seq: 2, tipo_blocco: "corsa_commerciale",
+giro_blocco { variante_id: 300, seq: 2, tipo_blocco: "corsa_commerciale",
                    corsa_commerciale_id: <treno 10603>, ... }
-rotazione_blocco { variante_id: 300, seq: 3, tipo_blocco: "corsa_commerciale",
+giro_blocco { variante_id: 300, seq: 3, tipo_blocco: "corsa_commerciale",
                    corsa_commerciale_id: <treno 10610>, ... }
 ...
 ```
@@ -464,7 +542,7 @@ turno_pdc_blocco { giornata_id: 60, seq: 8, tipo_evento: "CVa",
 ```
 
 Tutti i blocchi su corse commerciali condividono la **stessa**
-`corsa_commerciale_id` con il `rotazione_blocco` corrispondente nel
+`corsa_commerciale_id` con il `giro_blocco` corrispondente nel
 turno materiale che fisicamente fa quel treno. Triangolo chiuso.
 
 ### Esempio 4 — assegnazione persona a giornata
@@ -495,9 +573,9 @@ join con `turno_pdc_blocco` su `corsa_commerciale_id` → Mario Rossi.
 
 | Componente attuale | Destino |
 |--------------------|---------|
-| `material_turn` table | Diventa `rotazione_materiale` (estesa) |
-| `train_segment` table | Si **scompone** in `corsa_commerciale` (la parte commerciale) + `rotazione_blocco` (la parte di sequenza) |
-| `day_variant` table | Diventa `rotazione_variante` |
+| `material_turn` table | Diventa `giro_materiale` (estesa) |
+| `train_segment` table | Si **scompone** in `corsa_commerciale` (la parte commerciale) + `giro_blocco` (la parte di sequenza) |
+| `day_variant` table | Diventa `giro_variante` |
 | `pdc_turn` + `pdc_turn_day` + `pdc_block` | Restano, rinominati a `turno_pdc*` (italiano), arricchiti con FK a `corsa_commerciale` |
 | `pdc_train_periodicity` | Deprecato — la periodicità sta nella `corsa_commerciale` |
 | `train_route_cache` | Resta come cache ARTURO Live |
@@ -522,7 +600,7 @@ salute del DB.
 
 1. **Triangolo chiuso**: per ogni `turno_pdc_blocco` di tipo
    CONDOTTA/VETTURA con `corsa_commerciale_id` valorizzato, esiste un
-   `rotazione_blocco` con la stessa `corsa_commerciale_id` la cui
+   `giro_blocco` con la stessa `corsa_commerciale_id` la cui
    variante calendario sovrappone quella del PdC.
 2. **Coerenza temporale**: ora_inizio/fine di un blocco PdC su una
    corsa = ora_partenza/arrivo della corsa stessa (tolleranza ±1 min
@@ -532,9 +610,9 @@ salute del DB.
 4. **Indisponibilità rispettate**: se persona X ha
    `indisponibilita_persona` approvata su data D, non può avere
    `assegnazione_giornata` su D.
-5. **Stessa azienda**: una `rotazione_materiale` può consumare solo
+5. **Stessa azienda**: una `giro_materiale` può consumare solo
    `corsa_commerciale` della stessa `azienda`. Un `turno_pdc` può
-   coprire solo `rotazione_materiale` della stessa `azienda`.
+   coprire solo `giro_materiale` della stessa `azienda`.
 
 ---
 
@@ -557,33 +635,29 @@ Esplicito, per evitare scope creep:
 
 ---
 
-## 8. Cosa decidere prima di passare al codice
+## 8. Decisioni risolte (v0.2)
 
-Domande aperte da risolvere con l'utente leggendo questo doc:
+Tutte le domande aperte di v0.1 sono state risolte dall'utente il
+2026-04-25. Riepilogo per riferimento storico:
 
-1. **Granularità periodicità corsa**: tenerla come testo + array di
-   date denormalizzato (semplice, calcolabile da `Gg_*` mensili)?
-   Oppure normalizzarla con regole ricorrenti (DSL tipo cron)?
-   → Proposta: **denormalizzata in `validita_dates_apply` JSON**.
-   Calcoliamo una volta all'import, query semplici dopo.
-2. **Materiale vuoto**: nel PdE non c'è. Va in tabella separata
-   `corsa_materiale_vuoto` (sorella di `corsa_commerciale`) o come
-   tipo enumerato dentro `corsa_commerciale`?
-   → Proposta: **tabella sorella**, perché ha attributi diversi
-   (no posti, no biglietto).
-3. **Multi-tenancy ora o dopo**: introduciamo `azienda` da subito o
-   solo Trenord per semplicità v1?
-   → Proposta: **`azienda` da subito come campo, default 'trenord'**.
-   Costo zero ora, riscrittura zero dopo.
-4. **Turno CT v0**: lo introduciamo già nel modello o lo aggiungiamo
-   in fase 2?
-   → Proposta: **già nel modello** (giusto le tabelle vuote), così
-   l'API e le viste lo prevedono. Implementazione effettiva può
-   slittare.
-5. **Persone/assegnazioni v0**: quanto in dettaglio? Solo anagrafica
-   minima o anche turni festivi/notturni separati?
-   → Proposta: **minimo solido** (persona + assegnazione +
-   indisponibilità). Tutto il resto viene dopo.
+1. **Granularità periodicità corsa**: ✅ **Strada A** — denormalizzata
+   in `valido_in_date` JSON. All'import del PdE si calcola la lista
+   completa di date di circolazione per ogni corsa, query SI/NO
+   immediate.
+2. **Materiale vuoto**: ✅ **Tabella sorella** `corsa_materiale_vuoto`,
+   con campo `origine` per distinguere `importato_pde` (raro) vs
+   `generato_da_giro_materiale` (default — l'algoritmo li inventa).
+3. **Multi-tenancy `azienda`**: ✅ **Strada A** — campo da subito su
+   ogni tabella, default `'trenord'`.
+4. **Turno CT**: ⏸️ **Differito a v1**. In v0 si modella solo `turno_pdc`
+   con campi disegnati per essere replicabili (es. `condotta_min`
+   nullable). Punto di estensione esplicito in §LIV 3b.
+5. **Persone/assegnazioni**: ✅ **Minimo solido** — `persona` +
+   `assegnazione_giornata` + `indisponibilita_persona`, niente di più
+   in v0.
+
+**Aggiunta v0.2**: entità trasversale `revisione_turno` per gestire la
+validità lunga (12+ mesi) con revisioni interne — vedi §LIV 5+.
 
 ---
 
