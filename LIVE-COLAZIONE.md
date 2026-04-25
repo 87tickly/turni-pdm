@@ -4,6 +4,62 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-25 — docs/MODELLO-DATI.md draft v0.1 (architettura ecosistema integrato)
+
+### Contesto
+
+Utente ha allegato due file fondamentali:
+1. PdE Numbers (`All.1A5_14dic2025-12dic2026_TRENI e BUS_Rev5_RL.numbers`)
+   — 10580 corse commerciali × 124 colonne, fonte autorevole Trenord
+2. PDF "Turno Materiale Trenord dal 2/3/26" (353 pagine, 54 turni)
+   — esempio di come Trenord oggi struttura il giro materiale
+
+Richiesta: progettare un ecosistema integrato che copra
+**Offerta Commerciale → Giro Materiale → Turno PdC + CT → Personale**,
+nativo dentro ARTURO × Trenord. Eventuale riscrittura accettata.
+
+### Decisione architetturale
+
+**No riscrittura totale.** Il valore del codice esistente (parser PDF
+Gantt, TurnValidator §11.8/§4.1/§9.2, cv_registry, builder normativa-
+first, frontend Gantt) resta. Cambia il **modello dati sottostante**:
+oggi centrato su `train_segment` derivato da PDF, domani centrato su
+una piramide a 5 livelli con propagazione discendente.
+
+### Modifiche
+
+**Nuovo `docs/MODELLO-DATI.md` (draft v0.1)**:
+- Filosofia piramide: LIV 1 corsa_commerciale → LIV 2 rotazione_materiale
+  → LIV 3a/3b turno_pdc/turno_ct → LIV 4 persona+assegnazione →
+  LIV 5 ARTURO Live (no persistenza, solo consumo).
+- 12 entità principali con campi, tipi, sorgenti dato (PdE col[X]).
+- 4 esempi reali pescati dai dati esistenti (corsa 10603, Turno 1100,
+  ALOR_C G2 LMXGV, assegnazione persona).
+- Tabella sopravvivenza codice attuale: cosa diventa cosa, cosa resta,
+  cosa si deprecata.
+- 5 vincoli di consistenza chiave (triangolo PdE-MAT-PdC chiuso,
+  coerenza temporale, una persona-una giornata, indisponibilità
+  rispettate, stessa azienda).
+- Scope esplicito: cosa NON è nel modello (ritardi storici, audit,
+  manutenzione, biglietteria).
+- 5 domande aperte da decidere con l'utente (granularità periodicità,
+  materiale vuoto, multi-tenancy, CT v0, anagrafica v0) con proposta
+  di default per ciascuna.
+
+### Stato
+
+- Solo documentazione. Zero codice, zero migrazioni, zero impatto sul
+  resto del progetto.
+- Da revisionare con l'utente. Quando il modello regge → si scrive
+  `docs/MIGRAZIONE-DATI.md`. Solo dopo si tocca DB.
+
+### Prossimo step
+
+Attesa feedback utente sul documento. In particolare sulle 5 domande
+aperte di §8 (decisioni di scoping).
+
+---
+
 ## 2026-04-24 — Builder "normativa-first" collegato a /auto-genera
 
 ### Contesto
