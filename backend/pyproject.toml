@@ -13,9 +13,10 @@ dependencies = [
     "uvicorn[standard]>=0.30",
 
     # DB
-    "sqlalchemy>=2.0",
+    "sqlalchemy[asyncio]>=2.0",
     "alembic>=1.13",
     "psycopg[binary]>=3.2",
+    "greenlet>=3.0",  # async SQLAlchemy
 
     # Validation / config
     "pydantic>=2.7",

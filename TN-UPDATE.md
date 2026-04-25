@@ -10,6 +10,60 @@
 
 ---
 
+## 2026-04-26 — FASE D Sprint 1.3: db.py async + Postgres in CI
+
+### Contesto
+
+Inizio Sprint 1 (backend reale). Utente ha installato Docker Desktop
+(v29.4.0) → Postgres 16.13 ora gira su localhost:5432 via
+`docker compose up -d db`.
+
+Sprint 1.3 del PIANO-MVP: layer DB async SQLAlchemy.
+
+### Modifiche
+
+**Nuovo `backend/src/colazione/db.py`**:
+- `Base(DeclarativeBase)`: classe base ORM
+- `get_engine()`: singleton lazy `AsyncEngine` con `pool_pre_ping`
+- `get_session_factory()`: `async_sessionmaker`
+- `session_scope()`: context manager async per script standalone
+  (auto commit/rollback)
+- `get_session()`: FastAPI dependency yields sessione per request
+- `dispose_engine()`: cleanup al shutdown
+
+**`pyproject.toml`**: deps DB rinforzate
+- `sqlalchemy[asyncio]>=2.0` (era plain `sqlalchemy>=2.0`)
+- `greenlet>=3.0` esplicito (richiesto per async SQLAlchemy)
+
+**`backend/tests/test_db.py`**: 2 smoke test
+- `test_db_connection_returns_one`: SELECT 1
+- `test_db_postgres_version`: server_version_num >= 160000
+- Skip automatico se `SKIP_DB_TESTS=1` env var
+
+**`.github/workflows/backend-ci.yml`**: aggiunto service Postgres 16
+- `services.postgres` con healthcheck
+- env `DATABASE_URL` puntata a `localhost:5432`
+- I test DB ora girano anche in CI
+
+### Verifiche locali
+
+- Postgres 16.13 healthy via Docker (5432 esposta)
+- `pytest`: **5/5 passati** (3 main.py + 2 db)
+- `ruff check`: All checks passed
+- `ruff format --check`: 17 files formatted
+- `mypy src/colazione`: no issues 14 source files
+
+### Stato
+
+Sprint 1.3 completo. Postgres locale in funzione, layer DB async
+testato.
+
+### Prossimo step
+
+Sprint 1.4: Alembic setup (`alembic.ini` + `env.py` async + script.py.mako).
+
+---
+
 ## 2026-04-25 (14) — FASE D Sprint 0.5: README.md (Sprint 0 COMPLETATA)
 
 ### Contesto

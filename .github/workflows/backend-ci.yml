@@ -21,6 +21,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: colazione
+          POSTGRES_PASSWORD: colazione
+          POSTGRES_DB: colazione
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U colazione -d colazione"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg://colazione:colazione@localhost:5432/colazione
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,5 +65,5 @@ jobs:
       - name: Mypy strict
         run: uv run mypy src/colazione
 
-      - name: Pytest
+      - name: Pytest (with DB)
         run: uv run pytest --cov=src/colazione --cov-report=term-missing
