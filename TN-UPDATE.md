@@ -10,6 +10,61 @@
 
 ---
 
+## 2026-04-25 (12) — FASE D Sprint 0.3: docker-compose.yml
+
+### Contesto
+
+Sprint 0.3 del PIANO-MVP §2: orchestrazione 3 container (Postgres + backend
++ frontend) per dev locale.
+
+### Modifiche
+
+**Nuovo `docker-compose.yml`** (alla root):
+- Service `db`: `postgres:16-alpine`, healthcheck `pg_isready`,
+  volume nominato `colazione_pgdata`, porta 5432
+- Service `backend`: build da `./backend/Dockerfile`, env DATABASE_URL
+  pointing a `db:5432`, porta 8000, volumi montati per hot reload
+  (src, tests, alembic), command override con `--reload --app-dir src`
+- Service `frontend`: build da `./frontend/Dockerfile`, env
+  `VITE_API_BASE_URL=http://localhost:8000`, porta 5173, volumi
+  montati per hot reload (src, public, index.html)
+- Dependency chain: frontend → backend → db (con `service_healthy`)
+
+**`.gitignore`**: aggiunto `*.tsbuildinfo` (escludi cache TypeScript
+incremental build, era trapelata in Sprint 0.2). Untracked
+`frontend/tsconfig.app.tsbuildinfo` e `frontend/tsconfig.node.tsbuildinfo`.
+
+### Verifiche
+
+- Docker non installato sul sistema utente → impossibile
+  `docker compose up` o `docker compose config`
+- **Validato YAML manualmente** con PyYAML: 3 servizi (db, backend,
+  frontend), 1 volume nominato (colazione_pgdata), porte 5432/8000/5173.
+  Struttura coerente con STACK-TECNICO.md §7
+
+### TODO post-Docker-install (sistema utente)
+
+Quando l'utente installa Docker Desktop o OrbStack:
+1. `docker compose config` → valida la sintassi con compose engine
+2. `docker compose up -d db` → verifica Postgres parte (healthcheck OK)
+3. `docker compose up backend` → verifica build + uvicorn risponde su :8000/health
+4. `docker compose up frontend` → verifica Vite dev su :5173, app
+   contatta backend
+5. `docker compose down -v` → pulizia (cancella anche volume DB)
+
+### Stato
+
+Sprint 0.3 file committato. Verifica funzionale rinviata a quando
+Docker sarà disponibile.
+
+### Prossimo step
+
+Sprint 0.4: GitHub Actions CI per backend + frontend. La CI gira su
+container Linux puliti (no quirk path iCloud), quindi sarà la prima
+verifica end-to-end "ufficiale" che lo skeleton funziona.
+
+---
+
 ## 2026-04-25 (11) — FASE D Sprint 0.2: frontend skeleton
 
 ### Contesto

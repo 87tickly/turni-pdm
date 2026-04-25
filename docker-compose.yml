@@ -1,0 +1,89 @@
+# =====================================================================
+# docker-compose.yml — ambiente dev locale (3 servizi)
+#
+# Usage:
+#   docker compose up -d db                # solo Postgres
+#   docker compose up backend frontend      # backend + frontend
+#   docker compose up                       # tutto
+#   docker compose down                     # ferma tutto
+#   docker compose down -v                  # ferma + cancella volumi (RESET DB)
+#
+# Prerequisiti: Docker Desktop o OrbStack installato.
+# Vedi docs/STACK-TECNICO.md §7 per il riferimento di questo file.
+# =====================================================================
+
+services:
+  # -------------------------------------------------------------------
+  # Postgres 16 — database principale
+  # -------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: colazione_db
+    environment:
+      POSTGRES_USER: colazione
+      POSTGRES_PASSWORD: colazione
+      POSTGRES_DB: colazione
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - colazione_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U colazione -d colazione"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # -------------------------------------------------------------------
+  # Backend FastAPI — Python 3.12 + uv
+  # -------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: colazione_backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://colazione:colazione@db:5432/colazione
+      JWT_SECRET: dev-secret-change-me-min-32-characters-long
+      CORS_ALLOW_ORIGINS: http://localhost:5173
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      # Hot reload: src e tests montati dal repo. .venv resta nell'immagine.
+      - ./backend/src:/app/src
+      - ./backend/tests:/app/tests
+      - ./backend/alembic:/app/alembic
+      - ./data:/app/data:ro
+    # Dev: uvicorn con reload (override del CMD del Dockerfile)
+    command: ["uvicorn", "colazione.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--app-dir", "src"]
+
+  # -------------------------------------------------------------------
+  # Frontend React/Vite — Node 20 + pnpm
+  # -------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: colazione_frontend
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    volumes:
+      # Hot reload: source montato. node_modules resta nell'immagine.
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/index.html:/app/index.html
+
+# =====================================================================
+# Volumi nominati (persistenti tra docker compose down/up)
+# =====================================================================
+volumes:
+  colazione_pgdata:
+    name: colazione_pgdata
