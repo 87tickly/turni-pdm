@@ -10,6 +10,65 @@
 
 ---
 
+## 2026-04-25 (7) — FASE C doc 5: SCHEMA-DATI-NATIVO.md (DDL eseguibile)
+
+### Contesto
+
+Materializzazione di MODELLO-DATI v0.5 in DDL SQL eseguibile per
+Postgres 16. Specifica per la prima migrazione Alembic
+(0001_initial_schema.py).
+
+### Modifiche
+
+**Nuovo `docs/SCHEMA-DATI-NATIVO.md` v0.1** (~700 righe):
+
+- §1 Convenzioni (naming, tipi, FK, indici)
+- §2 Estensioni Postgres (pg_trgm)
+- §3-§9 Schema in 7 strati con CREATE TABLE eseguibili:
+  - Strato 0 anagrafica: azienda, stazione, materiale_tipo,
+    localita_manutenzione, dotazione, depot, depot_linea_abilitata,
+    depot_materiale_abilitato (8 tabelle)
+  - Strato 1 corse LIV 1: corsa_commerciale, corsa_composizione,
+    corsa_materiale_vuoto, corsa_import_run (4 tabelle)
+  - Strato 2 giro LIV 2: giro_materiale, versione_base_giro,
+    giro_finestra_validita, giro_giornata, giro_variante,
+    giro_blocco (6 tabelle)
+  - Strato 2bis revisioni: revisione_provvisoria,
+    revisione_provvisoria_blocco, revisione_provvisoria_pdc (3 tabelle)
+  - Strato 3 turno PdC LIV 3: turno_pdc, turno_pdc_giornata,
+    turno_pdc_blocco (3 tabelle)
+  - Strato 4 personale LIV 4: persona, assegnazione_giornata,
+    indisponibilita_persona (3 tabelle)
+  - Strato 5 auth/audit: app_user, app_user_ruolo, notifica,
+    audit_log (4 tabelle)
+
+Totale **31 tabelle**.
+
+- §10 Indici secondari (FK, query frequenti, GIN su JSONB e trigram
+  per cognome/nome persona)
+- §11 5 vincoli consistenza come query SQL eseguibili (per test
+  integrazione)
+- §12 Seed iniziale Trenord:
+  - 1 azienda Trenord con normativa_pdc_json completa
+  - 7 localita_manutenzione (FIORENZA, NOVATE, CAMNAGO, LECCO,
+    CREMONA, ISEO, POOL_TILO_SVIZZERA)
+  - 25 depot Trenord (NORMATIVA §2.1)
+- §13 Riepilogo numerico (record stimati: ~256k record totali in
+  produzione Trenord)
+
+### Stato
+
+- DDL pronto per migrazione Alembic.
+- 5 vincoli consistenza pronti per test integrazione.
+- Seed Trenord pronti per popolamento iniziale.
+
+### Prossimo step
+
+`docs/IMPORT-PDE.md` (doc 6): come si legge PdE Numbers/Excel,
+mapping colonne, calcolo valido_in_date denormalizzato, idempotenza.
+
+---
+
 ## 2026-04-25 (6) — FASE C doc 4: LOGICA-COSTRUZIONE.md
 
 ### Contesto
