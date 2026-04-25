@@ -10,6 +10,69 @@
 
 ---
 
+## 2026-04-26 (3) — FASE D Sprint 1.5: Migrazione 0001 (31 tabelle)
+
+### Contesto
+
+Sprint 1.5 del PIANO-MVP: il pezzo grosso. Materializza
+SCHEMA-DATI-NATIVO.md in DDL eseguibile via Alembic.
+
+### Modifiche
+
+**`alembic.ini`**: post-write hook ruff_format cambiato da
+`type=console_scripts` (non funziona con uv) a `type=exec` con
+`executable=ruff`. Ora i file di migrazione generati sono auto-formattati.
+
+**Nuovo `backend/alembic/versions/0001_initial_schema.py`** (~600 righe):
+
+`upgrade()`:
+- Estensione `pg_trgm`
+- **Strato 0** (8 tabelle anagrafica): azienda, stazione,
+  materiale_tipo, localita_manutenzione +dotazione, depot
+  +linea_abilitata +materiale_abilitato
+- **Strato 1** (4 tabelle LIV 1): corsa_import_run,
+  corsa_commerciale, corsa_composizione, corsa_materiale_vuoto
+- **Strato 2** (6 tabelle LIV 2): giro_materiale, versione_base_giro,
+  giro_finestra_validita, giro_giornata, giro_variante, giro_blocco
+- **Strato 2bis** (3 tabelle revisioni): revisione_provvisoria,
+  revisione_provvisoria_blocco, revisione_provvisoria_pdc
+- **Strato 3** (3 tabelle LIV 3): turno_pdc, turno_pdc_giornata,
+  turno_pdc_blocco
+- **Strato 4** (3 tabelle LIV 4): persona, assegnazione_giornata,
+  indisponibilita_persona
+- **Strato 5** (4 tabelle auth+audit): app_user, app_user_ruolo,
+  notifica, audit_log
+- FK cross-table risolte con ALTER (corsa_materiale_vuoto.giro_materiale_id,
+  persona.user_id, indisponibilita_persona.approvato_da_user_id)
+- ~30 indici secondari (FK, query frequenti, GIN su JSONB e trigram
+  per persona.cognome/nome)
+
+**Totale 31 tabelle** + `alembic_version` di Alembic = 32.
+
+`downgrade()`: drop di tutto in ordine inverso, FK cross-table prima,
+poi tabelle CASCADE. Ripristina DB pulito.
+
+### Verifiche locali
+
+- `alembic upgrade head`: 32 tabelle create (verificato con `\dt` +
+  `SELECT COUNT(*) FROM information_schema.tables`)
+- `alembic downgrade base`: torna a 1 tabella (alembic_version)
+- `alembic upgrade head` (di nuovo): di nuovo 32 → **idempotente**
+- `pytest`: 5/5 verdi
+- `ruff/format/mypy`: tutti verdi
+
+### Stato
+
+Sprint 1.5 completo. DB Postgres ha schema completo del modello v0.5,
+testato roundtrip up/down/up.
+
+### Prossimo step
+
+Sprint 1.6: migrazione `0002_seed_trenord.py` con 1 azienda + 7
+località manutenzione + 25 depot + dotazione iniziale dal seed JSON.
+
+---
+
 ## 2026-04-26 (2) — FASE D Sprint 1.4: Alembic setup async
 
 ### Contesto
