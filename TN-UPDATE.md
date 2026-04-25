@@ -10,6 +10,88 @@
 
 ---
 
+## 2026-04-25 (11) — FASE D Sprint 0.2: frontend skeleton
+
+### Contesto
+
+Sprint 0.2 del PIANO-MVP §2: scaffolding frontend React+TypeScript+
+Vite+Tailwind. Niente template `npm create vite` (interattivo) — file
+scritti a mano per controllo esplicito.
+
+### Modifiche
+
+**pnpm 10.33.2 installato** via `npm install -g pnpm` (corepack non
+disponibile sul sistema utente).
+
+**Nuovo `frontend/`**:
+- `package.json`: deps React 18, react-router-dom, TanStack Query,
+  Radix primitives (dialog, dropdown, popover, toast, slot), Tailwind
+  3, lucide-react, class-variance-authority, clsx, tailwind-merge.
+  Dev deps: TypeScript 5.7, ESLint 9 flat config, Prettier 3 +
+  prettier-plugin-tailwindcss, Vitest 2 + @testing-library/react +
+  jsdom, Vite 5.4 (compatibile Vitest 2)
+- `tsconfig.json` + `tsconfig.app.json` + `tsconfig.node.json`:
+  TypeScript strict, path alias `@/*` → `src/*`, target ES2022
+- `vite.config.ts`: import da `vitest/config` per supportare campo
+  `test`. Plugin React, alias `@`, server porta 5173
+- `tailwind.config.ts`: palette base shadcn (background, foreground,
+  primary, secondary, muted, accent, destructive)
+- `postcss.config.js`: tailwindcss + autoprefixer
+- `eslint.config.js`: flat config con typescript-eslint + react-hooks
+  + react-refresh
+- `.prettierrc.json`: semi true, double quotes, plugin Tailwind
+- `.prettierignore`: dist/, node_modules/, lockfile
+- `.env.example`: VITE_API_BASE_URL=http://localhost:8000
+- `.nvmrc`: node 20
+- `Dockerfile`: node:20-alpine + corepack + pnpm install
+- `.dockerignore`
+
+**`frontend/src/`**:
+- `main.tsx`: createRoot + StrictMode + import App
+- `App.tsx`: skeleton con titolo "Colazione" + sottotitolo Sprint
+  0.2 + smoke test connessione backend (fetch `/health`)
+- `index.css`: Tailwind directives + reset minimo body
+- `lib/utils.ts`: helper shadcn `cn()` (clsx + tailwind-merge)
+- `test/setup.ts`: import `@testing-library/jest-dom/vitest`
+- `App.test.tsx`: 2 test smoke (titolo, sottotitolo Sprint)
+
+**Cartelle vuote** create per moduli futuri:
+- `components/ui/` (shadcn add per componente)
+- `components/domain/` (componenti dominio)
+- `routes/` (1 cartella per ruolo, vedi RUOLI-E-DASHBOARD.md)
+- `hooks/` (TanStack Query hooks)
+
+### Verifiche
+
+- `pnpm install`: deps installate
+- `pnpm typecheck`: no errori
+- `pnpm lint`: no errori
+- `pnpm test`: **2/2 test passati**
+- `pnpm format:check`: All matched files use Prettier code style
+- `pnpm build`: dist generato, **143 KB JS gzipped 46 KB**
+
+### Quirk risolti durante setup
+
+1. `defineConfig` da `vite` non supporta campo `test` → cambiato a
+   import `from "vitest/config"`.
+2. Vite 6 incompatibile con Vitest 2 (mismatch tipi PluginOption) →
+   declassato Vite a `^5.4.0`.
+3. ESLint 9 flat config richiede `@eslint/js` come dipendenza
+   esplicita → aggiunta a devDependencies.
+
+### Stato
+
+Sprint 0.2 completo. Frontend skeleton pronto, smoke test backend
+nella UI (mostrerà "non raggiungibile" se backend non gira).
+
+### Prossimo step
+
+Sprint 0.3: `docker-compose.yml` (Postgres + backend + frontend).
+**Richiede installazione Docker Desktop o OrbStack** sul sistema
+utente. Suggerisco di chiedere all'utente prima di procedere.
+
+---
+
 ## 2026-04-25 (10) — FASE D Sprint 0.1: backend skeleton
 
 ### Contesto
