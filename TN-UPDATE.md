@@ -10,6 +10,51 @@
 
 ---
 
+## 2026-04-26 (2) — FASE D Sprint 1.4: Alembic setup async
+
+### Contesto
+
+Sprint 1.4 del PIANO-MVP: setup Alembic con env.py async-compatible.
+Ancora niente migrazioni reali (quelle in 1.5).
+
+### Modifiche
+
+**`backend/alembic.ini`**:
+- `script_location = alembic`
+- `prepend_sys_path = src` (per import `colazione`)
+- `file_template` con timestamp + slug per nomi file ordinati cronologicamente
+- `sqlalchemy.url` vuoto (settato runtime da env in env.py)
+- Post-write hook `ruff_format` (auto-format dei file generati)
+
+**`backend/alembic/env.py`** (async support):
+- Override `sqlalchemy.url` con `settings.database_url`
+- `target_metadata = Base.metadata` (vuoto in v0, popolato in 1.7)
+- `run_migrations_offline()` per modalità offline
+- `run_async_migrations()` con `async_engine_from_config` + `connection.run_sync(do_run_migrations)`
+- `compare_type=True`, `compare_server_default=True` per autogenerate accurato
+
+**`backend/alembic/script.py.mako`**: template moderno con type hints
+(`Sequence`, `str | None`).
+
+### Verifiche
+
+- `alembic current`: connessione DB OK, output pulito
+- `alembic upgrade head`: no-op (nessuna migrazione presente, ok)
+- `alembic history`: vuoto
+- `pytest`: 5/5 passati
+- `ruff`/`mypy`: tutti verdi
+
+### Stato
+
+Sprint 1.4 completo. Alembic pronto per accogliere migrazioni.
+
+### Prossimo step
+
+Sprint 1.5: migrazione `0001_initial_schema.py` con tutte le 31
+tabelle da SCHEMA-DATI-NATIVO.md. È il pezzo grosso (~1000 righe SQL).
+
+---
+
 ## 2026-04-26 — FASE D Sprint 1.3: db.py async + Postgres in CI
 
 ### Contesto
