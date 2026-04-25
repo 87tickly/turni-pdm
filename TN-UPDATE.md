@@ -10,6 +10,112 @@
 
 ---
 
+## 2026-04-26 (5) — FASE D Sprint 1.7: Modelli SQLAlchemy ORM
+
+### Contesto
+
+Sprint 1.7 del PIANO-MVP: mappare le 31 tabelle create dalle
+migrazioni 0001/0002 in classi SQLAlchemy ORM, in modo che il backend
+possa usarle via session async.
+
+### Decisione layout (deviazione dal PIANO-MVP)
+
+PIANO-MVP §2 step 1.7 dice "(1 file per entità)" → 31 file. Ho
+optato per **1 file per strato (7 file)**:
+- evita 31 file da 10-20 righe (boilerplate × 7)
+- entità dello stesso strato sono fortemente correlate (es. `giro_*`
+  o `turno_pdc_*`)
+- pattern standard nei progetti SQLAlchemy seri
+- la docstring di `db.py` (Sprint 1.3) è stata aggiornata di
+  conseguenza
+
+Le 31 classi restano tutte importabili da `colazione.models`.
+
+### Modifiche
+
+**Nuovo `backend/src/colazione/models/` (7 file)**:
+
+- `anagrafica.py` (Strato 0, 8 classi): Azienda, Stazione,
+  MaterialeTipo, LocalitaManutenzione, LocalitaManutenzioneDotazione,
+  Depot, DepotLineaAbilitata, DepotMaterialeAbilitato
+- `corse.py` (Strato 1, 4 classi): CorsaImportRun, CorsaCommerciale
+  (la più grossa, ~30 colonne), CorsaComposizione, CorsaMaterialeVuoto
+- `giri.py` (Strato 2, 6 classi): GiroMateriale, VersioneBaseGiro,
+  GiroFinestraValidita, GiroGiornata, GiroVariante, GiroBlocco
+- `revisioni.py` (Strato 2bis, 3 classi): RevisioneProvvisoria,
+  RevisioneProvvisoriaBlocco, RevisioneProvvisoriaPdc
+- `turni_pdc.py` (Strato 3, 3 classi): TurnoPdc, TurnoPdcGiornata,
+  TurnoPdcBlocco
+- `personale.py` (Strato 4, 3 classi): Persona, AssegnazioneGiornata,
+  IndisponibilitaPersona
+- `auth.py` (Strato 5, 4 classi): AppUser, AppUserRuolo, Notifica,
+  AuditLog
+
+**`models/__init__.py`**: importa e ri-esporta tutte le 31 classi
+(elenco esplicito in `__all__`, ordinato per strato).
+
+**Stile SQLAlchemy 2.0 moderno**:
+- `Mapped[T]` + `mapped_column()` per type safety
+- `Mapped[dict[str, Any]]` / `Mapped[list[Any]]` per JSONB
+  (mypy strict richiede tipi parametrizzati)
+- `Mapped[X | None]` per nullable
+- `BigInteger`, `String(N)`, `Text`, `Boolean`, `Integer`,
+  `Date`, `Time`, `DateTime(timezone=True)`, `Numeric(p,s)` per i
+  tipi DB
+- `JSONB` da `sqlalchemy.dialects.postgresql`, `INET` per audit IP
+- `server_default=func.now()` per `created_at`/`updated_at`
+- `default=dict` / `default=list` per JSONB Python-side default
+
+**Cosa NON è incluso** (intenzionalmente, per minimalismo):
+- CHECK constraint (sono in DB, validazione DB-side)
+- UNIQUE multi-colonna come `__table_args__` (sono in DB)
+- Indici secondari (sono in DB)
+- `relationship()` (verrà aggiunto in Sprint 4 quando le route ne
+  avranno bisogno)
+
+L'ORM è "specchio della struttura DB" minimale. L'autorità del
+schema resta nelle migrazioni Alembic, non nei modelli.
+
+**Aggiornato `backend/src/colazione/db.py`**: docstring di `Base`
+allineata al nuovo layout per-strato.
+
+### Test
+
+**Nuovo `backend/tests/test_models.py`** (3 test):
+- `test_models_register_on_metadata`: 31 tabelle su `Base.metadata`
+- `test_models_all_exported`: `__all__` contiene 31 nomi e tutti
+  importabili
+- `test_models_match_db_tables`: `__tablename__` ORM matchano le
+  tabelle reali in `pg_tables` (skippato se DB non configurato)
+
+### Verifiche
+
+- `python -c "from colazione.models import *"` → 31 classi importate
+  senza errori
+- `Base.metadata.tables` → 31 tabelle, nomi tutti coerenti con DB
+  (verificato anche via query `pg_tables`)
+- `pytest`: **8/8 verdi** (era 5/5, +3 nuovi su modelli)
+- `ruff check`: All checks passed
+- `ruff format`: 26 files formatted
+- `mypy src/colazione`: no issues found in **21 source files**
+  (era 14 prima, +7 nuovi: 7 modelli)
+
+### Stato
+
+Sprint 1.7 completo. Backend ha schema DB completo + dati seed +
+modelli ORM tutti registrati su `Base.metadata`. Pronto per scrivere
+schemas Pydantic (Sprint 1.8) e poi gli endpoint API.
+
+### Prossimo step
+
+Sprint 1.8 del PIANO-MVP: schemas Pydantic in
+`backend/src/colazione/schemas/` per serializzazione I/O API. Naming
+convention `<Entita>Read`, `<Entita>Create`, `<Entita>Update` (vedi
+PIANO-MVP §2 step 1.8). Tipico parsing con `from_attributes=True` per
+costruire da modello ORM.
+
+---
+
 ## 2026-04-26 (4) — FASE D Sprint 1.6: Migrazione 0002 seed Trenord
 
 ### Contesto

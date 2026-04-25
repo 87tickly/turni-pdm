@@ -24,8 +24,8 @@ from colazione.config import get_settings
 class Base(DeclarativeBase):
     """Base ORM dichiarativa. Tutti i modelli ereditano da qui.
 
-    I modelli vivono in `colazione/models/` (uno per entità, vedi
-    Sprint 1.7).
+    I modelli vivono in `colazione/models/`, organizzati per strato
+    del modello dati v0.5 (Sprint 1.7).
     """
 
 
