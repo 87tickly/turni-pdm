@@ -10,6 +10,77 @@
 
 ---
 
+## 2026-04-25 (6) — FASE C doc 4: LOGICA-COSTRUZIONE.md
+
+### Contesto
+
+Documento centrale degli algoritmi nativi. Tre algoritmi descritti in
+modo formale + pseudo-codice + mapping a moduli Python.
+
+### Modifiche
+
+**Nuovo `docs/LOGICA-COSTRUZIONE.md` v0.1** (~600 righe):
+
+**Algoritmo A — PdE → Giro Materiale**:
+- Input: corse, localita_manutenzione, dotazione, giorno_tipo
+- Greedy: per ogni località, costruisci catene di corse rispettando
+  continuità geografica + tempo manovra + composizione coerente +
+  ciclo chiuso
+- Genera `corsa_materiale_vuoto` per posizionamento e rientro
+- Multi-giornata + varianti calendario derivate da PdE periodicità
+
+**Algoritmo B — Giro Materiale → Turno PdC**:
+- Architettura "centrata sulla condotta" (riferimento ARCHITETTURA-
+  BUILDER-V4 storico): seed produttivo (1-2 corse, 2-3h condotta) +
+  posizionamento + gap handling + rientro
+- 5 step: A scelta seed, B posizionamento, C gap (REFEZ in finestra),
+  D rientro, E validazione
+- Validazione vincoli singolo turno (NORMATIVA §11.8, §4.1, §9.2,
+  §3, §6) + ciclo settimanale (§11.4, §11.5)
+
+**Algoritmo C — Revisione provvisoria + cascading**:
+- Crea `revisione_provvisoria` con causa esterna esplicita
+- Modifica `giro_blocco` impattati (modifica/cancella/aggiungi)
+- **Cascading**: per ogni giro modificato, crea
+  `revisione_provvisoria_pdc` con stessa finestra
+- Re-build automatico turni PdC nella finestra (Algoritmo B su giri-rev)
+- Notifiche cross-ruolo
+- Resolver query "cosa succede il giorno D?": base + override rev
+
+**Validazione + scoring**:
+- ValidatorePdC unificato in `domain/normativa/validator.py`
+- Score per ranking soluzioni (n_pdc, prestazione_sotto_sfruttata,
+  violazioni preferenziali §11.7)
+
+**Mapping moduli Python**:
+- `domain/builder_giro/`, `domain/builder_pdc/`, `domain/normativa/`,
+  `domain/revisioni/` — tutti DB-agnostic
+- Test puri in `tests/domain/`, fixtures con seed reali
+
+**Edge case noti** (7 casi):
+- Materiale pernotta fuori deposito
+- Partenza senza U-numero
+- CV Tirano (capolinea inversione)
+- Cap 7h notturno
+- MI.PG ↔ FIOz taxi obbligatorio
+- Composizione mista
+- POOL_TILO_SVIZZERA
+
+### Stato
+
+- Documento draft v0.1, ~600 righe.
+- Pronto per implementazione (FASE D) ma 3 punti aperti:
+  multi-giornata schema-tica, scoring seed con pesi placeholder,
+  cascading re-build a maglie larghe.
+
+### Prossimo step
+
+`docs/SCHEMA-DATI-NATIVO.md` (FASE C doc 5): DDL SQL eseguibile.
+Materializza `MODELLO-DATI.md` v0.5 in CREATE TABLE + indici + FK +
+seed iniziali per Postgres 16.
+
+---
+
 ## 2026-04-25 (5) — FASE C doc 3: RUOLI-E-DASHBOARD.md
 
 ### Contesto
