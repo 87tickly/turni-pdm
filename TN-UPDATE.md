@@ -10,6 +10,102 @@
 
 ---
 
+## 2026-04-26 (11) — Sprint 3 raffinamento: testo Periodicità = verità
+
+### Contesto
+
+Iterazione su Sprint 3 dopo discussione con utente. Il commit
+precedente lasciava 8/38 righe della fixture (~21%) con `valido_in_date`
+"approssimativo" e parser che falliva il cross-check Gg_*. L'utente
+ha chiarito:
+
+1. Il testo **`Periodicità` è la fonte di verità**, non `Codice Periodicità`.
+2. Avere un calendario festività italiane interno al codice (sempre
+   aggiornato per qualsiasi anno).
+
+### Modifiche
+
+**Nuovo `backend/src/colazione/importers/holidays.py`**:
+- `easter_sunday(year)`: algoritmo gaussiano-gregoriano (verificato per
+  2024-2030)
+- `italian_holidays(year)`: 12 festività civili italiane (10 fisse +
+  Pasqua + Pasquetta calcolate dinamicamente)
+- `italian_holidays_in_range(start, end)`: subset in un intervallo
+
+Disponibile come utility per il builder giro materiale e altre logiche.
+**NON usato** in `compute_valido_in_date` (vedi sotto).
+
+**`importers/pde.py` — aggiornamenti parser**:
+
+1. `PeriodicitaParsed` ha nuovo campo `filtro_giorni_settimana: set[int]`
+   (0=lun ... 6=dom).
+2. `parse_periodicita` riconosce frasi come "Circola il sabato e la
+   domenica" → filtro globale (solo se la frase contiene SOLO nomi
+   giorno-settimana, no intervalli/date).
+3. `compute_valido_in_date` applica:
+   - Default base: `is_tutti_giorni` o `filtro_giorni_settimana`
+   - Apply intervals (override del filtro: tutti i giorni dell'intervallo)
+   - Apply dates esplicite
+   - Skip intervals + dates
+4. **NESSUN auto-suppress festività**: il parser segue letteralmente il
+   testo. Se `Periodicità` dice "Circola tutti i giorni", il treno
+   circola anche a Natale. La regola dell'utente: testo = verità.
+5. `Codice Periodicità` rimane non parsato (dato informativo).
+6. Cross-check `Gg_*` declassato a **warning informativo**: non blocca
+   l'import. Se il testo Periodicità diverge dai conteggi Trenord, il
+   parser segue il testo e logga la discrepanza.
+
+### Risultati sulla fixture (38 righe)
+
+- **33/38 (87%)** righe hanno `valido_in_date` = Gg_anno PdE → zero warning
+- **5/38 (13%)** righe hanno discrepanza, ma il parser segue il testo:
+  - Treni 83/84 (Δ=+39): testo dichiara 5 grandi intervalli, Codice
+    Periodicità interno conta meno. Trenord usa Codice per Gg_anno.
+  - Treni 393/394 (Δ=+1), 701 (Δ=+2): off-by-piccolo simile.
+
+Per questi 5, il parser dice `valido_in_date_json` = quello che il
+testo afferma; le warning loggano la discrepanza per audit.
+
+### Test aggiornati
+
+**`tests/test_holidays.py`** (7 nuovi):
+- Pasqua corretta per 2024-2030
+- 12 festività italiane in un anno
+- Subset in range parziale
+- Range cross-anno (cattura festività di entrambi gli anni)
+
+**`tests/test_pde_periodicita.py`** (+5 nuovi):
+- "Circola il sabato e la domenica" → `{5, 6}`
+- "Circola il sabato" → `{5}`
+- Filtro + override intervals (treno 786 reale)
+- Frase con intervallo NON setta filtro globale
+- `compute_valido_in_date` con filtro + override
+
+**`tests/test_pde_row_parser.py`** (sostituito 2 test):
+- `test_high_match_with_pde_gg_anno`: ≥80% righe combaciano (era 75%)
+- `test_warnings_are_info_not_errors`: warning devono iniziare con
+  `gg_*:` (sono cross-check info, non bug di parsing)
+
+### Verifiche
+
+- `pytest`: **82/82 verdi** (era 69, +13 nuovi: 7 holidays + 5 periodicità + nuove varianti)
+- `ruff check` / `ruff format`: tutti verdi
+- `mypy strict`: no issues in **35 source files** (era 34, +1 holidays.py)
+
+### Stato
+
+Sprint 3.1-3.5 raffinato secondo regole utente. Parser pronto per
+Sprint 3.6 (DB + idempotenza + CLI).
+
+### Prossimo step
+
+Sprint 3.6-3.8 invariato:
+- `pde_importer.py` con bulk insert + tracking
+- Idempotenza SHA-256
+- CLI argparse
+
+---
+
 ## 2026-04-26 (10) — FASE D Sprint 3.1-3.5: Parser PdE puro
 
 ### Contesto

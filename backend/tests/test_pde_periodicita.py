@@ -95,6 +95,82 @@ def test_dates_inside_interval_not_double_counted() -> None:
     assert p.apply_dates == set()
 
 
+# ---------- filtro giorno-della-settimana ----------
+
+
+def test_filtro_sabato_e_domenica() -> None:
+    """'Circola il sabato e la domenica' → filtro globale {sab, dom}."""
+    p = parse_periodicita("Circola il sabato e la domenica.")
+    assert p.filtro_giorni_settimana == {5, 6}
+    assert p.is_tutti_giorni is False
+    assert p.apply_intervals == []
+
+
+def test_filtro_solo_sabato() -> None:
+    p = parse_periodicita("Circola il sabato.")
+    assert p.filtro_giorni_settimana == {5}
+
+
+def test_filtro_combinato_con_intervalli_override() -> None:
+    """Filtro globale + override per intervalli espliciti.
+
+    Pattern reale Trenord (treno 786):
+    'Circola il sabato e la domenica. Circola tutti i giorni dal 05/02
+    al 22/02. Non circola DD/MM. Circola DD/MM, DD/MM, ...'
+    """
+    text = (
+        "Circola il sabato e la domenica. "
+        "Circola tutti i giorni dal 05/02/2026 al 22/02/2026. "
+        "Non circola 07/03/2026, 08/03/2026. "
+        "Circola 01/01/2026, 06/01/2026."
+    )
+    p = parse_periodicita(text)
+    assert p.filtro_giorni_settimana == {5, 6}
+    assert p.apply_intervals == [(date(2026, 2, 5), date(2026, 2, 22))]
+    assert p.skip_dates == {date(2026, 3, 7), date(2026, 3, 8)}
+    assert p.apply_dates == {date(2026, 1, 1), date(2026, 1, 6)}
+
+
+def test_filtro_non_setta_se_intervallo_presente() -> None:
+    """Frase con weekday + intervallo non setta filtro globale."""
+    p = parse_periodicita("Circola tutti i giorni dal 05/02/2026 al 22/02/2026.")
+    assert p.filtro_giorni_settimana == set()
+    assert p.apply_intervals == [(date(2026, 2, 5), date(2026, 2, 22))]
+
+
+# ---------- compute_valido_in_date con filtro giorni-settimana ----------
+
+
+def test_compute_filtro_solo_sabato_e_domenica() -> None:
+    """Filtro {5,6}: solo sab e dom in [valido_da, valido_a]."""
+    p = PeriodicitaParsed(filtro_giorni_settimana={5, 6})
+    # 02/02/2026 (lun) → 08/02/2026 (dom): 7/2 sab + 8/2 dom = 2
+    dates = compute_valido_in_date(date(2026, 2, 2), date(2026, 2, 8), p)
+    assert dates == {date(2026, 2, 7), date(2026, 2, 8)}
+
+
+def test_compute_filtro_with_apply_interval_override() -> None:
+    """Apply interval supera il filtro globale (override completo)."""
+    p = PeriodicitaParsed(
+        filtro_giorni_settimana={5, 6},  # solo sab/dom
+        apply_intervals=[(date(2026, 2, 9), date(2026, 2, 13))],  # lun-ven
+    )
+    dates = compute_valido_in_date(date(2026, 2, 2), date(2026, 2, 15), p)
+    # Sab/dom 7-8/2 + interval lun-ven 9-13/2 + sab/dom 14-15/2
+    expected = {
+        date(2026, 2, 7),
+        date(2026, 2, 8),
+        date(2026, 2, 9),
+        date(2026, 2, 10),
+        date(2026, 2, 11),
+        date(2026, 2, 12),
+        date(2026, 2, 13),
+        date(2026, 2, 14),
+        date(2026, 2, 15),
+    }
+    assert dates == expected
+
+
 # ---------- compute_valido_in_date ----------
 
 

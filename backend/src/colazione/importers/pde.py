@@ -7,25 +7,42 @@ Spec: `docs/IMPORT-PDE.md`. Pipeline:
         → parse_corsa_row() → CorsaParsedRow (con composizioni nested)
             └── parse_periodicita() → PeriodicitaParsed
             └── compute_valido_in_date() → set[date]
-            └── cross_check_gg_mensili() → list[str] warning
+            └── (info) cross_check_gg_mensili() → list[str] warning
 
 Questo modulo contiene **solo le funzioni pure di parsing**. L'inserimento
 in DB + idempotenza + CLI vivono in `pde_importer.py` (Sprint 3.6+).
 
-Limiti noti del parser Sprint 3 (MVP):
-- Gestisce solo i pattern del campo testuale `Periodicità` documentati
-  in `parse_periodicita()`.
-- NON gestisce i filtri giorno-della-settimana presenti in
-  `Codice Periodicità` (mini-DSL Trenord con token tipo G1-G7, EC,
-  NCG, S, CP, P, ECF). Quel campo è la fonte di verità completa, ma
-  il suo parser è rinviato a v1.x.
-- Conseguenza: per i treni che circolano solo certi giorni della
-  settimana (es. solo sabato/domenica), il `valido_in_date_json`
-  calcolato è approssimativo (eccede di ~50% per i treni weekend-only).
-- `cross_check_gg_mensili` rileva la discrepanza e produce warning;
-  il chiamante può decidere se accettarlo (MVP) o rifiutare
-  l'import. Sulla fixture reale, ~21% delle righe (8/38) ha questa
-  problematica.
+## Convenzioni del PdE Trenord (decisione utente, 2026-04-26)
+
+Il campo testuale `Periodicità` è la **fonte di verità** per quando un
+treno circola. Il parser estrae **letteralmente** quanto scritto:
+
+1. **Filtro giorno-della-settimana globale**: frasi tipo
+   "Circola il sabato e la domenica" → solo sab/dom in tutto il range
+   di validità.
+2. **Apply intervals**: "Circola dal X al Y" o
+   "Circola tutti i giorni dal X al Y" → tutti i giorni dell'intervallo.
+3. **Apply dates esplicite**: "Circola DD/MM/YYYY, DD/MM/YYYY, ...".
+4. **Skip intervals/dates**: "Non circola dal X al Y" o
+   "Non circola DD/MM/YYYY, ...".
+
+Il parser **non** auto-sopprime le festività italiane: se il testo dice
+"Circola tutti i giorni", il treno circola anche a Natale. Le festività
+sono escluse solo se elencate esplicitamente in `Non circola DD/MM/YYYY`.
+
+Il modulo `holidays.py` resta disponibile come utility (può servire al
+builder giro materiale o ad altre logiche), ma `compute_valido_in_date`
+non lo usa.
+
+Il campo `Codice Periodicità` (mini-DSL Trenord interno con token
+EC/NCG/S/CP/P/ECF/G1-G7) **non** è parsato: per decisione utente, la
+fonte di verità è il testo, e il Codice è solo backup informativo.
+
+I `Gg_*` mensili e `Gg_anno` sono salvati nel DB come dati informativi
+del PdE; eventuali discrepanze tra date calcolate e `Gg_*` producono
+**warning informativi** (non bloccano l'import). Le discrepanze
+indicano che il testo `Periodicità` Trenord differisce dai conteggi
+interni Trenord (probabilmente derivati dal `Codice Periodicità`).
 """
 
 from __future__ import annotations
@@ -48,13 +65,21 @@ class PeriodicitaParsed(BaseModel):
 
     - `is_tutti_giorni`: True se appare 'Circola tutti i giorni' come
       frase pura (senza intervallo `dal X al Y`).
+    - `filtro_giorni_settimana`: insieme di weekday (`0`=lun ... `6`=dom)
+      che fungono da filtro globale (es. "Circola il sabato e la domenica"
+      → `{5, 6}`). Vuoto = nessun filtro.
     - `apply_intervals`: intervalli `Circola dal X al Y` (estremi inclusi).
-    - `apply_dates`: date singole `Circola DD/MM/YYYY`.
+      Sono **override del filtro globale**: dentro l'intervallo circola
+      tutti i giorni, non solo quelli filtrati.
+    - `apply_dates`: date singole `Circola DD/MM/YYYY`. Sono **override
+      delle festività auto-soppresse**: una data esplicitamente elencata
+      circola anche se è festività.
     - `skip_intervals`: intervalli `Non circola dal X al Y`.
     - `skip_dates`: date singole `Non circola DD/MM/YYYY`.
     """
 
     is_tutti_giorni: bool = False
+    filtro_giorni_settimana: set[int] = Field(default_factory=set)
     apply_intervals: list[tuple[date, date]] = Field(default_factory=list)
     apply_dates: set[date] = Field(default_factory=set)
     skip_intervals: list[tuple[date, date]] = Field(default_factory=list)
@@ -433,6 +458,26 @@ _INTERVAL_RE = re.compile(
     r"dal\s+(\d{1,2}/\d{1,2}/\d{4})\s+al\s+(\d{1,2}/\d{1,2}/\d{4})",
     re.IGNORECASE,
 )
+# Mappatura nomi giorno-settimana italiani → datetime.weekday() (0=lun ... 6=dom)
+_WEEKDAY_ITA: dict[str, int] = {
+    "lunedì": 0,
+    "lunedi": 0,
+    "martedì": 1,
+    "martedi": 1,
+    "mercoledì": 2,
+    "mercoledi": 2,
+    "giovedì": 3,
+    "giovedi": 3,
+    "venerdì": 4,
+    "venerdi": 4,
+    "sabato": 5,
+    "domenica": 6,
+}
+_WEEKDAY_RE = re.compile(
+    r"\b(lunedì|lunedi|martedì|martedi|mercoledì|mercoledi"
+    r"|giovedì|giovedi|venerdì|venerdi|sabato|domenica)\b",
+    re.IGNORECASE,
+)
 
 
 def _parse_date_it(s: str) -> date:
@@ -452,24 +497,27 @@ def parse_periodicita(text: str) -> PeriodicitaParsed:
         "Circola dal 14/01/2026 al 17/01/2026."
         "Circola 12/01/2026, 13/01/2026."
         "Circola tutti i giorni dal 02/03/2026 al 22/03/2026. Circola 28/03/2026."
+        "Circola il sabato e la domenica. Circola tutti i giorni dal X al Y."
         "Circola 19/12/2025, 20/12/2025, ..., 26/12/2026."
 
     Approccio: split per frasi su '. ', poi per ogni frase distingue
-    apply (Circola...) da skip (Non circola...), estrae intervalli e
-    date singole con regex.
+    apply (Circola...) da skip (Non circola...), estrae intervalli,
+    date singole e nomi giorno-settimana con regex.
+
+    Una frase apply che contiene SOLO giorni-settimana (no intervalli,
+    no date) imposta il filtro globale `filtro_giorni_settimana`.
     """
     if not text or not text.strip():
         return PeriodicitaParsed()
 
     is_tutti = False
+    filtro_giorni: set[int] = set()
     apply_intervals: list[tuple[date, date]] = []
     apply_dates: set[date] = set()
     skip_intervals: list[tuple[date, date]] = []
     skip_dates: set[date] = set()
 
     # Tokenize per frasi su '. ' (poi rimuovo punto finale).
-    # Esempio "Circola tutti i giorni. Non circola dal X al Y."
-    # → ["Circola tutti i giorni", "Non circola dal X al Y."]
     parts = [s.strip() for s in text.split(". ") if s.strip()]
     if parts:
         parts[-1] = parts[-1].rstrip(".")
@@ -502,18 +550,29 @@ def parse_periodicita(text: str) -> PeriodicitaParsed:
             except ValueError:
                 continue
 
+        # Estrai nomi giorno-settimana presenti nella frase
+        weekdays_in_sentence: set[int] = set()
+        for match in _WEEKDAY_RE.finditer(sentence):
+            weekdays_in_sentence.add(_WEEKDAY_ITA[match.group(1).lower()])
+
         if is_skip_sentence:
             skip_intervals.extend(intervals)
             skip_dates.update(single_dates)
+            # Skip-by-weekday non ancora osservato in dataset reale: skip.
         else:
             apply_intervals.extend(intervals)
             apply_dates.update(single_dates)
             # 'Circola tutti i giorni' senza intervallo → flag
             if "tutti i giorni" in sentence.lower() and not intervals:
                 is_tutti = True
+            # 'Circola il sabato e la domenica' (solo giorni-settimana,
+            # niente intervalli/date) → filtro globale
+            elif weekdays_in_sentence and not intervals and not single_dates:
+                filtro_giorni.update(weekdays_in_sentence)
 
     return PeriodicitaParsed(
         is_tutti_giorni=is_tutti,
+        filtro_giorni_settimana=filtro_giorni,
         apply_intervals=apply_intervals,
         apply_dates=apply_dates,
         skip_intervals=skip_intervals,
@@ -541,33 +600,53 @@ def compute_valido_in_date(
 ) -> set[date]:
     """Calcola l'insieme di date in cui la corsa circola effettivamente.
 
-    Algoritmo:
-    1. Se `is_tutti_giorni`, parto da tutto l'intervallo `[valido_da, valido_a]`.
-    2. Aggiungo ogni `apply_interval` (clip a `[valido_da, valido_a]`).
-    3. Aggiungo ogni date in `apply_dates` (filtrata per range).
-    4. Sottraggo ogni `skip_interval` (clip a `[valido_da, valido_a]`).
-    5. Sottraggo ogni date in `skip_dates`.
+    Algoritmo (l'ordine conta):
+
+    1. **Default base**:
+       - Se `is_tutti_giorni`, parto da tutto l'intervallo `[valido_da, valido_a]`.
+       - Altrimenti, se `filtro_giorni_settimana`, prendo solo i giorni
+         dell'intervallo che cadono in quei weekday (es. `{5,6}` = sab+dom).
+    2. **Apply intervals** (override del filtro): per ogni intervallo
+       "Circola dal X al Y", aggiungo TUTTI i giorni dell'intervallo
+       (clipped a `[valido_da, valido_a]`).
+    3. **Apply dates esplicite**: aggiungo ogni date in `apply_dates`
+       (filtrata per range).
+    4. **Skip intervals**: rimuovo ogni intervallo "Non circola dal X al Y".
+    5. **Skip dates**: rimuovo ogni date in `skip_dates`.
+
+    Il parser segue letteralmente il testo `Periodicità`: nessuna
+    auto-soppressione di festività. Il modulo `holidays.py` resta
+    disponibile come utility per altre logiche (builder giro materiale).
     """
     result: set[date] = set()
 
+    # Step 1 — default base
     if periodicita.is_tutti_giorni:
         result.update(_date_range(valido_da, valido_a))
+    elif periodicita.filtro_giorni_settimana:
+        for d in _date_range(valido_da, valido_a):
+            if d.weekday() in periodicita.filtro_giorni_settimana:
+                result.add(d)
 
+    # Step 2 — apply intervals (override del filtro: tutti i giorni)
     for a, b in periodicita.apply_intervals:
         clipped_from = max(a, valido_da)
         clipped_to = min(b, valido_a)
         result.update(_date_range(clipped_from, clipped_to))
 
+    # Step 3 — apply dates esplicite
     for d in periodicita.apply_dates:
         if valido_da <= d <= valido_a:
             result.add(d)
 
+    # Step 4 — skip intervals
     for a, b in periodicita.skip_intervals:
         clipped_from = max(a, valido_da)
         clipped_to = min(b, valido_a)
         for d in _date_range(clipped_from, clipped_to):
             result.discard(d)
 
+    # Step 5 — skip dates
     for d in periodicita.skip_dates:
         result.discard(d)
 

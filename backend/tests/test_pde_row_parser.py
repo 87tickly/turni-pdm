@@ -57,43 +57,37 @@ def test_composizione_keys_are_complete(parsed_rows: list[CorsaParsedRow]) -> No
         assert actual == expected
 
 
-def test_majority_of_rows_pass_cross_check(parsed_rows: list[CorsaParsedRow]) -> None:
-    """Almeno il 75% delle righe della fixture passa il cross-check Gg_*.
+def test_high_match_with_pde_gg_anno(parsed_rows: list[CorsaParsedRow]) -> None:
+    """≥80% delle righe ha `valido_in_date` allineato con Gg_anno PdE.
 
-    Le righe che falliscono hanno periodicità complessa con filtri
-    giorno-della-settimana (es. solo sab/dom), gestiti da `Codice
-    Periodicità` Trenord — mini-DSL non parsato in MVP (TODO v1.1).
-    Vedi docstring di `pde.py` per dettagli.
+    Il testo `Periodicità` è la **fonte di verità** (decisione utente).
+    Gg_anno è dato informativo Trenord, derivato dal `Codice Periodicità`
+    interno. Per la maggior parte dei treni i due combaciano; per pochi
+    casi (osservato: 5/38 = 13%) il testo Periodicità Trenord differisce
+    dai conteggi interni — il parser segue il testo, segnala discrepanza
+    come warning info ma NON blocca l'import.
 
-    Threshold 75% scelto in base alla distribuzione osservata sulla
-    fixture: 30/38 righe (~79%) hanno `Periodicità` esprimibile con
-    intervalli/date semplici. Se cala sotto, indaga prima di abbassare.
+    Threshold ≥80%: se cala sotto, indaga (potrebbe esserci nuovo
+    pattern del testo non gestito).
     """
     n_total = len(parsed_rows)
     n_ok = sum(1 for r in parsed_rows if not r.warnings)
     pct_ok = n_ok / n_total
-    assert pct_ok >= 0.75, (
-        f"Solo {n_ok}/{n_total} ({pct_ok:.0%}) righe passano cross-check; "
-        f"atteso ≥75%. Indaga le righe con warning."
+    assert pct_ok >= 0.80, (
+        f"Solo {n_ok}/{n_total} ({pct_ok:.0%}) righe matchano Gg_anno PdE; atteso ≥80%."
     )
 
 
-def test_complex_periodicita_rows_have_warnings(
-    parsed_rows: list[CorsaParsedRow],
-) -> None:
-    """Sanity check inverso: il parser DEVE flaggare le righe complesse.
+def test_warnings_are_info_not_errors(parsed_rows: list[CorsaParsedRow]) -> None:
+    """Le warning del parser sono info-only sul cross-check Gg_*.
 
-    Se questo fallisce, vuol dire che il parser ha bug 'silenziosi'
-    (calcola un risultato sbagliato senza warning). Più dannoso del
-    fallimento del cross-check.
+    Devono iniziare con `gg_*:` (formato cross_check_gg_mensili). Se
+    una warning ha formato diverso (es. eccezione di parsing), è un
+    bug serio — fail.
     """
-    n_with_warnings = sum(1 for r in parsed_rows if r.warnings)
-    # Sulla fixture nota: 8/38 righe complesse
-    assert n_with_warnings >= 1, "Nessun warning trovato — sospetto"
-    assert n_with_warnings <= 12, (
-        f"{n_with_warnings} righe con warning (atteso ≤12); "
-        "qualcosa è regredito nel parser semplice."
-    )
+    for r in parsed_rows:
+        for w in r.warnings:
+            assert w.startswith("gg_"), f"Warning non-info su treno {r.numero_treno}: {w!r}"
 
 
 def test_first_row_basic_fields(parsed_rows: list[CorsaParsedRow]) -> None:
