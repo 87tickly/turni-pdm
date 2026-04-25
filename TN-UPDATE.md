@@ -10,6 +10,116 @@
 
 ---
 
+## 2026-04-26 (6) — FASE D Sprint 1.8: Schemas Pydantic (Sprint 1 COMPLETATA)
+
+### Contesto
+
+Sprint 1.8 (ULTIMO della Sprint 1): schemas Pydantic per
+serializzazione I/O API. Specchio dei modelli ORM in 7 file per strato.
+
+### Modifiche
+
+**Nuovo `backend/src/colazione/schemas/` (7 file)**:
+
+- `anagrafica.py`: AziendaRead, StazioneRead, MaterialeTipoRead,
+  LocalitaManutenzioneRead, LocalitaManutenzioneDotazioneRead,
+  DepotRead, DepotLineaAbilitataRead, DepotMaterialeAbilitatoRead
+- `corse.py`: CorsaImportRunRead, CorsaCommercialeRead (~30 campi),
+  CorsaComposizioneRead, CorsaMaterialeVuotoRead
+- `giri.py`: GiroMaterialeRead, VersioneBaseGiroRead,
+  GiroFinestraValiditaRead, GiroGiornataRead, GiroVarianteRead,
+  GiroBloccoRead
+- `revisioni.py`: RevisioneProvvisoriaRead, RevisioneProvvisoriaBloccoRead,
+  RevisioneProvvisoriaPdcRead
+- `turni_pdc.py`: TurnoPdcRead, TurnoPdcGiornataRead, TurnoPdcBloccoRead
+- `personale.py`: PersonaRead, AssegnazioneGiornataRead,
+  IndisponibilitaPersonaRead
+- `auth.py`: AppUserRead (no `password_hash` per non leakare bcrypt
+  in API), AppUserRuoloRead, NotificaRead, AuditLogRead
+
+**Pattern Pydantic v2**:
+- `model_config = ConfigDict(from_attributes=True)` su ogni schema
+  (parsing da modelli ORM o da dict)
+- Tipi standard Python (`int`, `str`, `bool`, `datetime`, `date`,
+  `time`, `Decimal`, `dict[str, Any]`, `list[Any]`)
+- `Mapped[X | None] = None` per nullable, default `None`
+- Niente `Create`/`Update` (verranno aggiunti quando le route
+  POST/PATCH ne avranno bisogno, Sprint 4+)
+- Niente nested relationships (es. `composizioni: list[...]` su
+  CorsaCommerciale) — minimalismo, si arricchirà quando servirà
+
+**`schemas/__init__.py`**: importa e ri-esporta 31 schemi, ordinato
+per strato in `__all__`.
+
+### Test
+
+**Nuovo `backend/tests/test_schemas.py`** (6 test):
+- `test_schemas_all_exported`: 31 schemi nel `__all__`, tutti
+  importabili
+- `test_azienda_read_from_dict_fixture`: parsing da dict (input API
+  request body)
+- `test_azienda_read_from_orm_instance`: parsing da Azienda ORM
+  in memoria (path response_model)
+- `test_localita_manutenzione_read_pool_esterno`: schema con
+  campo nullable + flag bool (POOL_TILO con `is_pool_esterno=True`)
+- `test_corsa_commerciale_read_with_decimal_and_time`: tipi
+  complessi (time, date, Decimal, JSONB)
+- `test_schemas_serialize_to_json`: output `model_dump_json()`
+  serializzabile (per FastAPI response)
+
+### Verifiche
+
+- `pytest`: **14/14 verdi** (era 8/8, +6 nuovi su schemi)
+- `ruff check`: All checks passed (autofix applicato:
+  `timezone.utc` → `datetime.UTC` per Python 3.11+)
+- `ruff format --check`: 34 files already formatted
+- `mypy strict`: no issues found in **28 source files** (era 21,
+  +7 nuovi: 7 file schemas)
+
+### Stato
+
+**Sprint 1 COMPLETATA**. Backend ha:
+- main.py + /health + config.py (Sprint 1.1, 1.2)
+- db.py async (Sprint 1.3)
+- Alembic setup (Sprint 1.4)
+- Migrazione 0001 con 31 tabelle (Sprint 1.5)
+- Migrazione 0002 con seed Trenord (Sprint 1.6)
+- 31 modelli ORM (Sprint 1.7)
+- 31 schemi Pydantic Read (Sprint 1.8)
+
+Pronto per scrivere endpoint REST (auth + corse + depositi).
+
+### Riepilogo Sprint 1
+
+| Passo | Output | Commit |
+|-------|--------|--------|
+| 1.1 | main.py + /health | (in 0.1, `83b4f85`) |
+| 1.2 | config.py Pydantic Settings | (in 0.1, `83b4f85`) |
+| 1.3 | db.py async + Postgres CI | `4f4edcd` |
+| 1.4 | Alembic setup async | `44e8fe8` |
+| 1.5 | Migrazione 0001 (31 tabelle) | `e047672` |
+| 1.6 | Migrazione 0002 seed Trenord | `59455ca` |
+| 1.7 | Modelli SQLAlchemy ORM (31) | `56dfaee` |
+| 1.8 | Schemas Pydantic Read (31) | (questo commit) |
+
+Effort reale Sprint 1: ~1 sessione lavoro, vs stima 2-3 giorni
+del PIANO-MVP. Stima generosa ma corretta come buffer.
+
+### Prossimo step
+
+**Sprint 2 — Auth + utenti** (stima 2 giorni):
+- 2.1 `colazione/auth/` (hash bcrypt, JWT encode/decode, dependencies)
+- 2.2 Endpoint `POST /api/auth/login`
+- 2.3 Endpoint `POST /api/auth/refresh`
+- 2.4 Dependency `get_current_user` + `require_role`
+- 2.5 Migrazione `0003_seed_users.py` → admin + pianificatore_giro_demo
+
+Modulo `auth/` da costruire da zero. JWT custom + bcrypt come da
+STACK-TECNICO.md §6. Schemas dedicati in `schemas/security.py` (non
+nel `auth.py` strato 5 dei modelli).
+
+---
+
 ## 2026-04-26 (5) — FASE D Sprint 1.7: Modelli SQLAlchemy ORM
 
 ### Contesto
