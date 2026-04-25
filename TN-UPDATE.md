@@ -10,6 +10,80 @@
 
 ---
 
+## 2026-04-26 (8) — Sprint 3 prep: fixture PdE per test
+
+### Contesto
+
+Prima di scrivere il parser PdE (Sprint 3.1+), serve una **fixture
+committata** per i test unitari + CI. Il file PdE reale (10580 righe,
+6.9 MB) vive sul Mac dell'utente in
+`/Users/spant87/Library/Mobile Documents/com~apple~Numbers/Documents/`,
+**non si committa**: è dato commerciale e cambia ogni anno.
+
+La fixture è una mini-versione del file reale, ~40 righe scelte per
+coprire tutti i pattern di periodicità, salvata come `.xlsx` (formato
+portable che gira ovunque, niente dipendenza `numbers-parser` su CI
+Linux).
+
+### Modifiche
+
+**Nuovo `backend/scripts/build_pde_fixture.py`** (~140 righe):
+- One-shot script per (ri)generare la fixture quando serve
+- Apre file Numbers via `numbers-parser`, categorizza ~10580 righe per
+  pattern (skip/apply interval, date list, doppia composizione,
+  garantito festivo)
+- Selezione deterministica: prime N indici per bucket
+- Scrive `.xlsx` con `openpyxl` (header + righe + sheet "PdE RL")
+- CLI: `--source <numbers-path>` `--output <xlsx-path>`
+
+**Nuovo `backend/tests/fixtures/pde_sample.xlsx`** (19.5 KB):
+- 124 colonne (header completo del PdE Trenord)
+- 38 righe dati selezionate
+- Coverage pattern Periodicità:
+  - 10 skip interval (`Non circola dal X al Y`)
+  - 8 apply interval (`Circola dal X al Y`)
+  - 6 date list lunga (>20 slash, ~50-100 date)
+  - 14 date list corta (1-5 date)
+- Numero treno arriva come `int` (openpyxl converte i float
+  integer-valued — comodo per il parser)
+
+**`.gitignore`**: aggiunta sezione PdE input
+(`backend/data/pde-input/`) per quando l'utente caricherà il file
+reale localmente. Convenzione path:
+`backend/data/pde-input/PdE-YYYY-MM-DD.numbers`.
+
+### Verifica
+
+- Script eseguito sul file reale Trenord 14dic2025-12dic2026 Rev5_RL
+- Fixture rilegga correttamente con openpyxl: 124 colonne + 38 righe
+- Conta pattern in fixture: 10+8+6+14 = 38 ✓
+- File 19.5 KB → ben sotto soglia ragionevole per commit
+
+### Stato
+
+Sprint 3 prep fatto. Fixture committata, builder riproducibile.
+
+### Prossimo step
+
+**Sprint 3.1+ — Parser PdE vero** (`backend/src/colazione/importers/pde.py`):
+
+- Lettura file `.numbers` o `.xlsx` (auto-detect dall'estensione)
+- Parser singola riga → dataclass intermedio
+- Parser composizione 9 combinazioni (stagione × giorno_tipo) per i 6
+  attributi (categoria_posti, doppia_comp, vincolo, tipologia,
+  bici, prm)
+- Parser periodicità testuale → set di date ISO
+- Calcolo `valido_in_date_json` denormalizzato (cross-validato con
+  totali Gg_*)
+- Bulk insert + transazione + tracking `corsa_import_run` + SHA-256
+  per idempotenza
+- CLI argparse
+
+Effort stimato: ~3-4 turni di lavoro (Sprint 3 è il pezzo più fragile
+del PIANO-MVP, parser periodicità è critico).
+
+---
+
 ## 2026-04-26 (7) — FASE D Sprint 2: Auth JWT (Sprint 2 COMPLETATA)
 
 ### Contesto

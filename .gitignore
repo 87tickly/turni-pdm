@@ -73,6 +73,12 @@ uploads/
 tmp/
 .tmp/
 
+# PdE input file: i file Numbers/Excel del Programma di Esercizio sono
+# dati commerciali (decine di MB, cambiano ogni anno). L'utente li tiene
+# sul proprio Mac e li punta via CLI. La fixture mini per i test vive
+# in backend/tests/fixtures/ ed è committata.
+backend/data/pde-input/
+
 # =====================================================================
 # Claude Code
 # =====================================================================
