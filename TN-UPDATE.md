@@ -10,6 +10,129 @@
 
 ---
 
+## 2026-04-26 (10) — FASE D Sprint 3.1-3.5: Parser PdE puro
+
+### Contesto
+
+Sprint 3.1-3.5 del PIANO-MVP: parser puro PdE, no DB. Pipeline lettura
+file → dataclass intermedio → calcolo `valido_in_date_json`
+denormalizzato. DB + idempotenza + CLI rimandati a Sprint 3.6-3.8.
+
+### Modifiche
+
+**Nuovo `backend/src/colazione/importers/pde.py`** (~480 righe):
+
+- **3 Pydantic models intermedi**:
+  - `PeriodicitaParsed`: output del parser testuale (apply/skip
+    intervals + dates + flag is_tutti_giorni)
+  - `ComposizioneParsed`: 1 di 9 combinazioni stagione × giorno_tipo
+  - `CorsaParsedRow`: corsa completa con composizioni nested + warnings
+
+- **Reader** (`read_pde_file`): auto-detect dall'estensione, supporta
+  `.numbers` (via `numbers-parser`) e `.xlsx` (via `openpyxl`). Header
+  riga 0 → dict[colonna → valore].
+
+- **Helper di normalizzazione**: `_to_str_treno` (float `13.0` → `'13'`),
+  `_to_date`, `_to_time`, `_to_opt_decimal`, `_to_bool_si_no` (`SI`/`NO`
+  + bool nativi).
+
+- **`parse_corsa_row`**: mappa 1:1 i campi PdE → modello DB
+  `corsa_commerciale`. Calcola `giorni_per_mese_json` (16 chiavi
+  `gg_dic1AP`...`gg_anno`) e `valido_in_date_json` (lista ISO date).
+
+- **`parse_composizioni`**: estrae le 9 righe di `corsa_composizione`
+  (3 stagioni × 3 giorno_tipo × 6 attributi). Le 9 sono sempre
+  presenti, anche se vuote.
+
+- **`parse_periodicita`** (regex-based): tokenizza il testo per frasi
+  su `". "`, riconosce 5 sub-pattern:
+  - `Circola tutti i giorni` → `is_tutti_giorni=True`
+  - `Circola dal X al Y` (anche multipli `, dal Z al W`)
+  - `Circola DD/MM/YYYY, DD/MM/YYYY, ...`
+  - `Non circola dal X al Y`
+  - `Non circola DD/MM/YYYY, dal Z al W, ...` (misti)
+
+- **`compute_valido_in_date`**: applica la periodicità all'intervallo
+  `[valido_da, valido_a]`. Algoritmo:
+  1. Se `is_tutti_giorni`, popola tutto il range
+  2. Aggiungi `apply_intervals` (clip al range)
+  3. Aggiungi `apply_dates` (filter al range)
+  4. Sottrai `skip_intervals` e `skip_dates`
+
+- **`cross_check_gg_mensili`**: confronta date calcolate con i
+  `Gg_*` PdE per gen-nov (anno principale), dicembre split (dic1/dic2,
+  dic1AP/dic2AP), e totale `gg_anno`. Ritorna lista di warning,
+  vuota = match perfetto.
+
+### Limite noto MVP (documentato in modulo)
+
+Il parser usa **solo il campo testuale `Periodicità`**. Il PdE Trenord
+ha anche `Codice Periodicità`, un mini-DSL con filtri giorno-della-
+settimana (token tipo `G1-G7`, `EC`, `NCG`, `S`, `CP`, `P`, `ECF`)
+che è la fonte di verità completa. Per i treni con filtri weekend
+(es. `EC G6, G7 ...` = solo sabato/domenica), il `valido_in_date_json`
+calcolato è **approssimativo** (eccessivo del ~50%).
+
+Sulla fixture reale: **30/38 righe** (~79%) hanno periodicità
+"semplice" e passano cross-check. **8/38 righe** (~21%) hanno
+periodicità complessa con warning.
+
+Decisione MVP: accetta i warning, importa comunque, log centralizzato.
+Parser DSL `Codice Periodicità` rimandato a v1.x.
+
+### Test (3 file, 31 nuovi test)
+
+**`tests/test_pde_reader.py`** (5):
+- Fixture esiste, ritorna 38 righe, 124 colonne
+- Tipi: Periodicità è str, Treno 1 non None
+- Formato non supportato → `ValueError`
+
+**`tests/test_pde_periodicita.py`** (15):
+- Empty text, `Circola tutti i giorni` puro, con skip interval, apply
+  interval only, apply dates short list, `tutti i giorni dal X al Y`
+  → apply_interval (NON is_tutti), long apply dates list, skip mixed,
+  date interne intervallo non doppie
+- `compute_valido_in_date`: tutti i giorni, minus skip, apply interval,
+  apply dates filtered, skip overrides apply, clip to validity range
+
+**`tests/test_pde_row_parser.py`** (11):
+- Tutte le 38 righe parsano senza eccezioni
+- Ogni riga ha 9 composizioni con keys complete (3×3 stagioni×giorni)
+- ≥75% righe passano cross-check (threshold MVP, attualmente 79%)
+- Sanity inverso: parser DEVE flaggare le righe complesse (non bug
+  silenziosi)
+- Riga 0 (treno 13 FN Cadorna→Laveno): campi base, valido_in_date
+  popolato correttamente (383 giorni dal 14/12/2025 al 31/12/2026)
+- Decimal preservati (`Decimal("72.152")` per km_tratta)
+- Numero treno normalizzato a stringa intera (no trailing `.0`)
+
+### Verifiche
+
+- `pytest`: **69/69 verdi** (era 38/38, +31 nuovi)
+- `ruff check`: All checks passed
+- `ruff format --check`: 47 files formatted
+- `mypy strict`: no issues found in **34 source files** (era 33, +1
+  importers/pde.py)
+
+### Stato
+
+Sprint 3.1-3.5 completo. Parser PdE puro funzionante su fixture reale.
+Limite documentato (filtro giorni settimana → v1.x).
+
+### Prossimo step
+
+**Sprint 3.6-3.8 — DB + CLI + idempotenza**:
+
+- 3.6 `pde_importer.py`: orchestrator con bulk insert + transazione
+  unica + tracking `corsa_import_run`
+- 3.7 Idempotenza: SHA-256 file → skip se già importato; upsert per
+  `(azienda_id, numero_treno, valido_da)`
+- 3.8 CLI argparse: `python -m colazione.importers.pde --file ... --azienda ...`
+
+Test integration end-to-end fixture → DB temp.
+
+---
+
 ## 2026-04-26 (9) — Doc operativa import PdE
 
 ### Contesto
