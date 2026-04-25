@@ -10,6 +10,54 @@
 
 ---
 
+## 2026-04-25 (13) — FASE D Sprint 0.4: GitHub Actions CI
+
+### Contesto
+
+Sprint 0.4 del PIANO-MVP §2: CI automatica su push/PR per backend e
+frontend. La CI girerà su Linux pulito (Ubuntu) e validerà che lo
+skeleton funziona indipendentemente dalle quirk locali (path iCloud).
+
+### Modifiche
+
+**`.github/workflows/backend-ci.yml`**:
+- Trigger: push su master, PR, workflow_dispatch (manual). Path
+  filter su `backend/**` + workflow stesso.
+- Steps: checkout → setup-python 3.12 → astral-sh/setup-uv (cache
+  built-in) → `uv sync --extra dev` → `ruff check` → `ruff format
+  --check` → `mypy strict` → `pytest --cov`.
+- Working dir `backend/`.
+- Timeout 10 min.
+
+**`.github/workflows/frontend-ci.yml`**:
+- Trigger: push su master, PR, workflow_dispatch (manual). Path
+  filter su `frontend/**` + workflow stesso.
+- Steps: checkout → setup-node 20 → pnpm/action-setup v10.33.2 →
+  cache pnpm store → `pnpm install --frozen-lockfile` →
+  `format:check` → `lint` → `typecheck` → `test` (vitest) → `build`.
+- Cache `~/.pnpm-store` con key da hash di `pnpm-lock.yaml`.
+
+### Verifiche
+
+- Validato YAML manualmente con PyYAML: entrambi i workflow hanno
+  triggers e jobs ben definiti.
+- **La verifica vera arriverà al push**: GitHub Actions girerà
+  backend-ci e frontend-ci. Se entrambi diventano verdi, lo skeleton
+  e' confermato funzionante in CI Linux pulita.
+
+### Stato
+
+Sprint 0.4 file pronti, push imminente attiva i workflow.
+
+### Prossimo step
+
+Sprint 0.5 (ULTIMO della Sprint 0): `README.md` con quick start (clona
+repo → 5 comandi per arrivare alla pagina home). Dopo questo, Sprint 0
+finito, si passa a Sprint 1 (backend skeleton vero: SQLAlchemy +
+Alembic + 31 tabelle).
+
+---
+
 ## 2026-04-25 (12) — FASE D Sprint 0.3: docker-compose.yml
 
 ### Contesto
