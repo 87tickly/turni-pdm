@@ -10,6 +10,56 @@
 
 ---
 
+## 2026-04-25 (5) — FASE C doc 3: RUOLI-E-DASHBOARD.md
+
+### Contesto
+
+Specifica dettagliata delle 5 dashboard per ruolo. Ogni ruolo ha
+schermate, azioni, dati visualizzati, permessi. Documento operativo
+per costruire frontend e backend coerenti.
+
+### Modifiche
+
+**Nuovo `docs/RUOLI-E-DASHBOARD.md` v0.1** (~530 righe):
+
+- §1 Tabella riepilogativa 5 ruoli + ADMIN con privilegi
+- §2 Schermate condivise (login, profilo, settings)
+- §3 **Dashboard PIANIFICATORE_GIRO** (6 schermate):
+  home, vista PdE, lista giri, editor giro (centrale, con Gantt
+  orizzontale + drag&drop + valida live), revisioni, nuova revisione
+- §4 **Dashboard PIANIFICATORE_PDC** (5 schermate):
+  home, vista giri readonly, lista turni, editor turno PdC (centrale,
+  Gantt giornaliero + validazione normativa live + pannello vincoli
+  ciclo), revisioni cascading
+- §5 **Dashboard MANUTENZIONE** (5 schermate):
+  home, lista depositi, dettaglio deposito (inventario), spostamenti
+  tra depositi, manutenzioni programmate
+- §6 **Dashboard GESTIONE_PERSONALE** (6 schermate):
+  home, anagrafica, scheda persona (calendario annuale + ore/sett),
+  calendario assegnazioni (centrale, persone × date), indisponibilita,
+  sostituzioni
+- §7 **Dashboard PERSONALE_PDC** (5 schermate):
+  oggi (banner + Gantt giornaliero), calendario, dettaglio turno data,
+  ferie/assenze, segnalazioni
+- §8 Matrix permessi cross-ruolo per 11 entita
+- §9 Notifiche cross-ruolo (8 eventi tracciati)
+- §10 Settings admin
+- §11 Cosa NON e in v1 (dark mode, mobile native, PDF export ricco,
+  WebSocket/SSE, drill-down KPI, conversazioni in-app)
+
+### Stato
+
+- Documento draft v0.1, ~30 schermate descritte.
+- Pronto per priorizzazione in PIANO-MVP.md (doc 7).
+
+### Prossimo step
+
+`docs/LOGICA-COSTRUZIONE.md` (doc 4): algoritmo nativo PdE → giro
+materiale → turno PdC. Riformula ALGORITMO-BUILDER.md + ARCHITETTURA-
+BUILDER-V4.md in chiave nativa, senza riferimenti al codice vecchio.
+
+---
+
 ## 2026-04-25 (4) — FASE C doc 2: STACK-TECNICO.md (scelte confermate)
 
 ### Contesto
