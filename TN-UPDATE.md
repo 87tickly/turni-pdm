@@ -10,6 +10,76 @@
 
 ---
 
+## 2026-04-25 (14) — FASE D Sprint 0.5: README.md (Sprint 0 COMPLETATA)
+
+### Contesto
+
+Sprint 0.5 del PIANO-MVP §2: README quick start per chiunque cloni il
+repo. Ultimo passo della Sprint 0.
+
+### Modifiche
+
+**Nuovo `README.md` root** (~190 righe):
+- Frase manifesto + diagramma piramide (PdE → giro → PdC → persone)
+- Badge CI per backend-ci e frontend-ci
+- Stato attuale (Sprint 0 quasi completa)
+- Prerequisiti (Python 3.12, Node 20, uv, pnpm, Docker)
+- Quick start in 5 comandi (clona → docker db → backend → frontend →
+  browser)
+- Alternativa "tutto in Docker"
+- Comandi sviluppo backend + frontend (sync/test/lint/format/build)
+- Albero struttura repo commentato
+- Indice documentazione `docs/` (10 documenti linkati)
+- Sezione "Contribuire" (Conventional Commits + TN-UPDATE +
+  METODO-DI-LAVORO)
+- Licenza Proprietary + manifesto greenfield
+
+### Stato
+
+**Sprint 0 COMPLETATA**. 5 passi atomici ognuno con commit + verifica.
+
+### Riepilogo Sprint 0
+
+| Passo | Output | Commit |
+|-------|--------|--------|
+| 0.1 | backend/ skeleton (FastAPI + uv + ruff + mypy + pytest) | `83b4f85` |
+| 0.2 | frontend/ skeleton (React + Vite + TS + Tailwind + Vitest) | `b5873ca` |
+| 0.3 | docker-compose.yml (Postgres + backend + frontend) | `d700e24` |
+| 0.4 | GitHub Actions CI (backend-ci + frontend-ci) | `27b5914` |
+| 0.5 | README.md quick start | (questo commit) |
+
+### Verifiche locali (cumulative)
+
+- Backend: pytest 3/3, ruff 0 errori, mypy strict no issues
+- Frontend: vitest 2/2, eslint 0 errori, typecheck OK, build 143 KB
+  gzip 46 KB, prettier check OK
+- docker-compose.yml: YAML valido (3 servizi)
+- CI workflows: YAML valido (2 workflow, jobs e triggers definiti)
+
+### Verifica end-to-end CI
+
+Da controllare a breve dopo questo push: stato di backend-ci e
+frontend-ci su GitHub Actions per master. Se entrambi diventano verdi,
+**Sprint 0 e' confermata funzionante anche su Linux pulito** (no
+quirk path iCloud locale).
+
+### Prossimo step
+
+**Sprint 1 — Backend skeleton vero**:
+- 1.1 main.py + /health (gia fatto in 0.1)
+- 1.2 config.py Pydantic Settings (gia fatto in 0.1)
+- 1.3 db.py async engine + session manager
+- 1.4 Alembic setup + env.py async
+- 1.5 Migrazione 0001_initial_schema.py (31 tabelle da SCHEMA-DATI-NATIVO.md)
+- 1.6 Migrazione 0002_seed_trenord.py (azienda + 7 depositi + 25 depot)
+- 1.7 Modelli SQLAlchemy ORM in models/
+- 1.8 Schemas Pydantic in schemas/
+
+Effort stimato Sprint 1: 2-3 giorni lavorativi. La parte grossa è la
+migrazione 0001 (31 tabelle).
+
+---
+
 ## 2026-04-25 (13) — FASE D Sprint 0.4: GitHub Actions CI
 
 ### Contesto
