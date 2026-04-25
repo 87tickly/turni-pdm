@@ -4,6 +4,89 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-25 (3) — MODELLO-DATI.md v0.3: correzioni pesanti dopo revisione utente
+
+### Contesto
+
+Utente legge v0.2 e segnala 2 errori sostanziali:
+1. **Località di manutenzione mancante**: avevo trattato "OMV/OML:
+   TRENORD IMPMAN MILANO FIOREN" come stringa libera (`sede_omv`), ma
+   è entità di prima classe (sede materiale fisico, distinta da
+   `depot` che è sede personale). Senza modellarla non sappiamo da
+   dove parte il giro materiale né dove rientra.
+2. **Revisioni mal modellate**: in v0.2 le avevo trattate come
+   "versioning di documento" (PDF si ripubblica → carico nuova
+   versione). Sono invece **correzioni operative temporanee** dovute a
+   comunicazioni esterne (RFI Infrastruttura comunica interruzioni
+   linea/lavori) che modificano l'esercizio per finestra specifica.
+
+Inoltre utente chiarisce: RFI **non sopprime mai** corse, RFI comunica
+interruzioni → Trenord modifica **sia** giro materiale **sia** turno
+PdC contestualmente. Quindi le revisioni cascano (cascading effect).
+
+### Estrazione depositi manutentivi reali
+
+Eseguito parsing del PDF "Turno Materiale Trenord dal 2/3/26"
+(353 pagine) con pdfplumber. Trovati pattern OMV/OML su tutte le
+pagine Gantt → anagrafica reale Trenord:
+
+| Codice | Nome | Frequenza turni |
+|--------|------|-----------------|
+| `IMPMAN_MILANO_FIORENZA` | TRENORD IMPMAN MILANO FIORENZA | ~156 (massima parte) |
+| `IMPMAN_NOVATE` | TRENORD ImpMan Novate | ~37 |
+| `IMPMAN_CAMNAGO` | TRENORD ImpMan Camnago | ~27 |
+| `IMPMAN_LECCO` | TRENORD IMPMAN LECCO | ~16 |
+| `IMPMAN_ISEO` | TRENORD ImpMan Iseo | ~10 |
+| `IMPMAN_CREMONA` | TRENORD IMPMAN CREMONA | ~8 |
+| `NON_ASSEGNATO` | (Non assegnato) | ~30 |
+
+### Modifiche al doc v0.3
+
+**§0**: aggiunta sottosezione "v0.3 (correzioni)" con tabella delle
+correzioni esplicita.
+
+**§3 entità di supporto**:
+- `impianto/depot`: chiarito che è sede **personale**, NON da
+  confondere con sede materiale
+- **`localita_manutenzione`** (nuova): entità prima classe con
+  anagrafica iniziale 6+1 impianti reali Trenord
+
+**§LIV 2 `giro_materiale`**: rimosso campo `sede_omv` string,
+sostituito con FK `localita_manutenzione_partenza_id` +
+`localita_manutenzione_arrivo_id`.
+
+**§LIV 5+ revisioni (riformulato)**:
+- `versione_base_giro` (1:1 con giro_materiale, validità 12+ mesi)
+- `revisione_provvisoria` (N per giro): causa enum
+  (`interruzione_rfi`, `sciopero`, `manutenzione_straordinaria`,
+  `evento_speciale`, `altro`), comunicazione esterna riferimento,
+  descrizione evento, finestra_da/finestra_a
+- **`revisione_provvisoria_pdc`** (cascading): collegata 1:N a
+  `revisione_provvisoria` del giro, eredita la stessa finestra
+  temporale. Quando RFI cambia il giro, Trenord cambia anche il PdC
+  e questo modello lo riflette.
+- Algoritmo risoluzione query "cosa fa il treno X il giorno D?" con
+  override base → revisione
+
+**§4 esempio 2**: aggiornato Turno 1100 con FK
+localita_manutenzione_id.
+
+**§8 storico**: aggiunte righe correzione v0.3.
+
+### Stato
+
+- Documento v0.3. Correzioni recepite, modello più solido.
+- Diff: +120 / -45 righe rispetto a v0.2.
+- Ammessi 2 errori miei in modo esplicito (§0 v0.3) — regola 4
+  METODO-DI-LAVORO.md ("ammettere l'errore, sempre").
+
+### Prossimo step
+
+Utente legge v0.3. Se altri punti emergono → v0.4. Quando regge →
+`docs/MIGRAZIONE-DATI.md`.
+
+---
+
 ## 2026-04-25 (later) — MODELLO-DATI.md v0.2: decisioni utente recepite
 
 ### Contesto

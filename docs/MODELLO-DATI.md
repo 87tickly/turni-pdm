@@ -1,4 +1,4 @@
-# MODELLO DATI — Ecosistema ARTURO × Trenord (draft v0.2)
+# MODELLO DATI — Ecosistema ARTURO × Trenord (draft v0.3)
 
 > **Stato**: bozza in revisione con l'utente. Niente codice ancora.
 > Scopo: disegnare le entità e relazioni che reggono offerta commerciale,
@@ -11,18 +11,26 @@
 
 ---
 
-## 0. Decisioni v0.2 (recepite dall'utente)
+## 0. Decisioni v0.2 + correzioni v0.3
 
-Decisioni prese il 2026-04-25 dopo revisione v0.1:
+### v0.2 (decisioni di scoping)
 
 | Tema | Decisione |
 |------|-----------|
 | **Periodicità corsa** | **Strada A — denormalizzata**. All'import del PdE, per ogni corsa si calcola l'elenco completo di date in cui circola (`valido_in_date` JSON). Query SI/NO immediate. |
 | **Materiale vuoto** | Tabella sorella `corsa_materiale_vuoto`. **Non importato dal PdE — generato dal nostro algoritmo di costruzione giro materiale**. Campo `origine` traccia la provenienza. |
 | **Multi-tenancy `azienda`** | **Strada A — campo da subito**. Default `'trenord'`, predisposto per SAD/Trenitalia/Tper futuri senza riscrittura. |
-| **Turno CT** | **Differito**. Base struttura simile al PdC con piccole varianti contrattuali. In v0 si modella solo PdC, il modello CT è un punto di estensione esplicito (§3b di questo doc). |
+| **Turno CT** | **Differito**. Base struttura simile al PdC con piccole varianti contrattuali. In v0 si modella solo PdC. |
 | **Anagrafica persone** | Minimo solido (persona + assegnazione + indisponibilità). |
-| **Validità 12+ mesi con revisioni** | Aggiunta entità `revisione_turno`: lega un turno PdC o un giro materiale a una versione datata. Due "Turno 1100" con date diverse = revisioni dello stesso turno, non turni separati. |
+
+### v0.3 (correzioni dopo revisione utente del 25/04/2026)
+
+| Tema | Correzione |
+|------|------------|
+| **Località di manutenzione** | **Errore v0.2 corretto**: era una stringa libera `sede_omv`, ora è entità di prima classe `localita_manutenzione` con FK. Distinta da `depot` (sede personale). Anagrafica iniziale Trenord estratta dal PDF: 6 impianti reali (FIORENZA, LECCO, CREMONA, CAMNAGO, NOVATE, ISEO) + categoria "Non assegnato". |
+| **Giro materiale parte/arriva** | Ogni `giro_materiale` ha ora `localita_manutenzione_partenza_id` e `localita_manutenzione_arrivo_id` (in genere uguali, ciclo chiuso). |
+| **Revisioni: cosa sono** | **Errore v0.2 corretto**: NON sono versioning di documento. Sono **correzioni operative temporanee** dovute a eventi esterni (RFI comunica interruzioni → Trenord modifica). Modello separato in `versione_base_giro` (1 per giro, validità 12+ mesi) e `revisione_provvisoria` (N per giro, con causa, comunicazione esterna, finestra temporale). |
+| **Cascading PdC** | **Punto chiarito dall'utente**: RFI non sopprime mai corse. RFI comunica interruzioni → Trenord modifica giro materiale **E** turni PdC contestualmente. Il modello prevede `revisione_provvisoria_pdc` collegata 1:N a `revisione_provvisoria` del giro. |
 
 ---
 
@@ -158,7 +166,8 @@ ciclo ripetitivo di N giornate per un singolo tipo materiale.
 | numero_giornate | int | 2, 9, 10 |
 | km_media_giornaliera | float | 270.69 |
 | km_media_annua | float | 154832.47 |
-| sede_omv | string | "TRENORD IMPMAN MILANO FIOREN" |
+| **localita_manutenzione_partenza_id** | FK → `localita_manutenzione` | `IMPMAN_MILANO_FIORENZA` |
+| **localita_manutenzione_arrivo_id** | FK → `localita_manutenzione` | in genere = partenza (ciclo chiuso) |
 | posti_1cl | int | 0 |
 | posti_2cl | int | 470 |
 | valido_da | date | |
@@ -363,39 +372,109 @@ e va ragionato dopo.
 
 ---
 
-### Entità trasversale — `revisione_turno`
+### Versione base + revisioni provvisorie (riformulato v0.3)
 
-**Decisione #5 (validità 12+ mesi con revisioni)**: i turni materiali
-e i turni PdC vengono pubblicati con validità lunga (es. 14/12/2025 →
-12/12/2026), ma **all'interno di quella validità** subiscono revisioni
-periodiche (es. il PDF "Turno Materiale Trenord dal 2/3/26" è una
-revisione del turno principale 2025-2026).
+**Correzione importante v0.3** (rispetto a v0.2): le revisioni
+**non sono versioning del documento**. Sono uno strumento operativo
+specifico per gestire la discrepanza tra il piano teorico annuale e
+la realtà operativa quando RFI Infrastruttura comunica eventi che
+modificano l'esercizio.
 
-Due turni con stesso codice (es. due "Turno 1100") ma date depositata
-diverse **non sono turni separati**: sono **revisioni dello stesso
-turno**. Il modello deve riflettere questo.
+#### Concetto di base
+
+```
+GIRO MATERIALE 1100
+   |
+   ├── versione_base (validità 14/12/2025 → 12/12/2026)
+   |     pubblicata in offerta commerciale, allineata al PdE annuale
+   |
+   ├── revisione_provvisoria #A (15-30/04/2026)
+   |     causa: interruzione_rfi  (lavori tratta Como-Lecco)
+   |     comunicazione: PIR-2026-345
+   |     → modifica giro materiale per quella finestra
+   |     → CASCADING: trascina revisione_provvisoria del turno PdC
+   |        (perché Trenord modifica entrambi insieme)
+   |
+   └── revisione_provvisoria #B (01-08/06/2026)
+         causa: sciopero
+         ...
+```
+
+#### `versione_base_giro` (1:1 con `giro_materiale`)
+
+Una sola per giro materiale. È quella pubblicata con il PDF annuale.
 
 | Attributo | Tipo | Esempio |
 |-----------|------|---------|
 | id | PK | |
-| target_tipo | enum | `giro_materiale`, `turno_pdc` |
-| target_id | FK | id del giro o del turno PdC |
-| versione | int | 1, 2, 3... ordine cronologico |
-| data_deposito | date | "2026-02-25" (PDF "Depositata il 25/02/2026") |
-| valida_da | date | "2026-03-02" |
-| valida_a | date | "2026-12-12" o NULL se ultima |
+| giro_materiale_id | FK | univoco |
+| valido_da | date | "2025-12-14" |
+| valido_a | date | "2026-12-12" |
+| data_deposito | date | "2025-11-30" |
 | source_file | string | path PDF originale |
-| imported_at | datetime | |
-| note | string | descrizione cambiamenti rispetto a precedente |
 
-**Regola**: per ogni `target` e per una qualsiasi data D, esiste **una
-sola** revisione attiva (quella con `valida_da ≤ D ≤ valida_a` o
-`valida_a IS NULL`). Le query "qual è il turno 1100 il 15/04/2026?"
-risolvono automaticamente alla revisione corretta.
+#### `revisione_provvisoria` (entità nuova v0.3)
 
-Quando arriva una nuova revisione: la precedente non viene cancellata,
-ma chiusa (`valida_a` settato al giorno prima della nuova `valida_da`).
-Storia preservata, query coerenti.
+Modifica temporanea con causa esterna esplicita.
+
+| Attributo | Tipo | Esempio |
+|-----------|------|---------|
+| id | PK | |
+| giro_materiale_id | FK | |
+| codice_revisione | string | "1100-REV-2026-A" |
+| **causa** | enum | `interruzione_rfi`, `sciopero`, `manutenzione_straordinaria`, `evento_speciale`, `altro` |
+| comunicazione_esterna_rif | string | "PIR-2026-345" (riferimento RFI) |
+| descrizione_evento | string | "Lavori interruzione Como-Lecco, deviazione via Bergamo" |
+| finestra_da | date | "2026-04-15" |
+| finestra_a | date | "2026-04-30" |
+| data_pubblicazione | date | "2026-03-25" |
+| source_file | string | PDF/comunicato originale |
+
+Quando una `revisione_provvisoria` è attiva, **sostituisce** la
+`versione_base` per la finestra temporale specificata. I `giro_blocco`
+modificati vivono in `revisione_provvisoria_blocco` (figlia), che si
+sovrappone ai blocchi della versione base.
+
+#### Cascading sui turni PdC (regola operativa v0.3)
+
+**Punto fondamentale chiarito dall'utente**: una revisione provvisoria
+del giro materiale **NON resta isolata**. Trenord modifica
+contestualmente anche il turno PdC, perché le corse cambiate vanno
+ricoperte da macchinisti.
+
+Modello:
+- `revisione_provvisoria` (sul giro materiale) può avere **0 o più**
+  `revisione_provvisoria_pdc` collegate, una per ciascun turno PdC
+  impattato.
+- Ogni `revisione_provvisoria_pdc` ha la **stessa finestra temporale**
+  della rev del giro materiale che la causa.
+- Un PdC che copriva la giornata X del turno-base, durante la finestra
+  di revisione, copre la giornata X' del turno-rev. La sua
+  `assegnazione_giornata` risolve automaticamente alla rev quando
+  attiva.
+
+| `revisione_provvisoria_pdc` | Tipo | Esempio |
+|---|---|---|
+| id | PK | |
+| revisione_giro_id | FK → `revisione_provvisoria` | trigger della rev |
+| turno_pdc_id | FK | turno modificato |
+| codice_revisione | string | "ALOR_C-REV-2026-A" |
+| finestra_da/finestra_a | date | (ereditate dalla rev giro) |
+
+#### Risoluzione query "cosa fa il treno X il giorno D?"
+
+```
+1. trova giro_materiale che copre il treno X
+2. cerca revisione_provvisoria per quel giro con finestra_da ≤ D ≤ finestra_a
+   ├── se SÌ → usa giro_blocco della revisione (override)
+   └── se NO → usa giro_blocco della versione_base
+3. analogo per "chi guida il treno X il giorno D?":
+   trova turno_pdc che copre la corsa, applica eventuale rev_pdc se
+   D è nella finestra
+```
+
+Storia preservata: niente viene cancellato, le revisioni convivono
+con la base.
 
 ---
 
@@ -428,12 +507,51 @@ Anagrafica dei rotabili.
 | velocita_max | int | km/h |
 | posti_per_pezzo | int | |
 
-### `impianto` / `deposito`
+### `impianto` / `deposito` (sede personale PdC/CT)
 
-Esiste già come `depot`. Va esteso con:
+Esiste già come `depot`. È la **sede del personale** (ALESSANDRIA,
+LECCO, BRESCIA, MILANO PORTA GARIBALDI...). **NON va confuso con
+`localita_manutenzione`** (sede del materiale fisico).
+
+Va esteso con:
 - `tipi_personale_ammessi` (PdC, CT, ENTRAMBI)
 - `materiali_ammessi` (FK → `materiale_tipo`)
 - `linee_ammesse`
+
+### `localita_manutenzione` (sede materiale, **nuova**)
+
+**Decisione v0.3**: entità di prima classe distinta da `depot`.
+Sostituisce la stringa `sede_omv` di v0.2 con una FK relazionale.
+
+Una località di manutenzione è dove il materiale fisico (locomotive,
+carrozze) viene rimessato per manutenzione/pulizia/preparazione.
+Ogni `giro_materiale` parte da e termina in una località di
+manutenzione (in genere la stessa: ciclo chiuso).
+
+| Attributo | Tipo | Esempio |
+|-----------|------|---------|
+| id | PK | |
+| codice | string | "IMPMAN_MILANO_FIORENZA" |
+| nome_canonico | string | "TRENORD IMPMAN MILANO FIORENZA" |
+| nomi_alternativi | json string[] | ["MILANO FIOREN", "Fiorenza", "MI FIOREN"] |
+| stazione_collegata_id | FK → `stazione`? | "MILANO FIORENZA" se esiste come fermata commerciale |
+| azienda_id | FK | "trenord" |
+| attivo | bool | |
+
+#### Anagrafica iniziale Trenord (estratta dal PDF turno materiale 02/03/26)
+
+| Codice | Nome canonico | Frequenza nei turni |
+|--------|---------------|---------------------|
+| `IMPMAN_MILANO_FIORENZA` | TRENORD IMPMAN MILANO FIORENZA | Massima parte (~156 pagine Gantt) |
+| `IMPMAN_LECCO` | TRENORD IMPMAN LECCO | ~16 pagine |
+| `IMPMAN_CREMONA` | TRENORD IMPMAN CREMONA | ~8 pagine |
+| `IMPMAN_CAMNAGO` | TRENORD ImpMan Camnago | ~27 pagine |
+| `IMPMAN_NOVATE` | TRENORD ImpMan Novate | ~37 pagine |
+| `IMPMAN_ISEO` | TRENORD ImpMan Iseo | ~10 pagine |
+| `NON_ASSEGNATO` | (Non assegnato) | ~30 pagine — pseudo-località per materiali senza sede |
+
+Per coerenza si **canonicalizzano i nomi maiuscolo** ("ImpMan" → "IMPMAN")
+e si risolve il troncamento "FIOREN" → "FIORENZA" via `nomi_alternativi`.
 
 ### `azienda`
 
@@ -489,7 +607,8 @@ giro_materiale {
   numero_giornate: 2
   km_media_giornaliera: 270.69
   km_media_annua: 154832.47
-  sede_omv: "TRENORD IMPMAN MILANO FIOREN"
+  localita_manutenzione_partenza_id: <FK IMPMAN_MILANO_FIORENZA>
+  localita_manutenzione_arrivo_id: <FK IMPMAN_MILANO_FIORENZA>  // ciclo chiuso
   azienda: "trenord"
 }
 
@@ -656,8 +775,15 @@ Tutte le domande aperte di v0.1 sono state risolte dall'utente il
    `assegnazione_giornata` + `indisponibilita_persona`, niente di più
    in v0.
 
-**Aggiunta v0.2**: entità trasversale `revisione_turno` per gestire la
-validità lunga (12+ mesi) con revisioni interne — vedi §LIV 5+.
+**Correzione v0.3**: il modello v0.2 di `revisione_turno` come
+"versioning di documento" era sbagliato. Riformulato in
+`versione_base_giro` + `revisione_provvisoria` (con causa esterna +
+finestra temporale + cascading sui turni PdC). Vedi §LIV 5+ per il
+modello corretto.
+
+**Aggiunta v0.3**: entità `localita_manutenzione` distinta da `depot`
+PdC, con anagrafica iniziale Trenord estratta dal PDF (6 impianti reali
++ "Non assegnato"). Vedi §3.
 
 ---
 
