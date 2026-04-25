@@ -10,6 +10,60 @@
 
 ---
 
+## 2026-04-25 (3) — FASE C doc 1: VISIONE.md scritta
+
+### Contesto
+
+Primo documento architetturale del nuovo progetto. Scopo: chiarire
+in modo permanente cosa stiamo costruendo, per chi, e perché. Punto
+di riferimento per qualsiasi domanda di scope ("c'è dentro X?" → si
+controlla qui).
+
+### Modifiche
+
+**Nuovo `docs/VISIONE.md` (draft v0.1)**:
+- §1 Frase manifesto: sistema operativo per pianificazione
+  ferroviaria nativa, dal contratto commerciale al singolo
+  macchinista
+- §2 Il problema reale: 3 silos disconnessi (PdE, turno materiale,
+  turno PdC) cuciti con parser fragili
+- §3 Cosa fa il programma: 4 funzioni primarie (importa PdE, genera
+  giro, genera PdC, assegna persone) + 5a (revisioni provvisorie con
+  cascading)
+- §4 5 ruoli destinatari: pianificatore giro / pianificatore PdC /
+  manutenzione / gestione personale / personale finale (PdC)
+- §5 Cosa NON e': 6 esclusioni esplicite (no biglietteria, no real-
+  time da zero, no manutenzione predittiva, no payroll, no RFI, no
+  solo Trenord)
+- §6 7 principi guida: costruzione non importazione, no parser
+  fragili come ingresso primario, modello a piramide, multi-tenant
+  giorno 1, 5 dashboard 1 modello, revisioni provvisorie tracciate,
+  sviluppo iterativo
+- §7 Definizione di successo (uomo davanti al monitor + scala
+  industriale)
+- §8 Ambito rilascio: MVP v1 → v1.0 → v1.x → v2.0 → v2.x (no date)
+- §9 Riferimenti incrociati a documenti gia esistenti e in coda
+
+### Stato
+
+- Documento draft v0.1, ~250 righe.
+- Pronto per revisione utente.
+
+### Prossimo step
+
+**MI FERMO QUI.** Il prossimo documento (`STACK-TECNICO.md`) richiede
+decisioni dell'utente su:
+- Linguaggio backend (Python? Node? Go? Rust?)
+- Framework backend (FastAPI? Express? Fastify? altro?)
+- Frontend (React? Vue? Svelte? Next/Remix?)
+- DB primario (SQLite locale + Postgres prod come prima?)
+- Hosting (Railway? Vercel? Fly.io? Cloudflare? self-host?)
+- Auth (JWT? sessions? OAuth? Clerk/Auth0?)
+
+Aspetto input dell'utente prima di scrivere STACK-TECNICO.md.
+
+---
+
 ## 2026-04-25 (2) — FASE B completata: nuovo CLAUDE.md + .gitignore
 
 ### Contesto
