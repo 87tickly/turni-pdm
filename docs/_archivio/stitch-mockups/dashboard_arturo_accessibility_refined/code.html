@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+
+<html class="light" lang="it"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ARTURO· | Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@0,100..900;1,100..900&amp;family=Inter:wght@100..900&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                "on-tertiary": "#ffffff",
+                "surface-variant": "#dae2fd",
+                "inverse-surface": "#283044",
+                "tertiary-fixed": "#6bff8f",
+                "on-primary-fixed": "#001a40",
+                "primary-fixed": "#d7e2ff",
+                "on-tertiary-container": "#78ff96",
+                "on-secondary-fixed": "#001d34",
+                "on-background": "#0F172A",
+                "surface": "#faf8ff",
+                "on-surface": "#0F172A",
+                "on-primary-fixed-variant": "#004492",
+                "surface-dim": "#d2d9f4",
+                "secondary-container": "#6ab6ff",
+                "surface-bright": "#faf8ff",
+                "secondary-fixed": "#d0e4ff",
+                "inverse-on-surface": "#eef0ff",
+                "error-container": "#ffdad6",
+                "secondary": "#00629f",
+                "primary": "#004b9f",
+                "tertiary-container": "#007633",
+                "primary-container": "#0062cc",
+                "on-secondary-container": "#004674",
+                "error": "#ba1a1a",
+                "tertiary": "#005b25",
+                "surface-container-lowest": "#ffffff",
+                "on-primary-container": "#d9e4ff",
+                "on-tertiary-fixed-variant": "#005321",
+                "on-primary": "#ffffff",
+                "on-secondary": "#ffffff",
+                "secondary-fixed-dim": "#9bcbff",
+                "inverse-primary": "#acc7ff",
+                "surface-container": "#eaedff",
+                "primary-fixed-dim": "#acc7ff",
+                "outline": "#727784",
+                "tertiary-fixed-dim": "#4ae176",
+                "on-error-container": "#93000a",
+                "on-tertiary-fixed": "#002109",
+                "on-surface-variant": "#64748B",
+                "on-secondary-fixed-variant": "#004a79",
+                "surface-tint": "#005bbf",
+                "on-error": "#ffffff",
+                "surface-container-low": "#f2f3ff",
+                "surface-container-high": "#e2e7ff",
+                "outline-variant": "#c2c6d5",
+                "surface-container-highest": "#dae2fd",
+                "background": "#faf8ff"
+            },
+            "borderRadius": {
+                "DEFAULT": "0.125rem",
+                "lg": "0.25rem",
+                "xl": "0.5rem",
+                "full": "0.75rem"
+            },
+            "fontFamily": {
+                "headline": ["Exo 2", "sans-serif"],
+                "body": ["Inter", "sans-serif"],
+                "label": ["Inter", "sans-serif"],
+                "mono": ["JetBrains Mono", "monospace"]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            font-size: 1.125rem;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #FAF8FF;
+            color: #0F172A;
+        }
+        .rail-grid-pattern {
+            background-image: radial-gradient(#c2c6d5 0.5px, transparent 0.5px);
+            background-size: 24px 24px;
+        }
+        /* Accessibility & Interaction Refinements */
+        *:focus-visible {
+            outline: 2px solid #0062CC !important;
+            outline-offset: 2px !important;
+        }
+        .transition-standard {
+            transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .muted-text {
+            color: #64748B;
+        }
+    </style>
+</head>
+<body class="flex min-h-screen text-on-surface">
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-0 bottom-0 flex flex-col py-6 space-y-1 w-[224px] h-screen border-r border-slate-200/15 bg-[#FAF8FF] z-50">
+<div class="px-6 mb-8">
+<h1 class="text-lg font-['Exo_2'] font-bold text-[#0062CC]">ARTURO·</h1>
+<p class="text-[10px] uppercase tracking-[0.1em] muted-text font-bold">Railway Management</p>
+</div>
+<nav class="flex-1 space-y-1 px-3">
+<a class="bg-blue-600/10 text-[#0062CC] border-l-4 border-[#22C55E] flex items-center gap-3 px-4 py-2.5 transition-standard" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">dashboard</span>
+<span class="font-['Inter'] text-[13px] leading-[1.5] uppercase tracking-wider font-medium">Dashboard</span>
+</a>
+<a class="muted-text flex items-center gap-3 px-4 py-2.5 hover:bg-slate-100 transition-standard" href="#">
+<span class="material-symbols-outlined">train</span>
+<span class="font-['Inter'] text-[13px] leading-[1.5] uppercase tracking-wider font-medium">Cerca treni</span>
+</a>
+<a class="muted-text flex items-center gap-3 px-4 py-2.5 hover:bg-slate-100 transition-standard" href="#">
+<span class="material-symbols-outlined">conveyor_belt</span>
+<span class="font-['Inter'] text-[13px] leading-[1.5] uppercase tracking-wider font-medium">Turni Materiale</span>
+</a>
+<a class="muted-text flex items-center gap-3 px-4 py-2.5 hover:bg-slate-100 transition-standard" href="#">
+<span class="material-symbols-outlined">badge</span>
+<span class="font-['Inter'] text-[13px] leading-[1.5] uppercase tracking-wider font-medium">Turni PdC</span>
+</a>
+<a class="muted-text flex items-center gap-3 px-4 py-2.5 hover:bg-slate-100 transition-standard" href="#">
+<span class="material-symbols-outlined">calendar_month</span>
+<span class="font-['Inter'] text-[13px] leading-[1.5] uppercase tracking-wider font-medium">Calendario</span>
+</a>
+<a class="muted-text flex items-center gap-3 px-4 py-2.5 hover:bg-slate-100 transition-standard" href="#">
+<span class="material-symbols-outlined">picture_as_pdf</span>
+<span class="font-['Inter'] text-[13px] leading-[1.5] uppercase tracking-wider font-medium">Import PDF</span>
+</a>
+<a class="muted-text flex items-center gap-3 px-4 py-2.5 hover:bg-slate-100 transition-standard" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-['Inter'] text-[13px] leading-[1.5] uppercase tracking-wider font-medium">Impostazioni</span>
+</a>
+</nav>
+<div class="px-3 pt-4 border-t border-slate-200/15">
+<a class="muted-text flex items-center gap-3 px-4 py-2.5 hover:bg-slate-100 transition-standard" href="#">
+<span class="material-symbols-outlined">help</span>
+<span class="font-['Inter'] text-[13px] leading-[1.5] uppercase tracking-wider font-medium">Supporto</span>
+</a>
+<a class="text-error flex items-center gap-3 px-4 py-2.5 hover:bg-slate-100 transition-standard" href="#">
+<span class="material-symbols-outlined">logout</span>
+<span class="font-['Inter'] text-[13px] leading-[1.5] uppercase tracking-wider font-medium">Logout</span>
+</a>
+</div>
+</aside>
+<!-- Main Canvas -->
+<main class="ml-[224px] flex-1 flex flex-col min-h-screen">
+<!-- TopAppBar -->
+<header class="flex justify-between items-center w-full px-8 sticky top-0 z-40 h-14 bg-[#FAF8FF] border-b border-slate-200/15">
+<div class="flex items-center gap-8">
+<div class="flex items-center gap-4 bg-surface-container-low px-3 py-1.5 rounded-lg">
+<span class="material-symbols-outlined text-slate-400">search</span>
+<input class="bg-transparent border-none focus:ring-0 text-sm w-64 placeholder-slate-400 font-medium" placeholder="Cerca turno, treno o stazione..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-surface-container-low transition-standard" title="Visualizza segnalibri salvati">
+<span class="material-symbols-outlined text-on-surface">bookmark_check</span>
+</button>
+<div class="flex items-center gap-3 pl-4 border-l border-slate-200/30">
+<div class="text-right">
+<p class="text-xs font-bold text-on-surface">M. Rossi</p>
+<p class="text-[10px] muted-text uppercase tracking-tight font-medium">Capotreno</p>
+</div>
+<button class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center text-on-primary-container font-bold text-xs transition-standard hover:shadow-md" title="Profilo Utente">
+                    MR
+                </button>
+</div>
+</div>
+</header>
+<!-- Dashboard Content -->
+<div class="p-8 space-y-8 flex-1 overflow-y-auto rail-grid-pattern">
+<!-- Header Section -->
+<div class="flex justify-between items-end">
+<div>
+<h2 class="text-2xl font-['Exo_2'] font-bold text-primary tracking-tight">Pannello di Controllo</h2>
+<p class="muted-text text-sm mt-1 font-medium">Gestione flotta e turnazione aggiornata a 2 min fa.</p>
+</div>
+<button class="bg-primary hover:bg-primary-container text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-standard shadow-sm">
+<span class="material-symbols-outlined text-[18px]">add_circle</span>
+                Nuovo Turno
+            </button>
+</div>
+<!-- Stats Cards Grid -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+<!-- Totale Turni -->
+<button class="text-left bg-surface-container-lowest p-5 rounded-xl border-b-4 border-primary/20 hover:border-primary transition-standard">
+<div class="flex justify-between items-start mb-4">
+<p class="text-[11px] font-bold muted-text uppercase tracking-wider">Totale Turni</p>
+<span class="material-symbols-outlined text-primary/40">layers</span>
+</div>
+<div class="flex items-end gap-2">
+<span class="text-3xl font-mono font-bold text-on-surface">156</span>
+<span class="text-xs text-primary font-bold mb-1">+12%</span>
+</div>
+</button>
+<!-- Turni Attivi -->
+<button class="text-left bg-surface-container-lowest p-5 rounded-xl border-b-4 border-[#22C55E]/20 hover:border-[#22C55E] transition-standard">
+<div class="flex justify-between items-start mb-4">
+<p class="text-[11px] font-bold muted-text uppercase tracking-wider">Turni Attivi</p>
+<div class="flex gap-1 h-3 items-center">
+<span class="w-2 h-2 rounded-full bg-[#22C55E] animate-pulse"></span>
+<span class="text-[10px] text-[#22C55E] font-bold">LIVE</span>
+</div>
+</div>
+<div class="flex items-end gap-2">
+<span class="text-3xl font-mono font-bold text-on-surface">42</span>
+<span class="text-xs muted-text font-medium mb-1">In corso</span>
+</div>
+</button>
+<!-- Giornate Lavorate -->
+<button class="text-left bg-surface-container-lowest p-5 rounded-xl border-b-4 border-secondary/20 hover:border-secondary transition-standard">
+<div class="flex justify-between items-start mb-4">
+<p class="text-[11px] font-bold muted-text uppercase tracking-wider">Lavorati Settimana</p>
+<span class="material-symbols-outlined text-secondary/40">event_available</span>
+</div>
+<div class="flex items-end gap-2">
+<span class="text-3xl font-mono font-bold text-on-surface">5</span>
+<span class="text-xs muted-text font-medium mb-1">su 7 gg</span>
+</div>
+</button>
+<!-- Ore Settimana -->
+<button class="text-left bg-surface-container-lowest p-5 rounded-xl border-b-4 border-on-primary-fixed-variant/20 hover:border-on-primary-fixed-variant transition-standard">
+<div class="flex justify-between items-start mb-4">
+<p class="text-[11px] font-bold muted-text uppercase tracking-wider">Ore Settimana</p>
+<span class="material-symbols-outlined text-slate-400">timer</span>
+</div>
+<div class="flex items-end gap-2">
+<span class="text-3xl font-mono font-bold text-on-surface">38h 45m</span>
+</div>
+</button>
+</div>
+<!-- Bento Layout Content -->
+<div class="grid grid-cols-12 gap-6">
+<!-- Attività Recente (Bento Large) -->
+<section class="col-span-12 lg:col-span-7 bg-surface-container-lowest rounded-xl overflow-hidden shadow-sm">
+<div class="px-6 py-5 border-b border-slate-100 flex justify-between items-center">
+<h3 class="font-['Exo_2'] font-bold text-primary flex items-center gap-2">
+<span class="material-symbols-outlined text-lg">history</span>
+                        Attività recente
+                    </h3>
+<button class="text-xs font-bold text-primary hover:underline transition-standard">Vedi tutto</button>
+</div>
+<div class="divide-y divide-slate-50">
+<button class="w-full text-left px-6 py-4 flex items-center justify-between hover:bg-slate-50/50 transition-standard group">
+<div class="flex items-center gap-4">
+<div class="w-9 h-9 rounded-lg bg-surface-container-low flex items-center justify-center text-primary transition-standard group-hover:bg-primary/10">
+<span class="material-symbols-outlined">edit_note</span>
+</div>
+<div>
+<p class="text-sm font-semibold text-on-surface">Turno PdC #2931 Modificato</p>
+<p class="text-[11px] muted-text font-medium">Assegnato treno RV 2831 a L. Bianchi</p>
+</div>
+</div>
+<span class="text-[11px] font-mono muted-text">10m fa</span>
+</button>
+<button class="w-full text-left px-6 py-4 flex items-center justify-between hover:bg-slate-50/50 transition-standard group">
+<div class="flex items-center gap-4">
+<div class="w-9 h-9 rounded-lg bg-tertiary-container/10 flex items-center justify-center text-tertiary transition-standard group-hover:bg-tertiary-container/20">
+<span class="material-symbols-outlined">check_circle</span>
+</div>
+<div>
+<p class="text-sm font-semibold text-on-surface">Giro Materiale Validato</p>
+<p class="text-[11px] muted-text font-medium">Deposito Roma Termini - Flotta ETR1000</p>
+</div>
+</div>
+<span class="text-[11px] font-mono muted-text">45m fa</span>
+</button>
+<button class="w-full text-left px-6 py-4 flex items-center justify-between hover:bg-slate-50/50 transition-standard group">
+<div class="flex items-center gap-4">
+<div class="w-9 h-9 rounded-lg bg-surface-container-low flex items-center justify-center text-primary transition-standard group-hover:bg-primary/10">
+<span class="material-symbols-outlined">upload_file</span>
+</div>
+<div>
+<p class="text-sm font-semibold text-on-surface">Import PDF Completato</p>
+<p class="text-[11px] muted-text font-medium">Orario estivo RFI 2024</p>
+</div>
+</div>
+<span class="text-[11px] font-mono muted-text">2h fa</span>
+</button>
+<button class="w-full text-left px-6 py-4 flex items-center justify-between hover:bg-slate-50/50 transition-standard group">
+<div class="flex items-center gap-4">
+<div class="w-9 h-9 rounded-lg bg-error-container/10 flex items-center justify-center text-error transition-standard group-hover:bg-error-container/20">
+<span class="material-symbols-outlined">warning</span>
+</div>
+<div>
+<p class="text-sm font-semibold text-on-surface">Conflitto di Periodicità</p>
+<p class="text-[11px] muted-text font-medium">Treno 9632 - Sovrapposizione CVa</p>
+</div>
+</div>
+<span class="text-[11px] font-mono muted-text">5h fa</span>
+</button>
+</div>
+</section>
+<!-- Widgets Side Column -->
+<div class="col-span-12 lg:col-span-5 space-y-6">
+<!-- Oggi Widget -->
+<section class="bg-surface-container-lowest rounded-xl overflow-hidden shadow-sm border border-primary/5">
+<div class="px-6 py-4 bg-primary text-white flex justify-between items-center">
+<h3 class="font-['Exo_2'] font-bold text-sm tracking-wide uppercase">Oggi in Servizio</h3>
+<span class="text-[11px] font-mono font-medium opacity-80">14 MAGGIO</span>
+</div>
+<div class="p-5 space-y-4">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-2.5 h-2.5 rounded-full bg-[#22C55E]"></div>
+<p class="text-sm font-semibold">Treno 9612 (PdC)</p>
+</div>
+<div class="flex gap-1">
+<span class="w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold bg-primary text-white">L</span>
+<span class="w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold bg-primary text-white">M</span>
+<span class="w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold bg-primary text-white">X</span>
+<span class="w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold bg-primary text-white">G</span>
+<span class="w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold bg-primary text-white">V</span>
+<span class="w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold bg-slate-200 text-slate-500">S</span>
+<span class="w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold bg-slate-200 text-slate-500">D</span>
+</div>
+</div>
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-2.5 h-2.5 rounded-full bg-[#22C55E]"></div>
+<p class="text-sm font-semibold">Manovra MIL (MAT)</p>
+</div>
+<div class="flex gap-1">
+<span class="w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold bg-slate-200 text-slate-500">L</span>
+<span class="w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold bg-primary text-white">M</span>
+<span class="w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold bg-slate-200 text-slate-500">X</span>
+<span class="w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold bg-primary text-white">G</span>
+<span class="w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold bg-slate-200 text-slate-500">S</span>
+<span class="w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold bg-slate-200 text-slate-500">D</span>
+<span class="w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold bg-slate-200 text-slate-500">V</span>
+</div>
+</div>
+<div class="mt-4 pt-4 border-t border-slate-50">
+<p class="text-[11px] font-bold muted-text uppercase mb-2">Turno Prossimo</p>
+<button class="w-full flex items-center justify-between bg-surface-container-low p-3 rounded-lg hover:bg-primary/5 transition-standard group">
+<div class="text-left">
+<p class="text-xs font-bold text-on-surface">INV 4410 - Milano C.le</p>
+<p class="text-[10px] muted-text font-mono">PARTENZA 14:45</p>
+</div>
+<span class="material-symbols-outlined text-primary group-hover:translate-x-1 transition-standard">arrow_forward_ios</span>
+</button>
+</div>
+</div>
+</section>
+<!-- Prossimi Riposi Widget -->
+<button class="w-full text-left bg-gradient-to-br from-primary to-primary-container p-6 rounded-xl text-white shadow-lg overflow-hidden relative group transition-standard hover:shadow-xl">
+<div class="relative z-10">
+<h3 class="font-['Exo_2'] font-bold text-sm tracking-wide uppercase opacity-90 mb-4">Prossimi riposi</h3>
+<div class="flex items-center gap-4">
+<div class="text-4xl font-mono font-bold tracking-tighter">Tra 2 giorni</div>
+<div class="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-md transition-standard group-hover:scale-110">
+<span class="material-symbols-outlined">beach_access</span>
+</div>
+</div>
+<div class="mt-6 flex gap-2">
+<div class="flex-1 bg-white/10 rounded-lg p-2 backdrop-blur-sm">
+<p class="text-[10px] font-bold uppercase opacity-70">Data</p>
+<p class="text-xs font-semibold">Sab, 16 Mag</p>
+</div>
+<div class="flex-1 bg-white/10 rounded-lg p-2 backdrop-blur-sm">
+<p class="text-[10px] font-bold uppercase opacity-70">Durata</p>
+<p class="text-xs font-semibold">48 Ore</p>
+</div>
+</div>
+</div>
+<!-- Background decoration -->
+<div class="absolute -right-6 -bottom-6 opacity-10 transition-standard group-hover:rotate-12">
+<span class="material-symbols-outlined text-[120px]" style="font-variation-settings: 'FILL' 1;">calendar_today</span>
+</div>
+</button>
+</div>
+</div>
+<!-- Detailed Grid View (Implicit Bento bottom) -->
+<section class="bg-surface-container-lowest rounded-xl shadow-sm border border-slate-100 p-6">
+<div class="flex justify-between items-center mb-6">
+<h3 class="font-['Exo_2'] font-bold text-primary">Monitoraggio Linea Attiva</h3>
+<div class="flex gap-2">
+<span class="px-2.5 py-1 rounded-md text-[10px] font-bold bg-[#22C55E]/10 text-[#22C55E]">8 LINEE OK</span>
+<span class="px-2.5 py-1 rounded-md text-[10px] font-bold bg-error-container/10 text-error">1 RITARDO</span>
+</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left">
+<thead>
+<tr class="text-[10px] font-bold muted-text uppercase tracking-widest border-b border-slate-50">
+<th class="pb-3 px-2">Treno</th>
+<th class="pb-3 px-2">Tratta</th>
+<th class="pb-3 px-2">Stato</th>
+<th class="pb-3 px-2">Ritardo</th>
+<th class="pb-3 px-2 text-right">Azioni</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-slate-50">
+<tr class="hover:bg-slate-50/50 transition-standard group">
+<td class="py-4 px-2 font-mono font-bold text-sm text-primary">FR 9612</td>
+<td class="py-4 px-2 text-xs font-medium">Napoli C.le <span class="muted-text mx-1">→</span> Milano C.le</td>
+<td class="py-4 px-2">
+<span class="bg-tertiary-container/10 text-tertiary px-2 py-0.5 rounded text-[10px] font-bold">IN ORARIO</span>
+</td>
+<td class="py-4 px-2 text-[11px] font-mono muted-text">-</td>
+<td class="py-4 px-2 text-right">
+<button class="material-symbols-outlined text-slate-400 hover:text-primary transition-standard" title="Altre opzioni">more_horiz</button>
+</td>
+</tr>
+<tr class="hover:bg-slate-50/50 transition-standard group">
+<td class="py-4 px-2 font-mono font-bold text-sm text-primary">RV 2831</td>
+<td class="py-4 px-2 text-xs font-medium">Roma Termini <span class="muted-text mx-1">→</span> Firenze SMN</td>
+<td class="py-4 px-2">
+<span class="bg-error-container/10 text-error px-2 py-0.5 rounded text-[10px] font-bold">RITARDATO</span>
+</td>
+<td class="py-4 px-2 text-[11px] font-mono text-error font-bold">+12'</td>
+<td class="py-4 px-2 text-right">
+<button class="material-symbols-outlined text-slate-400 hover:text-primary transition-standard" title="Altre opzioni">more_horiz</button>
+</td>
+</tr>
+<tr class="hover:bg-slate-50/50 transition-standard group">
+<td class="py-4 px-2 font-mono font-bold text-sm text-primary">EC 37</td>
+<td class="py-4 px-2 text-xs font-medium">Venezia S.L. <span class="muted-text mx-1">→</span> Ginevra</td>
+<td class="py-4 px-2">
+<span class="bg-secondary-container/10 text-secondary px-2 py-0.5 rounded text-[10px] font-bold">SOPPRESSO</span>
+</td>
+<td class="py-4 px-2 text-[11px] font-mono muted-text">-</td>
+<td class="py-4 px-2 text-right">
+<button class="material-symbols-outlined text-slate-400 hover:text-primary transition-standard" title="Altre opzioni">more_horiz</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</div>
+</main>
+</body></html>

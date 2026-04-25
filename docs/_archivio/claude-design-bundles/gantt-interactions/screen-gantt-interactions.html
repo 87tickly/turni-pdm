@@ -1,0 +1,507 @@
+<!-- ═══════════════════════════════════════════════════════════
+     Gantt v3 · INTERACTIONS LAYER · 4 stati + API + coverage
+═══════════════════════════════════════════════════════════ -->
+<div class="gix-page">
+
+  <!-- ─── Page head ────────────────────────────────────── -->
+  <header class="gix-head">
+    <span class="eyebrow">Gantt v3 · interactions layer</span>
+    <h2>Opt-in interactions on top of the existing PDF sheet.</h2>
+    <p>
+      Il componente base <code>GanttSheet</code> resta "sola resa". Tutte le nuove capacità sono
+      <strong>opzionali via props</strong>: se il consumer non passa callback, nessun layer attivo,
+      <strong>zero regressione</strong> per <code>AutoBuilderGantt</code> e <code>/gantt-preview</code>.
+      Copre il 100% delle interazioni di <code>PdcGanttV2</code> (drag move / resize / cross-day / action bar 8-icone / timeline click / hover tooltip / autoFit).
+    </p>
+  </header>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- STATO 1 · IDLE · zero interactions                  -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="gix-state">
+    <div class="gix-state-head">
+      <span class="gix-state-tag">S1 · idle</span>
+      <h3>Stato idle — identico a oggi</h3>
+      <span class="gix-state-sub">consumer senza callback → comportamento <code>GanttSheet</code> attuale</span>
+    </div>
+    <div class="gix-stage">
+      <span class="gix-stage-label">ganttId=undefined · autoFit=false</span>
+      <svg viewBox="0 0 1240 150" style="width:100%; display:block; font-family: var(--font-body, Inter);">
+        <!-- col sinistra -->
+        <text x="14" y="24" font-size="13" font-weight="700" fill="#0A1322" font-family="Exo 2">G1 · LMXGV</text>
+        <text x="14" y="62" font-size="10.5" fill="#3E4C67" font-family="JetBrains Mono">1  [07:18]  [14:49]</text>
+        <!-- asse tick ogni ora -->
+        <g font-family="JetBrains Mono" font-size="10.5" font-weight="700" fill="#3E4C67">
+          <text x="118" y="16" text-anchor="middle">07</text><text x="164" y="16" text-anchor="middle">08</text><text x="210" y="16" text-anchor="middle">09</text><text x="256" y="16" text-anchor="middle">10</text><text x="302" y="16" text-anchor="middle">11</text><text x="348" y="16" text-anchor="middle">12</text><text x="394" y="16" text-anchor="middle">13</text><text x="440" y="16" text-anchor="middle">14</text><text x="486" y="16" text-anchor="middle">15</text>
+        </g>
+        <line x1="108" x2="1072" y1="58" y2="58" stroke="#0A1322" stroke-width="1"/>
+        <!-- tick verticali -->
+        <g stroke="#0A1322" stroke-width="1">
+          <line x1="118" y1="53" x2="118" y2="63"/><line x1="164" y1="53" x2="164" y2="63"/><line x1="210" y1="53" x2="210" y2="63"/><line x1="256" y1="53" x2="256" y2="63"/><line x1="302" y1="53" x2="302" y2="63"/><line x1="348" y1="53" x2="348" y2="63"/><line x1="394" y1="53" x2="394" y2="63"/><line x1="440" y1="53" x2="440" y2="63"/><line x1="486" y1="53" x2="486" y2="63"/>
+        </g>
+        <!-- segmenti: CVp, cond, cond, refez, cond, cond, CVa -->
+        <!-- CVp accento (18:00) -->
+        <line x1="128" x2="128" y1="43" y2="73" stroke="#B45309" stroke-width="1.5"/>
+        <text x="126" y="32" text-anchor="end" font-size="9" font-weight="600" fill="#B45309" font-family="JetBrains Mono">CVp 07:18</text>
+        <!-- cond 07:28 → 08:54 · 10042 AL→MI -->
+        <rect x="128" y="48" width="76" height="20" fill="#0B6AA8"/>
+        <text x="132" y="42" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">10042 <tspan font-weight="500" fill="#3E4C67">· MI</tspan></text>
+        <text x="128" y="82" font-size="9" fill="#3E4C67" font-family="JetBrains Mono">07:28</text>
+        <text x="204" y="82" text-anchor="end" font-size="9" fill="#3E4C67" font-family="JetBrains Mono">08:54</text>
+
+        <!-- vettura 09:02 → 09:58 (dashed) -->
+        <rect x="210" y="48" width="44" height="20" fill="#E9EEF5"/>
+        <rect x="210.5" y="48.5" width="43" height="19" fill="none" stroke="#4E6A85" stroke-width="1" stroke-dasharray="3 2.5"/>
+        <text x="216" y="42" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">[V]10118</text>
+        <text x="212" y="82" font-size="9" fill="#3E4C67" font-family="JetBrains Mono">09:02</text>
+
+        <!-- refez 10:12 → 10:40 -->
+        <rect x="274" y="53" width="22" height="10" fill="#D97706"/>
+        <text x="285" y="42" text-anchor="middle" font-size="10" font-weight="700" fill="#B45309" font-family="JetBrains Mono" letter-spacing="0.04em">REFEZ VGH</text>
+
+        <!-- cond 11:02 → 13:18 · 10047 MI→AL (suspect) -->
+        <rect x="306" y="48" width="106" height="20" fill="rgba(220,38,38,0.06)"/>
+        <rect x="306.5" y="48.5" width="105" height="19" fill="none" stroke="#DC2626" stroke-width="1.2" stroke-dasharray="3 2.5"/>
+        <text x="340" y="30" text-anchor="middle" font-size="14" fill="#DC2626">⚠</text>
+        <text x="310" y="42" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">10047 <tspan font-weight="500" fill="#3E4C67">· AL</tspan></text>
+        <text x="308" y="82" font-size="9" fill="#3E4C67" font-family="JetBrains Mono">11:02</text>
+        <text x="412" y="82" text-anchor="end" font-size="9" fill="#3E4C67" font-family="JetBrains Mono">13:18</text>
+
+        <!-- cond 13:30 → 14:42 -->
+        <rect x="418" y="48" width="56" height="20" fill="#0B6AA8"/>
+        <text x="422" y="42" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">10051 <tspan font-weight="500" fill="#3E4C67">· AL</tspan></text>
+        <text x="420" y="82" font-size="9" fill="#3E4C67" font-family="JetBrains Mono">13:30</text>
+        <text x="474" y="82" text-anchor="end" font-size="9" fill="#3E4C67" font-family="JetBrains Mono">14:42</text>
+
+        <!-- CVa accento -->
+        <line x1="480" x2="480" y1="43" y2="73" stroke="#6B21A8" stroke-width="1.5"/>
+        <text x="478" y="32" text-anchor="end" font-size="9" font-weight="600" fill="#6B21A8" font-family="JetBrains Mono">CVa 14:49</text>
+
+        <!-- metriche dx -->
+        <g font-family="JetBrains Mono" font-size="9.5" font-weight="700" fill="#3E4C67" letter-spacing="0.08em">
+          <text x="1088" y="16" text-anchor="middle">LAV</text><text x="1128" y="16" text-anchor="middle">CCT</text><text x="1168" y="16" text-anchor="middle">KM</text><text x="1204" y="16" text-anchor="middle">NOT</text><text x="1240" y="16" text-anchor="middle" style="font-family:JetBrains Mono; text-transform:uppercase">RIP</text>
+        </g>
+        <g font-family="JetBrains Mono" font-size="11" font-weight="600" fill="#0A1322">
+          <text x="1088" y="62" text-anchor="middle">7h31</text>
+          <text x="1128" y="62" text-anchor="middle">03h03</text>
+          <text x="1168" y="62" text-anchor="middle">153</text>
+          <text x="1204" y="62" text-anchor="middle">no</text>
+          <text x="1240" y="62" text-anchor="middle">14h55</text>
+        </g>
+      </svg>
+    </div>
+    <div class="gix-captions">
+      <div class="gix-cap"><strong>Render puro</strong>niente overlay, niente handle, niente cursori particolari. Il cursor è <code>default</code> ovunque.</div>
+      <div class="gix-cap"><strong>Tooltip nativo</strong>hover sul segmento → <code>&lt;title&gt;</code> SVG (browser), come oggi. Tooltip custom JS solo se il consumer opta-in.</div>
+      <div class="gix-cap"><strong>Esempi d'uso</strong><code>AutoBuilderGantt</code>, <code>/gantt-preview</code>. Nessuna prop nuova richiesta.</div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- STATO 2 · SELECTED + ACTION BAR                     -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="gix-state">
+    <div class="gix-state-head">
+      <span class="gix-state-tag">S2 · selected</span>
+      <h3>Selected state + action bar 8 icone</h3>
+      <span class="gix-state-sub">single-click su segmento → ring kinetic + bar sopra</span>
+    </div>
+    <div class="gix-stage" style="padding-top: 60px;">
+      <span class="gix-stage-label">onAction + hideActionBar=false</span>
+
+      <!-- Action bar HTML overlay (sopra il treno selezionato 10047) -->
+      <div class="gix-action-bar" style="left: 278px; top: 14px; --arrow-x: 82px;">
+        <button class="gix-action-btn" title="Modifica blocco"><span class="emoji-ic">✎</span></button>
+        <button class="gix-action-btn" title="Sposta (drag temporale o inter-turno)"><span class="emoji-ic">↔</span></button>
+        <button class="gix-action-btn" title="Duplica blocco"><span class="emoji-ic">⧉</span></button>
+        <span class="gix-action-sep"></span>
+        <button class="gix-action-btn" title="Collega al giro materiale"><span class="emoji-ic">🔗</span></button>
+        <button class="gix-action-btn warn" title="Verifica discrepanze ARTURO Live"><span class="emoji-ic">⚠</span></button>
+        <span class="gix-action-sep"></span>
+        <button class="gix-action-btn" title="Apri dettaglio treno"><span class="emoji-ic">↗</span></button>
+        <button class="gix-action-btn" title="Storico ritardi (30gg)"><span class="emoji-ic">⧗</span></button>
+        <span class="gix-action-sep"></span>
+        <button class="gix-action-btn danger" title="Elimina blocco"><span class="emoji-ic">×</span></button>
+      </div>
+
+      <svg viewBox="0 0 1240 150" style="width:100%; display:block;">
+        <text x="14" y="76" font-size="13" font-weight="700" fill="#0A1322" font-family="Exo 2">G1 · LMXGV</text>
+        <text x="14" y="114" font-size="10.5" fill="#3E4C67" font-family="JetBrains Mono">1  [07:18]  [14:49]</text>
+
+        <g font-family="JetBrains Mono" font-size="10.5" font-weight="700" fill="#3E4C67">
+          <text x="118" y="68" text-anchor="middle">07</text><text x="164" y="68" text-anchor="middle">08</text><text x="210" y="68" text-anchor="middle">09</text><text x="256" y="68" text-anchor="middle">10</text><text x="302" y="68" text-anchor="middle">11</text><text x="348" y="68" text-anchor="middle">12</text><text x="394" y="68" text-anchor="middle">13</text><text x="440" y="68" text-anchor="middle">14</text><text x="486" y="68" text-anchor="middle">15</text>
+        </g>
+        <line x1="108" x2="1072" y1="110" y2="110" stroke="#0A1322" stroke-width="1"/>
+        <g stroke="#0A1322" stroke-width="1">
+          <line x1="118" y1="105" x2="118" y2="115"/><line x1="164" y1="105" x2="164" y2="115"/><line x1="210" y1="105" x2="210" y2="115"/><line x1="256" y1="105" x2="256" y2="115"/><line x1="302" y1="105" x2="302" y2="115"/><line x1="348" y1="105" x2="348" y2="115"/><line x1="394" y1="105" x2="394" y2="115"/><line x1="440" y1="105" x2="440" y2="115"/><line x1="486" y1="105" x2="486" y2="115"/>
+        </g>
+
+        <!-- segmenti uguali a S1 -->
+        <line x1="128" x2="128" y1="95" y2="125" stroke="#B45309" stroke-width="1.5"/>
+        <text x="126" y="84" text-anchor="end" font-size="9" font-weight="600" fill="#B45309" font-family="JetBrains Mono">CVp 07:18</text>
+        <rect x="128" y="100" width="76" height="20" fill="#0B6AA8"/>
+        <text x="132" y="94" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">10042</text>
+        <text x="128" y="134" font-size="9" fill="#3E4C67" font-family="JetBrains Mono">07:28</text>
+
+        <rect x="210" y="100" width="44" height="20" fill="#E9EEF5"/>
+        <rect x="210.5" y="100.5" width="43" height="19" fill="none" stroke="#4E6A85" stroke-width="1" stroke-dasharray="3 2.5"/>
+        <text x="216" y="94" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">[V]10118</text>
+
+        <rect x="274" y="105" width="22" height="10" fill="#D97706"/>
+        <text x="285" y="94" text-anchor="middle" font-size="10" font-weight="700" fill="#B45309" font-family="JetBrains Mono" letter-spacing="0.04em">REFEZ</text>
+
+        <!-- SELECTED: 10047 — kinetic ring + shadow -->
+        <rect x="303" y="97" width="112" height="26" fill="none" stroke="#22C55E" stroke-width="2" rx="2"/>
+        <rect x="306" y="100" width="106" height="20" fill="rgba(220,38,38,0.06)" filter="drop-shadow(0 3px 8px rgba(34,197,94,0.35))"/>
+        <rect x="306.5" y="100.5" width="105" height="19" fill="none" stroke="#DC2626" stroke-width="1.2" stroke-dasharray="3 2.5"/>
+        <text x="310" y="94" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">10047 <tspan font-weight="500" fill="#3E4C67">· AL</tspan></text>
+        <text x="308" y="134" font-size="9" fill="#3E4C67" font-family="JetBrains Mono">11:02</text>
+        <text x="412" y="134" text-anchor="end" font-size="9" fill="#3E4C67" font-family="JetBrains Mono">13:18</text>
+        <!-- kinetic dot -->
+        <circle cx="414" cy="97" r="4" fill="#22C55E"/>
+        <circle cx="414" cy="97" r="7" fill="none" stroke="#22C55E" stroke-width="1.5" opacity="0.25"/>
+
+        <rect x="418" y="100" width="56" height="20" fill="#0B6AA8"/>
+        <text x="422" y="94" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">10051</text>
+        <line x1="480" x2="480" y1="95" y2="125" stroke="#6B21A8" stroke-width="1.5"/>
+
+        <g font-family="JetBrains Mono" font-size="9.5" font-weight="700" fill="#3E4C67" letter-spacing="0.08em">
+          <text x="1088" y="68" text-anchor="middle">LAV</text><text x="1128" y="68" text-anchor="middle">CCT</text><text x="1168" y="68" text-anchor="middle">KM</text><text x="1204" y="68" text-anchor="middle">NOT</text><text x="1240" y="68" text-anchor="middle">RIP</text>
+        </g>
+        <g font-family="JetBrains Mono" font-size="11" font-weight="600" fill="#0A1322">
+          <text x="1088" y="114" text-anchor="middle">7h31</text><text x="1128" y="114" text-anchor="middle">03h03</text><text x="1168" y="114" text-anchor="middle">153</text><text x="1204" y="114" text-anchor="middle">no</text><text x="1240" y="114" text-anchor="middle">14h55</text>
+        </g>
+      </svg>
+    </div>
+    <div class="gix-captions">
+      <div class="gix-cap"><strong>Ordine icone (stesso di oggi)</strong><code>✎ ↔ ⧉ | 🔗 ⚠ | ↗ ⧗ | ×</code> · 3 separatori verticali · warn in ambra, delete in rosso.</div>
+      <div class="gix-cap"><strong>Clamp ai bordi</strong>se il centro blocco è a <code>x&lt;150</code>, la bar si sposta a sinistra ma la freccia <code>::after</code> resta centrata sul blocco via <code>--arrow-x</code>.</div>
+      <div class="gix-cap"><strong>Dismiss</strong>click fuori dall'SVG o <code>Esc</code> → deseleziona + fade out action bar. <code>hideActionBar=true</code> disabilita l'overlay (PdcPage "lettura").</div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- STATO 3 · DRAG IN PROGRESS                          -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="gix-state">
+    <div class="gix-state-head">
+      <span class="gix-state-tag">S3 · drag</span>
+      <h3>Drag in progress — ghost + slot indicator + sticky time</h3>
+      <span class="gix-state-sub">threshold 4px · snap 5min · CVp/CVa seguono il treno padrone</span>
+    </div>
+    <div class="gix-stage">
+      <span class="gix-stage-label">onSegmentDrag attivo · cursor grabbing</span>
+
+      <!-- Slot indicator sull'asse (dove il blocco verrà piazzato) -->
+      <div class="gix-slot-indicator" style="left: 370px; top: 40px; bottom: 40px;" data-time="11:35"></div>
+
+      <!-- Sticky time tooltip vicino al cursore -->
+      <div class="gix-time-sticky" style="left: 405px; top: 20px;">
+        11:35 → 13:51
+      </div>
+
+      <svg viewBox="0 0 1240 150" style="width:100%; display:block;">
+        <text x="14" y="24" font-size="13" font-weight="700" fill="#0A1322" font-family="Exo 2">G1 · LMXGV</text>
+        <text x="14" y="62" font-size="10.5" fill="#3E4C67" font-family="JetBrains Mono">1  [07:18]  [14:49]</text>
+
+        <g font-family="JetBrains Mono" font-size="10.5" font-weight="700" fill="#3E4C67">
+          <text x="118" y="16" text-anchor="middle">07</text><text x="164" y="16" text-anchor="middle">08</text><text x="210" y="16" text-anchor="middle">09</text><text x="256" y="16" text-anchor="middle">10</text><text x="302" y="16" text-anchor="middle">11</text><text x="348" y="16" text-anchor="middle">12</text><text x="394" y="16" text-anchor="middle">13</text><text x="440" y="16" text-anchor="middle">14</text><text x="486" y="16" text-anchor="middle">15</text>
+        </g>
+        <line x1="108" x2="1072" y1="58" y2="58" stroke="#0A1322" stroke-width="1"/>
+        <g stroke="#0A1322" stroke-width="1">
+          <line x1="118" y1="53" x2="118" y2="63"/><line x1="164" y1="53" x2="164" y2="63"/><line x1="210" y1="53" x2="210" y2="63"/><line x1="256" y1="53" x2="256" y2="63"/><line x1="302" y1="53" x2="302" y2="63"/><line x1="348" y1="53" x2="348" y2="63"/><line x1="394" y1="53" x2="394" y2="63"/><line x1="440" y1="53" x2="440" y2="63"/><line x1="486" y1="53" x2="486" y2="63"/>
+        </g>
+
+        <!-- Altri segmenti (leggeri / intatti) -->
+        <rect x="128" y="48" width="76" height="20" fill="#0B6AA8"/>
+        <text x="132" y="42" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">10042</text>
+        <rect x="210" y="48" width="44" height="20" fill="#E9EEF5"/>
+        <rect x="210.5" y="48.5" width="43" height="19" fill="none" stroke="#4E6A85" stroke-width="1" stroke-dasharray="3 2.5"/>
+        <text x="216" y="42" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">[V]10118</text>
+        <rect x="274" y="53" width="22" height="10" fill="#D97706"/>
+
+        <!-- GHOST: posizione originale del 10047 (11:02 → 13:18), trasparente -->
+        <rect x="306" y="48" width="106" height="20" fill="rgba(11,106,168,0.08)"/>
+        <rect x="306" y="48" width="106" height="20" fill="none" stroke="#0B6AA8" stroke-width="1" stroke-dasharray="3 2" opacity="0.5"/>
+
+        <!-- DRAG POSITION: 10047 spostato a 11:35 → 13:51 (dx=+24px) -->
+        <rect x="340" y="48" width="106" height="20" fill="rgba(220,38,38,0.06)" filter="drop-shadow(0 4px 10px rgba(0,98,204,0.30))"/>
+        <rect x="340.5" y="48.5" width="105" height="19" fill="none" stroke="#DC2626" stroke-width="1.2" stroke-dasharray="3 2.5"/>
+        <rect x="338" y="46" width="110" height="24" fill="none" stroke="#0062CC" stroke-width="1.2" stroke-dasharray="4 3"/>
+        <text x="344" y="42" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">10047 <tspan font-weight="500" fill="#3E4C67">· AL</tspan></text>
+        <text x="342" y="82" font-size="9" font-weight="700" fill="#0062CC" font-family="JetBrains Mono">11:35</text>
+        <text x="446" y="82" text-anchor="end" font-size="9" font-weight="700" fill="#0062CC" font-family="JetBrains Mono">13:51</text>
+
+        <!-- 10051 non si muove -->
+        <rect x="418" y="48" width="56" height="20" fill="#0B6AA8" opacity="0.4"/>
+        <text x="422" y="42" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono" opacity="0.5">10051</text>
+
+        <g font-family="JetBrains Mono" font-size="9.5" font-weight="700" fill="#3E4C67" letter-spacing="0.08em">
+          <text x="1088" y="16" text-anchor="middle">LAV</text><text x="1128" y="16" text-anchor="middle">CCT</text><text x="1168" y="16" text-anchor="middle">KM</text><text x="1204" y="16" text-anchor="middle">NOT</text><text x="1240" y="16" text-anchor="middle">RIP</text>
+        </g>
+        <g font-family="JetBrains Mono" font-size="11" font-weight="600" fill="#0A1322">
+          <text x="1088" y="62" text-anchor="middle">7h31</text><text x="1128" y="62" text-anchor="middle">03h03</text><text x="1168" y="62" text-anchor="middle">153</text><text x="1204" y="62" text-anchor="middle">no</text><text x="1240" y="62" text-anchor="middle">14h55</text>
+        </g>
+      </svg>
+    </div>
+    <div class="gix-captions">
+      <div class="gix-cap"><strong>Ghost</strong>bordo tratteggiato brand sul rettangolo in drag (niente copia OS-style). Posizione originale mantenuta sfumata al 8% opacity come "back-reference".</div>
+      <div class="gix-cap"><strong>Slot sull'asse</strong>riga verticale 2px in brand <code>#0062CC</code> con pill orario in alto (<code>::before</code>). Snap visivo ogni 5min.</div>
+      <div class="gix-cap"><strong>Sticky time</strong>tooltip dark ancorato al cursore, sempre visibile durante resize/drag. Mostra <code>dep → arr</code> aggiornato real-time.</div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- STATO 4 · CROSS-DAY DnD                             -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="gix-state">
+    <div class="gix-state-head">
+      <span class="gix-state-tag">S4 · cross-day</span>
+      <h3>Cross-day drag — source → target con drop-slot</h3>
+      <span class="gix-state-sub">HTML5 DnD · MIME <code>application/x-colazione-block</code> · <code>ganttId</code> obbligatorio</span>
+    </div>
+    <div class="gix-stack">
+
+      <!-- SOURCE Gantt (G1 · LMXGV) -->
+      <div class="gix-stage">
+        <span class="gix-stage-label">source · ganttId=g1-LMXGV · blocco in uscita</span>
+        <svg viewBox="0 0 1240 120" style="width:100%; display:block;">
+          <text x="14" y="24" font-size="13" font-weight="700" fill="#0A1322" font-family="Exo 2">G1 · LMXGV</text>
+          <text x="14" y="62" font-size="10.5" fill="#3E4C67" font-family="JetBrains Mono">1  [07:18]  [14:49]</text>
+          <g font-family="JetBrains Mono" font-size="10.5" font-weight="700" fill="#3E4C67">
+            <text x="118" y="16" text-anchor="middle">07</text><text x="164" y="16" text-anchor="middle">08</text><text x="210" y="16" text-anchor="middle">09</text><text x="256" y="16" text-anchor="middle">10</text><text x="302" y="16" text-anchor="middle">11</text><text x="348" y="16" text-anchor="middle">12</text><text x="394" y="16" text-anchor="middle">13</text><text x="440" y="16" text-anchor="middle">14</text><text x="486" y="16" text-anchor="middle">15</text>
+          </g>
+          <line x1="108" x2="1072" y1="58" y2="58" stroke="#0A1322" stroke-width="1"/>
+          <rect x="128" y="48" width="76" height="20" fill="#0B6AA8"/>
+          <text x="132" y="42" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">10042</text>
+          <rect x="210" y="48" width="44" height="20" fill="#E9EEF5"/>
+          <rect x="210.5" y="48.5" width="43" height="19" fill="none" stroke="#4E6A85" stroke-width="1" stroke-dasharray="3 2.5"/>
+          <!-- SOURCE: 10047 in fase di rimozione (ghost + "→" uscita) -->
+          <rect x="306" y="48" width="106" height="20" fill="rgba(220,38,38,0.06)" opacity="0.35"/>
+          <rect x="306.5" y="48.5" width="105" height="19" fill="none" stroke="#DC2626" stroke-width="1.2" stroke-dasharray="3 2.5" opacity="0.35"/>
+          <text x="310" y="42" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono" opacity="0.35">10047</text>
+          <text x="359" y="92" text-anchor="middle" font-size="10" font-weight="700" fill="#DC2626" font-family="JetBrains Mono">↗ uscita in G3</text>
+          <rect x="418" y="48" width="56" height="20" fill="#0B6AA8"/>
+          <text x="422" y="42" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">10051</text>
+        </svg>
+      </div>
+
+      <!-- TARGET Gantt (G3 · D) -->
+      <div class="gix-stage is-target">
+        <span class="gix-stage-label">target · ganttId=g3-D · drop-slot attivo</span>
+
+        <!-- slot indicator -->
+        <div class="gix-slot-indicator" style="left: 440px; top: 38px; bottom: 18px;" data-time="13:00"></div>
+
+        <svg viewBox="0 0 1240 120" style="width:100%; display:block;">
+          <text x="14" y="24" font-size="13" font-weight="700" fill="#0A1322" font-family="Exo 2">G3 · D</text>
+          <text x="14" y="62" font-size="10.5" fill="#3E4C67" font-family="JetBrains Mono">3  [08:00]  [13:30]</text>
+          <g font-family="JetBrains Mono" font-size="10.5" font-weight="700" fill="#3E4C67">
+            <text x="118" y="16" text-anchor="middle">07</text><text x="164" y="16" text-anchor="middle">08</text><text x="210" y="16" text-anchor="middle">09</text><text x="256" y="16" text-anchor="middle">10</text><text x="302" y="16" text-anchor="middle">11</text><text x="348" y="16" text-anchor="middle">12</text><text x="394" y="16" text-anchor="middle">13</text><text x="440" y="16" text-anchor="middle">14</text><text x="486" y="16" text-anchor="middle">15</text>
+          </g>
+          <line x1="108" x2="1072" y1="58" y2="58" stroke="#0A1322" stroke-width="1"/>
+          <!-- G3 ha 2 treni: 10102 e 10108, con gap centrale libero -->
+          <rect x="160" y="48" width="78" height="20" fill="#0B6AA8"/>
+          <text x="164" y="42" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">10102 <tspan font-weight="500" fill="#3E4C67">· MI</tspan></text>
+          <rect x="256" y="48" width="58" height="20" fill="#0B6AA8"/>
+          <text x="260" y="42" font-size="10.5" font-weight="700" fill="#0A1322" font-family="JetBrains Mono">10106</text>
+          <!-- gap 11:30 — 14:00 disponibile per il drop -->
+          <rect x="450" y="48" width="22" height="20" fill="#E9EEF5"/>
+          <rect x="450.5" y="48.5" width="21" height="19" fill="none" stroke="#4E6A85" stroke-width="1" stroke-dasharray="3 2.5"/>
+
+          <!-- Ghost preview del blocco 10047 in arrivo a 13:00 -->
+          <rect x="394" y="46" width="46" height="24" fill="none" stroke="#0062CC" stroke-width="1.5" stroke-dasharray="4 3"/>
+          <text x="417" y="82" text-anchor="middle" font-size="9" font-weight="700" fill="#0062CC" font-family="JetBrains Mono">preview 10047</text>
+        </svg>
+      </div>
+    </div>
+    <div class="gix-captions">
+      <div class="gix-cap"><strong>MIME payload</strong><code>{ganttId, block, index, linkedCvp?, linkedCva?}</code> su <code>application/x-colazione-block</code>. Fallback <code>text/plain</code> per browser strict.</div>
+      <div class="gix-cap"><strong>Flow atomico</strong>source chiama <code>onCrossDragStart</code> → target chiama <code>onCrossDrop(payload, targetId, time)</code> → source chiama <code>onCrossRemove(idx, withLinkedCvs)</code> se <code>dropEffect==="move"</code>.</div>
+      <div class="gix-cap"><strong>Drop rejection</strong>se <code>payload.ganttId === target.ganttId</code> il drop viene ignorato (il drag intra-Gantt gestisce già move temporale).</div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- API PROPOSTA                                        -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="gix-api">
+    <h3>API estesa · opt-in completa</h3>
+    <div class="gix-api-grid">
+      <div class="gix-api-card">
+        <h4>Props aggiunte a <code>GanttSheetProps</code></h4>
+<pre><span class="cm">// Identity (obbligatorio solo per cross-day DnD)</span>
+ganttId?: <span class="tp">string</span>
+
+<span class="cm">// Drag temporale intra-Gantt (move + resize)</span>
+onSegmentDrag?: (
+  rowIdx: <span class="tp">number</span>,
+  segIdx: <span class="tp">number</span>,
+  changes: { dep_time?: <span class="tp">string</span>; arr_time?: <span class="tp">string</span> },
+) =&gt; <span class="tp">void</span>
+
+<span class="cm">// Click su area asse vuota (add-block in Builder)</span>
+onTimelineClick?: (
+  hour: <span class="tp">number</span>,
+  minute: <span class="tp">number</span>,
+  rowIdx: <span class="tp">number</span>,
+) =&gt; <span class="tp">void</span>
+
+<span class="cm">// Cross-day DnD</span>
+onCrossDragStart?: (p: CrossDragPayload) =&gt; <span class="tp">void</span>
+onCrossDrop?: (
+  p: CrossDragPayload,
+  targetGanttId: <span class="tp">string</span>,
+  dropTime: { hour: <span class="tp">number</span>; minute: <span class="tp">number</span>; rowIdx: <span class="tp">number</span> },
+) =&gt; <span class="tp">void</span>
+onCrossRemove?: (
+  segIdx: <span class="tp">number</span>,
+  withLinkedCvs: <span class="tp">boolean</span>,
+) =&gt; <span class="tp">void</span>
+
+<span class="cm">// Action bar 8-icone</span>
+onAction?: (
+  action: GanttAction,
+  seg: GanttSegment,
+  rowIdx: <span class="tp">number</span>,
+  segIdx: <span class="tp">number</span>,
+) =&gt; <span class="tp">void</span>
+
+<span class="cm">// Tuning</span>
+hideActionBar?: <span class="tp">boolean</span>    <span class="cm">// default false</span>
+autoFit?: <span class="tp">boolean</span>          <span class="cm">// default false</span>
+snapMinutes?: <span class="tp">number</span>       <span class="cm">// default 5</span>
+dragThresholdPx?: <span class="tp">number</span>   <span class="cm">// default 4</span></pre>
+      </div>
+
+      <div class="gix-api-card">
+        <h4>Tipi nuovi in <code>types.ts</code></h4>
+<pre><span class="kw">export type</span> GanttAction =
+  | <span class="st">"edit"</span>
+  | <span class="st">"move"</span>
+  | <span class="st">"duplicate"</span>
+  | <span class="st">"link"</span>
+  | <span class="st">"warn"</span>
+  | <span class="st">"detail"</span>
+  | <span class="st">"history"</span>
+  | <span class="st">"delete"</span>
+
+<span class="kw">export interface</span> CrossDragPayload {
+  ganttId: <span class="tp">string</span>
+  seg: GanttSegment
+  rowIdx: <span class="tp">number</span>
+  segIdx: <span class="tp">number</span>
+  <span class="cm">// Per CVp/CVa linkati al treno padrone</span>
+  linkedCvp?: GanttSegment
+  linkedCva?: GanttSegment
+}
+
+<span class="kw">export const</span> CROSS_DAY_MIME =
+  <span class="st">"application/x-colazione-block"</span>
+</pre>
+
+        <h4 style="margin-top:14px">Nuovi tokens in <code>tokens.ts</code></h4>
+<pre>SELECTED_RING:  <span class="st">"#22C55E"</span>   <span class="cm">// kinetic green</span>
+SELECTED_SHADOW: <span class="st">"0 3px 8px rgba(34,197,94,.35)"</span>
+DRAG_GHOST_BORDER: <span class="st">"#0062CC"</span>
+DROP_SLOT:      <span class="st">"#0062CC"</span>
+DROP_SLOT_HALO: <span class="st">"rgb(0 98 204 / 0.12)"</span>
+ACTION_BAR_BG:  <span class="st">"var(--surface-container-lowest)"</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════ -->
+  <!-- COVERAGE TABLE                                      -->
+  <!-- ═══════════════════════════════════════════════════ -->
+  <section class="gix-cov">
+    <h4>Coverage · <code>PdcGanttV2</code> → <code>GanttSheet</code> esteso · 1:1</h4>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:28%">Feature PdcGanttV2</th>
+          <th style="width:32%">API GanttSheet esteso</th>
+          <th style="width:10%">Status</th>
+          <th>Note</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Drag move intra-Gantt (threshold 4px, snap 5min)</td><td class="mono">onSegmentDrag(rowIdx, segIdx, {dep_time, arr_time})</td><td><span class="pill ok">1:1</span></td><td>Event listener globali mousemove/mouseup scoped al drag corrente</td></tr>
+        <tr><td>Resize start (handle 6px sx)</td><td class="mono">onSegmentDrag con solo dep_time modificato</td><td><span class="pill ok">1:1</span></td><td>Vincolo <code>dep &lt; arr - snap</code></td></tr>
+        <tr><td>Resize end (handle 6px dx)</td><td class="mono">onSegmentDrag con solo arr_time modificato</td><td><span class="pill ok">1:1</span></td><td>idem</td></tr>
+        <tr><td>Gruppo CVp/CVa legato al treno</td><td class="mono">interno (flag cvp/cva già in GanttSegment)</td><td><span class="pill ok">1:1</span></td><td>Il drag padre emette più callback consecutive: treno + CVp agganciato + CVa agganciato</td></tr>
+        <tr><td>Cross-day drag (HTML5 DnD)</td><td class="mono">onCrossDragStart / onCrossDrop / onCrossRemove</td><td><span class="pill ok">1:1</span></td><td>MIME <code>application/x-colazione-block</code>, payload serializzato</td></tr>
+        <tr><td>Click su timeline vuota (add)</td><td class="mono">onTimelineClick(hour, minute, rowIdx)</td><td><span class="pill ok">1:1</span></td><td>Cursor <code>crosshair</code> in area asse non coperta da segmenti</td></tr>
+        <tr><td>Hover tooltip custom</td><td class="mono">interno (overlay DOM via wrapperRef)</td><td><span class="pill ok">1:1</span></td><td>Se non fornito, fallback a <code>&lt;title&gt;</code> SVG</td></tr>
+        <tr><td>Action bar 8 icone (selected)</td><td class="mono">onAction + hideActionBar</td><td><span class="pill ok">1:1</span></td><td>Ordine icone preservato, 3 separatori, clamp ai bordi</td></tr>
+        <tr><td>Esc / click fuori → deseleziona</td><td class="mono">interno (listener doc, unmount-safe)</td><td><span class="pill ok">1:1</span></td><td>—</td></tr>
+        <tr><td>autoFit range visivo</td><td class="mono">autoFit: boolean</td><td><span class="pill ok">1:1</span></td><td>Fallback a <code>range</code> se 0 segmenti</td></tr>
+        <tr><td>Debug logging</td><td class="mono">debug: boolean (già presente)</td><td><span class="pill ok">1:1</span></td><td>—</td></tr>
+        <tr><td>Auto-scroll durante drag oltre bordo</td><td class="mono">interno (RAF + scroll container detection)</td><td><span class="pill new">migliorato</span></td><td>Non funzionava bene in PdcGanttV2, nuovo RAF loop in <code>gantt/interactions.ts</code></td></tr>
+        <tr><td>Sticky time tooltip durante resize</td><td class="mono">interno</td><td><span class="pill new">nuovo</span></td><td>Non presente in v2, aggiunto come richiesto in §vincoli soft</td></tr>
+        <tr><td>Keyboard nav (Tab/Enter)</td><td class="mono">tabindex + onKeyDown</td><td><span class="pill new">nuovo</span></td><td>Minimo: Tab naviga segmenti, Enter apre drawer (= onSegmentClick)</td></tr>
+      </tbody>
+    </table>
+  </section>
+</div>
+
+<!-- Tweaks panel -->
+<div class="gix-tweaks" id="gixTweaks">
+  <div class="gix-tweaks-head">
+    <h5>Tweaks · Gantt interactions</h5>
+    <button onclick="document.getElementById('gixTweaks').classList.remove('is-open')">×</button>
+  </div>
+  <div class="gix-tweaks-body">
+    <div class="gix-tweak-row">
+      <label>snapMinutes</label>
+      <input type="range" min="1" max="15" value="5" id="tw-snap">
+      <span class="val" id="tw-snap-v">5m</span>
+    </div>
+    <div class="gix-tweak-row">
+      <label>dragThresholdPx</label>
+      <input type="range" min="0" max="10" value="4" id="tw-thr">
+      <span class="val" id="tw-thr-v">4px</span>
+    </div>
+    <div class="gix-tweak-row">
+      <label>autoFit padding</label>
+      <input type="range" min="0" max="60" step="5" value="30" id="tw-pad">
+      <span class="val" id="tw-pad-v">30m</span>
+    </div>
+    <div class="gix-tweak-row">
+      <label>hideActionBar</label>
+      <input type="checkbox" id="tw-hide">
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // Tweak panel plumbing
+  const snap = document.getElementById('tw-snap');
+  const thr = document.getElementById('tw-thr');
+  const pad = document.getElementById('tw-pad');
+  if (snap) snap.addEventListener('input', e => document.getElementById('tw-snap-v').textContent = e.target.value + 'm');
+  if (thr) thr.addEventListener('input', e => document.getElementById('tw-thr-v').textContent = e.target.value + 'px');
+  if (pad) pad.addEventListener('input', e => document.getElementById('tw-pad-v').textContent = e.target.value + 'm');
+
+  // Edit mode wiring
+  window.addEventListener('message', (ev) => {
+    if (ev.data?.type === '__activate_edit_mode') {
+      document.getElementById('gixTweaks')?.classList.add('is-open');
+    } else if (ev.data?.type === '__deactivate_edit_mode') {
+      document.getElementById('gixTweaks')?.classList.remove('is-open');
+    }
+  });
+  try { window.parent.postMessage({type: '__edit_mode_available'}, '*'); } catch(e){}
+
+  // Dismiss action bar on outside click (demo)
+  document.querySelectorAll('.gix-action-bar').forEach(bar => {
+    bar.addEventListener('click', (e) => {
+      if (e.target.closest('.gix-action-btn')) {
+        e.target.closest('.gix-action-btn').style.background = 'rgb(0 98 204 / 0.10)';
+        setTimeout(() => e.target.closest('.gix-action-btn').style.background = '', 200);
+      }
+    });
+  });
+})();
+</script>

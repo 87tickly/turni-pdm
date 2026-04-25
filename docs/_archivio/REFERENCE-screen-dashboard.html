@@ -1,0 +1,206 @@
+<div class="screen active">
+  <div class="content">
+    <div class="topbar">
+      <div style="display:flex; align-items:center; gap:12px; width: 420px;">
+        <div class="search-input-wrap" style="flex:1; box-shadow: var(--shadow-sm);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input placeholder="Cerca turno, treno o stazione…" style="font-family:var(--font-sans); font-size:13px; font-weight:500;"/>
+          <span class="kbd">⌘ K</span>
+        </div>
+      </div>
+      <div class="topbar-spacer"></div>
+      <button class="icon-btn"><svg class="ic-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg></button>
+      <div style="display:flex; align-items:center; gap:10px; padding-left:8px;">
+        <div style="text-align:right; display:flex; flex-direction:column">
+          <span style="font-size:12px; font-weight:700; color:var(--on-surface-strong);">M. Rossi</span>
+          <span style="font-size:9.5px; text-transform:uppercase; letter-spacing:0.08em; color:var(--on-surface-quiet); font-weight:600;">Capotreno</span>
+        </div>
+        <div class="avatar">MR</div>
+      </div>
+    </div>
+
+    <div class="content-body">
+      <div class="page-title-row">
+        <div>
+          <h1 class="page-title">Pannello di Controllo</h1>
+          <div class="page-subtitle" style="margin-top:4px;">Gestione flotta e turnazione · aggiornata a 2 min fa</div>
+        </div>
+        <div style="margin-left:auto">
+          <button class="btn btn-primary btn-lg">
+            <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
+            Nuovo turno
+          </button>
+        </div>
+      </div>
+
+      <!-- KPIs -->
+      <div class="dash-grid">
+        <div class="kpi">
+          <div class="k"><span>Totale turni</span>
+            <svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          </div>
+          <div class="v">156</div>
+          <div class="s"><span class="delta">+12%</span> vs 30gg</div>
+        </div>
+        <div class="kpi">
+          <div class="k"><span>Turni attivi</span></div>
+          <span class="live"><span class="pulse"></span>LIVE</span>
+          <div class="v">42</div>
+          <div class="s">In corso ora</div>
+        </div>
+        <div class="kpi">
+          <div class="k"><span>Lavorati settimana</span>
+            <svg class="ic" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
+          </div>
+          <div class="v">5<span class="unit">/7 gg</span></div>
+          <div class="s">2 riposi programmati</div>
+        </div>
+        <div class="kpi">
+          <div class="k"><span>Ore settimana</span>
+            <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          </div>
+          <div class="v">38<span class="unit">h 45m</span></div>
+          <div class="s">Max 42h · buffer 3h 15m</div>
+        </div>
+      </div>
+
+      <!-- Two-column main -->
+      <div class="dash-main">
+        <!-- Activity feed + linea attiva -->
+        <div style="display:flex; flex-direction:column; gap:16px;">
+          <div class="activity">
+            <div class="activity-hd">
+              <span class="t">Attività recente</span>
+              <span class="all">Vedi tutto →</span>
+            </div>
+            <div class="activity-body">
+              <div class="act-row">
+                <div class="act-ic blue"><svg class="ic" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></div>
+                <div class="act-main">
+                  <div class="t">Turno PdC #2931 Modificato</div>
+                  <div class="s">Assegnato treno RV 2831 a L. Bianchi</div>
+                </div>
+                <div class="act-time">10 min fa</div>
+              </div>
+              <div class="act-row">
+                <div class="act-ic green"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg></div>
+                <div class="act-main">
+                  <div class="t">Giro Materiale Validato</div>
+                  <div class="s">Deposito Roma Termini · Flotta ETR1000</div>
+                </div>
+                <div class="act-time">45 min fa</div>
+              </div>
+              <div class="act-row">
+                <div class="act-ic slate"><svg class="ic" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></svg></div>
+                <div class="act-main">
+                  <div class="t">Import PDF Completato</div>
+                  <div class="s">Orario estivo RFI 2026 · 248 turni rilevati</div>
+                </div>
+                <div class="act-time">2h fa</div>
+              </div>
+              <div class="act-row">
+                <div class="act-ic amber"><svg class="ic" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4M12 17h.01"/></svg></div>
+                <div class="act-main">
+                  <div class="t">Conflitto di periodicità</div>
+                  <div class="s">Treno 9632 · Sovrapposizione CVa</div>
+                </div>
+                <div class="act-time">5h fa</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="linea-card">
+            <div class="linea-hd">
+              <span class="t">Monitoraggio linea attiva</span>
+              <div class="meta">
+                <span class="chip chip-success chip-dot">8 linee OK</span>
+                <span class="chip chip-warning chip-dot">1 ritardo</span>
+              </div>
+            </div>
+            <table class="linea-tbl">
+              <thead>
+                <tr>
+                  <th>Treno</th><th>Tratta</th><th>Stato</th><th>Ritardo</th><th style="text-align:right">Azioni</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="tr-code">FR 9612</span></td>
+                  <td class="route">Napoli C.le <span class="arr">→</span> Milano C.le</td>
+                  <td><span class="chip chip-success chip-dot">In orario</span></td>
+                  <td class="mono" style="color:var(--on-surface-muted)">—</td>
+                  <td style="text-align:right; color:var(--on-surface-quiet); font-weight:700; letter-spacing:0.1em">···</td>
+                </tr>
+                <tr>
+                  <td><span class="tr-code">RV 2831</span></td>
+                  <td class="route">Roma Termini <span class="arr">→</span> Firenze S.M.N.</td>
+                  <td><span class="chip chip-warning chip-dot">Ritardato</span></td>
+                  <td class="mono" style="color:var(--warning); font-weight:700">+12′</td>
+                  <td style="text-align:right; color:var(--on-surface-quiet); font-weight:700; letter-spacing:0.1em">···</td>
+                </tr>
+                <tr>
+                  <td><span class="tr-code">EC 37</span></td>
+                  <td class="route">Venezia S.L. <span class="arr">→</span> Ginevra</td>
+                  <td><span class="chip chip-muted chip-dot">Soppresso</span></td>
+                  <td class="mono" style="color:var(--on-surface-muted)">—</td>
+                  <td style="text-align:right; color:var(--on-surface-quiet); font-weight:700; letter-spacing:0.1em">···</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Side column -->
+        <div class="dash-side">
+          <div class="today-card">
+            <div class="hd">
+              <span>Oggi in servizio</span>
+              <span class="mono" style="letter-spacing:0.04em">14 mag</span>
+            </div>
+            <div class="body">
+              <div class="row">
+                <span class="dot"></span>
+                <div>
+                  <div style="font-size:12.5px; font-weight:600;">Treno 9612 <span style="opacity:0.7; font-weight:500; font-family:var(--font-mono); font-size:11px;">(PdC)</span></div>
+                </div>
+                <div class="period-mini">
+                  <span class="on">L</span><span>M</span><span>X</span><span class="on">G</span><span class="on">V</span><span>S</span><span>D</span>
+                </div>
+              </div>
+              <div class="row">
+                <span class="dot"></span>
+                <div>
+                  <div style="font-size:12.5px; font-weight:600;">Manovra MIL <span style="opacity:0.7; font-weight:500; font-family:var(--font-mono); font-size:11px;">(MAT)</span></div>
+                </div>
+                <div class="period-mini">
+                  <span class="on">L</span><span class="on">M</span><span>X</span><span class="on">G</span><span>V</span><span>S</span><span>D</span>
+                </div>
+              </div>
+            </div>
+            <div class="next">
+              <div class="k">Turno prossimo</div>
+              <div class="code">INV 4410 · Milano C.le</div>
+              <div class="t">Partenza 14:45</div>
+            </div>
+          </div>
+
+          <div class="side-card" style="background:linear-gradient(135deg, #0A1E3F 0%, #132B52 100%); color:#E5E9F3;">
+            <div class="eyebrow" style="color:rgba(255,255,255,0.6)">Prossimi riposi</div>
+            <div class="display" style="color:#fff; font-size:28px; margin-top:6px;">Tra 2 giorni</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:14px;">
+              <div style="padding:10px 12px; background:rgba(255,255,255,0.10); border-radius:var(--r-md);">
+                <div style="font-size:9.5px; text-transform:uppercase; letter-spacing:0.1em; color:rgba(255,255,255,0.65); font-weight:700">Data</div>
+                <div class="mono" style="font-weight:600; font-size:13px; margin-top:2px;">Sab, 16 mag</div>
+              </div>
+              <div style="padding:10px 12px; background:rgba(255,255,255,0.10); border-radius:var(--r-md);">
+                <div style="font-size:9.5px; text-transform:uppercase; letter-spacing:0.1em; color:rgba(255,255,255,0.65); font-weight:700">Durata</div>
+                <div class="mono" style="font-weight:600; font-size:13px; margin-top:2px;">48 ore</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

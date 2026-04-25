@@ -1,0 +1,161 @@
+<div class="screen active">
+  <div class="content">
+    <!-- Blurred editor behind the palette -->
+    <div class="topbar" style="opacity:0.45; filter: blur(2px);">
+      <div class="editor-code">
+        <span class="k">Editor Turno</span>
+        <span class="v mono">AROR_C</span>
+      </div>
+      <div class="topbar-meta">
+        <div class="topbar-field">
+          <span class="k">Deposito</span>
+          <span class="v">Arona</span>
+        </div>
+        <div class="topbar-field">
+          <span class="k">Profilo</span>
+          <span class="v">Condotta</span>
+        </div>
+      </div>
+      <div class="topbar-spacer"></div>
+      <div class="topbar-actions">
+        <button class="btn btn-secondary">Salva bozza</button>
+        <button class="btn btn-primary">Pubblica turno</button>
+      </div>
+    </div>
+
+    <div class="content-body" style="opacity:0.35; filter: blur(2.5px);">
+      <h1 class="page-title" style="padding-top:12px">Editor Turno PdC</h1>
+      <div class="page-subtitle">Codice turno: AROR_C · Deposito: Arona · 6 giornate</div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-top:12px;">
+        <div class="card" style="padding:16px;">
+          <div class="eyebrow">Partenza</div>
+          <div class="display" style="font-size:22px; margin-top:4px;">Milano C.le</div>
+          <div class="mono" style="color:var(--brand); font-weight:700; font-size:18px; margin-top:6px;">08:15</div>
+        </div>
+        <div class="card" style="padding:16px;">
+          <div class="eyebrow">Durata</div>
+          <div class="display" style="font-size:22px; margin-top:4px;">8h 22m</div>
+          <div class="mono" style="color:var(--on-surface-muted); font-size:12px; margin-top:6px;">Condotta 5h 45m</div>
+        </div>
+        <div class="card" style="padding:16px;">
+          <div class="eyebrow">Dettagli servizio</div>
+          <div class="display" style="font-size:22px; margin-top:4px;">3 treni</div>
+          <div class="mono" style="color:var(--on-surface-muted); font-size:12px; margin-top:6px;">2 vetture · 1 refez</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Palette overlay -->
+  <div class="palette-backdrop">
+    <div class="palette">
+      <div class="palette-input">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input placeholder="Cerca turno, treno, azione…" value="aror" autocomplete="off"/>
+        <span class="palette-esc">ESC</span>
+      </div>
+
+      <div class="palette-body">
+        <div class="palette-group">
+          <div class="group-title">Suggerimenti</div>
+          <div class="palette-item">
+            <div class="ic-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            </div>
+            <div>
+              <div class="title">Ultimi turni modificati</div>
+              <div class="sub">Visualizza la cronologia recente</div>
+            </div>
+            <div class="meta"></div>
+          </div>
+        </div>
+
+        <div class="palette-group">
+          <div class="group-title">Turni</div>
+          <div class="palette-item active">
+            <div class="ic-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+            </div>
+            <div>
+              <div class="title">Turno AROR_C</div>
+              <div class="sub">Arona · Condotta · 6 giornate</div>
+            </div>
+            <span class="selected-flag">SELECTED</span>
+          </div>
+        </div>
+
+        <div class="palette-group">
+          <div class="group-title">Treni</div>
+          <div class="palette-item">
+            <div class="ic-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h12a2 2 0 0 1 2 2v8a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V6a2 2 0 0 1 2-2Z"/><path d="M4 10h16"/></svg>
+            </div>
+            <div>
+              <div class="title">Treno 10581</div>
+              <div class="sub">AROR → Verona · 2 carriers · 15:05 → 16:41</div>
+            </div>
+            <div class="meta"></div>
+          </div>
+          <div class="palette-item">
+            <div class="ic-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h12a2 2 0 0 1 2 2v8a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V6a2 2 0 0 1 2-2Z"/><path d="M4 10h16"/></svg>
+            </div>
+            <div>
+              <div class="title">Treno 2304</div>
+              <div class="sub">Milano C.le → Bologna C.le · 1 carrier</div>
+            </div>
+            <div class="meta"></div>
+          </div>
+        </div>
+
+        <div class="palette-group">
+          <div class="group-title">Azioni</div>
+          <div class="palette-item">
+            <div class="ic-wrap" style="background:rgba(34,197,94,0.14); color:var(--success)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-3 14h6l-3 6"/></svg>
+            </div>
+            <div>
+              <div class="title">Nuovo turno PdC</div>
+              <div class="sub">Crea un turno vuoto da zero</div>
+            </div>
+            <div class="meta"><span class="kbd">⌘</span><span class="kbd">N</span></div>
+          </div>
+          <div class="palette-item">
+            <div class="ic-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="M12 18v-6M9 15l3 3 3-3"/></svg>
+            </div>
+            <div>
+              <div class="title">Importa PDF</div>
+              <div class="sub">Parser intelligente per turni RFI / Trenord</div>
+            </div>
+            <div class="meta"><span class="kbd">⌘</span><span class="kbd">I</span></div>
+          </div>
+          <div class="palette-item">
+            <div class="ic-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+            </div>
+            <div>
+              <div class="title">Attiva modalità notturna</div>
+              <div class="sub">Ottimizzata per turni dalle 22:00</div>
+            </div>
+            <div class="meta"><span class="kbd">⌘</span><span class="kbd">D</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="palette-ft">
+        <div class="hint">
+          <span class="kbd">↑↓</span>
+          Naviga
+        </div>
+        <div class="hint">
+          <span class="kbd">↵</span>
+          Seleziona
+        </div>
+        <div class="spacer"></div>
+        <span class="brand-ft">ARTURO COMMAND ENGINE · v1.2</span>
+      </div>
+    </div>
+  </div>
+</div>
