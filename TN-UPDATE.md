@@ -10,6 +10,87 @@
 
 ---
 
+## 2026-04-25 (10) — FASE D Sprint 0.1: backend skeleton
+
+### Contesto
+
+Inizio costruzione codice. Sprint 0.1 del PIANO-MVP §2: scaffolding
+backend FastAPI con Python 3.12 + uv, struttura cartelle per moduli
+futuri.
+
+### Modifiche
+
+**Nuovo `backend/`**:
+- `pyproject.toml`: dipendenze runtime (FastAPI, SQLAlchemy 2.0,
+  alembic, psycopg3, Pydantic v2, bcrypt, pyjwt, openpyxl,
+  numbers-parser) + extras dev (ruff, mypy, pytest, pytest-cov,
+  pytest-asyncio, httpx). Config ruff line-length 100, mypy strict,
+  pytest pythonpath=["src"]
+- `.python-version`: 3.12
+- `Dockerfile`: image python:3.12-slim + uv per build, multi-stage
+  (deps cached, project install separato)
+- `.dockerignore`
+- `.env.example`: template per .env.local
+
+**Struttura `backend/src/colazione/`**:
+- `__init__.py` (versione 0.1.0)
+- `main.py`: FastAPI app skeleton con `/health` endpoint + CORS
+- `config.py`: Pydantic Settings (DATABASE_URL, JWT, admin, CORS)
+- Cartelle vuote (con `__init__.py`) per: `auth/`, `models/`,
+  `schemas/`, `api/`, `domain/{builder_giro,builder_pdc,normativa,revisioni}`,
+  `importers/`
+
+**`backend/tests/test_main.py`**:
+- `test_health_endpoint_returns_ok` → 200 OK
+- `test_app_metadata` → titolo + versione corretti
+- `test_openapi_schema_exists` → /openapi.json contiene /health
+
+**`backend/alembic/versions/.gitkeep`** (Alembic vero in Sprint 1.4)
+
+**`.gitignore`** aggiornato: `.claude/` interamente ignorato (era
+solo `.claude/settings.local.json`).
+
+### Verifiche
+
+- `uv sync --extra dev`: deps installate (~50 pacchetti)
+- `uv run pytest -v`: **3/3 test passati**
+- `uv run ruff check .`: All checks passed (dopo --fix automatico)
+- `uv run ruff format --check .`: 15 files already formatted
+- `uv run mypy src/colazione`: no issues found in 13 source files
+
+### Quirk locale documentato
+
+Il path repo `Mobile Documents/com~apple~CloudDocs/...` (iCloud sync)
+con spazi e tilde **impedisce a Python di processare il file `.pth`
+editable** generato da uv. Sintomo: `import colazione` da `python -c`
+fallisce con ModuleNotFoundError. **Workaround**: `pythonpath = ["src"]`
+in `[tool.pytest.ini_options]` per i test, `PYTHONPATH=src` per
+script standalone. **In Docker/CI il problema non si presenta**
+(nessuno spazio nel path).
+
+### Stato
+
+Sprint 0.1 completo. Backend skeleton committato, tutti i check
+verdi.
+
+### Prossimo step
+
+Sprint 0.2: `frontend/` skeleton (React + Vite + TypeScript +
+Tailwind + shadcn). Richiede installazione `pnpm` (suggerirò
+`corepack enable` o `npm i -g pnpm`).
+
+---
+
+> Questo file viene aggiornato dopo **ogni modifica** al progetto.
+> È il diario operativo del nuovo programma, costruito da zero.
+>
+> **Predecessore archiviato**: `docs/_archivio/LIVE-COLAZIONE-storico.md`
+> contiene il diario del progetto vecchio (eliminato il 2026-04-25).
+> Lì si trova la storia di come ci siamo arrivati al modello dati e
+> all'architettura, in caso serva un riferimento.
+
+---
+
 ## 2026-04-25 (9) — FASE C doc 7: PIANO-MVP.md (FASE C COMPLETA)
 
 ### Contesto
