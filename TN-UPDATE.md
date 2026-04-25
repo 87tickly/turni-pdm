@@ -10,6 +10,75 @@
 
 ---
 
+## 2026-04-25 (9) — FASE C doc 7: PIANO-MVP.md (FASE C COMPLETA)
+
+### Contesto
+
+Ultimo documento architetturale. Definisce primo MVP girabile +
+ordine costruzione + definizione "completato".
+
+### Modifiche
+
+**Nuovo `docs/PIANO-MVP.md` v0.1** (~430 righe):
+
+**Definizione MVP v1**:
+- Login + 5 dashboard navigabili (2 funzionanti su dati reali, 3
+  scaffolding)
+- Schema DB completo + seed Trenord
+- Importer PdE da CLI (file Numbers reale)
+- Vista corse + dashboard manutenzione
+
+**Cosa NON e MVP**: builder giro, builder PdC, editor, persone,
+revisioni, notifiche, mobile, deploy prod.
+
+**8 sprint atomici** (1 commit per passo):
+- Sprint 0 setup repo (1-2gg)
+- Sprint 1 backend skeleton + Alembic + 31 tabelle (2-3gg)
+- Sprint 2 auth JWT (2gg)
+- Sprint 3 importer PdE Numbers (3-4gg, parser periodicita critico)
+- Sprint 4 API base corse + depositi (2gg)
+- Sprint 5 frontend skeleton React+shadcn (3-4gg)
+- Sprint 6 dashboard MVP (2 reali + 3 scaffolding) (3-4gg)
+- Sprint 7 test E2E + docs (1-2gg)
+
+**Effort totale**: 17-23 gg lavorativi (3-4 settimane full time),
+con buffer 30% = 22-30 gg reali (~5-6 settimane).
+
+**12 criteri di "MVP completato"** verificabili.
+
+**Roadmap v1.1-v1.7** post-MVP:
+- v1.1 Builder giro materiale (Algoritmo A)
+- v1.2 Editor giro (lettura)
+- v1.3 Anagrafica persone
+- v1.4 Builder turno PdC (Algoritmo B)
+- v1.5 Editor scrittura (drag&drop)
+- v1.6 Assegnazioni
+- v1.7 Revisioni provvisorie (Algoritmo C)
+
+**Decisioni rinviate** (non bloccanti MVP): file uploads, real-time
+push, audit retention, backup, logging, hosting prod.
+
+### Stato
+
+**FASE C COMPLETATA**. Tutti i 7 documenti architetturali scritti:
+1. ✅ VISIONE.md
+2. ✅ STACK-TECNICO.md
+3. ✅ RUOLI-E-DASHBOARD.md
+4. ✅ LOGICA-COSTRUZIONE.md
+5. ✅ SCHEMA-DATI-NATIVO.md
+6. ✅ IMPORT-PDE.md
+7. ✅ PIANO-MVP.md
+
+Repo pronto per FASE D (codice).
+
+### Prossimo step
+
+Aspetto OK utente per iniziare FASE D Sprint 0 passo 0.1
+(creare backend/ + pyproject.toml). Oppure utente chiede revisione
+di qualche documento.
+
+---
+
 ## 2026-04-25 (8) — FASE C doc 6: IMPORT-PDE.md
 
 ### Contesto
