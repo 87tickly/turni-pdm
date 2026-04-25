@@ -10,6 +10,65 @@
 
 ---
 
+## 2026-04-25 (4) — FASE C doc 2: STACK-TECNICO.md (scelte confermate)
+
+### Contesto
+
+Utente ha confermato in blocco le 6 scelte consigliate. Stack tecnico
+definito.
+
+### Modifiche
+
+**Nuovo `docs/STACK-TECNICO.md` v1.0** (~390 righe):
+
+Le 6 scelte:
+1. Backend: **Python 3.12+**
+2. Framework: **FastAPI** (async, OpenAPI auto-gen, Pydantic-native)
+3. DB: **PostgreSQL 16+** (anche dev, no più SQLite-PG dual-mode)
+4. Frontend: **React 18 + TypeScript + Vite**
+5. UI Kit: **shadcn/ui** (Radix + Tailwind CSS)
+6. Auth: **JWT custom + bcrypt**
+
+Hosting differito (probabile VPS self-host quando arriva il momento).
+
+**Struttura repo monorepo**:
+- `backend/` (FastAPI con `src/colazione/` + `domain/` per business
+  logic DB-agnostic)
+- `frontend/` (Vite con routes per ruolo, non per tipo)
+- `data/` (seed JSON gia presente)
+- `docker-compose.yml` per dev (db + backend + frontend)
+- Alembic per migrazioni schema versionate
+
+**Tooling**:
+- Backend: `uv` (package manager) + `ruff` (lint+format) + `mypy` + `pytest`
+- Frontend: `pnpm` + `eslint` + `prettier` + `vitest` + `@testing-library/react`
+
+**Convenzioni**:
+- Python: type hints obbligatori, mypy strict, async ovunque
+- React: function components, TanStack Query per stato server,
+  Tailwind only (no CSS modules/styled-components)
+- Commit: Conventional Commits in italiano
+
+**Cosa NON useremo** (esplicito):
+- Tauri (web-only per ora)
+- GraphQL (REST sufficiente)
+- Redis/Celery (non serve in MVP)
+- Microservizi/k8s (monolite modulare)
+- SSR/SSG (SPA classica)
+- i18n (italiano-only)
+
+### Stato
+
+- Documento v1.0, completo per costruzione MVP.
+- Modifiche future tracciate qui in TN-UPDATE.md.
+
+### Prossimo step
+
+`docs/RUOLI-E-DASHBOARD.md` (FASE C doc 3): dettaglio delle 5
+dashboard, schermate per ruolo, azioni, permessi, mockup testuale.
+
+---
+
 ## 2026-04-25 (3) — FASE C doc 1: VISIONE.md scritta
 
 ### Contesto
