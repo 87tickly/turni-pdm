@@ -1,4 +1,4 @@
-# MODELLO DATI — Ecosistema ARTURO × Trenord (draft v0.3)
+# MODELLO DATI — Ecosistema ARTURO × Trenord (draft v0.4)
 
 > **Stato**: bozza in revisione con l'utente. Niente codice ancora.
 > Scopo: disegnare le entità e relazioni che reggono offerta commerciale,
@@ -31,6 +31,15 @@
 | **Giro materiale parte/arriva** | Ogni `giro_materiale` ha ora `localita_manutenzione_partenza_id` e `localita_manutenzione_arrivo_id` (in genere uguali, ciclo chiuso). |
 | **Revisioni: cosa sono** | **Errore v0.2 corretto**: NON sono versioning di documento. Sono **correzioni operative temporanee** dovute a eventi esterni (RFI comunica interruzioni → Trenord modifica). Modello separato in `versione_base_giro` (1 per giro, validità 12+ mesi) e `revisione_provvisoria` (N per giro, con causa, comunicazione esterna, finestra temporale). |
 | **Cascading PdC** | **Punto chiarito dall'utente**: RFI non sopprime mai corse. RFI comunica interruzioni → Trenord modifica giro materiale **E** turni PdC contestualmente. Il modello prevede `revisione_provvisoria_pdc` collegata 1:N a `revisione_provvisoria` del giro. |
+
+### v0.4 (parsing completo PDF turno materiale, 25/04/2026)
+
+| Tema | Aggiunta |
+|------|----------|
+| **Dotazione per deposito** | Parsato l'intero PDF (54 cover + 299 Gantt). Per ogni deposito ho la lista completa dei tipi rotabile e la quantità totale (es. MILANO FIORENZA: 974 pezzi su 49 tipi distinti; ISEO: 21 pezzi su 4 tipi). Aggiunta tabella `localita_manutenzione_dotazione` con seed `data/depositi_manutenzione_trenord_seed.json`. |
+| **Validità P/I/E** | Osservato che alcuni turni hanno cover multipli con codici P/I/E (Primaverile/Invernale/Estiva?). Sono **versioni stagionali pianificate**, distinte dalle revisioni provvisorie per eventi RFI. Da chiarire in v0.5 se aggiungere entità `versione_stagionale_giro`. |
+| **NON_ASSEGNATO modellato** | 7 turni (1190-1199, ETR524, 272 pezzi) non hanno deposito Trenord. Sospetto pool TILO/terzi. Modellato come pseudo-località con flag `is_pool_esterno`. Da confermare con utente. |
+| **PDF è revisione provvisoria** | Validato il modello v0.3 con dato reale: il PDF "dal 2/3/26 — depositato 25/02/26" è esso stesso una revisione provvisoria, non il piano base annuale. |
 
 ---
 
@@ -540,18 +549,80 @@ manutenzione (in genere la stessa: ciclo chiuso).
 
 #### Anagrafica iniziale Trenord (estratta dal PDF turno materiale 02/03/26)
 
-| Codice | Nome canonico | Frequenza nei turni |
-|--------|---------------|---------------------|
-| `IMPMAN_MILANO_FIORENZA` | TRENORD IMPMAN MILANO FIORENZA | Massima parte (~156 pagine Gantt) |
-| `IMPMAN_LECCO` | TRENORD IMPMAN LECCO | ~16 pagine |
-| `IMPMAN_CREMONA` | TRENORD IMPMAN CREMONA | ~8 pagine |
-| `IMPMAN_CAMNAGO` | TRENORD ImpMan Camnago | ~27 pagine |
-| `IMPMAN_NOVATE` | TRENORD ImpMan Novate | ~37 pagine |
-| `IMPMAN_ISEO` | TRENORD ImpMan Iseo | ~10 pagine |
-| `NON_ASSEGNATO` | (Non assegnato) | ~30 pagine — pseudo-località per materiali senza sede |
+Parsing completo del PDF (54 cover + 299 pagine Gantt) — output salvato
+in `data/depositi_manutenzione_trenord_seed.json`.
+
+| Codice | Nome canonico | Turni gestiti | Tipi pezzo | Pezzi totali |
+|--------|---------------|--------------:|-----------:|-------------:|
+| `IMPMAN_MILANO_FIORENZA` | TRENORD IMPMAN MILANO FIORENZA | **29** | 49 | **974** |
+| `IMPMAN_NOVATE` | TRENORD IMPMAN NOVATE | 7 | 14 | 299 |
+| `NON_ASSEGNATO` | (Non assegnato) | 7 | 2 | 272 |
+| `IMPMAN_CAMNAGO` | TRENORD IMPMAN CAMNAGO | 2 | 7 | 169 |
+| `IMPMAN_CREMONA` | TRENORD IMPMAN CREMONA | 2 | 4 | 92 |
+| `IMPMAN_LECCO` | TRENORD IMPMAN LECCO | 3 | 6 | 57 |
+| `IMPMAN_ISEO` | TRENORD IMPMAN ISEO | 4 | 4 | 21 |
+| **TOTALE** | | **54** | | **1884** |
 
 Per coerenza si **canonicalizzano i nomi maiuscolo** ("ImpMan" → "IMPMAN")
 e si risolve il troncamento "FIOREN" → "FIORENZA" via `nomi_alternativi`.
+
+#### `localita_manutenzione_dotazione` (tabella figlia, **nuova v0.4**)
+
+Per ogni località, l'inventario dei rotabili per tipo. Permette di
+sapere subito *quanti pezzi di tipo X sono di base in deposito Y*.
+
+| Attributo | Tipo | Esempio |
+|-----------|------|---------|
+| id | PK | |
+| localita_manutenzione_id | FK | `IMPMAN_MILANO_FIORENZA` |
+| tipo_pezzo | string | "ALe710", "TN-Ale204-A4", "E464N" |
+| quantita | int | 74 |
+| famiglia_rotabile | string? | "TSR", "Coradia Lecco ETR204", "Vivalto", "Locomotiva E464" |
+| note | string | calcolato come somma su tutti i turni del deposito |
+
+**Specializzazione di ogni deposito** (dato concreto dal seed):
+
+- **MILANO FIORENZA**: multi-flotta (49 tipi distinti). Top: ALe710 (74),
+  ALe711 (64), nBBW (52, Vivalto), nBC-clim (51), TN-Ale204/Le204
+  (48 ciascuno × 4 sigle), TN-Ale522/Le522 (36 × 5 sigle, Caravaggio),
+  TN-Ale421/Le421 (34 × 3-4 sigle, Donizetti), E464N (22), poi
+  ETR526 Coradia 526, ETR104, npBDL, npBDCTE...
+- **NOVATE**: TSR (ALe710=53, ALe711=58), Le245 (30), TN-Le425 (28
+  TILO ETR425), Le990 (20), Le736 (14), Ale760+761 (10+10), ALe506,
+  ALe426. Specializzazione su TSR + TILO + treni Tibb di pool.
+- **CAMNAGO**: ALe710 (56) + ALe711 (28) per TSR Mi-NO + ETR522
+  Caravaggio (TA+DM1+DM2+TB+TX, 17 ciascuno). Solo 2 turni ma corposi.
+- **CREMONA**: solo Aln803-A/B + Ln803-PP/C (23 pezzi ciascuno).
+  Treni diesel DMU monolitici.
+- **LECCO**: ETR204 Coradia Lecco (TN-Ale204-A1/A4 + TN-Le204-A2/A3,
+  11 pezzi × 4 sigle = 44) + diesel ATR125 (9), ATR115 (4).
+- **ISEO**: solo diesel — ATR125 (8), ALn668(1000) (8), ATR115 (4),
+  D520 (1). Linee non elettrificate Brescia-Iseo-Edolo.
+- **NON_ASSEGNATO**: solo ETR524 (Le524=164, Ale524=108) — 7 turni
+  dedicati. **Sospetto**: composizioni TILO svizzere o pool condiviso
+  con altri operatori, da chiarire con utente.
+
+#### Osservazioni emerse dal parsing (v0.4)
+
+1. **Validità multipla per stesso turno**: alcuni turni appaiono **due
+   volte** nel PDF (es. cover di "1134" appare 2 volte, "1191" 2 volte,
+   "1161" 3 volte). Sono **revisioni con validità diversa** (Validità
+   P, I, E — Pasqua/Inverno/Estate o simili). Il modello v0.3 li gestiva
+   come `versione_base_giro` 1:1 — ma in realtà servirà una variante:
+   le validità calendar-based (P/I/E) **non sono** revisioni provvisorie
+   per eventi RFI, sono **versioni stagionali pianificate**. Da chiarire
+   in v0.5 se aggiungere `versione_stagionale_giro` o estendere
+   `giro_variante` per coprire questo caso.
+
+2. **NON_ASSEGNATO non è un bug, è una categoria reale**: 7 turni e 272
+   pezzi (ETR524) non hanno deposito Trenord. Ipotesi: pool TILO o
+   composizioni di terzi gestite da Trenord. Va modellato come
+   pseudo-località con flag `is_pool_esterno=true`.
+
+3. **Il PDF stesso è una revisione provvisoria**: "Turno Materiale
+   Trenord dal 2/3/26 — Depositata il 25/02/2026" non è il piano base
+   annuale, è una revisione che entra in vigore a marzo. Conferma il
+   modello v0.3 (versione_base + revisione_provvisoria) con dati reali.
 
 ### `azienda`
 

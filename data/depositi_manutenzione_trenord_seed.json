@@ -1,0 +1,1508 @@
+{
+  "depositi": {
+    "MILANO FIORENZA": {
+      "turni": [
+        "1100",
+        "1101",
+        "1102",
+        "1103",
+        "1104",
+        "1105",
+        "1110",
+        "1111",
+        "1112",
+        "1121",
+        "1122",
+        "1123",
+        "1124",
+        "1125",
+        "1126",
+        "1127",
+        "1128",
+        "1130",
+        "1132",
+        "1133",
+        "1134",
+        "1134",
+        "1135",
+        "1136",
+        "1137",
+        "1160",
+        "1161",
+        "1161",
+        "1161"
+      ],
+      "pezzi_totali": {
+        "npBDL": 2,
+        "nBC-clim": 51,
+        "E464N": 22,
+        "nBBW": 52,
+        "npBBHW": 13,
+        "nAAW": 13,
+        "npBDL-clim": 4,
+        "npBDCTE-clim": 3,
+        "ALe711": 64,
+        "ALe710": 74,
+        "TN-Ale421-DM2": 34,
+        "TN-Ale421-DM1": 34,
+        "TN-Le421-TA": 34,
+        "TN-Le421-TB": 18,
+        "TN-Le421-TB1": 16,
+        "TN-Le522-TB": 24,
+        "TN-Ale522-DM2": 36,
+        "TN-Ale522-DM1": 36,
+        "TN-Le522-TX": 36,
+        "TN-Le522-TA": 36,
+        "TN-Le522-TB1": 12,
+        "TN-Ale521-DM1": 4,
+        "TN-Le521-TX": 4,
+        "TN-Le521-TA": 4,
+        "TN-Le521-TB": 4,
+        "TN-Ale521-DM2": 4,
+        "TN-Ale526-A41": 9,
+        "TN-Le526-A43": 9,
+        "TN-Ale526-A46": 9,
+        "TN-Ale204-A4": 48,
+        "TN-Ale204-A1": 48,
+        "TN-Le204-A2": 48,
+        "TN-Le204-A3": 48,
+        "TN-Ale103-A4": 2,
+        "TN-Le103-A2": 2,
+        "TN-Ale103-A1": 2,
+        "TN-Ale104-A4": 5,
+        "TN-Le104-A2": 5,
+        "TN-Ale104-A1": 5,
+        "TN-Le104-A3": 5,
+        "TN-A522-TB1": 7,
+        "TN-A522-TX": 7,
+        "TN-A522-TA": 7,
+        "TN-A522-DM1": 7,
+        "TN-A522-DM2": 7,
+        "TN-A421-DM1": 15,
+        "TN-A421-TA": 15,
+        "TN-A421-TB": 15,
+        "TN-A421-DM2": 15
+      },
+      "tipi_materiale_unici": [
+        "1TN-A421-DM1+1TN-A421-TA+1TN-A421-TB+1TN-A421-DM2",
+        "1TN-A421-DM2+1TN-A421-DM1+1TN-A421-TA+1TN-A421-TB",
+        "1TN-A522-TB1+1TN-A522-TX+1TN-A522-TA+1TN-A522-DM1+1TN-A522-DM2",
+        "1TN-Ale103-A4+1TN-Le103-A2+1TN-Ale103-A1",
+        "1TN-Ale104-A4+1TN-Le104-A2+1TN-Ale104-A1+1TN-Le104-A3",
+        "1TN-Ale204-A4+1TN-Ale204-A1+1TN-Le204-A2+1TN-Le204-A3",
+        "1TN-Ale204-A4+1TN-Le204-A2+1TN-Le204-A3+1TN-Ale204-A1",
+        "1TN-Ale421-DM1+1TN-Ale421-DM2+1TN-Le421-TB1+1TN-Le421-TA",
+        "1TN-Ale421-DM2+1TN-Ale421-DM1+1TN-Le421-TA+1TN-Le421-TB",
+        "1TN-Ale421-DM2+1TN-Le421-TA+1TN-Le421-TB+1TN-Ale421-DM1",
+        "1TN-Ale521-DM1+1TN-Le521-TX+1TN-Le521-TA+1TN-Le521-TB+1TN-Ale521-DM2",
+        "1TN-Ale526-A41+3TN-Le526-A42-A45-A44+1TN-Le526-A43+1TN-Ale526-A46",
+        "1TN-Le204-A2+1TN-Ale204-A4+1TN-Le204-A3+1TN-Ale204-A1",
+        "1TN-Le204-A2+1TN-Le204-A3+1TN-Ale204-A4+1TN-Ale204-A1",
+        "1TN-Le421-TA+1TN-Ale421-DM1+1TN-Ale421-DM2+1TN-Le421-TB1",
+        "1TN-Le522-TA+1TN-Le522-TB1+1TN-Ale522-DM1+1TN-Ale522-DM2+1TN-Le522-TX",
+        "1TN-Le522-TB+1TN-Ale522-DM2+1TN-Ale522-DM1+1TN-Le522-TX+1TN-Le522-TA",
+        "1TN-Le522-TB+1TN-Le522-TX+1TN-Le522-TA+1TN-Ale522-DM1+1TN-Ale522-DM2",
+        "1npBDCTE-clim+1E464N+5nBC-clim",
+        "1npBDCTE-clim+1E464N+6nBC-clim",
+        "1npBDL+5nBC-clim+1E464N",
+        "1npBDL-clim+1E464N+6nBC-clim",
+        "2ALe711+1ALe710",
+        "2ALe711+3ALe710",
+        "4nBBW+1nAAW+1E464N+1npBBHW",
+        "4nBBW+1npBBHW+1E464N+1nAAW"
+      ]
+    },
+    "LECCO": {
+      "turni": [
+        "1113",
+        "1114",
+        "1131"
+      ],
+      "pezzi_totali": {
+        "ATR115": 4,
+        "ATR125": 9,
+        "TN-Ale204-A4": 11,
+        "TN-Le204-A2": 11,
+        "TN-Le204-A3": 11,
+        "TN-Ale204-A1": 11
+      },
+      "tipi_materiale_unici": [
+        "1ATR115",
+        "1ATR125",
+        "1TN-Ale204-A4+1TN-Le204-A2+1TN-Le204-A3+1TN-Ale204-A1"
+      ]
+    },
+    "CREMONA": {
+      "turni": [
+        "1115",
+        "1116"
+      ],
+      "pezzi_totali": {
+        "TN-Aln803-A": 23,
+        "TN-Ln803-PP": 23,
+        "TN-Aln803-B": 23,
+        "TN-Ln803-C": 23
+      },
+      "tipi_materiale_unici": [
+        "1TN-Aln803-A+1TN-Ln803-PP+1TN-Aln803-B+1TN-Ln803-C",
+        "1TN-Aln803-B+1TN-Ln803-C+1TN-Ln803-PP+1TN-Aln803-A"
+      ]
+    },
+    "NOVATE": {
+      "turni": [
+        "1162",
+        "1163",
+        "1165",
+        "1166",
+        "1167",
+        "1169",
+        "1170"
+      ],
+      "pezzi_totali": {
+        "Le245": 30,
+        "ALe245": 20,
+        "TN-Ale425-A41": 14,
+        "TN-Le425-A42-A45": 28,
+        "TN-Ale425-A46": 14,
+        "TN-Le425-A43": 14,
+        "ALe710": 53,
+        "ALe711": 58,
+        "Ale760": 10,
+        "Ale761": 10,
+        "Le990": 20,
+        "ALe506": 7,
+        "ALe426": 7,
+        "Le736": 14
+      },
+      "tipi_materiale_unici": [
+        "1ALe506+1ALe426+2Le736",
+        "1ALe710+2ALe711",
+        "1Ale760+1Ale761+2Le990",
+        "1TN-Ale425-A41+2TN-Le425-A42-A45+1TN-Ale425-A46+1TN-Le425-A43",
+        "2ALe711+2ALe710",
+        "2ALe711+3ALe710",
+        "3Le245+2ALe245"
+      ]
+    },
+    "CAMNAGO": {
+      "turni": [
+        "1168",
+        "1171"
+      ],
+      "pezzi_totali": {
+        "ALe710": 56,
+        "ALe711": 28,
+        "TN-Le522-TA": 17,
+        "TN-Ale522-DM1": 17,
+        "TN-Ale522-DM2": 17,
+        "TN-Le522-TB": 17,
+        "TN-Le522-TX": 17
+      },
+      "tipi_materiale_unici": [
+        "1TN-Le522-TA+1TN-Ale522-DM1+1TN-Ale522-DM2+1TN-Le522-TB+1TN-Le522-TX",
+        "4ALe710+2ALe711"
+      ]
+    },
+    "ISEO": {
+      "turni": [
+        "1180",
+        "1181",
+        "1182",
+        "1184"
+      ],
+      "pezzi_totali": {
+        "ATR125": 8,
+        "ATR115": 4,
+        "ALn668(1000)": 8,
+        "D520": 1
+      },
+      "tipi_materiale_unici": [
+        "1ATR115",
+        "1ATR125",
+        "1D520",
+        "2ALn668(1000)"
+      ]
+    },
+    "NON_ASSEGNATO": {
+      "turni": [
+        "1190",
+        "1191",
+        "1191",
+        "1192",
+        "1195",
+        "1196",
+        "1199"
+      ],
+      "pezzi_totali": {
+        "Le524": 164,
+        "Ale524": 108
+      },
+      "tipi_materiale_unici": [
+        "2Ale524+2Le524",
+        "2Ale524+4Le524",
+        "2Le524+2Ale524",
+        "4Le524+2Ale524"
+      ]
+    }
+  },
+  "turni_dettaglio": [
+    {
+      "numero_turno": "1100",
+      "pezzi": [
+        [
+          "npBDL",
+          2
+        ],
+        [
+          "nBC-clim",
+          10
+        ],
+        [
+          "E464N",
+          2
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1npBDL+5nBC-clim+1E464N",
+      "descrizione_materiale": "PR 270 - PPF 120 - m. 174 - MD",
+      "numero_giornate": 2,
+      "cover_page": 1,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1101",
+      "pezzi": [
+        [
+          "nBBW",
+          40
+        ],
+        [
+          "npBBHW",
+          10
+        ],
+        [
+          "E464N",
+          10
+        ],
+        [
+          "nAAW",
+          10
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "4nBBW+1npBBHW+1E464N+1nAAW",
+      "descrizione_materiale": "PR 402 - PPF 125 - m.174 - VIVALTO",
+      "numero_giornate": 10,
+      "cover_page": 3,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1102",
+      "pezzi": [
+        [
+          "nBBW",
+          12
+        ],
+        [
+          "nAAW",
+          3
+        ],
+        [
+          "E464N",
+          3
+        ],
+        [
+          "npBBHW",
+          3
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "4nBBW+1nAAW+1E464N+1npBBHW",
+      "descrizione_materiale": "PR 402 - PPF 125 - m.174 - VIVALTO",
+      "numero_giornate": 3,
+      "cover_page": 12,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1103",
+      "pezzi": [
+        [
+          "npBDL-clim",
+          4
+        ],
+        [
+          "E464N",
+          4
+        ],
+        [
+          "nBC-clim",
+          24
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1npBDL-clim+1E464N+6nBC-clim",
+      "descrizione_materiale": "PR 315 - PPF 120 - m. 201 - MD - Materiale Attrezzato con AI",
+      "numero_giornate": 4,
+      "cover_page": 15,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1104",
+      "pezzi": [
+        [
+          "npBDCTE-clim",
+          1
+        ],
+        [
+          "E464N",
+          1
+        ],
+        [
+          "nBC-clim",
+          5
+        ]
+      ],
+      "validita_codice": "Valido",
+      "tipo_materiale": "1npBDCTE-clim+1E464N+5nBC-clim",
+      "descrizione_materiale": "PR 270 - PPF 120 - m. 174 - MD - Materiale Attrezzato con AI",
+      "numero_giornate": 1,
+      "cover_page": 18,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1105",
+      "pezzi": [
+        [
+          "npBDCTE-clim",
+          2
+        ],
+        [
+          "E464N",
+          2
+        ],
+        [
+          "nBC-clim",
+          12
+        ]
+      ],
+      "validita_codice": "Valido",
+      "tipo_materiale": "1npBDCTE-clim+1E464N+6nBC-clim",
+      "descrizione_materiale": "PR 315 - PPF 120 - m. 201 - MD - Materiale Attrezzato AI",
+      "numero_giornate": 2,
+      "cover_page": 20,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1110",
+      "pezzi": [
+        [
+          "ALe711",
+          22
+        ],
+        [
+          "ALe710",
+          11
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "2ALe711+1ALe710",
+      "descrizione_materiale": "TSR 3pz - m.79",
+      "numero_giornate": 11,
+      "cover_page": 22,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1111",
+      "pezzi": [
+        [
+          "ALe711",
+          24
+        ],
+        [
+          "ALe710",
+          36
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "2ALe711+3ALe710",
+      "descrizione_materiale": "TSR 5pz - m.131",
+      "numero_giornate": 12,
+      "cover_page": 34,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1112",
+      "pezzi": [
+        [
+          "ALe711",
+          18
+        ],
+        [
+          "ALe710",
+          27
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "2ALe711+3ALe710",
+      "descrizione_materiale": "TSR 5pz - m.131",
+      "numero_giornate": 9,
+      "cover_page": 47,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1113",
+      "pezzi": [
+        [
+          "ATR115",
+          4
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1ATR115",
+      "descrizione_materiale": "ATR 115 - m.40",
+      "numero_giornate": 4,
+      "cover_page": 54,
+      "deposito": "LECCO"
+    },
+    {
+      "numero_turno": "1114",
+      "pezzi": [
+        [
+          "ATR125",
+          9
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1ATR125",
+      "descrizione_materiale": "ATR 125 - m.78",
+      "numero_giornate": 9,
+      "cover_page": 57,
+      "deposito": "LECCO"
+    },
+    {
+      "numero_turno": "1115",
+      "pezzi": [
+        [
+          "TN-Aln803-A",
+          7
+        ],
+        [
+          "TN-Ln803-PP",
+          7
+        ],
+        [
+          "TN-Aln803-B",
+          7
+        ],
+        [
+          "TN-Ln803-C",
+          7
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Aln803-A+1TN-Ln803-PP+1TN-Aln803-B+1TN-Ln803-C",
+      "descrizione_materiale": "ATR 803 (Colleoni) - m.67",
+      "numero_giornate": 7,
+      "cover_page": 67,
+      "deposito": "CREMONA"
+    },
+    {
+      "numero_turno": "1116",
+      "pezzi": [
+        [
+          "TN-Aln803-B",
+          16
+        ],
+        [
+          "TN-Ln803-C",
+          16
+        ],
+        [
+          "TN-Ln803-PP",
+          16
+        ],
+        [
+          "TN-Aln803-A",
+          16
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Aln803-B+1TN-Ln803-C+1TN-Ln803-PP+1TN-Aln803-A",
+      "descrizione_materiale": "ATR 803 (Colleoni) - m.67- PV-Al con +4'/-4 PV dal 21/1 al 22/3",
+      "numero_giornate": 16,
+      "cover_page": 70,
+      "deposito": "CREMONA"
+    },
+    {
+      "numero_turno": "1121",
+      "pezzi": [
+        [
+          "TN-Ale421-DM2",
+          9
+        ],
+        [
+          "TN-Ale421-DM1",
+          9
+        ],
+        [
+          "TN-Le421-TA",
+          9
+        ],
+        [
+          "TN-Le421-TB",
+          9
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Ale421-DM2+1TN-Ale421-DM1+1TN-Le421-TA+1TN-Le421-TB",
+      "descrizione_materiale": "Caravaggio 4pz - m.110 - Treni Mi-PC rit +4' in arr dal 24/2 al 7/4",
+      "numero_giornate": 9,
+      "cover_page": 77,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1122",
+      "pezzi": [
+        [
+          "TN-Ale421-DM1",
+          10
+        ],
+        [
+          "TN-Ale421-DM2",
+          10
+        ],
+        [
+          "TN-Le421-TB1",
+          10
+        ],
+        [
+          "TN-Le421-TA",
+          10
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Ale421-DM1+1TN-Ale421-DM2+1TN-Le421-TB1+1TN-Le421-TA",
+      "descrizione_materiale": "Caravaggio 4pz - 1°CL (ETR421) - m.110",
+      "numero_giornate": 10,
+      "cover_page": 88,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1123",
+      "pezzi": [
+        [
+          "TN-Ale421-DM2",
+          9
+        ],
+        [
+          "TN-Le421-TA",
+          9
+        ],
+        [
+          "TN-Le421-TB",
+          9
+        ],
+        [
+          "TN-Ale421-DM1",
+          9
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Ale421-DM2+1TN-Le421-TA+1TN-Le421-TB+1TN-Ale421-DM1",
+      "descrizione_materiale": "Caravaggio 4pz - m.110",
+      "numero_giornate": 9,
+      "cover_page": 95,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1124",
+      "pezzi": [
+        [
+          "TN-Le421-TA",
+          6
+        ],
+        [
+          "TN-Ale421-DM1",
+          6
+        ],
+        [
+          "TN-Ale421-DM2",
+          6
+        ],
+        [
+          "TN-Le421-TB1",
+          6
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Le421-TA+1TN-Ale421-DM1+1TN-Ale421-DM2+1TN-Le421-TB1",
+      "descrizione_materiale": "Caravaggio 4pz - 1°CL (ETR421) - m.110",
+      "numero_giornate": 6,
+      "cover_page": 101,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1125",
+      "pezzi": [
+        [
+          "TN-Le522-TB",
+          17
+        ],
+        [
+          "TN-Ale522-DM2",
+          17
+        ],
+        [
+          "TN-Ale522-DM1",
+          17
+        ],
+        [
+          "TN-Le522-TX",
+          17
+        ],
+        [
+          "TN-Le522-TA",
+          17
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Le522-TB+1TN-Ale522-DM2+1TN-Ale522-DM1+1TN-Le522-TX+1TN-Le522-TA",
+      "descrizione_materiale": "Caravaggio 5pz (ETR522) - m.137",
+      "numero_giornate": 17,
+      "cover_page": 107,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1126",
+      "pezzi": [
+        [
+          "TN-Le522-TB",
+          7
+        ],
+        [
+          "TN-Le522-TX",
+          7
+        ],
+        [
+          "TN-Le522-TA",
+          7
+        ],
+        [
+          "TN-Ale522-DM1",
+          7
+        ],
+        [
+          "TN-Ale522-DM2",
+          7
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Le522-TB+1TN-Le522-TX+1TN-Le522-TA+1TN-Ale522-DM1+1TN-Ale522-DM2",
+      "descrizione_materiale": "Caravaggio 5pz (ETR522) - m.137",
+      "numero_giornate": 7,
+      "cover_page": 118,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1127",
+      "pezzi": [
+        [
+          "TN-Le522-TA",
+          12
+        ],
+        [
+          "TN-Le522-TB1",
+          12
+        ],
+        [
+          "TN-Ale522-DM1",
+          12
+        ],
+        [
+          "TN-Ale522-DM2",
+          12
+        ],
+        [
+          "TN-Le522-TX",
+          12
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Le522-TA+1TN-Le522-TB1+1TN-Ale522-DM1+1TN-Ale522-DM2+1TN-Le522-TX",
+      "descrizione_materiale": "Caravaggio 5pz con 1°CL (ETR522) - m.137",
+      "numero_giornate": 12,
+      "cover_page": 122,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1128",
+      "pezzi": [
+        [
+          "TN-Ale521-DM1",
+          4
+        ],
+        [
+          "TN-Le521-TX",
+          4
+        ],
+        [
+          "TN-Le521-TA",
+          4
+        ],
+        [
+          "TN-Le521-TB",
+          4
+        ],
+        [
+          "TN-Ale521-DM2",
+          4
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Ale521-DM1+1TN-Le521-TX+1TN-Le521-TA+1TN-Le521-TB+1TN-Ale521-DM2",
+      "descrizione_materiale": "Rock 5pz - m.137",
+      "numero_giornate": 4,
+      "cover_page": 143,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1130",
+      "pezzi": [
+        [
+          "TN-Ale526-A41",
+          9
+        ],
+        [
+          "TN-Le526-A43",
+          9
+        ],
+        [
+          "TN-Ale526-A46",
+          9
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Ale526-A41+3TN-Le526-A42-A45-A44+1TN-Le526-A43+1TN-Ale526-A46",
+      "descrizione_materiale": "Coradia 526 - m.98",
+      "numero_giornate": 9,
+      "cover_page": 146,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1131",
+      "pezzi": [
+        [
+          "TN-Ale204-A4",
+          11
+        ],
+        [
+          "TN-Le204-A2",
+          11
+        ],
+        [
+          "TN-Le204-A3",
+          11
+        ],
+        [
+          "TN-Ale204-A1",
+          11
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Ale204-A4+1TN-Le204-A2+1TN-Le204-A3+1TN-Ale204-A1",
+      "descrizione_materiale": "Donizetti - ETR 204 - m.84",
+      "numero_giornate": 11,
+      "cover_page": 149,
+      "deposito": "LECCO"
+    },
+    {
+      "numero_turno": "1132",
+      "pezzi": [
+        [
+          "TN-Ale204-A4",
+          8
+        ],
+        [
+          "TN-Ale204-A1",
+          8
+        ],
+        [
+          "TN-Le204-A2",
+          8
+        ],
+        [
+          "TN-Le204-A3",
+          8
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Ale204-A4+1TN-Ale204-A1+1TN-Le204-A2+1TN-Le204-A3",
+      "descrizione_materiale": "Donizetti - ETR 204 - m.84",
+      "numero_giornate": 8,
+      "cover_page": 155,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1133",
+      "pezzi": [
+        [
+          "TN-Le204-A2",
+          10
+        ],
+        [
+          "TN-Ale204-A4",
+          10
+        ],
+        [
+          "TN-Le204-A3",
+          10
+        ],
+        [
+          "TN-Ale204-A1",
+          10
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Le204-A2+1TN-Ale204-A4+1TN-Le204-A3+1TN-Ale204-A1",
+      "descrizione_materiale": "Donizetti - ETR 204 - m.84",
+      "numero_giornate": 10,
+      "cover_page": 158,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1134",
+      "pezzi": [
+        [
+          "TN-Ale204-A4",
+          12
+        ],
+        [
+          "TN-Le204-A2",
+          12
+        ],
+        [
+          "TN-Le204-A3",
+          12
+        ],
+        [
+          "TN-Ale204-A1",
+          12
+        ]
+      ],
+      "validita_codice": "Valido",
+      "tipo_materiale": "1TN-Ale204-A4+1TN-Le204-A2+1TN-Le204-A3+1TN-Ale204-A1",
+      "descrizione_materiale": "Donizetti - ETR 204 - m.84 -",
+      "numero_giornate": 12,
+      "cover_page": 168,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1134",
+      "pezzi": [
+        [
+          "TN-Ale204-A4",
+          12
+        ],
+        [
+          "TN-Le204-A2",
+          12
+        ],
+        [
+          "TN-Le204-A3",
+          12
+        ],
+        [
+          "TN-Ale204-A1",
+          12
+        ]
+      ],
+      "validita_codice": "Valido",
+      "tipo_materiale": "1TN-Ale204-A4+1TN-Le204-A2+1TN-Le204-A3+1TN-Ale204-A1",
+      "descrizione_materiale": "Donizetti - ETR 204 - m.84 -",
+      "numero_giornate": 12,
+      "cover_page": 178,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1135",
+      "pezzi": [
+        [
+          "TN-Le204-A2",
+          6
+        ],
+        [
+          "TN-Le204-A3",
+          6
+        ],
+        [
+          "TN-Ale204-A4",
+          6
+        ],
+        [
+          "TN-Ale204-A1",
+          6
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Le204-A2+1TN-Le204-A3+1TN-Ale204-A4+1TN-Ale204-A1",
+      "descrizione_materiale": "Donizetti - ETR 204 - m.84",
+      "numero_giornate": 6,
+      "cover_page": 188,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1136",
+      "pezzi": [
+        [
+          "TN-Ale103-A4",
+          2
+        ],
+        [
+          "TN-Le103-A2",
+          2
+        ],
+        [
+          "TN-Ale103-A1",
+          2
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Ale103-A4+1TN-Le103-A2+1TN-Ale103-A1",
+      "descrizione_materiale": "POP 3pz - m.66",
+      "numero_giornate": 2,
+      "cover_page": 191,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1137",
+      "pezzi": [
+        [
+          "TN-Ale104-A4",
+          5
+        ],
+        [
+          "TN-Le104-A2",
+          5
+        ],
+        [
+          "TN-Ale104-A1",
+          5
+        ],
+        [
+          "TN-Le104-A3",
+          5
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Ale104-A4+1TN-Le104-A2+1TN-Ale104-A1+1TN-Le104-A3",
+      "descrizione_materiale": "POP 4pz - m.84",
+      "numero_giornate": 5,
+      "cover_page": 193,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1160",
+      "pezzi": [
+        [
+          "TN-A522-TB1",
+          7
+        ],
+        [
+          "TN-A522-TX",
+          7
+        ],
+        [
+          "TN-A522-TA",
+          7
+        ],
+        [
+          "TN-A522-DM1",
+          7
+        ],
+        [
+          "TN-A522-DM2",
+          7
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-A522-TB1+1TN-A522-TX+1TN-A522-TA+1TN-A522-DM1+1TN-A522-DM2",
+      "descrizione_materiale": "Caravaggio 5pz (ETR522-Aeroportuali) - m.137",
+      "numero_giornate": 7,
+      "cover_page": 197,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1161",
+      "pezzi": [
+        [
+          "TN-A421-DM1",
+          5
+        ],
+        [
+          "TN-A421-TA",
+          5
+        ],
+        [
+          "TN-A421-TB",
+          5
+        ],
+        [
+          "TN-A421-DM2",
+          5
+        ]
+      ],
+      "validita_codice": "Valido",
+      "tipo_materiale": "1TN-A421-DM1+1TN-A421-TA+1TN-A421-TB+1TN-A421-DM2",
+      "descrizione_materiale": "Caravaggio 4pz (ETR421-Aeroportuali) - m.110",
+      "numero_giornate": 5,
+      "cover_page": 204,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1161",
+      "pezzi": [
+        [
+          "TN-A421-DM2",
+          5
+        ],
+        [
+          "TN-A421-DM1",
+          5
+        ],
+        [
+          "TN-A421-TA",
+          5
+        ],
+        [
+          "TN-A421-TB",
+          5
+        ]
+      ],
+      "validita_codice": "Valido",
+      "tipo_materiale": "1TN-A421-DM2+1TN-A421-DM1+1TN-A421-TA+1TN-A421-TB",
+      "descrizione_materiale": "Caravaggio 4pz (ETR421-Aeroportuali) - m.110",
+      "numero_giornate": 5,
+      "cover_page": 208,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1161",
+      "pezzi": [
+        [
+          "TN-A421-DM2",
+          5
+        ],
+        [
+          "TN-A421-DM1",
+          5
+        ],
+        [
+          "TN-A421-TA",
+          5
+        ],
+        [
+          "TN-A421-TB",
+          5
+        ]
+      ],
+      "validita_codice": "Valido",
+      "tipo_materiale": "1TN-A421-DM2+1TN-A421-DM1+1TN-A421-TA+1TN-A421-TB",
+      "descrizione_materiale": "Caravaggio 4pz (ETR421-Aeroportuali) - m.110",
+      "numero_giornate": 5,
+      "cover_page": 211,
+      "deposito": "MILANO FIORENZA"
+    },
+    {
+      "numero_turno": "1162",
+      "pezzi": [
+        [
+          "Le245",
+          30
+        ],
+        [
+          "ALe245",
+          20
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "3Le245+2ALe245",
+      "descrizione_materiale": "Coradia 245 - m.83",
+      "numero_giornate": 10,
+      "cover_page": 215,
+      "deposito": "NOVATE"
+    },
+    {
+      "numero_turno": "1163",
+      "pezzi": [
+        [
+          "TN-Ale425-A41",
+          14
+        ],
+        [
+          "TN-Le425-A42-A45",
+          28
+        ],
+        [
+          "TN-Ale425-A46",
+          14
+        ],
+        [
+          "TN-Le425-A43",
+          14
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Ale425-A41+2TN-Le425-A42-A45+1TN-Ale425-A46+1TN-Le425-A43",
+      "descrizione_materiale": "Coradia 425 - m.82",
+      "numero_giornate": 14,
+      "cover_page": 220,
+      "deposito": "NOVATE"
+    },
+    {
+      "numero_turno": "1165",
+      "pezzi": [
+        [
+          "ALe710",
+          12
+        ],
+        [
+          "ALe711",
+          24
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1ALe710+2ALe711",
+      "descrizione_materiale": "TSR 3pz - m.79",
+      "numero_giornate": 12,
+      "cover_page": 230,
+      "deposito": "NOVATE"
+    },
+    {
+      "numero_turno": "1166",
+      "pezzi": [
+        [
+          "ALe711",
+          20
+        ],
+        [
+          "ALe710",
+          20
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "2ALe711+2ALe710",
+      "descrizione_materiale": "TSR 4pz - m. 105 - Linea Mi-NO +2' in arrivo e -2' in partenza dal 2/3 al 31/7",
+      "numero_giornate": 10,
+      "cover_page": 242,
+      "deposito": "NOVATE"
+    },
+    {
+      "numero_turno": "1167",
+      "pezzi": [
+        [
+          "ALe711",
+          14
+        ],
+        [
+          "ALe710",
+          21
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "2ALe711+3ALe710",
+      "descrizione_materiale": "TSR 5pz - m.131",
+      "numero_giornate": 7,
+      "cover_page": 252,
+      "deposito": "NOVATE"
+    },
+    {
+      "numero_turno": "1168",
+      "pezzi": [
+        [
+          "ALe710",
+          56
+        ],
+        [
+          "ALe711",
+          28
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "4ALe710+2ALe711",
+      "descrizione_materiale": "TSR 6pz- m.157 - Linea Mi-NO +2' in arrivo e -2' in partenza dal 2/3 al 31/7",
+      "numero_giornate": 14,
+      "cover_page": 257,
+      "deposito": "CAMNAGO"
+    },
+    {
+      "numero_turno": "1169",
+      "pezzi": [
+        [
+          "Ale760",
+          10
+        ],
+        [
+          "Ale761",
+          10
+        ],
+        [
+          "Le990",
+          20
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1Ale760+1Ale761+2Le990",
+      "descrizione_materiale": "R-TAF - m.106 - Linea Mi-NO +2' in arrivo e -2' in partenza dal 2/3 al 31/7",
+      "numero_giornate": 10,
+      "cover_page": 270,
+      "deposito": "NOVATE"
+    },
+    {
+      "numero_turno": "1170",
+      "pezzi": [
+        [
+          "ALe506",
+          7
+        ],
+        [
+          "ALe426",
+          7
+        ],
+        [
+          "Le736",
+          14
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1ALe506+1ALe426+2Le736",
+      "descrizione_materiale": "TAF TI - m.106",
+      "numero_giornate": 7,
+      "cover_page": 281,
+      "deposito": "NOVATE"
+    },
+    {
+      "numero_turno": "1171",
+      "pezzi": [
+        [
+          "TN-Le522-TA",
+          17
+        ],
+        [
+          "TN-Ale522-DM1",
+          17
+        ],
+        [
+          "TN-Ale522-DM2",
+          17
+        ],
+        [
+          "TN-Le522-TB",
+          17
+        ],
+        [
+          "TN-Le522-TX",
+          17
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1TN-Le522-TA+1TN-Ale522-DM1+1TN-Ale522-DM2+1TN-Le522-TB+1TN-Le522-TX",
+      "descrizione_materiale": "Caravaggio 5pz ( ETR522) -m. 137 - Linea Mi-NO +2' in arrivo e -2' in partenza dal 2/3 al 31/7",
+      "numero_giornate": 17,
+      "cover_page": 284,
+      "deposito": "CAMNAGO"
+    },
+    {
+      "numero_turno": "1180",
+      "pezzi": [
+        [
+          "ATR125",
+          8
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1ATR125",
+      "descrizione_materiale": "ATR 125 - m.78",
+      "numero_giornate": 8,
+      "cover_page": 300,
+      "deposito": "ISEO"
+    },
+    {
+      "numero_turno": "1181",
+      "pezzi": [
+        [
+          "ATR115",
+          4
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1ATR115",
+      "descrizione_materiale": "ATR115 - m.40",
+      "numero_giornate": 4,
+      "cover_page": 308,
+      "deposito": "ISEO"
+    },
+    {
+      "numero_turno": "1182",
+      "pezzi": [
+        [
+          "ALn668(1000)",
+          8
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "2ALn668(1000)",
+      "descrizione_materiale": "2 Aln668 - m.47",
+      "numero_giornate": 4,
+      "cover_page": 312,
+      "deposito": "ISEO"
+    },
+    {
+      "numero_turno": "1184",
+      "pezzi": [
+        [
+          "D520",
+          1
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "1D520",
+      "descrizione_materiale": "Turno dedicato Treno dei Sapori",
+      "numero_giornate": 1,
+      "cover_page": 315,
+      "deposito": "ISEO"
+    },
+    {
+      "numero_turno": "1190",
+      "pezzi": [
+        [
+          "Le524",
+          6
+        ],
+        [
+          "Ale524",
+          6
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "2Le524+2Ale524",
+      "descrizione_materiale": "TILO S30 - Flirt 4pz - m.74",
+      "numero_giornate": 3,
+      "cover_page": 317,
+      "deposito": "NON_ASSEGNATO"
+    },
+    {
+      "numero_turno": "1191",
+      "pezzi": [
+        [
+          "Le524",
+          10
+        ],
+        [
+          "Ale524",
+          10
+        ]
+      ],
+      "validita_codice": "Valido",
+      "tipo_materiale": "2Le524+2Ale524",
+      "descrizione_materiale": "TILO S40 - S50 Flirt 4pz - m.74",
+      "numero_giornate": 5,
+      "cover_page": 320,
+      "deposito": "NON_ASSEGNATO"
+    },
+    {
+      "numero_turno": "1191",
+      "pezzi": [
+        [
+          "Le524",
+          10
+        ],
+        [
+          "Ale524",
+          10
+        ]
+      ],
+      "validita_codice": "Valido",
+      "tipo_materiale": "2Le524+2Ale524",
+      "descrizione_materiale": "TILO S40 - S50 Flirt 4pz - m.74",
+      "numero_giornate": 5,
+      "cover_page": 323,
+      "deposito": "NON_ASSEGNATO"
+    },
+    {
+      "numero_turno": "1192",
+      "pezzi": [
+        [
+          "Ale524",
+          26
+        ],
+        [
+          "Le524",
+          26
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "2Ale524+2Le524",
+      "descrizione_materiale": "TILO S10 - Flirt 4pz - m.74-Serv Viagg escluso nella tratta Como Camerl.-PM Albate e viveversa",
+      "numero_giornate": 13,
+      "cover_page": 327,
+      "deposito": "NON_ASSEGNATO"
+    },
+    {
+      "numero_turno": "1195",
+      "pezzi": [
+        [
+          "Le524",
+          44
+        ],
+        [
+          "Ale524",
+          22
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "4Le524+2Ale524",
+      "descrizione_materiale": "TILO S40 - S50 Flirt 6pz - m.106",
+      "numero_giornate": 11,
+      "cover_page": 334,
+      "deposito": "NON_ASSEGNATO"
+    },
+    {
+      "numero_turno": "1196",
+      "pezzi": [
+        [
+          "Le524",
+          28
+        ],
+        [
+          "Ale524",
+          14
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "4Le524+2Ale524",
+      "descrizione_materiale": "TILO S10 - RE 80 Flirt 6pz - m.106- Serv Viagg escluso nella tratta Como SG-PM Albate e viceversa",
+      "numero_giornate": 7,
+      "cover_page": 346,
+      "deposito": "NON_ASSEGNATO"
+    },
+    {
+      "numero_turno": "1199",
+      "pezzi": [
+        [
+          "Ale524",
+          20
+        ],
+        [
+          "Le524",
+          40
+        ]
+      ],
+      "validita_codice": "P",
+      "tipo_materiale": "2Ale524+4Le524",
+      "descrizione_materiale": "TILO S10 - RE 80 - Flirt TSI 6pz - m.106",
+      "numero_giornate": 10,
+      "cover_page": 350,
+      "deposito": "NON_ASSEGNATO"
+    }
+  ]
+}

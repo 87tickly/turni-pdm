@@ -4,6 +4,78 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-25 (4) — Anagrafica completa depositi manutentivi + dotazione (v0.4)
+
+### Contesto
+
+Utente chiede di estrarre dal PDF turno materiale, per ciascuno dei 7
+depositi manutentivi, la lista dei tipi materiale assegnati e la
+quantità in pezzi.
+
+### Lavoro svolto
+
+**Parsing completo del PDF** (`Turno Materiale Trenord dal 2_3_26.pdf`,
+353 pagine):
+- 54 cover turno identificate
+- Per ogni cover: numero turno, tipo materiale, descrizione, giornate,
+  km giornaliera/annua, lista pezzi (nome + quantità)
+- Per ogni cover: deposito manutentivo abbinato dalla pagina Gantt
+  successiva (parsing OMV/OML case-insensitive)
+- Aggregazione per deposito: somma pezzi per tipo + lista turni gestiti
+
+**Risultato (seed Trenord, validità 02/03/26)**:
+
+| Deposito | Turni | Tipi pezzo | Pezzi totali |
+|----------|------:|-----------:|-------------:|
+| MILANO FIORENZA | 29 | 49 | 974 |
+| NOVATE | 7 | 14 | 299 |
+| NON_ASSEGNATO | 7 | 2 | 272 |
+| CAMNAGO | 2 | 7 | 169 |
+| CREMONA | 2 | 4 | 92 |
+| LECCO | 3 | 6 | 57 |
+| ISEO | 4 | 4 | 21 |
+| **TOTALE** | **54** | | **1884** |
+
+### File creati
+
+- `scripts/extract_depositi_manutenzione.py` (script riproducibile,
+  testato: rigenera identico l'output con `python scripts/...
+  <pdf_path>`)
+- `data/depositi_manutenzione_trenord_seed.json` (output, 33KB) —
+  diventerà seed quando creeremo le tabelle DB
+
+### Modifiche al doc v0.4
+
+- Titolo: v0.3 → v0.4
+- §0: aggiunta tabella "v0.4" con 4 righe (dotazione, P/I/E,
+  NON_ASSEGNATO, PDF è revisione)
+- §3 `localita_manutenzione`: tabella anagrafica arricchita con
+  conteggi reali (turni, tipi pezzo, pezzi totali)
+- §3 nuova entità figlia `localita_manutenzione_dotazione` con
+  `(localita_id, tipo_pezzo, quantita, famiglia_rotabile)`
+- §3 sottosezione "Specializzazione di ogni deposito" con dettaglio
+  per ciascuno dei 7 (FIORENZA multi-flotta, NOVATE TSR+TILO+Tibb,
+  CAMNAGO Mi-NO+ETR522, CREMONA solo Aln803/Ln803, LECCO ETR204+ATR,
+  ISEO solo diesel, NON_ASSEGNATO solo ETR524 sospetto pool TILO)
+- §3 sottosezione "Osservazioni emerse dal parsing" con 3 punti:
+  validità multipla P/I/E (versioni stagionali, non revisioni RFI),
+  NON_ASSEGNATO è categoria reale (non bug), il PDF stesso è una
+  revisione provvisoria
+
+### Stato
+
+- Documento v0.4. Anagrafica iniziale Trenord ora completa e
+  riproducibile.
+- 3 osservazioni emerse → potenziali aggiunte v0.5 (versione
+  stagionale P/I/E, flag pool_esterno, conferma utente su NON_ASSEGNATO).
+
+### Prossimo step
+
+Utente legge v0.4. Quando regge → `docs/MIGRAZIONE-DATI.md` (piano
+migrazione DB tabella per tabella, ancora senza codice).
+
+---
+
 ## 2026-04-25 (3) — MODELLO-DATI.md v0.3: correzioni pesanti dopo revisione utente
 
 ### Contesto
