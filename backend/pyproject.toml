@@ -69,6 +69,20 @@ ignore = [
 quote-style = "double"
 indent-style = "space"
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI usa Depends/Query/Path/etc come default args (pattern standard).
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Form",
+    "fastapi.File",
+    "fastapi.Security",
+]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

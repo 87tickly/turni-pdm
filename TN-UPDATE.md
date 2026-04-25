@@ -10,6 +10,157 @@
 
 ---
 
+## 2026-04-26 (7) — FASE D Sprint 2: Auth JWT (Sprint 2 COMPLETATA)
+
+### Contesto
+
+Sprint 2 del PIANO-MVP: autenticazione JWT custom + bcrypt, endpoint
+login/refresh/me, dependencies FastAPI per autorizzazione, seed di
+2 utenti applicativi.
+
+### Modifiche
+
+**Modulo `backend/src/colazione/auth/`** (4 file):
+
+- `password.py`: `hash_password()` + `verify_password()` su bcrypt
+  (cost factor default 12). `verify_password` ritorna False (no
+  raise) per hash malformati.
+- `tokens.py`: `create_access_token()` (claims: sub, type=access,
+  iat, exp, username, is_admin, roles, azienda_id),
+  `create_refresh_token()` (claims minimi: sub, type=refresh, iat,
+  exp), `decode_token(token, expected_type)` con
+  `InvalidTokenError` per firma/scaduto/tipo errato. HS256.
+- `dependencies.py`: `get_current_user()` da
+  `Authorization: Bearer <token>` (HTTPBearer FastAPI), no DB query
+  per request — claims vivono nel JWT. `require_role(role)` factory
+  + `require_admin()` factory ritornano dependency che check
+  ruolo/admin (admin bypassa role check).
+- `__init__.py`: ri-esporta API pubblica del modulo.
+
+**`backend/src/colazione/schemas/security.py`** (nuovo):
+- `LoginRequest`, `TokenResponse`, `RefreshRequest`, `RefreshResponse`,
+  `CurrentUser`. Distinto da `schemas/auth.py` perché qui sono shape
+  I/O API, non entità DB.
+
+**`backend/src/colazione/api/auth.py`** (nuovo):
+- `POST /api/auth/login`: verify password → emette access+refresh,
+  aggiorna `last_login_at`. Stessa risposta 401 per username
+  inesistente o password sbagliata (no info leak).
+- `POST /api/auth/refresh`: decode refresh → riemette access con
+  ruoli aggiornati dal DB.
+- `GET /api/auth/me`: ritorna `CurrentUser` corrente (utile per
+  debug + frontend "chi sono io").
+
+**`backend/src/colazione/main.py`**: registra
+`app.include_router(auth_routes.router)`.
+
+**Migrazione `backend/alembic/versions/0003_seed_users.py`**:
+- 2 utenti: `admin` (is_admin=TRUE, ruolo ADMIN) +
+  `pianificatore_giro_demo` (ruolo PIANIFICATORE_GIRO)
+- Password da env `ADMIN_DEFAULT_PASSWORD` / `DEMO_PASSWORD`,
+  fallback `admin12345` / `demo12345` per dev locale
+- Hash bcrypt calcolato a runtime (cost 12) — implica che
+  down/up cambia hash ma password resta uguale
+- `downgrade()`: DELETE in ordine FK-safe (ruoli prima, app_user dopo)
+
+**`backend/pyproject.toml`**: aggiunto
+`[tool.ruff.lint.flake8-bugbear] extend-immutable-calls` per
+ignorare B008 sulle `Depends/Query/Path/Body/Header/Cookie/Form/
+File/Security` di FastAPI (pattern standard).
+
+**`.github/workflows/backend-ci.yml`**: aggiunto step
+`Apply Alembic migrations` (`alembic upgrade head`) prima di
+pytest. Necessario per i test che richiedono schema + seed
+(test_models_match_db_tables, test_auth_endpoints).
+**Bug fix preesistente** introdotto in Sprint 1.7 — la CI con
+test_models_match_db_tables falliva perché lo schema non era
+applicato. Adesso risolto.
+
+### Test (4 file, 24 test nuovi)
+
+**`tests/test_auth_password.py`** (5):
+- hash è stringa bcrypt-prefixed
+- hash è random per call (salt diverso)
+- verify password corretta
+- verify password sbagliata
+- verify ritorna False per hash malformato
+
+**`tests/test_auth_tokens.py`** (6):
+- access token roundtrip (claims completi)
+- refresh token roundtrip (claims minimi)
+- decode rifiuta type errato (access usato come refresh)
+- decode rifiuta token scaduto
+- decode rifiuta firma sbagliata
+- decode rifiuta garbage
+
+**`tests/test_auth_endpoints.py`** (13):
+- login admin (200, claims is_admin + ruolo ADMIN)
+- login demo (200, ruolo PIANIFICATORE_GIRO)
+- login wrong password (401)
+- login unknown user (401)
+- login missing fields (422 validation)
+- refresh success (200 + nuovo access valido)
+- refresh rifiuta access token (401)
+- refresh rifiuta garbage (401)
+- refresh rifiuta user_id inesistente (401)
+- /me senza auth (401)
+- /me con access valido (200)
+- /me rifiuta refresh come access (401)
+- /me rifiuta scheme non Bearer (401)
+
+### Verifiche
+
+- `pytest`: **38/38 verdi** (era 14/14, +24 nuovi)
+- `ruff check`: All checks passed (B008 esentato per FastAPI Depends)
+- `ruff format --check`: 39 files formatted
+- `mypy strict`: no issues found in **33 source files** (era 28, +5
+  nuovi: password, tokens, dependencies, schemas/security, api/auth)
+- `alembic upgrade head` (3 migrazioni applicate)
+- `alembic downgrade -1` (0003 reverted) → `app_user` count = 0
+- `alembic upgrade head` (re-apply) → idempotente, conteggi
+  ripristinati
+
+Login funzionale verificato direttamente:
+- admin/admin12345 → access token con `is_admin=True`, `roles=[ADMIN]`
+- pianificatore_giro_demo/demo12345 → `roles=[PIANIFICATORE_GIRO]`
+
+### Stato
+
+**Sprint 2 COMPLETATA**. Tutto Sprint 2.1-2.5 chiuso in un commit
+unico (vs ipotesi PIANO-MVP di 5 commit separati).
+
+Backend ora ha:
+- Schema DB completo (Sprint 1)
+- Seed Trenord + 2 utenti applicativi (Sprint 1.6 + 2.5)
+- Modelli ORM (Sprint 1.7) e schemas Pydantic (Sprint 1.8)
+- Auth JWT funzionante con login/refresh/me + role-based access
+  control via `require_role(...)`
+
+### Prossimo step
+
+**Sprint 3 — Importer PdE** (stima 3-4 giorni nel PIANO-MVP, il pezzo
+più fragile):
+
+- 3.1 `importers/pde.py` skeleton + lettura file Numbers
+- 3.2 Parser singola riga → CorsaCommercialeCreate
+- 3.3 Parser composizione 9 combinazioni stagione × giorno_tipo
+- 3.4 Parser periodicità testuale (intervalli skip, date singole,
+      date extra)
+- 3.5 Calcolo `valido_in_date_json` denormalizzato
+- 3.6 Bulk insert + transazione + tracking corsa_import_run
+- 3.7 Idempotenza (SHA-256 file, re-import 0 nuovi insert)
+- 3.8 CLI: `uv run python -m colazione.importers.pde --file ...`
+
+Il file PdE reale Trenord è ~10580 corse, target import < 30s.
+Spec dettagliata in `docs/IMPORT-PDE.md`. Servirà fixture: prendere
+50 righe del file reale.
+
+Decision aperta: il file Numbers reale del PdE 2025-12-14 → 2026-12-12
+è disponibile localmente o serve l'utente per fornirlo? Da chiedere
+quando si parte con Sprint 3.
+
+---
+
 ## 2026-04-26 (6) — FASE D Sprint 1.8: Schemas Pydantic (Sprint 1 COMPLETATA)
 
 ### Contesto

@@ -65,5 +65,8 @@ jobs:
       - name: Mypy strict
         run: uv run mypy src/colazione
 
+      - name: Apply Alembic migrations
+        run: uv run alembic upgrade head
+
       - name: Pytest (with DB)
         run: uv run pytest --cov=src/colazione --cov-report=term-missing

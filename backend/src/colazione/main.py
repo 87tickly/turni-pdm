@@ -1,7 +1,8 @@
 """FastAPI app entry point.
 
 Sprint 0.1: skeleton minimo con /health endpoint.
-Le route reali (corse, giri, turni_pdc, ...) arrivano in Sprint 4.
+Sprint 2: registra il router auth (`/api/auth/login`, `/api/auth/refresh`).
+Le route corse/giri/turni arrivano in Sprint 4.
 """
 
 from collections.abc import AsyncIterator
@@ -11,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from colazione import __version__
+from colazione.api import auth as auth_routes
 from colazione.config import get_settings
 
 
@@ -43,6 +45,8 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         """Liveness probe. Sprint 0.1 minimal."""
         return {"status": "ok", "version": __version__}
+
+    app.include_router(auth_routes.router)
 
     return app
 
