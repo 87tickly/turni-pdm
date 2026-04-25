@@ -10,6 +10,59 @@
 
 ---
 
+## 2026-04-25 (8) — FASE C doc 6: IMPORT-PDE.md
+
+### Contesto
+
+Specifica del primo importer del programma. Legge PdE Numbers/Excel
+e popola corsa_commerciale + corsa_composizione. È il punto di ingresso
+del sistema: senza questo, il resto della piramide non si popola.
+
+### Modifiche
+
+**Nuovo `docs/IMPORT-PDE.md` v0.1** (~470 righe):
+
+- §1 Input: formati supportati (.numbers prio, .xlsx alt), 3 sheet
+  Trenord (PdE RL = 10580 righe da importare; NOTE Treno e NOTE BUS
+  per dopo)
+- §2 Mapping completo 124 colonne PdE → schema DB:
+  - identificativi (numero treno, rete, categoria, linea, direttrice)
+  - geografia (origine/destinazione + CdS, orari, km, durate)
+  - periodicità (testuale + flag garantito feriale/festivo)
+  - 9 combinazioni stagione × giorno-tipo → corsa_composizione (95K
+    record per Trenord)
+  - calendario annuale (Gg_gen, Gg_feb, ..., Gg_anno)
+  - aggregati (totale km, postikm, velocità commerciale)
+- §3 **Algoritmo calcolo valido_in_date_json denormalizzato**:
+  - parsing testo "Periodicità" (intervalli skip, date singole skip,
+    date extra)
+  - validazione incrociata con Gg_* per mese
+  - retorna lista date ISO YYYY-MM-DD
+- §4 Idempotenza:
+  - chiave logica `(azienda_id, numero_treno, valido_da)` → upsert
+  - SHA-256 file → skip se già importato
+  - tracking corsa_import_run con n_create / n_update / warnings
+- §5 Pseudo-codice top-level (transazione unica + bulk insert)
+- §6 8 edge case noti (numero treno come float, date all'italiana,
+  caratteri Unicode, sheet ordering, ecc.)
+- §7 Performance: 10580 × 9 = 95K insert, target < 30s con bulk insert
+  + transazione unica
+- §8 Test (smoke + idempotenza + modifica + calcolo periodicità)
+- §9 CLI: `uv run python -m colazione.importers.pde --file ... --azienda trenord`
+
+### Stato
+
+- Spec pronta per implementazione `backend/src/colazione/importers/pde.py`
+- Anche pronta per la fixture di test (50 righe del file reale)
+
+### Prossimo step
+
+`docs/PIANO-MVP.md` (FASE C doc 7, ULTIMO): primo MVP girabile +
+ordine costruzione codice + definizione "MVP completato". Dopo
+questo, FASE C chiusa e si passa a FASE D (codice).
+
+---
+
 ## 2026-04-25 (7) — FASE C doc 5: SCHEMA-DATI-NATIVO.md (DDL eseguibile)
 
 ### Contesto
