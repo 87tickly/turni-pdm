@@ -1,30 +1,17 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg-info/
-/dist/
-build/
-.eggs/
+# =====================================================================
+# .gitignore — agnostico, da estendere quando si decide lo stack
+# in docs/STACK-TECNICO.md (FASE C)
+# =====================================================================
 
 # Environment variables
 .env
+.env.local
+.env.*.local
 
-# Virtual environment
-venv/
-.venv/
-env/
-
-# Database backups (il DB principale turni.db va committato)
-turni_backup_*.db
-
-# Logs
-*.log
-server.log
-
-# Uploads (PDF caricati dall'utente)
-uploads/
+# OS
+.DS_Store
+Thumbs.db
+nul
 
 # IDE / Editor
 .vscode/
@@ -33,15 +20,59 @@ uploads/
 *.swo
 *~
 
-# OS
-.DS_Store
-Thumbs.db
-nul
+# Logs
+*.log
 
-# Test / Cache
+# =====================================================================
+# Python (se useremo Python)
+# =====================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+venv/
+.venv/
+env/
 .pytest_cache/
 .coverage
 htmlcov/
+.mypy_cache/
+.ruff_cache/
 
-# Claude
-.claude/
+# =====================================================================
+# Node.js (se useremo Node/JS)
+# =====================================================================
+node_modules/
+dist/
+build/
+.next/
+.nuxt/
+.vite/
+.turbo/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.parcel-cache/
+
+# =====================================================================
+# Database locali (da rivedere in STACK-TECNICO.md)
+# =====================================================================
+*.sqlite
+*.sqlite3
+*.db
+!data/*.json
+
+# =====================================================================
+# File runtime / upload locali (da definire)
+# =====================================================================
+uploads/
+tmp/
+.tmp/
+
+# =====================================================================
+# Claude Code
+# =====================================================================
+.claude/settings.local.json

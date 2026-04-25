@@ -10,6 +10,48 @@
 
 ---
 
+## 2026-04-25 (2) — FASE B completata: nuovo CLAUDE.md + .gitignore
+
+### Contesto
+
+CLAUDE.md vecchio era pieno di riferimenti al codice eliminato in
+FASE A (server.py, FastAPI, Tauri, parser PDF, train_segment, builder
+genetico, ecc.). Riscrittura completa per il nuovo progetto greenfield.
+
+### Modifiche
+
+**`CLAUDE.md`** completamente riscritto:
+- Stato del progetto: greenfield, in scrittura specifiche
+- 7 regole operative obbligatorie (lettura TN-UPDATE.md, aggiornamento
+  TN-UPDATE.md dopo ogni task, METODO-DI-LAVORO.md, lettura dominio,
+  manifesto greenfield, sviluppo per ruoli)
+- Mappa dei documenti di dominio con "quando leggerli"
+- Stato fasi A/B/C/D + lista 7 documenti FASE C
+- Stack tecnologico: TBD in `docs/STACK-TECNICO.md` (FASE C doc 2)
+- Glossario dominio essenziale (PdE, giro materiale, turno PdC, CV,
+  PK, ACCp/ACCa, vettura, materiale vuoto, FR, S.COMP, ciclo 5+2)
+- Convenzioni naming + riferimenti a tutti i .md
+
+**`.gitignore`** aggiornato:
+- Rimosse voci specifiche al vecchio (turni.db, server.log, uploads/
+  hardcoded, ecc.)
+- Aggiunte sezioni separate per Python e Node.js (entrambi ignorati
+  finche non scegliamo lo stack)
+- Strutturato per essere stack-agnostic e estendibile in FASE C
+
+### Stato
+
+- CLAUDE.md ora rispecchia il progetto attuale (greenfield)
+- .gitignore agnostic per qualsiasi stack
+- Repo pronto per FASE C (scrittura specifiche architetturali)
+
+### Prossimo step
+
+FASE C documento 1: `docs/VISIONE.md`. Cos'e' il programma, per chi,
+cosa risolve, scope esplicito.
+
+---
+
 ## 2026-04-25 — Greenfield reset (FASE A completata)
 
 ### Decisione

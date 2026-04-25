@@ -1,277 +1,167 @@
-# COLAZIONE — Sistema Gestionale Personale di Macchina
+# COLAZIONE — Programma di pianificazione ferroviaria nativa (greenfield)
+
+> **Stato del progetto**: greenfield, in fase di scrittura specifiche.
+> Reset eseguito il **2026-04-25**. Il programma vecchio (parser PDF
+> Gantt + backend FastAPI + frontend React) è stato eliminato — vedi
+> `TN-UPDATE.md` per il diario, `docs/_archivio/` per la memoria storica.
+
+---
 
 ## Regole operative OBBLIGATORIE
 
-1. **Leggi sempre `LIVE-COLAZIONE.md`** all'inizio di ogni conversazione per avere il contesto aggiornato di tutte le modifiche fatte
-2. **Dopo ogni task completato** (feature, fix, refactoring, qualsiasi modifica):
-   - Aggiorna `LIVE-COLAZIONE.md` con le modifiche fatte
-   - Fai `git add` dei file modificati
-   - Fai `git commit` con messaggio descrittivo
-   - Fai `git push`
-3. **Mai lavorare senza contesto**: se non hai letto LIVE-COLAZIONE.md, leggilo prima di fare qualsiasi cosa
-4. **Leggi `docs/METODO-DI-LAVORO.md`** all'inizio di ogni sessione (subito dopo `LIVE-COLAZIONE.md`). È il framework di comportamento ispirato all'affidabilità lavorativa giapponese — fiducia attraverso i fatti, diagnosi prima di azione, un passo alla volta completato bene, ammettere l'errore, verifica prima del commit, preservare non distruggere, costanza nel tempo. NON È opzionale. Nei momenti di fretta o frustrazione è proprio quando serve fermarsi e ri-consultarlo.
-5. **Leggi `docs/NORMATIVA-PDC.md`** quando si lavora su builder (`src/turn_builder/`), parser PdC (`src/importer/`), UI Gantt (`frontend/src/components/gantt/`), o qualsiasi logica che riguardi turni PdC, accessori (ACCp/ACCa), cambio volante (CVp/CVa), pause (REFEZ, PK), vetture, materiale vuoto (numeri U****), FR, ciclo settimanale. È la **fonte della verità** sulla normativa di dominio: se il codice fa diversamente, è il codice a essere sbagliato, non il documento. Costruito passo-passo con l'utente.
-5-bis. **Leggi `docs/ALGORITMO-BUILDER.md`** quando lavori su `src/turn_builder/auto_builder.py` o sulla generazione automatica di turni PdC. È la **specifica formale** dell'algoritmo (pseudo-codice + mapping file). Applica la NORMATIVA-PDC.md. Il codice del builder deve rispettarlo.
-6. **Design UX/UI → SEMPRE via Claude Design** (claude.ai/design, by Anthropic Labs): quando la conversazione riguarda aspetto visivo, layout, interazioni, design system, nuove schermate, restyle di componenti, mockup, wireframe → NON iniziare a generare CSS/Tailwind inline o proporre markup a mano.
+### 1. Leggi sempre `TN-UPDATE.md` a inizio sessione
 
-   **PRECONDIZIONE — Claude Design conosce GIÀ questa cartella.** L'utente ha collegato su claude.ai/design sia il repo GitHub `87tickly/turni-pdm` sia la cartella locale `COLAZIONE` come contesto filesystem diretto. Claude Design può leggere componenti sorgente, token CSS (`frontend/src/index.css`), reference (`docs/REFERENCE-*.html`, `docs/HANDOFF-claude-design.md`), screenshot già salvati. **NON serve preparare bundle di upload** (zip, copie, cartelle materiale). Serve solo un **prompt mirato**.
+Il diario operativo del nuovo progetto. Contiene la cronologia di
+ogni modifica fatta, in ordine cronologico inverso (entry più recente
+in cima). **Leggi le prime 2-3 entry prima di fare qualsiasi cosa.**
 
-   **Workflow quando l'utente chiede "redesign X"**:
-   1. NON scrivere CSS/JSX
-   2. Scrivere un prompt mirato in `docs/PROMPT-claude-design-{feature}.md` che specifichi:
-      - **Cosa redesignare**: path file + nome componente (es. `frontend/src/components/PdcGanttV2.tsx`)
-      - **Cosa non va oggi**: riferimento a screenshot o descrizione del pain point
-      - **Vincoli funzionali da preservare**: props, interazioni (drag/resize/click), API consumate, callback
-      - **Principi DS applicabili**: link a `docs/HANDOFF-claude-design.md` (Claude Design lo legge da sé)
-      - **Deliverable atteso**: hi-fi mockup + handoff markdown pronto per Claude Code
-   3. L'utente copia il prompt su claude.ai/design, riceve l'handoff, me lo mostra
-   4. SOLO POI implemento il React
+### 2. Aggiorna `TN-UPDATE.md` dopo ogni task completato
 
-   **Motivo**: Claude Design ha Claude Opus 4.7 vision + lettura codebase, produce risultati migliori del disegnare ad-hoc in chat. Un prompt mirato (30 sec) + 10 min in Claude Design = risparmio di 5-10h di iterazioni CSS frustranti.
+Dopo ogni feature, fix, refactoring, qualsiasi modifica:
+- Aggiungi una entry in cima a `TN-UPDATE.md` con data, contesto,
+  modifiche, stato, prossimo step
+- `git add` dei file modificati
+- `git commit` con messaggio descrittivo
+- `git push`
 
-## STRUTTURA VERA di un turno PdC (memorizzato 21/04/2026)
+L'entry segue la struttura: `## YYYY-MM-DD — titolo breve` + sezioni
+`### Contesto`, `### Modifiche`, `### Stato`, `### Prossimo step`.
 
-Referenza: **turno ALOR_C [65046]** impianto ALESSANDRIA, profilo Condotta,
-valido 23/02/2026 - 12/12/2026 (PDF "Turni PdC rete RFI dal 23 Febbraio 2026",
-pagine 386-387). Da studiare **prima di toccare l'algoritmo del builder**.
+### 3. Mai lavorare senza contesto
 
-### Un turno ha N giornate × M varianti calendario
+Se non hai letto `TN-UPDATE.md`, leggilo prima di fare qualsiasi cosa.
 
-Il turno ALOR_C ha **5 giornate lavorative (1-5) + 2 riposi** (ciclo 5+2).
-Ogni giornata ha varianti per giorno settimana:
-- **LMXGV** = feriale (Lun Mar Mer Gio Ven)
-- **S** = Sabato
-- **D** = Domenica
-- **SD** = Sab/Dom combinata (quando uguali)
-- **F** = Festivo infrasettimanale (variante specifica)
+### 4. Leggi `docs/METODO-DI-LAVORO.md` a inizio sessione
 
-Stesse giornate ma **sequenze di treni COMPLETAMENTE DIVERSE** tra LMXGV e S
-e D. Domenica (D) spesso è `S.COMP AL` = disponibilita' a riposo.
+Subito dopo `TN-UPDATE.md`. È il framework di comportamento (7 regole:
+diagnosi prima di azione, numeri non ipotesi, un passo alla volta,
+ammettere l'errore, verifica prima del commit, preservare non
+distruggere, costanza nel tempo). **NON è opzionale.** Nei momenti di
+fretta o frustrazione è proprio quando serve fermarsi e ri-consultarlo.
 
-### Cct (condotta) reale: 2-3h, NON 4-5h
+### 5. Dominio: leggi i documenti di riferimento quando serve
 
-Numeri letti dalle 5 giornate LMXGV del turno ALOR_C:
-- G1: Cct 02:28 (148 min), Lav 05:13 — **ratio 47%**
-- G2: Cct 02:53 (173 min), Lav 08:17 — **ratio 35%**
-- G3: Cct 03:33 (213 min), Lav 08:30 — **ratio 42%**
-- G4: Cct 02:16 (136 min), Lav 08:05 — **ratio 28%**
-- G5: Cct 01:45 (105 min), Lav 06:07 — **ratio 29%**
+| Documento | Quando leggerlo |
+|-----------|-----------------|
+| `docs/NORMATIVA-PDC.md` (1292 righe) | Quando lavori su builder turni PdC, validazione regole operative (accessori, refezione, CV, vetture, FR, ciclo settimanale, prestazione max). **Fonte verità Trenord** — se il codice fa diversamente, è il codice a essere sbagliato. |
+| `docs/MODELLO-DATI.md` v0.5 | Quando tocchi entità del modello (corsa_commerciale, giro_materiale, turno_pdc, persona, revisioni, località manutenzione). Modello concettuale a piramide. |
+| `docs/ALGORITMO-BUILDER.md` | Quando implementi l'algoritmo di costruzione turni PdC dal giro materiale. **Riferimento storico**: scritto per il vecchio progetto, va riadattato in chiave nativa, ma la logica algoritmica resta valida. |
+| `docs/ARCHITETTURA-BUILDER-V4.md` | Idea "centrata sulla condotta" (seed produttivo + posizionamento + rientro). **Riferimento storico** — logica preziosa, riscrivere in chiave nativa quando si arriva al builder. |
+| `docs/schema-pdc.md` | Schema JSON canonico turno PdC con esempi reali. Riferimento storico. |
 
-**Media condotta: ~2h30-3h. Media prestazione: ~7h. Ratio medio: 35%.**
+### 6. Manifesto greenfield (vedi `docs/MODELLO-DATI.md` §⚠️)
 
-Il mio scoring pre-esistente puntava a ratio 60-70% → **SBAGLIATO**.
+**Non stiamo replicando il sistema Trenord.** Il programma è di
+ARTURO × Trenord, ispirato dalla loro realtà operativa ma indipendente.
+Multi-tenant: domani SAD/TILO/Trenitalia possono usare la stessa app
+con normativa configurabile per azienda.
 
-### Uso massiccio di VETTURA (posizionamento + rientro)
+**Il vecchio progetto non torna.** Niente parser PDF Gantt come fonte
+primaria, niente `train_segment` come entità centrale. La logica di
+costruzione è:
 
-Giornata 2 LMXGV (il caso da analizzare a fondo):
 ```
-AL → (11055 VOGH)  [VETTURA 49' + 4']  Vogh
-   → 2316 Mlce     [CONDOTTA 55']      Milano Centrale
-   → U316 FlOz     [CONDOTTA 16' + 6'] Fiorenza
-   → (59AS Mlba)   [VETTURA 38' + 55'] Milano Bovisa
-   → (24135 Mlro)  [VETTURA 6' + 33']  Milano Rogoredo
-   → REFEZ Mlro    [PAUSA 30']         Mlro
-   → 10045 AL      [CONDOTTA 56' + 41'] Alessandria
-   → CVa 10062 AL  [CAMBIO VOLANTE ARRIVO] AL
+PROPOSTA COMMERCIALE (PdE)        ← sorgente unica autorevole
+        ↓
+TURNO MATERIALE (giro)            ← lo COSTRUIAMO noi (algoritmo)
+        ↓
+TURNO PdC                         ← lo COSTRUIAMO noi (algoritmo)
+        ↓
+ASSEGNAZIONE PERSONE              ← anagrafica + indisponibilità
 ```
 
-**7 segmenti**: 4 VETTURA + 2 CONDOTTA + 1 REFEZIONE + 1 CVa. Solo 2
-treni guidati, gli altri tutti passivi per posizionarsi o rientrare.
+### 7. Sviluppa per ruoli — 5 dashboard separate
 
-### Simboli nel PDF turno PdC
+Il programma serve **persone con ruoli diversi**:
+1. Pianificatore Giro Materiale
+2. Pianificatore Turno PdC
+3. Manutenzione (gestione dotazione fisica)
+4. Gestione Personale (anagrafica + assegnazioni)
+5. Personale finale (PdC che vede il proprio turno)
 
-- `(NUMERO STAZ` = treno in **vettura** (PdC passeggero)
-- `NUMERO STAZ` (barra continua nera) = treno in **condotta** (PdC guida)
-- `●NUMERO` = **preriscaldamento** (tempi maggiorati per preparare il mezzo)
-- `CVp NUMERO` = **Cambio Volante in Produzione** (PdC cambia treno guidando)
-- `CVa NUMERO` = **Cambio Volante in Arrivo** (altro tipo di cambio in arrivo)
-- `REFEZ STAZ` = **refezione** (pausa pasto) in stazione specifica
-- `(VOCTAXI` = **vettura occasionale in TAXI** (quando non c'e' treno)
-- `●10020 Tr 10020 tempi maggiorati per preriscaldo` = nota operativa
+Ogni ruolo ha una propria dashboard con schermate, azioni, permessi.
+Non costruire un'interfaccia unica.
 
-### Pattern algoritmico corretto (per prossima iterazione builder)
+---
 
-Il builder attuale cerca **catene di treni-condotta dal deposito**. Sbagliato.
-Il builder giusto deve partire dal **punto di condotta** e costruire:
+## Stato attuale del progetto
 
-1. **STEP 1 - Seleziona il/i treno/i produttivo/i**: 1-2 treni che il PdC
-   guida, condotta totale target **2-3h** (non 4-5h)
-2. **STEP 2 - Posizionamento iniziale**: dal deposito alla stazione di
-   inizio condotta, tipicamente in **vettura** su 1-3 treni passivi
-3. **STEP 3 - Refezione**: 30 min in stazione compatibile, durante il gap
-   tra treni condotta o prima/dopo
-4. **STEP 4 - Rientro**: dal punto di fine condotta al deposito, in
-   vettura o condotta
-5. **STEP 5 - Valida**: prestazione ≤ 8h30, condotta ≤ 5h30, refezione in
-   finestra, riposo dopo turno
+| Fase | Stato | Output |
+|------|-------|--------|
+| **A — Greenfield reset** | ✅ completa (2026-04-25) | Repo pulito, solo dominio + 1 seed |
+| **B — Nuovo CLAUDE.md** | 🔄 in corso | Questo file |
+| **C — Documentazione architetturale** | ⏸️ in coda | 7 documenti da scrivere uno per volta con review utente |
+| **D — Costruzione codice** | ⏸️ in coda | Solo dopo che C è chiusa e validata |
 
-**Il turno vero e' CENTRATO SULLA CONDOTTA, non sulla catena dal deposito.**
+### Documenti FASE C da scrivere (ordine)
 
-### Non fossilizzarsi e NON gettare la spugna
+1. `docs/VISIONE.md` — cos'è il programma, per chi, cosa risolve
+2. `docs/STACK-TECNICO.md` — backend/frontend/DB/hosting/auth (richiede decisioni utente)
+3. `docs/RUOLI-E-DASHBOARD.md` — 5 dashboard, schermate, permessi
+4. `docs/LOGICA-COSTRUZIONE.md` — algoritmo nativo PdE → giro → PdC
+5. `docs/SCHEMA-DATI-NATIVO.md` — schema SQL concreto (eseguibile)
+6. `docs/IMPORT-PDE.md` — come si legge il PdE Numbers
+7. `docs/PIANO-MVP.md` — primo MVP girabile, ordine costruzione
 
-L'utente ha pazienza limitata (giustamente) per:
-- Risposte tipo "funziona cosi e cosi"
-- "Dataset povero quindi impossibile"
-- "E' un problema architetturale da fare in sessione futura"
-
-Tutti questi sono modi di gettare la spugna. Prima di dare una di queste
-risposte, rileggere `docs/METODO-DI-LAVORO.md` (regole 1, 3, 7):
-- **Diagnosi prima di azione**: quando il builder sceglie sempre Pavia,
-  verifica davvero qual e' lo score delle alternative, perche' vengono
-  scartate, cosa cambia aggiungendo bonus
-- **Un passo alla volta**: ogni fix testato con numeri, non "dovrebbe
-  funzionare"
-- **Costanza nel tempo**: il problema di Alessandria non si risolve "dopo"
-  o "in sessione dedicata" — si risolve ora con 2-3 ore di riprogettazione
-  algoritmica se serve
-
-## Scopo
-
-Software gestionale per la pianificazione turni del personale di macchina ferroviario.
-Partito come tool specifico Trenord, sta diventando un sistema ibrido utilizzabile da qualsiasi azienda di trasporto ferroviario.
+---
 
 ## Stack tecnologico
 
-| Layer | Tecnologia | Note |
-|-------|-----------|------|
-| Backend | Python 3.12 + FastAPI | API REST, logica di business |
-| Frontend | React + TypeScript (in migrazione) | Sostituisce il vecchio vanilla HTML |
-| UI Kit | shadcn/ui (Radix + Tailwind) | Design moderno, minimale, alta densità dati |
-| Desktop | Tauri (pianificato) | macOS + Windows |
-| Database | SQLite (locale) / PostgreSQL (produzione) | Dual-mode via `DATABASE_URL` env var |
-| Deploy | Railway CLI | `railway up` per staging/produzione |
-| Dati real-time | ARTURO Live API (live.arturo.travel) | Sostituisce ViaggiaTreno diretto |
-| Auth | JWT (python-jose) + bcrypt | Token 72h |
+**Da decidere in `docs/STACK-TECNICO.md`** (FASE C documento 2). Le scelte
+impattano CLAUDE.md, che andrà aggiornato dopo.
 
-## Come avviare
+Il progetto vecchio usava: Python 3.12 + FastAPI + React/TS + shadcn +
+Tauri (pianificato) + SQLite/PostgreSQL + Railway. Possiamo riutilizzare
+parte di queste scelte se rette, ma niente è obbligatorio.
 
-```bash
-# Backend (dev)
-uvicorn server:app --reload --port 8002
-
-# Test
-python -m pytest tests/ -v
-
-# CLI
-python app.py info              # statistiche DB
-python app.py train 10603       # cerca treno
-python app.py station "MILANO CENTRALE"
-python app.py build-auto --deposito MILANO --days 5
-```
+---
 
 ## Variabili d'ambiente
 
-| Variabile | Obbligatoria | Default | Descrizione |
-|-----------|-------------|---------|-------------|
-| `DATABASE_URL` | No | SQLite `turni.db` | Connection string PostgreSQL per produzione |
-| `JWT_SECRET` | Si in prod | `dev-secret-...` | Chiave firma JWT |
-| `ADMIN_DEFAULT_PASSWORD` | No | random generata | Password iniziale admin |
+Da definire in `docs/STACK-TECNICO.md`. Per ora nessuna.
 
-## Struttura directory
-
-```
-COLAZIONE/
-├── server.py                  # FastAPI app shell (62 righe: CORS + router includes)
-├── app.py                     # CLI entry point
-│
-├── api/                       # Router FastAPI modulari
-│   ├── deps.py                # Dipendenze condivise (DB, JWT auth)
-│   ├── auth.py                # Register, login, admin
-│   ├── health.py              # Health check, info DB
-│   ├── upload.py              # Upload PDF
-│   ├── trains.py              # Query treni, stazioni, giro materiale
-│   ├── validation.py          # Validazione giornata, costanti
-│   ├── builder.py             # Auto-builder, calendar
-│   ├── shifts.py              # CRUD turni salvati/settimanali
-│   ├── importers.py           # Import turno personale/PdC
-│   └── viaggiatreno.py        # Dati real-time via ARTURO Live API
-│
-├── services/                  # Logica di business
-│   ├── arturo_client.py       # Client API ARTURO Live (live.arturo.travel)
-│   ├── segments.py            # Dedup, serializzazione segmenti
-│   └── timeline.py            # Costruzione timeline visiva giornata
-├── requirements.txt
-├── turni.db                   # Database SQLite locale
-├── turno_materiale_treni.json # Dati turni materiale estratti da PDF
-├── fr_stations.txt            # Stazioni fuori residenza
-│
-│
-├── src/
-│   ├── constants.py           # Regole operative (da astrarre in config/)
-│   ├── database/db.py         # Abstraction layer DB (SQLite/PostgreSQL)
-│   ├── validator/rules.py     # Engine validazione turni
-│   ├── turn_builder/
-│   │   ├── auto_builder.py    # AI builder (genetico + simulated annealing)
-│   │   └── manual_builder.py  # Builder interattivo CLI
-│   ├── importer/
-│   │   ├── pdf_parser.py      # Parser PDF Gantt Trenord
-│   │   ├── turno_personale_parser.py
-│   │   └── turno_pdc_parser.py
-│   └── cli/main.py            # Comandi CLI
-│
-├── tests/                     # pytest
-├── static/index.html          # Frontend legacy (da sostituire con frontend/)
-└── uploads/                   # PDF caricati
-```
+---
 
 ## Glossario dominio
 
-| Termine IT | Significato | Dettaglio |
-|-----------|-------------|-----------|
-| Turno materiale | Ciclo rotazione treni | Sequenza treni assegnati a un convoglio |
-| Turno personale | Ciclo lavoro macchinista | Sequenza giornate lavorative + riposi |
-| Segmento | Singola tratta treno | Da stazione A a B con orari |
-| Prestazione | Durata totale turno giornaliero | Include condotta + pause + accessori. Max 8h30 (510 min) |
-| Condotta | Tempo effettivo di guida | Max 5h30 (330 min) |
-| Refezione | Pausa pasto | 30 min, finestre 11:30-15:30 o 18:30-22:30 |
-| FR (Fuori Residenza) | Pernottamento fuori sede | Max 1/settimana, 3/28 giorni |
-| Dormita | Notte in FR | Riposo minimo 6h fuori dal deposito base |
-| Deposito | Sede operativa macchinista | Es. Milano Garibaldi, Brescia, Lecco |
-| S.COMP | Disponibilità (a disposizione) | Min 6h (360 min) |
-| Notturno | Turno tra 00:01-01:00 | Max 7h (420 min) |
-| LV/SAB/DOM | Tipo giornata | Feriale / Sabato / Domenica |
-| Ciclo 5+2 | Blocco lavoro-riposo | 5 giorni lavoro + 2 riposo |
+Riassunto rapido. Per il dettaglio normativo vedi `docs/NORMATIVA-PDC.md`.
 
-## Regole operative chiave
+| Termine IT | Significato |
+|-----------|-------------|
+| **PdE** (Programma di Esercizio) | Offerta commerciale annuale: elenco di tutte le corse treno con orari, periodicità, composizione. Fonte unica da cui tutto deriva. |
+| **Giro materiale** (turno materiale) | Ciclo di rotazione di un convoglio fisico. N giornate × M varianti calendario × sequenza di corse coperte. |
+| **Turno PdC** | Ciclo di lavoro di un macchinista. N giornate × M varianti × sequenza di blocchi (condotta, vettura, accessori, refezione, CV). |
+| **Località di manutenzione** | Sede del materiale fisico (IMPMAN FIORENZA, NOVATE, CAMNAGO, LECCO, CREMONA, ISEO + pool TILO Svizzera). Distinta da deposito PdC. |
+| **Deposito PdC** | Sede del personale di macchina (25 voci Trenord: ALESSANDRIA, ARONA, BERGAMO, BRESCIA, ecc.). |
+| **Prestazione** | Durata totale turno giornaliero. Max 8h30 (510 min) standard, 7h (420 min) presa servizio 01:00-04:59. |
+| **Condotta** | Tempo effettivo di guida. Max 5h30 (330 min). |
+| **Refezione (REFEZ)** | Pausa pasto 30 min. Obbligatoria se prestazione > 6h. Finestre 11:30-15:30 o 18:30-22:30. |
+| **CV** (CVp/CVa) | Cambio Volante: il PdC consegna/prende il mezzo in stazione ammessa, gap < 65'. |
+| **PK** (Parking) | Materiale parcheggiato in stazione durante una pausa. Alternativa a CV. |
+| **ACCp/ACCa** | Accessori in partenza/arrivo del treno (40' standard, 80' con preriscaldo dic-feb). |
+| **Vettura** | PdC viaggia come passeggero (deadhead). Niente accessori, solo 15' pre/post servizio ai bordi del turno. |
+| **Materiale vuoto (U\*\*\*\*)** | Treno senza passeggeri per posizionamento (es. da Fiorenza a Mi.Centrale). |
+| **Treno commerciale "i"** | Treno con suffisso "i" (es. 28335i): traccia RFI ma materiale ancora vuoto, posizionamento. |
+| **FR (Fuori Residenza)** | Pernottamento fuori sede. Max 1/settimana, max 3/28gg. |
+| **S.COMP** | Disponibilità a comparto. Min 6h. |
+| **Ciclo 5+2** | Blocco 5 giorni lavoro + 2 riposo. Riposo settimanale ≥ 62h con 2 giorni solari. |
 
-- **Prestazione**: max 510 min (8h30) con accessori inclusi
-- **Condotta**: max 330 min (5h30)
-- **Refezione**: 30 min obbligatori in finestra 11:30-15:30 o 18:30-22:30
-- **Riposo tra turni**: 11h standard, 14h dopo fine 00:01-01:00, 16h dopo notturno
-- **Riposo settimanale**: min 62h
-- **Ore settimanali**: target 35h30, min 33h, max 38h
-- **FR**: max 1/settimana, max 3 in 28 giorni, riposo min 6h
+---
 
 ## Convenzioni
 
-- **Naming dominio**: termini italiani (prestazione, condotta, deposito, turno)
-- **Naming codice**: inglese per struttura (routes, services, models), italiano per concetti di dominio
-- **Orari**: sempre in minuti dall'inizio giornata (es. 510 = 8:30)
-- **Database**: migrazioni idempotenti via `_run_migration()` in db.py
-- **API**: RESTful, prefisso `/api/`, risposte JSON
-- **Frontend**: React + TypeScript, componenti shadcn/ui, Tailwind CSS
+- **Naming dominio**: termini italiani (prestazione, condotta, deposito, turno, giro materiale)
+- **Naming codice**: inglese per struttura (routes, services, models), italiano per concetti di dominio (pdc, giro, refezione)
+- **Orari**: minuti dall'inizio giornata (es. 510 = 8h30)
+- **API**: RESTful, prefisso `/api/`, risposte JSON (da formalizzare in STACK-TECNICO.md)
 
-## Roadmap
+---
 
-| Phase | Stato | Descrizione |
-|-------|-------|-------------|
-| Phase 0 | In corso | Ristrutturazione backend: split server.py, config multi-azienda, sicurezza |
-| Phase 1 | Pianificato | Nuovo frontend React + Tauri desktop shell |
-| Phase 2 | Futuro | Multi-azienda completo, gestionale personale esteso |
+## Riferimenti
 
-## AI Builder (auto_builder.py)
-
-Algoritmo a 4 fasi per costruzione automatica turni:
-1. **POOL**: genera catene treni candidati via DFS (depth=10, branch=4)
-2. **BUILD**: scheduling greedy multi-restart (25 tentativi)
-3. **EVOLVE**: crossover genetico sui migliori 8 candidati (15 round)
-4. **REFINE**: simulated annealing (40 iterazioni, T: 300→10)
-
-Non toccare questo modulo in Phase 0 — è già ben strutturato.
-
-## Note importanti
-
-- `pdf_parser.py` contiene costanti geometriche specifiche per i PDF Gantt Trenord — è specifico per natura
-- Il vecchio `static/index.html` (5441 righe) verrà sostituito completamente dal nuovo frontend React
-- Il deploy è sempre via Railway CLI (`railway up`)
-- SQLite è il DB primario per uso desktop; PostgreSQL solo per deploy web
+- `TN-UPDATE.md` — diario operativo (cronologia modifiche)
+- `docs/METODO-DI-LAVORO.md` — framework comportamentale
+- `docs/NORMATIVA-PDC.md` — fonte verità dominio
+- `docs/MODELLO-DATI.md` v0.5 — modello concettuale
+- `data/depositi_manutenzione_trenord_seed.json` — anagrafica reale 7 depositi + 1884 pezzi
+- `docs/_archivio/LIVE-COLAZIONE-storico.md` — diario progetto vecchio (memoria storica)
