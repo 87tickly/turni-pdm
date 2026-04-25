@@ -10,6 +10,59 @@
 
 ---
 
+## 2026-04-26 (9) — Doc operativa import PdE
+
+### Contesto
+
+L'utente vuole tenere a portata di mano i comandi per importare il
+PdE reale, così non si dimentica fra mesi. Documentati in 2 posti
+complementari:
+
+1. `docs/IMPORT-PDE.md` §9 — spec + workflow completo (per chi cerca
+   "come funziona l'import")
+2. `backend/data/pde-input/README.md` — quick reference dei comandi
+   pronti copy-paste (per chi apre la cartella)
+
+### Modifiche
+
+**`docs/IMPORT-PDE.md`** §9 ricostruita: prima era 1 riga astratta
+(`uv run ... --file ... --azienda trenord`), ora ha 6 sotto-sezioni:
+- 9.1 Pre-requisiti (docker compose + alembic upgrade)
+- 9.2 Procedura import (mkdir + cp + comando)
+- 9.3 Output atteso
+- 9.4 Verifica post-import (query DB)
+- 9.5 Re-import + flag `--force`
+- 9.6 Aggiornare la fixture quando arriva un nuovo PdE
+
+**Nuovo `backend/data/pde-input/README.md`**: quick reference della
+cartella locale. Ricorda comandi essenziali, convenzioni di
+naming, workflow per multipli anni di PdE.
+
+**`.gitignore`** raffinato: era `backend/data/pde-input/`
+(ignora tutta la cartella). Ora `backend/data/pde-input/*` +
+eccezione `!backend/data/pde-input/README.md`. Risultato verificato
+con `git check-ignore`:
+- `fake.numbers` → ignorato (regola riga 80)
+- `README.md` → tracciato (eccezione riga 81)
+
+### Verifica
+
+`git check-ignore -v backend/data/pde-input/fake.numbers` ritorna
+match con la regola `*` → ignorato. `git check-ignore -v README.md`
+ritorna match con la regola `!` → committato.
+
+### Stato
+
+Fatto. La procedura di import PdE è documentata + accessibile sia
+via `docs/` (spec) sia via cartella locale (cheat sheet).
+
+### Prossimo step
+
+Sprint 3.1+ vero — `importers/pde.py` con parser, idempotenza, CLI.
+Stesso piano di prima, niente cambio scope.
+
+---
+
 ## 2026-04-26 (8) — Sprint 3 prep: fixture PdE per test
 
 ### Contesto

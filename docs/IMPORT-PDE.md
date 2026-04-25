@@ -454,22 +454,46 @@ Fixture: `tests/fixtures/pde_sample_50.xlsx` (estratto del file reale,
 
 ---
 
-## 9. CLI
+## 9. Workflow operativo (come importare il PdE reale)
 
-Esposizione del comando via FastAPI CLI o script standalone:
+Il file PdE Trenord (`.numbers` o `.xlsx`) **non vive nel repo Git**:
+è dato commerciale, decine di MB, cambia ogni anno. L'utente lo tiene
+sul proprio Mac e lo punta via CLI quando serve importarlo nel DB.
+
+### 9.1 Pre-requisiti
 
 ```bash
-# Da backend/
+# Postgres locale up
+docker compose up -d db
+
+# Migrazioni applicate (schema + seed Trenord + utenti)
+cd backend
+uv run alembic upgrade head
+```
+
+### 9.2 Procedura import
+
+```bash
+# 1) (Una volta sola) crea la cartella locale gitignored
+mkdir -p backend/data/pde-input
+
+# 2) Copia il file PdE dentro (esempio con il PdE Trenord 2025-2026)
+cp "/Users/spant87/Library/Mobile Documents/com~apple~Numbers/Documents/All.1A5_14dic2025-12dic2026_TRENI e BUS_Rev5_RL.numbers" \
+   backend/data/pde-input/
+
+# 3) Importa nel DB (durata ~25-30s per 10580 corse)
+cd backend
 uv run python -m colazione.importers.pde \
-    --file /path/to/All.1A5_14dic2025-12dic2026_TRENI_e_BUS.numbers \
+    --file "data/pde-input/All.1A5_14dic2025-12dic2026_TRENI e BUS_Rev5_RL.numbers" \
     --azienda trenord
 ```
 
-Output sul terminale:
+### 9.3 Output atteso
+
 ```
 [1/3] Apertura file...
       10580 righe trovate in sheet 'PdE RL'
-[2/3] Verifica idempotenza... file mai importato
+[2/3] Verifica idempotenza... file mai importato (SHA-256 nuovo)
 [3/3] Importazione...
       ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰ 100% (10580/10580)
    ✓ 10580 corse importate
@@ -478,6 +502,42 @@ Output sul terminale:
    ⚠ 3 warning di periodicità non validate (vedi log)
 
 Run ID: 1, durata 24.7s
+```
+
+### 9.4 Verifica post-import
+
+```bash
+docker exec colazione_db psql -U colazione -d colazione -c "
+SELECT COUNT(*) AS corse FROM corsa_commerciale;
+SELECT COUNT(*) AS composizioni FROM corsa_composizione;
+SELECT id, source_file, n_corse_create, completed_at FROM corsa_import_run;
+"
+```
+
+Atteso: `corse=10580`, `composizioni=95220`, 1 riga in `corsa_import_run`.
+
+### 9.5 Re-import (idempotenza)
+
+Rilanciare lo stesso comando sullo stesso file:
+- SHA-256 matcha → skip totale, `n_corse_create=0`, `n_corse_update=0`
+- File modificato → confronto record per record, update solo dove cambia.
+
+Per **forzare un re-import** (es. dopo bug fix nel parser):
+```bash
+uv run python -m colazione.importers.pde --file ... --azienda trenord --force
+```
+
+### 9.6 Aggiornare la fixture di test
+
+Quando il PdE source cambia (nuovo anno, nuove edge case):
+
+```bash
+cd backend
+PYTHONPATH=src uv run python scripts/build_pde_fixture.py \
+    --source "data/pde-input/<nuovo-pde>.numbers"
+# Output: tests/fixtures/pde_sample.xlsx aggiornato
+git add tests/fixtures/pde_sample.xlsx
+git commit -m "chore: aggiorna fixture PdE per anno YYYY"
 ```
 
 ---
