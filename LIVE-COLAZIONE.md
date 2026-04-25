@@ -4,6 +4,59 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-25 (6) — Step 2 START: docs/MIGRAZIONE-DATI.md draft v0.1
+
+### Contesto
+
+Utente conferma v0.5 del modello come "solido oggi". Sblocco a Step 2:
+piano di migrazione DB tabella per tabella, ancora **senza codice**.
+
+### Decisione architetturale
+
+**Pattern strangler, niente big bang.** Le tabelle nuove **affiancano**
+le vecchie. Codice esistente intoccato finché le nuove sono validate.
+Tre regole non negoziabili: mai DROP/TRUNCATE prima della validazione,
+migrazioni idempotenti, backfill in 3 fasi (schema → popola →
+confronta).
+
+### Modifiche
+
+**Nuovo `docs/MIGRAZIONE-DATI.md` (draft v0.1)**:
+
+- §0 Manifesto: pattern strangler + 3 regole
+- §1 Mappa sopravvivenza: per ogni tabella attuale, cosa diventa
+  (rinomina logica, ALTER, scompone, deprecata, invariata)
+- §2 DAG di dipendenze in 7 strati: anagrafiche pure → derivate →
+  LIV 1 (corse) → LIV 2 (giro) → revisioni → LIV 3 (PdC) → LIV 4
+  (persone)
+- §3-§8 schema completo per ogni nuova tabella + ALTER per esistenti,
+  con SQL esemplificativo + strategia backfill + query di validazione
+- §9 cutover graduale in 5 step (shadow read → cutover read → cutover
+  write → validazione 30gg → drop legacy)
+- §10 cosa NON tocchiamo (saved_shift, frontend Gantt, auto_builder,
+  TurnValidator, performance tuning)
+- §11 TODO list ad alto livello: 21 passi numerati, 1 commit + 1 test
+  di consistenza ciascuno
+- §12 4 decisioni aperte da chiudere con utente prima di iniziare
+  passo 1: nomi SQL fisici vs logici, ordine import PdE vs migrazione
+  strutturale, backup DB obbligatorio, file migrations vs `_run_migration_NNN()`
+
+### Stato
+
+- Documento draft v0.1, 784 righe.
+- Solo documentazione. Zero codice, zero migrazioni eseguite, zero
+  modifiche al DB.
+- Il modello v0.5 e questo documento insieme costituiscono la
+  **specifica completa** per iniziare lo Step 3 (codice).
+
+### Prossimo step
+
+Utente legge MIGRAZIONE-DATI.md e risponde alle 4 decisioni aperte
+del §12. Quando OK → iniziamo passo 1 (creare `azienda` + popolare
+trenord). Tutti i 21 passi sono atomici e testati: ognuno è 1 commit.
+
+---
+
 ## 2026-04-25 (5) — MODELLO-DATI.md v0.5: chiarimenti utente + manifesto
 
 ### Contesto
