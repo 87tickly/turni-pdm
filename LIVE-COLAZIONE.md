@@ -4,6 +4,74 @@ Questo file viene aggiornato ad ogni modifica. Leggilo sempre per avere il conte
 
 ---
 
+## 2026-04-25 (5) — MODELLO-DATI.md v0.5: chiarimenti utente + manifesto
+
+### Contesto
+
+Utente legge v0.4 e fornisce 3 chiarimenti chiave + un richiamo al
+focus che merita un paragrafo manifesto nel doc.
+
+### Chiarimenti
+
+1. **Codici turno con suffisso lettera**: errore mio in v0.4. Pensavo
+   "P/I/E" fossero codici validità (Primaverile/Invernale/Estiva).
+   In realtà sono **codici turno distinti** (1161 base + 1161A
+   variante estiva), ognuno con la sua finestra calendario:
+   - 1161: valido fino al 27/3 e dal 29/9 (annuale con buco estivo)
+   - 1161A: valido dal 1/8 al 28/9 (estate)
+
+2. **NON_ASSEGNATO = POOL_TILO**: i 7 turni 1190-1199 con ETR524
+   (272 pezzi) sono materiali svizzeri TILO per servizi
+   Svizzera-Italia, manutenuti da TILO non da Trenord.
+
+3. **Orario base** confermato: viene dal PdE (LIV 1
+   `corsa_commerciale.valido_da/a`). Già nel modello.
+
+### Richiamo al focus (manifesto)
+
+Utente: *"noi non dobbiamo copiare niente, dobbiamo creare il nuovo
+programma, io ti sto solo facendo vedere oggi come funziona. hai
+capito?"*
+
+Aggiunto paragrafo introduttivo `⚠️ Manifesto` al modello che chiarisce
+in modo permanente:
+- Non stiamo replicando il sistema Trenord
+- Il modello è di **ARTURO × Trenord**, non di Trenord-dentro-ARTURO
+- Se Trenord cambia formato, cambia solo l'importer, non il modello
+- Multi-tenancy permette di accogliere altri vettori senza riscrittura
+- Le regole operative Trenord-specifiche (8h30, 5h30, ecc.) vivranno
+  in `azienda.normativa_pdc` come JSON configurabile
+
+### Modifiche al doc v0.5
+
+- **Manifesto** in cima al doc (prima del §0)
+- **§0**: aggiunta tabella v0.5 con 5 righe (manifesto, codici turno
+  con suffisso, finestre discontinue, NON_ASSEGNATO chiarito, orario
+  base confermato)
+- **§LIV 5+ revisioni**: rimossi `valido_da/a` da `versione_base_giro`,
+  spostati in tabella figlia nuova **`giro_finestra_validita`** che
+  permette intervalli multipli/discontinui. Esempio Turno 1161
+  documentato.
+- **§3 `localita_manutenzione`**: aggiunti campi `is_pool_esterno`
+  (bool) + `azienda_proprietaria_esterna` (string). Esempio
+  `POOL_TILO_SVIZZERA` documentato.
+- **§3 anagrafica**: rinominato `NON_ASSEGNATO` → `POOL_TILO_SVIZZERA`
+  con descrizione corretta.
+- **§3 specializzazione depositi**: aggiornata voce POOL_TILO con
+  conferma utente.
+
+### Stato
+
+- Documento v0.5. Modello ora più solido di un altro grado.
+- Tutte le 3 osservazioni di v0.4 chiuse o reindirizzate.
+
+### Prossimo step
+
+Utente conferma se v0.5 è da congelare o se altri punti emergono.
+Quando regge → `docs/MIGRAZIONE-DATI.md` (Step 2).
+
+---
+
 ## 2026-04-25 (4) — Anagrafica completa depositi manutentivi + dotazione (v0.4)
 
 ### Contesto

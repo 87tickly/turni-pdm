@@ -1,4 +1,39 @@
-# MODELLO DATI — Ecosistema ARTURO × Trenord (draft v0.4)
+# MODELLO DATI — Ecosistema ARTURO × Trenord (draft v0.5)
+
+## ⚠️ Manifesto — cos'è e cos'NON è questo modello (v0.5)
+
+**NON è un calco del sistema Trenord.** Non stiamo replicando il loro
+DB, non stiamo importando il loro formato. Il modello è di **ARTURO ×
+Trenord**, non di Trenord-dentro-ARTURO.
+
+**È un modello indipendente, ispirato dalla realtà operativa** che
+osserviamo nei loro PDF (turno materiale, turno PdC) e nel loro PdE.
+Tutti i dati estratti (anagrafica depositi, dotazione materiale, regole
+operative) servono **a capire come funziona davvero un'azienda
+ferroviaria**, per disegnare entità che reggano questa realtà.
+
+**Implicazioni concrete:**
+1. Se domani Trenord cambia formato PDF → il modello dati **non muta**.
+   Cambia solo l'importer (`pdf_parser.py`, `extract_*.py`).
+2. Se domani arriva SAD/TILO/Trenitalia/Tper come secondo cliente → il
+   modello li accoglie con `azienda='sad'` (multi-tenancy v0.2). Zero
+   riscrittura.
+3. Le tabelle e i nomi sono **nostri**, non di Trenord. Es: noi
+   abbiamo `corsa_commerciale`, `giro_materiale`, `turno_pdc`. Trenord
+   ha "Programma di Esercizio", "Turno Materiale", "Turno PdC". Sono
+   concetti analoghi, non identici.
+4. Le regole operative codificate nel `TurnValidator` (max prestazione
+   8h30, condotta 5h30, ecc.) sono Trenord-specifiche. Per altre
+   aziende vivranno in `azienda.normativa_pdc` come JSON
+   configurabile.
+
+Il riferimento a Trenord nel titolo del documento significa
+**"primo cliente di riferimento"**, non "calco passivo del loro
+sistema".
+
+---
+
+
 
 > **Stato**: bozza in revisione con l'utente. Niente codice ancora.
 > Scopo: disegnare le entità e relazioni che reggono offerta commerciale,
@@ -37,9 +72,19 @@
 | Tema | Aggiunta |
 |------|----------|
 | **Dotazione per deposito** | Parsato l'intero PDF (54 cover + 299 Gantt). Per ogni deposito ho la lista completa dei tipi rotabile e la quantità totale (es. MILANO FIORENZA: 974 pezzi su 49 tipi distinti; ISEO: 21 pezzi su 4 tipi). Aggiunta tabella `localita_manutenzione_dotazione` con seed `data/depositi_manutenzione_trenord_seed.json`. |
-| **Validità P/I/E** | Osservato che alcuni turni hanno cover multipli con codici P/I/E (Primaverile/Invernale/Estiva?). Sono **versioni stagionali pianificate**, distinte dalle revisioni provvisorie per eventi RFI. Da chiarire in v0.5 se aggiungere entità `versione_stagionale_giro`. |
-| **NON_ASSEGNATO modellato** | 7 turni (1190-1199, ETR524, 272 pezzi) non hanno deposito Trenord. Sospetto pool TILO/terzi. Modellato come pseudo-località con flag `is_pool_esterno`. Da confermare con utente. |
+| **Validità P/I/E** | Osservato che alcuni turni hanno cover multipli — vedi v0.5 per chiarimento. |
+| **NON_ASSEGNATO modellato** | 7 turni (1190-1199, ETR524, 272 pezzi) non hanno deposito Trenord — vedi v0.5 per chiarimento. |
 | **PDF è revisione provvisoria** | Validato il modello v0.3 con dato reale: il PDF "dal 2/3/26 — depositato 25/02/26" è esso stesso una revisione provvisoria, non il piano base annuale. |
+
+### v0.5 (chiarimenti utente del 25/04/2026)
+
+| Tema | Chiarimento + correzione |
+|------|------|
+| **Manifesto** | Aggiunto paragrafo introduttivo: questo NON è un calco del sistema Trenord. È modello nostro, ispirato dalla loro realtà ma indipendente. Si veda § all'inizio del doc. |
+| **Codici turno con suffisso lettera (1161, 1161A...)** | **Erano lettura mia sbagliata**: non sono "validità P/I/E del codice" ma **codici turno distinti**. Esempio reale: Turno 1161 (valido fino al 27/3 e dal 29/9) e Turno 1161A (valido dal 1/8 al 28/9, estivo). Sono giri materiali separati con finestre di validità complementari sull'anno. |
+| **Finestre di validità discontinue** | Il modello v0.4 aveva `versione_base_giro.valido_da/a` come singolo intervallo. Insufficiente per 1161 ("fino al 27/3 **E** dal 29/9"). Aggiunta tabella figlia `giro_finestra_validita` con 1+ intervalli per giro. |
+| **NON_ASSEGNATO chiarito** | Sono **materiali svizzeri (TILO) per servizi Svizzera-Italia**, manutenuti dai vettori esteri, non da Trenord. Aggiunto flag `is_pool_esterno` + `azienda_proprietaria_esterna` su `localita_manutenzione`. |
+| **Orario base** | Confermato: viene dal PdE (LIV 1 `corsa_commerciale.valido_da/a`). Già nel modello, nulla da cambiare. |
 
 ---
 
@@ -417,10 +462,44 @@ Una sola per giro materiale. È quella pubblicata con il PDF annuale.
 |-----------|------|---------|
 | id | PK | |
 | giro_materiale_id | FK | univoco |
-| valido_da | date | "2025-12-14" |
-| valido_a | date | "2026-12-12" |
 | data_deposito | date | "2025-11-30" |
 | source_file | string | path PDF originale |
+
+**Nota v0.5**: i campi `valido_da/valido_a` sono stati rimossi da qui
+e spostati in tabella figlia `giro_finestra_validita` perché un giro
+può avere intervalli di validità **discontinui** sull'anno.
+
+#### `giro_finestra_validita` (figlia di `versione_base_giro`, **nuova v0.5**)
+
+Una o più finestre di validità per la versione base del giro.
+La maggior parte dei giri ha 1 sola finestra (validità annuale
+intera), ma alcuni ne hanno 2+ (es. Turno 1161 base = "fino al 27/3
+e dal 29/9", che è coperto sull'estate dal Turno 1161A "dal 1/8
+al 28/9").
+
+| Attributo | Tipo | Esempio |
+|-----------|------|---------|
+| id | PK | |
+| versione_base_giro_id | FK | |
+| valido_da | date | "2026-09-29" |
+| valido_a | date | "2026-12-12" |
+| seq | int | 1, 2, 3... ordine cronologico |
+
+**Esempio Turno 1161** (annuale con buco estivo coperto da 1161A):
+```
+giro_materiale {id: 161, numero_turno: "1161"}
+versione_base_giro {id: 261, giro_materiale_id: 161}
+giro_finestra_validita {versione_id: 261, seq: 1, da: 2025-12-14, a: 2026-03-27}
+giro_finestra_validita {versione_id: 261, seq: 2, da: 2026-09-29, a: 2026-12-12}
+
+giro_materiale {id: 162, numero_turno: "1161A"}  // turno-fratello estivo
+versione_base_giro {id: 262, giro_materiale_id: 162}
+giro_finestra_validita {versione_id: 262, seq: 1, da: 2026-08-01, a: 2026-09-28}
+```
+
+**Vincolo**: per un dato `numero_turno` (al netto del suffisso), le
+finestre dei giri-fratelli **non si sovrappongono** (mai due giri
+attivi nello stesso giorno per lo stesso codice base).
 
 #### `revisione_provvisoria` (entità nuova v0.3)
 
@@ -544,8 +623,29 @@ manutenzione (in genere la stessa: ciclo chiuso).
 | nome_canonico | string | "TRENORD IMPMAN MILANO FIORENZA" |
 | nomi_alternativi | json string[] | ["MILANO FIOREN", "Fiorenza", "MI FIOREN"] |
 | stazione_collegata_id | FK → `stazione`? | "MILANO FIORENZA" se esiste come fermata commerciale |
-| azienda_id | FK | "trenord" |
+| azienda_id | FK | "trenord" — chi gestisce operativamente |
+| **is_pool_esterno** | bool | **v0.5**: true se i materiali sono di vettore estero (vedi sotto) |
+| **azienda_proprietaria_esterna** | string? | **v0.5**: "TILO", "SBB", null per Trenord interno |
 | attivo | bool | |
+
+**Caso pool esterno (v0.5)**: alcuni servizi (es. Svizzera-Italia) sono
+operati con materiali di vettori esteri (TILO, SBB) che **non sono
+manutenuti da Trenord**. Nel PDF di Trenord questi turni appaiono con
+"Non assegnato" come OMV/OML — non perché manchi il dato, ma perché la
+manutenzione è altrove. Il modello li rappresenta con una pseudo-località:
+
+```
+localita_manutenzione {
+  codice: "POOL_TILO_SVIZZERA",
+  nome_canonico: "(Pool TILO - servizi Svizzera-Italia)",
+  is_pool_esterno: true,
+  azienda_proprietaria_esterna: "TILO",
+  azienda_id: "trenord",  // chi gestisce operativamente in Italia
+}
+```
+
+I 7 turni Trenord 1190-1199 con materiali ETR524 (272 pezzi totali —
+164 Le524 + 108 Ale524) cadono in questa categoria.
 
 #### Anagrafica iniziale Trenord (estratta dal PDF turno materiale 02/03/26)
 
@@ -556,7 +656,7 @@ in `data/depositi_manutenzione_trenord_seed.json`.
 |--------|---------------|--------------:|-----------:|-------------:|
 | `IMPMAN_MILANO_FIORENZA` | TRENORD IMPMAN MILANO FIORENZA | **29** | 49 | **974** |
 | `IMPMAN_NOVATE` | TRENORD IMPMAN NOVATE | 7 | 14 | 299 |
-| `NON_ASSEGNATO` | (Non assegnato) | 7 | 2 | 272 |
+| `POOL_TILO_SVIZZERA` | (ETR524 servizi Svizzera-Italia, manutenzione TILO) | 7 | 2 | 272 |
 | `IMPMAN_CAMNAGO` | TRENORD IMPMAN CAMNAGO | 2 | 7 | 169 |
 | `IMPMAN_CREMONA` | TRENORD IMPMAN CREMONA | 2 | 4 | 92 |
 | `IMPMAN_LECCO` | TRENORD IMPMAN LECCO | 3 | 6 | 57 |
@@ -598,9 +698,10 @@ sapere subito *quanti pezzi di tipo X sono di base in deposito Y*.
   11 pezzi × 4 sigle = 44) + diesel ATR125 (9), ATR115 (4).
 - **ISEO**: solo diesel — ATR125 (8), ALn668(1000) (8), ATR115 (4),
   D520 (1). Linee non elettrificate Brescia-Iseo-Edolo.
-- **NON_ASSEGNATO**: solo ETR524 (Le524=164, Ale524=108) — 7 turni
-  dedicati. **Sospetto**: composizioni TILO svizzere o pool condiviso
-  con altri operatori, da chiarire con utente.
+- **POOL_TILO_SVIZZERA** (ex "NON_ASSEGNATO" in v0.4): solo ETR524
+  (Le524=164, Ale524=108) — 7 turni dedicati a servizi Svizzera-Italia.
+  Materiali di proprietà TILO, manutenzione **non** Trenord.
+  **Confermato dall'utente in v0.5**.
 
 #### Osservazioni emerse dal parsing (v0.4)
 
