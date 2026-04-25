@@ -10,6 +10,91 @@
 
 ---
 
+## 2026-04-26 (4) — FASE D Sprint 1.6: Migrazione 0002 seed Trenord
+
+### Contesto
+
+Sprint 1.6 del PIANO-MVP: popolamento iniziale dati Trenord nelle
+tabelle anagrafica create da 0001. Materializza la sezione §12 di
+`SCHEMA-DATI-NATIVO.md` in INSERT eseguibili via Alembic.
+
+### Modifiche
+
+**Nuovo `backend/alembic/versions/0002_seed_trenord.py`** (~340 righe):
+
+Dati statici come liste Python in cima al file (estratti da
+`docs/SCHEMA-DATI-NATIVO.md` §12 + `data/depositi_manutenzione_trenord_seed.json`):
+- `LOCALITA_MANUTENZIONE` (7 tuple)
+- `DEPOT_TRENORD` (25 tuple)
+- `MATERIALE_CODES` (69 codici, ordinati alfabeticamente)
+- `DOTAZIONE` (84 tuple)
+
+Helper `_sql_str()` e `_sql_bool()` per costruire VALUES SQL safe (NULL
+e quoting standard).
+
+`upgrade()` — 5 sezioni di INSERT:
+- §12.1 azienda Trenord con `normativa_pdc_json` completo (15 campi
+  da NORMATIVA-PDC: 510/420 min, finestre refezione 11:30-15:30 e
+  18:30-22:30, FR 1/sett 3/28gg, riposo 62h, ecc.)
+- §12.2 7 località manutenzione: 6 IMPMAN reali + POOL_TILO_SVIZZERA
+  (`is_pool_esterno=TRUE`, `azienda_proprietaria_esterna='TILO'`)
+- §12.3 25 depot PdC, tutti `tipi_personale_ammessi='PdC'`
+- `materiale_tipo` (69 codici, solo `codice` + `azienda_id`, altri
+  campi NULL/default — arricchimento a builder time)
+- `localita_manutenzione_dotazione` (84 righe, JOIN su
+  `localita_manutenzione.codice` per risolvere FK runtime)
+
+Stile `(VALUES …) AS v CROSS JOIN azienda` come da spec §12, evita
+hard-coding di `azienda_id` (auto-generato).
+
+`downgrade()`: 5 DELETE in ordine FK-safe (figli → padri), filtrati
+per `azienda_id = (SELECT id FROM azienda WHERE codice='trenord')` —
+non tocca seed di altre aziende future.
+
+POOL_TILO_SVIZZERA è creato senza dotazione (pool esterno, materiale
+non gestito da Trenord). NON_ASSEGNATO del seed JSON è escluso
+(placeholder applicativo).
+
+### Verifiche locali
+
+`alembic upgrade head` → conteggi:
+- `azienda` = 1
+- `localita_manutenzione` = 7
+- `depot` = 25
+- `materiale_tipo` = 69
+- `localita_manutenzione_dotazione` = 84
+
+Totale pezzi materiale: 1612 (974 FIORENZA + 299 NOVATE + 169 CAMNAGO
++ 92 CREMONA + 57 LECCO + 21 ISEO).
+
+`normativa_pdc_json` verificato con `jsonb_pretty()`: 15 chiavi
+presenti coi valori corretti (max_prestazione 510, refez 30, finestre
+[690,930] e [1110,1350], ecc.).
+
+`alembic downgrade -1` → 5 tabelle a 0 righe (clean).
+`alembic upgrade head` (di nuovo) → conteggi identici → **idempotente**.
+
+`pytest`: 5/5 verdi.
+`ruff check`: All checks passed.
+`ruff format --check`: 18 files already formatted.
+`mypy src/colazione`: no issues found in 14 source files.
+
+### Stato
+
+Sprint 1.6 completo. DB Postgres ha azienda Trenord + 7 località
+manutenzione + 25 depot + 69 tipi materiale + 84 righe dotazione.
+Schema 0001 + seed 0002 = base anagrafica pronta per Strato 1 (corse
+PdE).
+
+### Prossimo step
+
+Sprint 1.7: modelli SQLAlchemy ORM in `backend/src/colazione/models/`,
+una classe per entità (Azienda, LocalitaManutenzione, Depot,
+MaterialeTipo, …). Usano `Base` da `db.py` (Sprint 1.3) e mappano le
+tabelle create dalle migrazioni 0001/0002.
+
+---
+
 ## 2026-04-26 (3) — FASE D Sprint 1.5: Migrazione 0001 (31 tabelle)
 
 ### Contesto
