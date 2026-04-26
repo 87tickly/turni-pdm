@@ -10,6 +10,118 @@
 
 ---
 
+## 2026-04-26 (13) — Sprint 3.7: delta-sync "no train left behind"
+
+### Contesto
+
+Smoke test sul file PdE Trenord reale (`All.1A5_14dic2025-12dic2026_TRENI
+e BUS_Rev5_RL.numbers`, 6.9 MB, 10579 righe) ha rivelato un bug grave:
+la chiave UNIQUE business `(azienda_id, numero_treno, valido_da)`
+collassava silenziosamente **53 righe del PdE** (corse perse). Indagine:
+
+| Chiave testata | Collisioni residue |
+|---|---|
+| `(numero, valido_da)` | 51 |
+| `(numero, rete, valido_da)` | 17 |
+| `(numero, rete, valido_da, valido_a, cod_dest)` | 11 |
+| `(numero, rete, valido_da, valido_a, cod_dest, VCO)` | 6 |
+
+Esempi reali: Treno 2277 RFI (Mi.Garibaldi→Bergamo) e Treno 2277 FN
+(Mi.Cadorna→Novara) lo stesso giorno; Treno 2982 RFI con due
+destinazioni alternative (Gallarate/Saronno); Treno 2840A RFI con
+"variazione commerciale autorizzata" (VCO popolata) accanto al treno
+base. **Nessuna superchiave business "ragionevole" elimina tutte le
+collisioni** — il PdE Trenord ha varianti su colonne marginali.
+
+Decisione utente (esplicita): *"Il programma è per una grande azienda.
+Non possiamo permetterci di perdere dati. L'obiettivo è non dimenticare
+nessun treno in giro."*
+
+### Modifiche
+
+**`backend/alembic/versions/0004_corsa_row_hash_no_unique.py`** (nuova):
+- `DELETE` di tutti i dati spuri (10526 corse, 53 perse silenziosamente)
+- `DROP CONSTRAINT corsa_commerciale_azienda_id_numero_treno_valido_da_key`
+- `ADD COLUMN row_hash VARCHAR(64) NOT NULL` (SHA-256 dei campi grezzi)
+- `CREATE INDEX idx_corsa_row_hash` su `(azienda_id, row_hash)` — non unique
+- `CREATE INDEX idx_corsa_business` su `(azienda_id, numero_treno, rete, valido_da)`
+
+**`backend/src/colazione/models/corse.py`**: aggiunto campo `row_hash`
+sul modello `CorsaCommerciale`.
+
+**`backend/src/colazione/importers/pde_importer.py`** (refactor totale):
+
+- **`compute_row_hash(raw_row)`**: SHA-256 deterministico. Serializzazione
+  JSON con `sort_keys=True`, separator stretto, `None`/`""` equivalenti,
+  tipi non JSON → `str()`.
+- **`ImportSummary` con semantica delta-sync**: campi `n_total`,
+  `n_create`, `n_delete`, `n_kept` (sostituiscono il vecchio `n_update`).
+- **`importa_pde()` con algoritmo multiset**:
+  1. SHA-256 file → check idempotenza globale
+  2. Bulk SELECT `(id, row_hash)` per azienda → `defaultdict[hash → list[id]]`
+  3. **Diff multiset (Counter)**: per ogni riga del file, se esiste
+     un'istanza non-matchata in DB con quel hash → kept; altrimenti
+     INSERT. Esistenti che eccedono il count del file → DELETE.
+  4. Bulk DELETE righe sparite (cascade su composizioni)
+  5. INSERT righe nuove + 9 composizioni ciascuna
+  6. **INVARIANTE FORTE**: `COUNT(*) corse == righe_file`. Se diverso
+     → `raise RuntimeError` → rollback transazione completa.
+
+Le righe completamente identiche nel PdE (8 coppie osservate sul file
+2025-2026) **non vengono deduplicate**: ognuna ha la sua riga in DB.
+Multiset semantics garantisce l'invariante.
+
+**`docs/IMPORT-PDE.md`** §4-§5 riscritti per riflettere delta-sync.
+
+### Test
+
+**`tests/test_pde_importer.py`** (+5 unit test su `compute_row_hash`):
+- Deterministico, key-order invariant, sensibile ai valori, sensibile
+  ai campi extra, `None == ""`, gestisce datetime/Decimal.
+
+**`tests/test_pde_importer_db.py`** (+1, totale 11 integration):
+- `test_first_import_no_train_left_behind`: COUNT(*) = righe lette,
+  fallisce con messaggio esplicito "PERDITA DATI" se diverso.
+- `test_row_hash_populated_and_unique`: ogni corsa ha hash 64-char hex,
+  38 hash unici per la fixture.
+- `test_reimport_with_force_keeps_all_ids_stable`: snapshot id prima/dopo
+  il force re-import → tutti id invariati (`{hash → id}` identico).
+- Tests pre-esistenti adattati alla nuova semantica delta-sync.
+
+### Verifiche end-to-end (file Trenord reale 10579 righe)
+
+- **Run 61 (DB pulito)**: `total=10579 (kept=0 create=10579 delete=0)`,
+  durata 69.4s. Invariante 10579=10579 ✓.
+- **Run 62 (force re-import)**: `total=10579 (kept=10579 create=0
+  delete=0)`, durata 16.7s, **id stabili** (all hash matchano).
+- **Run 63 (skip idempotente)**: skip totale, run riusato, 10.4s.
+
+DB post-import: 10579 corse, 95211 composizioni (10579×9), 163 stazioni,
+2 run completed.
+
+### Verifiche CI
+
+- `pytest`: **113/113 verdi** (era 106, +7: 5 unit hash + 1 row_hash db
+  + 1 stable-ids; il vecchio `test_reimport_with_force_overwrites_as_update`
+  è stato rinominato/riscritto con nuova semantica)
+- `ruff check` + `ruff format`: tutti verdi
+- `mypy strict`: no issues in **36 source files** (invariato)
+
+### Stato
+
+**No train left behind verificato**. Sprint 3.7.1 (delta-sync core) chiuso.
+Restano in coda nello stesso Sprint 3.7:
+
+- 3.7.2 Performance: bulk INSERT chunked (target 69s → ~10s)
+- 3.7.3 Quick wins: `read_pde_file` dopo idempotency check (skip 10s →
+  ~1s); `clock_timestamp()` per `dur_s` reale in DB
+
+### Prossimo step
+
+Bulk operations (commit successivo).
+
+---
+
 ## 2026-04-26 (12) — FASE D Sprint 3.6: DB importer + idempotenza + CLI
 
 ### Contesto

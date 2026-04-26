@@ -19,6 +19,7 @@ from colazione.importers.pde_importer import (
     _composizione_rows,
     _corsa_payload,
     collect_stazioni,
+    compute_row_hash,
     compute_sha256,
 )
 
@@ -154,6 +155,59 @@ def test_collect_stazioni_falls_back_to_codice_when_nome_empty() -> None:
 
 
 # =====================================================================
+# compute_row_hash
+# =====================================================================
+
+
+def test_compute_row_hash_deterministic() -> None:
+    """Stessa riga → stesso hash."""
+    row = {"a": 1, "b": "hello", "c": None}
+    assert compute_row_hash(row) == compute_row_hash(row)
+
+
+def test_compute_row_hash_key_order_invariant() -> None:
+    """Ordine delle chiavi non influisce sull'hash (json sort_keys)."""
+    r1 = {"a": 1, "b": 2, "c": 3}
+    r2 = {"c": 3, "a": 1, "b": 2}
+    assert compute_row_hash(r1) == compute_row_hash(r2)
+
+
+def test_compute_row_hash_sensitive_to_values() -> None:
+    """Cambia 1 carattere in 1 valore → hash diverso."""
+    r1 = {"treno": "1234", "rete": "RFI"}
+    r2 = {"treno": "1234", "rete": "FN"}
+    assert compute_row_hash(r1) != compute_row_hash(r2)
+
+
+def test_compute_row_hash_sensitive_to_extra_field() -> None:
+    """Aggiungere un campo cambia l'hash."""
+    r1 = {"a": 1}
+    r2 = {"a": 1, "b": 2}
+    assert compute_row_hash(r1) != compute_row_hash(r2)
+
+
+def test_compute_row_hash_treats_none_and_empty_string_equally() -> None:
+    """Null e stringa vuota sono semanticamente uguali nel PdE."""
+    r1 = {"a": None}
+    r2 = {"a": ""}
+    assert compute_row_hash(r1) == compute_row_hash(r2)
+
+
+def test_compute_row_hash_handles_datetime_decimal() -> None:
+    """Tipi non JSON-serializzabili → str() (non solleva)."""
+    from datetime import date, time
+    from decimal import Decimal
+
+    row: dict[str, object] = {
+        "valido_da": date(2026, 1, 1),
+        "ora_partenza": time(6, 30),
+        "km_tratta": Decimal("12.345"),
+    }
+    h = compute_row_hash(row)
+    assert len(h) == 64  # SHA-256 hex
+
+
+# =====================================================================
 # _corsa_payload
 # =====================================================================
 
@@ -161,10 +215,11 @@ def test_collect_stazioni_falls_back_to_codice_when_nome_empty() -> None:
 def test_corsa_payload_contains_required_db_fields() -> None:
     """Payload deve avere tutte le colonne NOT NULL di corsa_commerciale."""
     parsed = _mk_parsed()
-    payload = _corsa_payload(parsed, azienda_id=1, import_run_id=42)
+    payload = _corsa_payload(parsed, azienda_id=1, import_run_id=42, row_hash="a" * 64)
 
     required = {
         "azienda_id",
+        "row_hash",
         "numero_treno",
         "codice_origine",
         "codice_destinazione",
@@ -182,6 +237,7 @@ def test_corsa_payload_contains_required_db_fields() -> None:
     assert payload["azienda_id"] == 1
     assert payload["import_run_id"] == 42
     assert payload["import_source"] == "pde"
+    assert payload["row_hash"] == "a" * 64
 
 
 def test_corsa_payload_preserves_decimal_values() -> None:
@@ -189,7 +245,7 @@ def test_corsa_payload_preserves_decimal_values() -> None:
     parsed = _mk_parsed()
     parsed.km_tratta = Decimal("72.152")
     parsed.totale_km = Decimal("100.500")
-    payload = _corsa_payload(parsed, azienda_id=1, import_run_id=1)
+    payload = _corsa_payload(parsed, azienda_id=1, import_run_id=1, row_hash="x" * 64)
     assert payload["km_tratta"] == Decimal("72.152")
     assert payload["totale_km"] == Decimal("100.500")
 
@@ -197,7 +253,7 @@ def test_corsa_payload_preserves_decimal_values() -> None:
 def test_corsa_payload_passes_optional_nullable_fields() -> None:
     """I campi opzionali None vanno nel payload come None (non missing)."""
     parsed = _mk_parsed()
-    payload = _corsa_payload(parsed, azienda_id=1, import_run_id=1)
+    payload = _corsa_payload(parsed, azienda_id=1, import_run_id=1, row_hash="x" * 64)
     assert payload["codice_inizio_cds"] is None
     assert payload["min_tratta"] is None
     assert payload["totale_km"] is None

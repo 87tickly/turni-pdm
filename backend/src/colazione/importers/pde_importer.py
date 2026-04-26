@@ -1,28 +1,49 @@
-"""Orchestrator import PdE → DB con idempotenza SHA-256 e CLI — Sprint 3.6.
+"""Orchestrator import PdE → DB con **delta-sync** + idempotenza SHA-256 + CLI.
 
-Architettura a 4 fasi (tutto in una **singola transazione**):
+Sprint 3.7: refactor da "upsert per chiave business" a "delta-sync per
+row_hash". La chiave business `(azienda_id, numero_treno, valido_da)`
+collassava silenziosamente fino a 53 righe del PdE Trenord reale —
+**perdita dati inaccettabile** per un sistema di pianificazione
+ferroviaria. La nuova strategia garantisce **ogni riga PdE = una riga
+in DB**.
 
-    1. Hash file + read rows           → fuori transazione (no DB)
-    2. get_azienda_id + idempotency    → skip se SHA-256 già visto e niente --force
-    3. open run + upsert stazioni      → bulk
-    4. per ogni riga: upsert corsa     → INSERT (nuova) o UPDATE+REPLACE composizioni
-    5. close run                       → completed_at, n_create, n_update, note
+## Architettura delta-sync (multiset)
 
-In caso di errore in 3-5: rollback completo (session_scope() gestisce).
+Ogni riga del PdE ha una `row_hash` (SHA-256 dei campi grezzi). Identità
+naturale, deterministica, stabile fra re-import. Il PdE può avere righe
+**completamente identiche** (osservate 8 coppie sul file 2025-2026):
+**non vengono deduplicate**, ognuna è una riga in DB. Identità =
+multiset di hash.
+
+Algoritmo per import:
+
+    1. Hash file → check idempotenza (SHA-256 globale del file)
+    2. Read + parse → calcola row_hash per ogni riga (10579 hash)
+    3. Bulk SELECT (id, row_hash) per azienda
+    4. Diff multiset (Counter):
+       - per ogni riga del file: se esiste un'istanza non-matchata
+         in DB con quel hash → kept (id stabile). Altrimenti → INSERT.
+       - esistenti che eccedono il count del file → DELETE.
+    5. Bulk DELETE righe sparite (cascade su composizioni)
+    6. Bulk INSERT righe nuove + 9 composizioni ciascuna
+    7. **INVARIANTE FORTE**: COUNT(*) corse post-import == righe nel
+       file. Se diverso → raise + rollback transazione.
+    8. Close run
+
+Tutto in **una transazione**. Errore in 3-7 → rollback completo.
+
+## Stabilità id
+
+Re-import del PdE invariato: tutti gli id stabili.
+Re-import file con N righe modificate: solo le N hanno nuovo id.
+Re-import file con righe duplicate: ordine arbitrario tra i duplicati,
+ma il count totale è preservato.
+Compatibile con Sprint 4+ (giri materiali pinned a corsa.id).
 
 ## Idempotenza
 
-`corsa_import_run.source_hash` traccia ogni file importato. Se un run con
-stesso `source_hash` (e stessa `azienda_id`, `completed_at IS NOT NULL`)
-esiste già, l'import si ferma e ritorna `ImportSummary(skipped=True)`.
-
-Per forzare il re-import (es. dopo un fix nel parser): `--force`.
-
-## Chiave upsert corsa
-
-`(azienda_id, numero_treno, valido_da)` — corrisponde al constraint
-`UNIQUE` su `corsa_commerciale`. Sopra questa chiave: UPDATE in-place
-+ DELETE+REINSERT delle 9 `corsa_composizione`.
+`corsa_import_run.source_hash` traccia il file. Stesso hash + azienda
++ run completato → skip totale (ImportSummary.skipped=True).
 
 ## CLI
 
@@ -31,7 +52,7 @@ Per forzare il re-import (es. dopo un fix nel parser): `--force`.
         --azienda trenord \\
         [--force]
 
-Vedi `docs/IMPORT-PDE.md` §9 per il workflow operativo completo.
+Vedi `docs/IMPORT-PDE.md` §9 per il workflow operativo.
 """
 
 from __future__ import annotations
@@ -39,9 +60,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import json
 import logging
 import sys
 import time
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -67,25 +90,34 @@ logger = logging.getLogger(__name__)
 
 
 # =====================================================================
-# Risultato dell'import
+# Risultato dell'import (semantica delta-sync)
 # =====================================================================
 
 
 @dataclass
 class ImportSummary:
-    """Esito dell'import."""
+    """Esito dell'import con conteggi delta-sync.
+
+    - `n_total`: totale corse in DB per quell'azienda dopo l'import.
+    - `n_create`: righe nuove inserite (hash non presente prima).
+    - `n_delete`: righe rimosse (presenti prima, non più nel file).
+    - `n_kept`: righe invariate (hash matcha → id stabile, no-op).
+    - `n_warnings`: cross-check Gg_* falliti (info, non bloccanti).
+    """
 
     skipped: bool = False
     skip_reason: str | None = None
     run_id: int | None = None
+    n_total: int = 0
     n_create: int = 0
-    n_update: int = 0
+    n_delete: int = 0
+    n_kept: int = 0
     n_warnings: int = 0
     duration_s: float = 0.0
 
 
 # =====================================================================
-# Hash file
+# Hash file + hash riga
 # =====================================================================
 
 
@@ -96,6 +128,24 @@ def compute_sha256(path: Path) -> str:
         for chunk in iter(lambda: f.read(65536), b""):
             sha.update(chunk)
     return sha.hexdigest()
+
+
+def compute_row_hash(raw_row: dict[str, Any]) -> str:
+    """SHA-256 deterministico di una riga grezza del PdE.
+
+    I 124 campi della riga sono serializzati in JSON ordinato per chiave.
+    Valori `None` → `null` JSON. Tipi non JSON-serializzabili
+    (datetime, Decimal, time) → `str()`. Stabile fra esecuzioni: stessa
+    riga PdE produce sempre lo stesso hash.
+
+    NB: il `_` come terzo arg di `json.dumps` (separators) elimina spazi
+    spurî → la stringa canonica è byte-stable.
+    """
+    serializable: dict[str, str | None] = {
+        k: (None if v is None or v == "" else str(v)) for k, v in raw_row.items()
+    }
+    canonical = json.dumps(serializable, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 # =====================================================================
@@ -145,12 +195,7 @@ def collect_stazioni(
     parsed_rows: list[CorsaParsedRow],
     raw_rows: list[dict[str, Any]],
 ) -> dict[str, str]:
-    """Estrae il dizionario `codice → nome` di tutte le stazioni del file.
-
-    Le 4 colonne PdE che riferiscono stazioni: Origine, Destinazione,
-    Inizio CdS, Fine CdS. La prima occorrenza vince — duplicati con nome
-    leggermente diverso vengono ignorati (raro nel PdE Trenord).
-    """
+    """Estrae il dizionario `codice → nome` di tutte le stazioni del file."""
     out: dict[str, str] = {}
 
     def _add(codice: str | None, nome_raw: Any) -> None:
@@ -173,13 +218,7 @@ async def upsert_stazioni(
     stazioni: dict[str, str],
     azienda_id: int,
 ) -> None:
-    """Bulk upsert `stazione`. ON CONFLICT (codice) DO NOTHING.
-
-    Il PdE può avere stazioni di altri operatori (RFI, FN ferrovie del
-    nord) ma noi le associamo all'azienda corrente: l'import per Trenord
-    crea/usa stazioni con `azienda_id=trenord`. Multi-tenant edge case
-    (stessa stazione condivisa) sarà gestito separatamente in v1.x.
-    """
+    """Bulk upsert `stazione`. ON CONFLICT (codice) DO NOTHING."""
     if not stazioni:
         return
     rows = [
@@ -191,7 +230,7 @@ async def upsert_stazioni(
 
 
 # =====================================================================
-# Upsert corsa + composizioni
+# Payload mappers
 # =====================================================================
 
 
@@ -199,10 +238,15 @@ def _corsa_payload(
     parsed: CorsaParsedRow,
     azienda_id: int,
     import_run_id: int,
+    row_hash: str,
 ) -> dict[str, Any]:
-    """Mappa `CorsaParsedRow` → dict di colonne `corsa_commerciale`."""
+    """Mappa `CorsaParsedRow` → dict di colonne `corsa_commerciale`.
+
+    Include `row_hash` (Sprint 3.7): identità naturale per delta-sync.
+    """
     return {
         "azienda_id": azienda_id,
+        "row_hash": row_hash,
         "numero_treno": parsed.numero_treno,
         "rete": parsed.rete,
         "numero_treno_rfi": parsed.numero_treno_rfi,
@@ -261,47 +305,8 @@ def _composizione_rows(
     ]
 
 
-async def upsert_corsa(
-    session: AsyncSession,
-    parsed: CorsaParsedRow,
-    azienda_id: int,
-    import_run_id: int,
-) -> bool:
-    """Upsert corsa + 9 composizioni. Ritorna True se INSERT, False se UPDATE."""
-    stmt = select(CorsaCommerciale.id).where(
-        CorsaCommerciale.azienda_id == azienda_id,
-        CorsaCommerciale.numero_treno == parsed.numero_treno,
-        CorsaCommerciale.valido_da == parsed.valido_da,
-    )
-    existing_id = (await session.execute(stmt)).scalar_one_or_none()
-
-    payload = _corsa_payload(parsed, azienda_id, import_run_id)
-
-    if existing_id is not None:
-        await session.execute(
-            update(CorsaCommerciale).where(CorsaCommerciale.id == existing_id).values(**payload)
-        )
-        # Replace composizioni: delete tutte le 9 esistenti + reinsert
-        await session.execute(
-            delete(CorsaComposizione).where(CorsaComposizione.corsa_commerciale_id == existing_id)
-        )
-        corsa_id = existing_id
-        was_insert = False
-    else:
-        result = await session.execute(
-            pg_insert(CorsaCommerciale).values(**payload).returning(CorsaCommerciale.id)
-        )
-        corsa_id = result.scalar_one()
-        was_insert = True
-
-    comp_rows = _composizione_rows(corsa_id, parsed)
-    await session.execute(pg_insert(CorsaComposizione).values(comp_rows))
-
-    return was_insert
-
-
 # =====================================================================
-# Top-level orchestration
+# Top-level orchestration (delta-sync)
 # =====================================================================
 
 
@@ -311,7 +316,7 @@ async def importa_pde(
     *,
     force: bool = False,
 ) -> ImportSummary:
-    """Importa il PdE nel DB per l'azienda specificata.
+    """Importa il PdE nel DB per l'azienda specificata, con delta-sync.
 
     Args:
         file_path: percorso al file `.numbers` o `.xlsx`.
@@ -319,18 +324,21 @@ async def importa_pde(
         force: se True, salta il check di idempotenza (re-import forzato).
 
     Returns:
-        `ImportSummary` con run_id, n_create, n_update, durata.
+        `ImportSummary` con conteggi delta (create / delete / kept).
+
+    Raises:
+        FileNotFoundError: file non esiste.
+        ValueError: azienda non trovata.
+        RuntimeError: invariante post-import fallita (rollback).
     """
     t0 = time.monotonic()
 
-    # Step 1 — fuori transazione: hash + read file
     if not file_path.exists():
         raise FileNotFoundError(f"File PdE non trovato: {file_path}")
     file_hash = compute_sha256(file_path)
     raw_rows = read_pde_file(file_path)
 
     async with session_scope() as session:
-        # Step 2 — risolve azienda + check idempotenza
         azienda_id = await get_azienda_id(session, azienda_codice)
 
         if not force:
@@ -346,53 +354,121 @@ async def importa_pde(
                     duration_s=time.monotonic() - t0,
                 )
 
-        # Step 3 — apri run + upsert stazioni
+        # Step 1 — parse + compute row_hash per ogni riga
+        # NB: il PdE Trenord può avere righe completamente identiche
+        # (8 coppie osservate sul file 2025-2026). NON le deduplichiamo:
+        # principio "no train left behind". Identità DB = multiset di
+        # row_hash — N righe con stesso hash = N righe in DB.
+        parsed_rows = [parse_corsa_row(r) for r in raw_rows]
+        row_hashes = [compute_row_hash(r) for r in raw_rows]
+        n_total_file = len(parsed_rows)
+
+        # Step 2 — open run + upsert stazioni
         run = CorsaImportRun(
             source_file=file_path.name,
             source_hash=file_hash,
             azienda_id=azienda_id,
         )
         session.add(run)
-        await session.flush()  # popola run.id
+        await session.flush()
         run_id = run.id
-
-        parsed_rows = [parse_corsa_row(r) for r in raw_rows]
 
         stazioni = collect_stazioni(parsed_rows, raw_rows)
         await upsert_stazioni(session, stazioni, azienda_id)
 
-        # Step 4 — per ogni riga: upsert corsa + composizioni
-        n_create = 0
-        n_update = 0
-        n_warnings = 0
-        for parsed in parsed_rows:
-            was_insert = await upsert_corsa(session, parsed, azienda_id, run_id)
-            if was_insert:
-                n_create += 1
-            else:
-                n_update += 1
-            n_warnings += len(parsed.warnings)
+        # Step 3 — delta-sync (multiset): bulk SELECT esistenti per azienda
+        # Per ogni hash, raccolgo TUTTI gli id esistenti (può essere >1
+        # se ci sono righe identiche nel PdE).
+        result = await session.execute(
+            select(CorsaCommerciale.id, CorsaCommerciale.row_hash)
+            .where(CorsaCommerciale.azienda_id == azienda_id)
+            .order_by(CorsaCommerciale.id)
+        )
+        existing_ids_by_hash: dict[str, list[int]] = defaultdict(list)
+        for cid, h in result.all():
+            existing_ids_by_hash[h].append(cid)
 
-        # Step 5 — chiudi run
+        # Step 4 — calcola diff multiset
+        # Per ogni riga del file: se esiste un'istanza non-matchata in DB
+        # con quel hash → kept (id stabile). Altrimenti → INSERT.
+        # Esistenti che eccedono il count del file → DELETE.
+        file_hash_count: Counter[str] = Counter(row_hashes)
+        matched_count: Counter[str] = Counter()
+        to_insert: list[tuple[CorsaParsedRow, str]] = []
+        for parsed, h in zip(parsed_rows, row_hashes, strict=True):
+            if matched_count[h] < len(existing_ids_by_hash.get(h, [])):
+                matched_count[h] += 1  # kept (id stabile)
+            else:
+                to_insert.append((parsed, h))  # nuovo o duplicato non in DB
+
+        to_delete_ids: list[int] = []
+        for h, ids in existing_ids_by_hash.items():
+            n_in_file = file_hash_count.get(h, 0)
+            if len(ids) > n_in_file:
+                # Cancella le ultime (per id) — semantica arbitraria ma stabile
+                to_delete_ids.extend(ids[n_in_file:])
+
+        n_kept = sum(matched_count.values())
+        n_create = len(to_insert)
+        n_delete = len(to_delete_ids)
+        n_warnings = sum(len(p.warnings) for p in parsed_rows)
+
+        # Step 5 — bulk DELETE righe sparite (composizioni cascade via FK)
+        if to_delete_ids:
+            await session.execute(
+                delete(CorsaCommerciale).where(CorsaCommerciale.id.in_(to_delete_ids))
+            )
+
+        # Step 6 — INSERT righe nuove + 9 composizioni ciascuna
+        # (Sprint 3.7.2 farà bulk; qui per chiarezza algoritmica)
+        for parsed, row_hash in to_insert:
+            payload = _corsa_payload(parsed, azienda_id, run_id, row_hash)
+            ins_result = await session.execute(
+                pg_insert(CorsaCommerciale).values(**payload).returning(CorsaCommerciale.id)
+            )
+            corsa_id = ins_result.scalar_one()
+            comp_rows = _composizione_rows(corsa_id, parsed)
+            await session.execute(pg_insert(CorsaComposizione).values(comp_rows))
+
+        # Step 7 — INVARIANTE FORTE: post-import COUNT(*) == righe nel file
+        # Garanzia "no train left behind": ogni riga del PdE ha una riga in DB.
+        n_total_db = await session.scalar(
+            select(func.count())
+            .select_from(CorsaCommerciale)
+            .where(CorsaCommerciale.azienda_id == azienda_id)
+        )
+        if n_total_db != n_total_file:
+            raise RuntimeError(
+                f"INVARIANTE FALLITA: corse in DB={n_total_db}, "
+                f"righe nel file={n_total_file}. Rollback transazione. "
+                f"(diff: kept={n_kept} create={n_create} delete={n_delete})"
+            )
+
+        # Step 8 — close run
         await session.execute(
             update(CorsaImportRun)
             .where(CorsaImportRun.id == run_id)
             .values(
-                n_corse=n_create + n_update,
+                n_corse=n_total_db,
                 n_corse_create=n_create,
-                n_corse_update=n_update,
+                n_corse_update=n_delete,  # riusato come "delta deleted" — vedi note
                 completed_at=func.now(),
-                note=f"{n_warnings} warning periodicità (cross-check Gg_*)",
+                note=(
+                    f"delta-sync: kept={n_kept} delete={n_delete} create={n_create}, "
+                    f"warnings={n_warnings} (cross-check Gg_*)"
+                ),
             )
         )
 
-    return ImportSummary(
-        run_id=run_id,
-        n_create=n_create,
-        n_update=n_update,
-        n_warnings=n_warnings,
-        duration_s=time.monotonic() - t0,
-    )
+        return ImportSummary(
+            run_id=run_id,
+            n_total=int(n_total_db),
+            n_create=n_create,
+            n_delete=n_delete,
+            n_kept=n_kept,
+            n_warnings=n_warnings,
+            duration_s=time.monotonic() - t0,
+        )
 
 
 # =====================================================================
@@ -448,8 +524,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     print(
-        f"✓ Run ID {summary.run_id}: {summary.n_create} create, "
-        f"{summary.n_update} update, {summary.n_warnings} warning"
+        f"✓ Run ID {summary.run_id}: total={summary.n_total} "
+        f"(kept={summary.n_kept} create={summary.n_create} delete={summary.n_delete}), "
+        f"warnings={summary.n_warnings}"
     )
     print(f"  durata: {summary.duration_s:.1f}s")
     return 0

@@ -1,16 +1,19 @@
-"""Integration test pde_importer (DB reale) — Sprint 3.6.
+"""Integration test pde_importer (DB reale) — Sprint 3.7 (delta-sync).
 
 Richiede Postgres locale via `docker compose up -d db` + migrazioni
-applicate (azienda 'trenord' seed).
+applicate (azienda 'trenord' seed + 0004 row_hash).
 
 Set `SKIP_DB_TESTS=1` per saltare. Usa la fixture canonica
 `tests/fixtures/pde_sample.xlsx` (38 righe Trenord).
 
-Coverage:
-- Primo import: 38 corse, 342 composizioni, run completato, stazioni create
-- Idempotenza: re-import stesso file → skip (run riusato)
-- Forza: --force → 0 create, 38 update (composizioni rimpiazzate)
-- Round-trip: una corsa specifica letta dal DB matcha il parser
+Coverage del nuovo modello "ogni riga PdE = una riga DB":
+- **No-train-left-behind**: COUNT(*) DB = righe lette dal file (38)
+- Idempotenza globale via SHA-256 file: re-import = skip
+- Force re-import: tutti gli id stabili (kept=38, create=0, delete=0)
+- Modifica fixture in-place tramite `--force` su file diverso → simulazione delta
+- Round-trip: una corsa specifica con row_hash valorizzato
+- Edge cases: azienda inesistente, file mancante
+- Invariante post-import (COUNT(*) == hash unici)
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pde_sample.xlsx"
+FIXTURE_N_ROWS = 38  # righe nella fixture (ground truth)
 
 
 # =====================================================================
@@ -44,17 +48,10 @@ FIXTURE = Path(__file__).parent / "fixtures" / "pde_sample.xlsx"
 
 
 async def _wipe_corse(session: AsyncSession) -> None:
-    """Cancella tutte le corse + composizioni + run + stazioni orfane.
-
-    Le composizioni cascadano via FK al delete della corsa, ma faccio
-    DELETE espliciti per non dipendere da Postgres.
-    """
+    """Cancella corse + composizioni + run + stazioni."""
     await session.execute(text("DELETE FROM corsa_composizione"))
     await session.execute(text("DELETE FROM corsa_commerciale"))
     await session.execute(text("DELETE FROM corsa_import_run"))
-    # Stazioni: cancello quelle non riferite da nessun'altra tabella.
-    # Nei test la fixture crea solo stazioni nuove, mai pre-esistenti
-    # (il seed Trenord 0002 non popola `stazione`).
     await session.execute(text("DELETE FROM stazione"))
 
 
@@ -73,118 +70,163 @@ async def cleanup_engine() -> None:
 
 
 # =====================================================================
-# Primo import
+# Primo import — "no train left behind"
 # =====================================================================
 
 
-async def test_first_import_creates_38_corse() -> None:
+async def test_first_import_no_train_left_behind() -> None:
+    """INVARIANTE CRITICA: ogni riga del file PdE diventa una riga in DB.
+
+    La fixture ha 38 righe → DB deve avere esattamente 38 corse. Questa
+    è la garanzia anti-perdita-dati di Sprint 3.7.
+    """
     summary = await importa_pde(FIXTURE, azienda_codice="trenord")
     assert summary.skipped is False
-    assert summary.n_create == 38
-    assert summary.n_update == 0
+    assert summary.n_total == FIXTURE_N_ROWS
+    assert summary.n_create == FIXTURE_N_ROWS
+    assert summary.n_delete == 0
+    assert summary.n_kept == 0
     assert summary.run_id is not None
 
     async with session_scope() as session:
         n = await session.scalar(select(text("COUNT(*)")).select_from(CorsaCommerciale))
-        assert n == 38
+        assert n == FIXTURE_N_ROWS, (
+            f"PERDITA DATI: {FIXTURE_N_ROWS} righe nel PdE → {n} corse in DB."
+        )
 
 
-async def test_first_import_creates_342_composizioni() -> None:
-    """38 corse × 9 composizioni per corsa = 342 record."""
+async def test_first_import_creates_n_composizioni() -> None:
+    """Ogni corsa ha 9 composizioni → 38×9 = 342."""
     await importa_pde(FIXTURE, azienda_codice="trenord")
     async with session_scope() as session:
         n = await session.scalar(select(text("COUNT(*)")).select_from(CorsaComposizione))
-        assert n == 342
+        assert n == FIXTURE_N_ROWS * 9
 
 
-async def test_first_import_run_completed() -> None:
+async def test_first_import_run_completed_with_delta_note() -> None:
     summary = await importa_pde(FIXTURE, azienda_codice="trenord")
     async with session_scope() as session:
         run = await session.get(CorsaImportRun, summary.run_id)
         assert run is not None
         assert run.completed_at is not None
-        assert run.n_corse == 38
-        assert run.n_corse_create == 38
+        assert run.n_corse == FIXTURE_N_ROWS
+        assert run.n_corse_create == FIXTURE_N_ROWS
+        # n_corse_update viene riusato per "deleted" in delta-sync
         assert run.n_corse_update == 0
         assert run.source_hash is not None
         assert len(run.source_hash) == 64
         assert run.source_file == "pde_sample.xlsx"
         assert run.note is not None
-        assert "warning" in run.note.lower()
+        assert "delta-sync" in run.note
+        assert "kept=0" in run.note
+        assert "create=38" in run.note
 
 
-async def test_first_import_upserts_stazioni_dynamically() -> None:
-    """Le stazioni del PdE non sono pre-seedate: il import le crea."""
+async def test_first_import_creates_stazioni_with_fk_valid() -> None:
+    """Stazioni create al volo, ogni corsa ha FK valida origine + destinazione."""
     await importa_pde(FIXTURE, azienda_codice="trenord")
     async with session_scope() as session:
         n_stazioni = await session.scalar(select(text("COUNT(*)")).select_from(text("stazione")))
-        # La fixture ha 38 corse con varie stazioni. Mi aspetto >= 10 (tante linee diverse)
         assert n_stazioni >= 10
-        # E ogni corsa deve avere FK valida (origine + destinazione presenti)
         result = await session.execute(
             text("""
-            SELECT COUNT(*) FROM corsa_commerciale c
-            JOIN stazione so ON so.codice = c.codice_origine
-            JOIN stazione sd ON sd.codice = c.codice_destinazione
-        """)
+                SELECT COUNT(*) FROM corsa_commerciale c
+                JOIN stazione so ON so.codice = c.codice_origine
+                JOIN stazione sd ON sd.codice = c.codice_destinazione
+            """)
         )
-        n_with_fk = result.scalar_one()
-        assert n_with_fk == 38
+        assert result.scalar_one() == FIXTURE_N_ROWS
+
+
+async def test_row_hash_populated_and_unique() -> None:
+    """Ogni corsa ha row_hash 64-char unico (SHA-256 della riga del PdE)."""
+    await importa_pde(FIXTURE, azienda_codice="trenord")
+    async with session_scope() as session:
+        result = await session.execute(
+            select(CorsaCommerciale.row_hash).select_from(CorsaCommerciale)
+        )
+        hashes = [h for (h,) in result.all()]
+        assert len(hashes) == FIXTURE_N_ROWS
+        for h in hashes:
+            assert len(h) == 64
+            assert all(c in "0123456789abcdef" for c in h)
+        # Tutte le 38 righe della fixture sono distinte → 38 hash unici
+        assert len(set(hashes)) == FIXTURE_N_ROWS
 
 
 # =====================================================================
-# Idempotenza
+# Idempotenza file (SHA-256 globale)
 # =====================================================================
 
 
 async def test_reimport_same_file_is_skipped() -> None:
+    """Stesso SHA-256 file → skip totale, run riusato."""
     summary1 = await importa_pde(FIXTURE, azienda_codice="trenord")
     summary2 = await importa_pde(FIXTURE, azienda_codice="trenord")
 
     assert summary2.skipped is True
     assert summary2.skip_reason is not None
-    # Skip rinvia al run originale, non ne crea uno nuovo
     assert summary2.run_id == summary1.run_id
-    # E il count totale di run resta 1
+
     async with session_scope() as session:
         n_run = await session.scalar(select(text("COUNT(*)")).select_from(CorsaImportRun))
         assert n_run == 1
 
 
-async def test_reimport_with_force_overwrites_as_update() -> None:
-    """--force riprocessa: 0 create, 38 update (le corse esistono già)."""
+# =====================================================================
+# Force re-import: delta-sync con file invariato → tutti id stabili
+# =====================================================================
+
+
+async def test_reimport_with_force_keeps_all_ids_stable() -> None:
+    """--force su stesso file: kept=38 (tutti hash matchano), create=0, delete=0.
+
+    Verifica forte di stabilità id: re-import del PdE invariato non
+    cancella nulla. Pronto per Sprint 4 (giri materiali su corsa.id).
+    """
     summary1 = await importa_pde(FIXTURE, azienda_codice="trenord")
+
+    # Snapshot id prima del re-import
+    async with session_scope() as session:
+        result = await session.execute(
+            select(CorsaCommerciale.id, CorsaCommerciale.row_hash).order_by(CorsaCommerciale.id)
+        )
+        ids_before = {h: cid for cid, h in result.all()}
+
     summary2 = await importa_pde(FIXTURE, azienda_codice="trenord", force=True)
 
     assert summary2.skipped is False
+    assert summary2.n_total == FIXTURE_N_ROWS
+    assert summary2.n_kept == FIXTURE_N_ROWS  # tutte invariate
     assert summary2.n_create == 0
-    assert summary2.n_update == 38
-    # Nuovo run creato (force = nuovo tracking)
+    assert summary2.n_delete == 0
     assert summary2.run_id != summary1.run_id
 
-    # Le composizioni restano 342 (le 9 vecchie sostituite con 9 nuove)
+    # Stabilità id: stessi (id, row_hash) prima e dopo
+    async with session_scope() as session:
+        result = await session.execute(
+            select(CorsaCommerciale.id, CorsaCommerciale.row_hash).order_by(CorsaCommerciale.id)
+        )
+        ids_after = {h: cid for cid, h in result.all()}
+    assert ids_before == ids_after, "id non stabili: re-import senza modifiche ha cambiato gli id"
+
+    # Composizioni totali e run totali coerenti
     async with session_scope() as session:
         n_corse = await session.scalar(select(text("COUNT(*)")).select_from(CorsaCommerciale))
         n_comp = await session.scalar(select(text("COUNT(*)")).select_from(CorsaComposizione))
         n_run = await session.scalar(select(text("COUNT(*)")).select_from(CorsaImportRun))
-        assert n_corse == 38
-        assert n_comp == 342
+        assert n_corse == FIXTURE_N_ROWS
+        assert n_comp == FIXTURE_N_ROWS * 9
         assert n_run == 2
 
 
 # =====================================================================
-# Round-trip — verifica che i dati salvati matchino il parser
+# Round-trip
 # =====================================================================
 
 
 async def test_corsa_round_trip_first_row() -> None:
-    """Treno 13 (riga 0 fixture) salvato in DB ha campi attesi.
-
-    Spec dalla fixture (verificata in test_pde_row_parser):
-    - numero_treno = '13', rete = 'FN'
-    - origine = S01066, destinazione = S01747
-    - valido 14/12/2025 → 31/12/2026 (383 giorni)
-    """
+    """Treno 13 (riga 0 fixture) salvato in DB ha campi attesi."""
     await importa_pde(FIXTURE, azienda_codice="trenord")
     async with session_scope() as session:
         result = await session.execute(
@@ -199,6 +241,7 @@ async def test_corsa_round_trip_first_row() -> None:
         assert corsa.is_treno_garantito_festivo is False
         assert corsa.giorni_per_mese_json["gg_anno"] == 365
         assert len(corsa.valido_in_date_json) == 383
+        assert len(corsa.row_hash) == 64
 
 
 async def test_composizioni_round_trip_first_row() -> None:
@@ -235,7 +278,6 @@ async def test_composizioni_round_trip_first_row() -> None:
 
 
 async def test_unknown_azienda_raises() -> None:
-    """Codice azienda inesistente → ValueError chiaro."""
     with pytest.raises(ValueError, match="non trovata"):
         await importa_pde(FIXTURE, azienda_codice="nonesisto")
 

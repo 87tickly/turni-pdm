@@ -245,53 +245,99 @@ e va corretto nei casi anomali (rari, ma esistono).
 
 ---
 
-## 4. Idempotenza dell'import
+## 4. Identità riga + delta-sync (Sprint 3.7)
 
-Re-import dello stesso file PdE deve essere **safe**: nessun
-duplicato, nessuna perdita di dati esistenti.
+**Lezione dal file Trenord 2025-2026 reale**: la chiave business
+`(azienda_id, numero_treno, valido_da)` collassa silenziosamente fino a
+**53 corse** del PdE, perdendo dati. Anche aggiungendo `rete`, `valido_a`,
+`cod_destinazione`, `VCO`, restano collisioni residue. Il PdE ha
+varianti su colonne marginali (es. periodicità testuale, totali) che
+nessuna superchiave business ragionevole cattura.
 
-### 4.1 Identificazione corsa esistente
+**Decisione architetturale** (utente, 2026-04-26): *"Il programma è per
+una grande azienda, non possiamo permetterci di perdere dati."*
 
-Chiave logica: `(azienda_id, numero_treno, valido_da)`.
+→ **Ogni riga del PdE = una riga in `corsa_commerciale`, sempre, anche
+se duplicata.**
+
+### 4.1 `row_hash` — identità naturale per riga
+
+Ogni `corsa_commerciale` ha `row_hash VARCHAR(64) NOT NULL` =
+SHA-256 dei 124 campi grezzi della riga PdE serializzati in JSON
+canonico (`sort_keys=True`, separator stretto). Deterministico:
+stessa riga PdE → stesso hash. None ed empty string sono trattati
+uguali (sono semanticamente equivalenti nel PdE).
+
+`row_hash` **non è UNIQUE**: il PdE Trenord 2025-2026 ha **8 coppie di
+righe identiche al byte**. Sono comunque preservate (1 INSERT per ogni
+occorrenza), perché potrebbero essere semanticamente distinte (vedi
+principio sopra).
+
+### 4.2 SHA-256 file (idempotenza globale)
+
+Prima dell'import, `compute_sha256(file_path)` → confronto con
+`corsa_import_run.source_hash` esistenti completati per la stessa
+azienda. Match → skip totale, niente operazioni in DB.
+Forza con `--force` (es. dopo bug fix nel parser).
+
+### 4.3 Algoritmo delta-sync (multiset)
 
 ```python
-def upsert_corsa(corsa_data):
-    key = (corsa_data.azienda_id, corsa_data.numero_treno, corsa_data.valido_da)
-    existing = query_corsa(*key)
-    if existing:
-        if has_diff(existing, corsa_data):
-            update(existing, corsa_data)
-            log_update(corsa_data.numero_treno)
-        # else: skip, già coerente
+# Step 1 — parse + hash
+parsed_rows = [parse_corsa_row(r) for r in raw_rows]
+row_hashes = [compute_row_hash(r) for r in raw_rows]
+
+# Step 2 — esistenti raggruppati per hash (può esserci >1)
+existing_ids_by_hash = defaultdict(list)
+for cid, h in db.execute("SELECT id, row_hash FROM corsa_commerciale "
+                          "WHERE azienda_id=? ORDER BY id"):
+    existing_ids_by_hash[h].append(cid)
+
+# Step 3 — diff multiset
+file_count = Counter(row_hashes)
+matched = Counter()
+to_insert = []
+for parsed, h in zip(parsed_rows, row_hashes):
+    if matched[h] < len(existing_ids_by_hash.get(h, [])):
+        matched[h] += 1   # kept (id stabile)
     else:
-        insert(corsa_data)
-        log_insert(corsa_data.numero_treno)
+        to_insert.append((parsed, h))
+
+# Esistenti che eccedono il count del file → DELETE
+to_delete_ids = []
+for h, ids in existing_ids_by_hash.items():
+    n_in_file = file_count.get(h, 0)
+    if len(ids) > n_in_file:
+        to_delete_ids.extend(ids[n_in_file:])
+
+# Step 4 — bulk DELETE + bulk INSERT
+db.execute(delete(...).where(id.in_(to_delete_ids)))
+for parsed, h in to_insert:
+    db.execute(insert(...).values(...row_hash=h))
+
+# Step 5 — INVARIANTE FORTE
+n_db = db.scalar("SELECT COUNT(*) FROM corsa_commerciale WHERE azienda_id=?")
+assert n_db == len(parsed_rows), "PERDITA DATI! Rollback."
 ```
 
-### 4.2 Hash file
+**Garanzie**:
+1. **No-train-left-behind**: dopo l'import, `COUNT(*) = righe_file`.
+   L'importer rolla back la transazione se l'invariante fallisce.
+2. **Stabilità id su re-import invariato**: tutti `kept`, 0 `delete`,
+   0 `create` → ogni `corsa.id` invariato. Compatibile con FK da Sprint 4+.
+3. **File modificato**: solo le righe cambiate prendono nuovo id;
+   le altre restano identiche.
+4. **Righe duplicate nel PdE**: preservate tutte (multiset).
 
-Per evitare di rifare l'import inutilmente:
+### 4.4 Tracking in `corsa_import_run`
 
-```python
-file_hash = sha256(file_bytes)
-if exists_run(source_hash=file_hash, completed_at IS NOT NULL):
-    print("File già importato il", run.started_at)
-    confirm = input("Procedere comunque? [s/N] ")
-    if confirm != 's':
-        return
-```
-
-### 4.3 Tracking in `corsa_import_run`
-
-Ogni esecuzione apre una riga in `corsa_import_run` con:
-- `source_file`: path/nome
-- `source_hash`: SHA-256
+- `source_file`: nome file
+- `source_hash`: SHA-256 globale
 - `started_at`, `completed_at`
-- `n_corse_create`, `n_corse_update`
-- `note`: errori/warning sintetizzati
-
-L'import linka ogni `corsa_commerciale` creata o aggiornata al run
-corrente via `import_run_id`.
+- `n_corse`: totale post-import (= righe nel file, per invariante)
+- `n_corse_create`: righe inserite nel run
+- `n_corse_update`: righe **cancellate** nel run (delta-sync semantica)
+- `note`: `delta-sync: kept=X delete=Y create=Z, warnings=N`
 
 ---
 
@@ -300,69 +346,61 @@ corrente via `import_run_id`.
 ```python
 async def importa_pde(
     file_path: Path,
-    azienda_codice: str = 'trenord',
-    confirm_overwrite: bool = False,
-) -> ImportResult:
-    # Step 1: open
-    if file_path.suffix == '.numbers':
-        rows = leggi_numbers(file_path)
-    elif file_path.suffix == '.xlsx':
-        rows = leggi_xlsx(file_path)
-    else:
-        raise ImportError(f"Formato non supportato: {file_path.suffix}")
-
-    # Step 2: dedup check
+    azienda_codice: str,
+    *,
+    force: bool = False,
+) -> ImportSummary:
+    # Step 1: hash file (fuori transazione)
     file_hash = compute_sha256(file_path)
-    existing_run = await find_existing_run(file_hash)
-    if existing_run and not confirm_overwrite:
-        return ImportResult(skipped=True, reason="già importato")
+    raw_rows = read_pde_file(file_path)  # auto-detect .numbers / .xlsx
 
-    # Step 3: open run
-    azienda_id = await get_azienda_id(azienda_codice)
-    run = await create_import_run(file_path, file_hash, azienda_id)
+    async with session_scope() as session:
+        azienda_id = await get_azienda_id(session, azienda_codice)
 
-    # Step 4: process rows
-    n_create = 0
-    n_update = 0
-    warnings = []
+        # Step 2: idempotenza globale via SHA-256 file
+        if not force:
+            existing_run = await find_existing_run(session, file_hash, azienda_id)
+            if existing_run is not None:
+                return ImportSummary(skipped=True, run_id=existing_run.id)
 
-    for row_idx, row in enumerate(rows[1:], start=1):  # skip header
-        try:
-            corsa = parse_row(row)
-            corsa.azienda_id = azienda_id
-            corsa.import_run_id = run.id
-            corsa.valido_in_date_json = calcola_valido_in_date(
-                corsa.valido_da, corsa.valido_a,
-                row['Periodicità'], corsa.giorni_per_mese_json
-            )
+        # Step 3: parse + row_hash
+        parsed_rows = [parse_corsa_row(r) for r in raw_rows]
+        row_hashes = [compute_row_hash(r) for r in raw_rows]
+        n_total_file = len(parsed_rows)
 
-            # Upsert stazioni se mancanti
-            await upsert_stazione(corsa.codice_origine, row['Stazione Origine Treno'])
-            await upsert_stazione(corsa.codice_destinazione, row['Stazione Destinazione Treno'])
-            # ... cds origin/dest se presenti
+        # Step 4: apri run + upsert stazioni
+        run = create_run(session, file_path.name, file_hash, azienda_id)
+        await upsert_stazioni(session, collect_stazioni(...), azienda_id)
 
-            existing = await find_corsa(azienda_id, corsa.numero_treno, corsa.valido_da)
-            if existing:
-                if has_changes(existing, corsa):
-                    await update_corsa(existing.id, corsa)
-                    n_update += 1
-            else:
-                corsa_id = await insert_corsa(corsa)
-                # 9 righe in corsa_composizione
-                await insert_composizione(corsa_id, parse_composizione(row))
-                n_create += 1
-        except Exception as e:
-            warnings.append(f"Riga {row_idx}: {e}")
+        # Step 5: delta-sync multiset (vedi §4.3)
+        existing_ids_by_hash = await load_existing(session, azienda_id)
+        to_insert, to_delete_ids, n_kept = compute_diff(
+            parsed_rows, row_hashes, existing_ids_by_hash
+        )
 
-    # Step 5: close run
-    await close_import_run(run.id, n_create, n_update, warnings)
+        # Step 6: bulk DELETE (cascade su composizioni)
+        if to_delete_ids:
+            await session.execute(delete(...).where(id.in_(to_delete_ids)))
 
-    return ImportResult(
-        ok=True,
-        n_create=n_create,
-        n_update=n_update,
-        warnings=warnings,
+        # Step 7: INSERT righe nuove + 9 composizioni ciascuna
+        for parsed, row_hash in to_insert:
+            corsa_id = await insert_corsa(session, parsed, row_hash, run.id)
+            await insert_composizioni(session, corsa_id, parsed.composizioni)
+
+        # Step 8: INVARIANTE FORTE
+        n_db = await session.scalar(select(count()).where(azienda_id=azienda_id))
+        if n_db != n_total_file:
+            raise RuntimeError("PERDITA DATI! Rollback.")
+
+        # Step 9: chiudi run
+        await close_run(session, run.id, n_kept, len(to_delete_ids), len(to_insert))
+
+    return ImportSummary(
         run_id=run.id,
+        n_total=n_total_file,
+        n_kept=n_kept,
+        n_create=len(to_insert),
+        n_delete=len(to_delete_ids),
     )
 ```
 

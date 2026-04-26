@@ -55,6 +55,11 @@ class CorsaCommerciale(Base):
         BigInteger, ForeignKey("azienda.id", ondelete="RESTRICT")
     )
 
+    # SHA-256 dei campi grezzi della riga PdE — identità naturale per
+    # delta-sync (Sprint 3.7). Stabile fra re-import: se la riga del PdE
+    # non cambia, il hash non cambia → la corsa resta in DB con stesso id.
+    row_hash: Mapped[str] = mapped_column(String(64))
+
     numero_treno: Mapped[str] = mapped_column(String(20))
     rete: Mapped[str | None] = mapped_column(String(10))
     numero_treno_rfi: Mapped[str | None] = mapped_column(String(20))
