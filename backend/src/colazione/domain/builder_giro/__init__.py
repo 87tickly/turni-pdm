@@ -16,6 +16,9 @@ Sub-moduli:
 - `multi_giornata.py` (Sprint 4.4.3) — concatenazione cross-notte:
   da catene posizionate single-day a `Giro` multi-giornata che
   attraversano la mezzanotte.
+- `composizione.py` (Sprint 4.4.4) — assegnazione regole a ogni
+  blocco corsa (chiama ``risolvi_corsa``) + rilevamento eventi
+  ``aggancio``/``sgancio`` (delta numero_pezzi intra-giornata).
 - `builder.py` (Sprint 4.4.5, futuro) — orchestrator che persiste sul DB.
 
 Tutto è **DB-agnostic**: ricevi dataclass/oggetti, ritorni dataclass.
@@ -26,6 +29,18 @@ from colazione.domain.builder_giro.catena import (
     Catena,
     ParamCatena,
     costruisci_catene,
+)
+from colazione.domain.builder_giro.composizione import (
+    BloccoAssegnato,
+    CorsaResidua,
+    EventoComposizione,
+    GiornataAssegnata,
+    GiroAssegnato,
+    IncompatibilitaMateriale,
+    TipoEvento,
+    assegna_e_rileva_eventi,
+    assegna_materiali,
+    rileva_eventi_composizione,
 )
 from colazione.domain.builder_giro.multi_giornata import (
     GiornataGiro,
@@ -54,11 +69,17 @@ from colazione.domain.builder_giro.risolvi_corsa import (
 
 __all__ = [
     "AssegnazioneRisolta",
+    "BloccoAssegnato",
     "BloccoMaterialeVuoto",
     "Catena",
     "CatenaPosizionata",
+    "CorsaResidua",
+    "EventoComposizione",
     "Giro",
+    "GiornataAssegnata",
     "GiornataGiro",
+    "GiroAssegnato",
+    "IncompatibilitaMateriale",
     "LocalitaSenzaStazioneError",
     "MotivoChiusura",
     "ParamCatena",
@@ -66,6 +87,9 @@ __all__ = [
     "ParamPosizionamento",
     "PosizionamentoImpossibileError",
     "RegolaAmbiguaError",
+    "TipoEvento",
+    "assegna_e_rileva_eventi",
+    "assegna_materiali",
     "costruisci_catene",
     "costruisci_giri_multigiornata",
     "determina_giorno_tipo",
@@ -73,5 +97,6 @@ __all__ = [
     "matches_all",
     "matches_filtro",
     "posiziona_su_localita",
+    "rileva_eventi_composizione",
     "risolvi_corsa",
 ]

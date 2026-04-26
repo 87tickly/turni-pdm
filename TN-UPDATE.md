@@ -10,6 +10,123 @@
 
 ---
 
+## 2026-04-26 (23) — Sprint 4.4.4: assegnazione regole + eventi composizione
+
+### Contesto
+
+Sub 4.4.3 produce `Giro` multi-giornata fatti di catene posizionate.
+Manca: ad ogni blocco corsa va assegnato un materiale tramite
+`risolvi_corsa()` (Sprint 4.2), e i delta `numero_pezzi` vanno
+materializzati in eventi `aggancio`/`sgancio` (`PROGRAMMA-MATERIALE.md`
+§5).
+
+### Modifiche
+
+**Nuovo `backend/src/colazione/domain/builder_giro/composizione.py`**:
+
+Tre funzioni pure + 6 dataclass frozen:
+
+- `assegna_materiali(giro, regole) → GiroAssegnato`: per ogni corsa
+  chiama `risolvi_corsa()`. `None` → corsa va in `corse_residue`.
+  `RegolaAmbiguaError` → bubble up (caller decide). Se una giornata
+  usa > 1 `materiale_tipo` → registra `IncompatibilitaMateriale`
+  (warning, vìola `LOGICA-COSTRUZIONE.md` §3.3 punto 3).
+- `rileva_eventi_composizione(giro_assegnato) → GiroAssegnato`:
+  scorre `blocchi_assegnati` di ogni giornata, calcola delta
+  `numero_pezzi`. Se delta != 0: crea `EventoComposizione` (tipo
+  aggancio/sgancio, stazione_proposta = origine blocco corrente,
+  `is_validato_utente=False`). Usa `dataclasses.replace` per
+  rispettare frozen.
+- `assegna_e_rileva_eventi(giri, regole) → list[GiroAssegnato]`:
+  orchestrator pipeline.
+
+**Output dataclass**:
+
+- `BloccoAssegnato`: corsa + assegnazione.
+- `EventoComposizione`: tipo, pezzi_delta, stazione_proposta,
+  posizione_dopo_blocco, note_builder, is_validato_utente.
+- `CorsaResidua`: data + corsa senza regola.
+- `IncompatibilitaMateriale`: data + frozenset dei tipi visti.
+- `GiornataAssegnata`: data + catena_posizionata + blocchi_assegnati
+  + eventi_composizione + materiali_tipo_giornata.
+- `GiroAssegnato`: localita + giornate + chiuso + motivo + residue
+  + incompatibilità.
+
+**Modifica `__init__.py`**: re-export 10 nuovi simboli + aggiornati
+docstring sub-moduli e `__all__`.
+
+### Decisioni di design
+
+- **Eventi solo intra-giornata**: i delta cross-notte tra giornate
+  consecutive del giro (es. G1 chiude con 6 pezzi, G2 inizia con 3)
+  NON generano eventi qui. Sono concettualmente "durante la notte"
+  e li gestirà 4.4.5 orchestrator se servono. 4.4.4 fa un solo
+  passo: composizione **dentro** ogni giornata.
+- **`RegolaAmbiguaError` bubble up**: 4.4.4 pure non sa cosa fare
+  (l'utente deve disambiguare); il caller business logic decide
+  (es. abort builder, segnala UI).
+- **Stazione proposta = origine blocco corrente**: euristica semplice
+  e deterministica. L'utente sposta in editor giro UI (campo
+  `is_validato_utente=False`).
+- **`dataclasses.replace` per "modificare" frozen**: pythonic e
+  type-safe. `rileva_eventi_composizione` ricrea giornate e giro
+  preservando immutabilità.
+- **`IncompatibilitaMateriale` come warning, non errore**: la
+  decisione strict mode spetta al builder. Per ora la sola
+  registrazione dell'anomalia è sufficiente.
+
+### Test
+
+**`backend/tests/test_composizione.py`** (20 test puri, 0.03s):
+
+- 7 `assegna_materiali` (1 corsa+1 regola, residua, no incompat,
+  incompat 2 tipi, RegolaAmbigua bubble, pass-through metadata,
+  multi-giornata)
+- 5 `rileva_eventi_composizione` (costante = 0 eventi, aggancio
+  3→6, sgancio 6→3, sequenza 3→6→3, eventi solo intra-giornata)
+- 2 orchestrator (pipeline + giri vuoti)
+- 6 frozen dataclass + dataclass smoke (BloccoAssegnato,
+  EventoComposizione, GiornataAssegnata, GiroAssegnato,
+  CorsaResidua, IncompatibilitaMateriale)
+- 1 determinismo
+
+### Verifiche
+
+- `pytest` (no DB): **231 passed + 50 skipped** (era 211+50; +20 nuovi)
+- `ruff check` + `format` ✓ (auto-fix organize imports)
+- `mypy strict`: no issues in **44 source files** (era 43, +1
+  composizione.py)
+
+### Stato
+
+Sub 4.4.4 chiuso. Builder pure ha ora 5 moduli e 4 funzioni
+top-level che compongono la pipeline:
+
+```
+costruisci_catene → posiziona_su_localita → costruisci_giri_multigiornata
+                 → assegna_e_rileva_eventi → list[GiroAssegnato]
+```
+
+Tutto DB-agnostic. Pronto per 4.4.5 che farà il bridge ORM
+(loader DB → pipeline pure → persister DB) + endpoint REST.
+
+### Prossimo step
+
+Sub 4.4.5: orchestrator builder + persistenza DB.
+
+- Loader: dato `programma_id` + finestra temporale, carica corse
+  + dotazione + regole dal DB → dataclass dominio.
+- Esegue pipeline pure 4.4.1→4.4.4.
+- Persister: traduce `list[GiroAssegnato]` in ORM
+  (`GiroMateriale + GiroGiornata + GiroVariante + GiroBlocco` +
+  `CorsaMaterialeVuoto`). Eventi composizione → blocchi
+  `aggancio`/`sgancio` con `metadata_json`.
+- Endpoint `POST /api/programmi/{id}/genera-giri` sincrono.
+- Strict mode handling: `no_corse_residue`, `no_giro_non_chiuso_a_localita`
+  → 400 se violati.
+
+---
+
 ## 2026-04-26 (22) — Sprint 4.4.3: multi-giornata cross-notte
 
 ### Contesto
