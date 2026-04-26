@@ -88,6 +88,14 @@ from colazione.models.corse import (
 
 logger = logging.getLogger(__name__)
 
+# Bulk INSERT chunk sizes — bilanciano memoria e round-trip al DB.
+# Postgres tipicamente regge fino a ~32k parametri per query (limite
+# binding protocol). Una corsa ha ~33 colonne → 1000 corse ≈ 33k params,
+# borderline. Tengo conservativo a 500 per stare comodi.
+_CHUNK_CORSE = 500
+# Composizione ha 9 colonne → 2000 righe ≈ 18k params, sicuro.
+_CHUNK_COMPOSIZIONI = 2000
+
 
 # =====================================================================
 # Risultato dell'import (semantica delta-sync)
@@ -336,7 +344,6 @@ async def importa_pde(
     if not file_path.exists():
         raise FileNotFoundError(f"File PdE non trovato: {file_path}")
     file_hash = compute_sha256(file_path)
-    raw_rows = read_pde_file(file_path)
 
     async with session_scope() as session:
         azienda_id = await get_azienda_id(session, azienda_codice)
@@ -344,6 +351,8 @@ async def importa_pde(
         if not force:
             existing_run = await find_existing_run(session, file_hash, azienda_id)
             if existing_run is not None:
+                # Skip prima di leggere il file: read_pde_file su Numbers
+                # ~10-15s, evitabile.
                 return ImportSummary(
                     skipped=True,
                     skip_reason=(
@@ -353,6 +362,9 @@ async def importa_pde(
                     run_id=existing_run.id,
                     duration_s=time.monotonic() - t0,
                 )
+
+        # File mai visto (o force) → ora leggo
+        raw_rows = read_pde_file(file_path)
 
         # Step 1 — parse + compute row_hash per ogni riga
         # NB: il PdE Trenord può avere righe completamente identiche
@@ -419,16 +431,31 @@ async def importa_pde(
                 delete(CorsaCommerciale).where(CorsaCommerciale.id.in_(to_delete_ids))
             )
 
-        # Step 6 — INSERT righe nuove + 9 composizioni ciascuna
-        # (Sprint 3.7.2 farà bulk; qui per chiarezza algoritmica)
-        for parsed, row_hash in to_insert:
-            payload = _corsa_payload(parsed, azienda_id, run_id, row_hash)
-            ins_result = await session.execute(
-                pg_insert(CorsaCommerciale).values(**payload).returning(CorsaCommerciale.id)
-            )
-            corsa_id = ins_result.scalar_one()
-            comp_rows = _composizione_rows(corsa_id, parsed)
-            await session.execute(pg_insert(CorsaComposizione).values(comp_rows))
+        # Step 6 — Bulk INSERT corse + composizioni (Sprint 3.7.2)
+        # Performance: 1 INSERT con N values (chunked) invece di N INSERT
+        # singoli. Riduce i round-trip al DB di ~3 ordini di grandezza
+        # su file grandi.
+        #
+        # Postgres garantisce che `INSERT ... RETURNING id` ritorna gli
+        # id nell'ordine dei VALUES (cfr. docs PostgreSQL §6.4 RETURNING).
+        # Allineiamo i `corsa_id` ai `parsed` con `zip(strict=True)`.
+        if to_insert:
+            inserted_ids: list[int] = []
+            for i in range(0, len(to_insert), _CHUNK_CORSE):
+                chunk = to_insert[i : i + _CHUNK_CORSE]
+                payloads = [_corsa_payload(parsed, azienda_id, run_id, h) for parsed, h in chunk]
+                ins_result = await session.execute(
+                    pg_insert(CorsaCommerciale).values(payloads).returning(CorsaCommerciale.id)
+                )
+                inserted_ids.extend(row[0] for row in ins_result.all())
+
+            # Bulk INSERT composizioni (9 per corsa, raggruppate)
+            all_comp_rows: list[dict[str, Any]] = []
+            for (parsed, _h), corsa_id in zip(to_insert, inserted_ids, strict=True):
+                all_comp_rows.extend(_composizione_rows(corsa_id, parsed))
+            for i in range(0, len(all_comp_rows), _CHUNK_COMPOSIZIONI):
+                comp_chunk = all_comp_rows[i : i + _CHUNK_COMPOSIZIONI]
+                await session.execute(pg_insert(CorsaComposizione).values(comp_chunk))
 
         # Step 7 — INVARIANTE FORTE: post-import COUNT(*) == righe nel file
         # Garanzia "no train left behind": ogni riga del PdE ha una riga in DB.
@@ -445,6 +472,11 @@ async def importa_pde(
             )
 
         # Step 8 — close run
+        # NB: usiamo `clock_timestamp()` invece di `now()` perché in
+        # PostgreSQL `now()` è alias di `transaction_timestamp()` e
+        # ritorna sempre lo stesso valore per tutta la transazione →
+        # `completed_at - started_at` sarebbe sempre 0. Con clock_timestamp
+        # la durata reale del run viene salvata in DB.
         await session.execute(
             update(CorsaImportRun)
             .where(CorsaImportRun.id == run_id)
@@ -452,7 +484,7 @@ async def importa_pde(
                 n_corse=n_total_db,
                 n_corse_create=n_create,
                 n_corse_update=n_delete,  # riusato come "delta deleted" — vedi note
-                completed_at=func.now(),
+                completed_at=func.clock_timestamp(),
                 note=(
                     f"delta-sync: kept={n_kept} delete={n_delete} create={n_create}, "
                     f"warnings={n_warnings} (cross-check Gg_*)"

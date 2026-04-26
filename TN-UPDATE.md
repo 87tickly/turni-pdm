@@ -10,7 +10,71 @@
 
 ---
 
-## 2026-04-26 (13) — Sprint 3.7: delta-sync "no train left behind"
+## 2026-04-26 (14) — Sprint 3.7.2-3.7.3: bulk INSERT + quick wins
+
+### Contesto
+
+Dopo aver chiuso 3.7.1 (delta-sync correttezza), ottimizzazioni
+performance sull'import del PdE Trenord reale.
+
+### Modifiche `pde_importer.py`
+
+**Bulk operations (3.7.2)**:
+- INSERT corse in chunk da 500 (limite ~32k bind params di Postgres)
+- INSERT composizioni in chunk da 2000
+- `pg_insert(...).values(payloads).returning(id)` ritorna gli id
+  nell'ordine dei VALUES (garanzia Postgres) → allineamento con i
+  `parsed` via `zip(strict=True)`
+- Eliminato il loop "1 INSERT per corsa" che faceva ~10579 round-trip
+
+**Quick wins (3.7.3)**:
+- `read_pde_file()` spostato **dopo** il check di idempotenza: skip
+  un file già visto non legge più il file Numbers (read = ~10s)
+- `func.now()` → `func.clock_timestamp()` per `completed_at` di
+  `corsa_import_run`. Postgres `now()` è alias di `transaction_timestamp`
+  → tutti gli INSERT in una transazione hanno lo stesso timestamp e
+  `completed_at - started_at = 0`. Con `clock_timestamp()` la durata
+  reale del run viene salvata.
+
+### Misure end-to-end (file Trenord 10579 righe)
+
+| Operazione | Sprint 3.6 | Sprint 3.7.1 | **Sprint 3.7 finale** |
+|---|---|---|---|
+| Primo import (DB vuoto) | 52.3s | 69.4s | **30.3s** |
+| Skip idempotente | 10.4s | 10.4s | **0.1s** |
+| Force re-import (id stabili) | n/a | 16.7s | **16.4s** |
+| Perdita dati | 53 corse | 0 | **0** |
+| `dur_s` in DB | 0 (bug) | 0 (bug) | **valore reale** ✓ |
+
+DB post-import: 10579 corse, 95211 composizioni, 163 stazioni, 2 run.
+**10571 hash unici + 8 duplicati preservati** = invariante "no train
+left behind" verificata sul file reale.
+
+### Verifiche CI
+
+- `pytest`: 113/113 verdi (invariato)
+- `ruff` + `mypy strict`: tutti verdi (36 source files)
+
+### Stato
+
+**Sprint 3.7 chiuso completamente**. Importer PdE production-ready:
+correttezza (no perdita dati), performance (30s primo import, 0.1s
+skip), idempotenza (SHA-256 file), id stabili (delta-sync), invariante
+forte (rollback se inconsistenza).
+
+### Prossimo step
+
+Sprint 4 — builder giro materiale dal PdE. Riferimenti:
+- `docs/ALGORITMO-BUILDER.md` (storico, da riadattare)
+- `docs/ARCHITETTURA-BUILDER-V4.md` (storico, da riadattare)
+
+Le 10579 corse + 95211 composizioni in DB sono la base per
+costruire i giri materiali. `corsa.id` stabile fra re-import del
+PdE → ok per FK del giro.
+
+---
+
+## 2026-04-26 (13) — Sprint 3.7.1: delta-sync "no train left behind"
 
 ### Contesto
 
