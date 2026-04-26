@@ -10,6 +10,86 @@
 
 ---
 
+## 2026-04-26 (19) — Sprint 4.3: API REST CRUD programma materiale
+
+### Contesto
+
+Sub 4.2 ha chiuso la funzione pura `risolvi_corsa`. Ora il
+pianificatore deve poter creare/leggere/modificare programmi via
+API REST. È il bridge tra UI futura (frontend) e modello dati.
+
+### Modifiche
+
+**Nuovo `backend/src/colazione/api/programmi.py`** (~340 righe):
+
+8 endpoint protetti da `require_role("PIANIFICATORE_GIRO")`
+(admin bypassa). Tutti filtrano per `user.azienda_id` dal JWT (multi-
+tenant rigorosa).
+
+| Endpoint | Cosa |
+|---|---|
+| `POST /api/programmi` | Crea programma (stato `bozza`), regole nested opzionali |
+| `GET /api/programmi` | Lista azienda corrente con filtri `?stato=`, `?stagione=` |
+| `GET /api/programmi/{id}` | Dettaglio + regole (ordinate per priorità DESC) |
+| `PATCH /api/programmi/{id}` | Aggiorna intestazione (no stato, no regole) |
+| `POST /api/programmi/{id}/regole` | Aggiungi regola (solo bozza) |
+| `DELETE /api/programmi/{id}/regole/{rid}` | Rimuovi regola (solo bozza) |
+| `POST /api/programmi/{id}/pubblica` | Bozza → attivo con validazione |
+| `POST /api/programmi/{id}/archivia` | Attivo → archiviato |
+
+**Validazione pubblicazione** (`_validate_pubblicabile`):
+1. Stato corrente = `bozza` (no doppia pubblicazione)
+2. Almeno 1 regola (no programma vuoto)
+3. Nessun programma attivo della stessa azienda+stagione si
+   sovrappone su `[valido_da, valido_a]` (constraint applicativo,
+   non SQL)
+
+Errori → 400 (validazione) o 409 (conflitto sovrapposizione).
+404 per programma di altra azienda (security: non rivelare l'esistenza).
+
+**Modifica registrazione**:
+`backend/src/colazione/main.py`: include `programmi_routes.router`.
+
+### Test
+
+**`backend/tests/test_programmi_api.py`** (23 test integration, DB
+required, skipif `SKIP_DB_TESTS=1`):
+
+- 4 auth (401 senza token, admin/pianificatore_giro_demo OK)
+- 4 POST (minimo, regole nested, validità invertita 422, filtro
+  invalido 422)
+- 4 GET (lista vuota, lista con filtri, dettaglio 404, regole
+  ordinate per priorità DESC)
+- 2 PATCH (aggiorna intestazione, 404 inesistente)
+- 3 regole (add bozza OK, delete bozza OK, add su attivo blocca 400)
+- 4 pubblica (bozza+regole OK, senza regole 400, già attivo 400,
+  sovrapposizione 409)
+- 2 archivia (attivo OK, già archiviato 400)
+
+Cleanup `_wipe_programmi` autouse: ogni test parte da DB pulito.
+Login via helper `_login(client, username, password)` per riuso.
+
+### Verifiche
+
+- `pytest`: **208/208 verdi** (era 185, +23 nuovi)
+- `ruff check` + `format` ✓
+- `mypy strict`: **40 source files** (era 39, +1 api/programmi.py)
+
+### Stato
+
+Sub 4.3 chiuso. Il pianificatore ha API complete per gestire i
+programmi materiale via REST. Frontend potrà collegarsi quando
+arriva.
+
+### Prossimo step
+
+Sub 4.4: builder algoritmico vero. Usa `risolvi_corsa` (Sub 4.2) +
+le regole del programma attivo (via API o ORM diretta) per
+costruire i giri materiali multi-giornata cross-notte (decisione
+utente: B subito).
+
+---
+
 ## 2026-04-26 (18) — Sprint 4.2: risolvi_corsa (funzione pura)
 
 ### Contesto

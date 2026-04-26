@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from colazione import __version__
 from colazione.api import auth as auth_routes
+from colazione.api import programmi as programmi_routes
 from colazione.config import get_settings
 
 
@@ -47,6 +48,7 @@ def create_app() -> FastAPI:
         return {"status": "ok", "version": __version__}
 
     app.include_router(auth_routes.router)
+    app.include_router(programmi_routes.router)
 
     return app
 
