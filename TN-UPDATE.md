@@ -10,6 +10,101 @@
 
 ---
 
+## 2026-04-26 (21) — Sprint 4.4.2: posizionamento catena su località
+
+### Contesto
+
+Sub 4.4.1 produce catene "nude" (solo corse incatenate). Per
+trasformare una catena in un giro vero serve **chiuderla a una
+località manutenzione**: se la prima corsa non parte dalla stazione
+collegata alla località, serve un materiale vuoto di posizionamento
+(testa); analogo per il rientro (coda).
+
+### Modifiche
+
+**Nuovo `backend/src/colazione/domain/builder_giro/posizionamento.py`**:
+
+- `_LocalitaLike` (Protocol): `codice` + `stazione_collegata_codice`.
+- `ParamPosizionamento` (frozen): `durata_vuoto_default_min=30`,
+  `gap_min=5`. Singleton `_DEFAULT_PARAM`.
+- `BloccoMaterialeVuoto` (frozen): origine, destinazione, partenza,
+  arrivo, motivo (`'testa'`|`'coda'`).
+- `CatenaPosizionata` (frozen): codice località + stazione collegata,
+  vuoto_testa | None, catena originale, vuoto_coda | None,
+  `chiusa_a_localita: bool`.
+- `LocalitaSenzaStazioneError`, `PosizionamentoImpossibileError`.
+- `posiziona_su_localita(catena, localita, params) → CatenaPosizionata`.
+
+**Algoritmo**:
+
+1. Vuoto di testa se `prima.codice_origine != stazione_localita`.
+   Orari: `arrivo = prima.partenza - gap_min`, `partenza = arrivo -
+   durata_vuoto`. Se partenza < 00:00 → `PosizionamentoImpossibileError`
+   (caso "prima corsa molto presto al mattino").
+2. Vuoto di coda se NON cross-notte e `ultima.codice_destinazione !=
+   stazione_localita`. Orari simmetrici. Se l'arrivo supera 23:59 →
+   no vuoto generato, `chiusa_a_localita=False` (4.4.3 lo riprende).
+3. `chiusa_a_localita` finale: `True` se la giornata si chiude in
+   stazione collegata (naturalmente o via vuoto coda).
+
+**Modifica `__init__.py`**: re-export 6 nuovi simboli + aggiornati
+docstring sub-moduli e `__all__`.
+
+### Decisioni di design
+
+- **Durata vuoto stimata costante** (30' default). Niente matrice
+  km/velocità reale qui — raffinamento futuro quando avremo dati
+  geografici. Stima conservativa.
+- **Cross-notte → no vuoto coda**: se la catena chiude cross-notte
+  (4.4.1), non possiamo materializzare una coda con `time` puro.
+  Marca `chiusa_a_localita=False` e demanda a 4.4.3.
+- **`PosizionamentoImpossibileError` esplicito**: se la prima corsa
+  parte alle 00:10 con vuoto stimato 30'+5', il vuoto sarebbe alle
+  23:35 del giorno prima. Errore esplicito invece di clip silenzioso.
+- **`BloccoMaterialeVuoto.motivo`**: `'testa'`|`'coda'` per
+  tracciabilità in `metadata_json` quando 4.4.5 persisterà.
+- **Validazione input rigorosa**: catena vuota o località senza
+  stazione → eccezioni esplicite. Niente `Optional` opachi.
+
+### Test
+
+**`backend/tests/test_posizionamento.py`** (18 test puri, 0.02s):
+
+- 2 validazione (catena vuota, località senza stazione)
+- 4 casi base (no vuoti, solo testa, solo coda, entrambi)
+- 2 calcolo orari (testa, coda)
+- 3 cross-notte / mezzanotte (cross-notte chiude, vuoto testa
+  pre-mezzanotte raises, vuoto coda post-mezzanotte non chiude)
+- 1 prima corsa presto in stazione (no testa, no errore)
+- 4 determinismo + frozen (3 dataclass + default param)
+- 1 esempio realistico Trenord (giro S5 Cadorna ↔ Varese, Fiorenza
+  manutenzione → 2 vuoti)
+- 1 default param
+
+### Verifiche
+
+- `pytest` (no DB): **194 passed + 50 skipped** (era 176+50; +18 nuovi)
+- `ruff check` + `format` ✓
+- `mypy strict`: no issues in **42 source files** (era 41, +1
+  posizionamento.py)
+
+### Stato
+
+Sub 4.4.2 chiuso. Ora una catena può essere chiusa a località con
+materiali vuoti. Pronta per 4.4.3 che concatenerà più
+`CatenaPosizionata` (o catene grezze) in giri multi-giornata
+cross-notte.
+
+### Prossimo step
+
+Sub 4.4.3: multi-giornata cross-notte. Dato un pool di corse di più
+giornate, costruisce `GiroMateriale` (G1...Gn) che possono attraversare
+la mezzanotte. Determinazione `giorno_tipo` via data partenza (§6.7).
+Chiusura: torna a località OR raggiunge `n_giornate_default` OR
+supera `km_max_giornaliero`.
+
+---
+
 ## 2026-04-26 (20) — Sprint 4.4.1: catena single-day greedy chain
 
 ### Contesto

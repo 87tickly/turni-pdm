@@ -10,6 +10,9 @@ Sub-moduli:
 - `catena.py` (Sprint 4.4.1) — funzione pura greedy chain single-day:
   data una lista di corse, produce catene massimali per continuità
   geografica + gap minimo.
+- `posizionamento.py` (Sprint 4.4.2) — funzione pura che chiude una
+  catena su una località manutenzione, generando blocchi
+  ``materiale_vuoto`` di testa/coda quando necessario.
 - `builder.py` (Sprint 4.4.5, futuro) — orchestrator multi-giornata
   che persiste sul DB.
 
@@ -21,6 +24,14 @@ from colazione.domain.builder_giro.catena import (
     Catena,
     ParamCatena,
     costruisci_catene,
+)
+from colazione.domain.builder_giro.posizionamento import (
+    BloccoMaterialeVuoto,
+    CatenaPosizionata,
+    LocalitaSenzaStazioneError,
+    ParamPosizionamento,
+    PosizionamentoImpossibileError,
+    posiziona_su_localita,
 )
 from colazione.domain.builder_giro.risolvi_corsa import (
     AssegnazioneRisolta,
@@ -34,13 +45,19 @@ from colazione.domain.builder_giro.risolvi_corsa import (
 
 __all__ = [
     "AssegnazioneRisolta",
+    "BloccoMaterialeVuoto",
     "Catena",
+    "CatenaPosizionata",
+    "LocalitaSenzaStazioneError",
     "ParamCatena",
+    "ParamPosizionamento",
+    "PosizionamentoImpossibileError",
     "RegolaAmbiguaError",
     "costruisci_catene",
     "determina_giorno_tipo",
     "estrai_valore_corsa",
     "matches_all",
     "matches_filtro",
+    "posiziona_su_localita",
     "risolvi_corsa",
 ]
