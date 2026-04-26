@@ -39,6 +39,7 @@ Il modulo è **DB-agnostic**.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Literal, Protocol
@@ -172,7 +173,7 @@ class GiroAssegnato:
 # =====================================================================
 
 
-def assegna_materiali(giro: Giro, regole: list[_RegolaLike]) -> GiroAssegnato:
+def assegna_materiali(giro: Giro, regole: Sequence[_RegolaLike]) -> GiroAssegnato:
     """Assegna materiale a ogni corsa del giro chiamando ``risolvi_corsa``.
 
     Algoritmo:
@@ -311,7 +312,9 @@ def rileva_eventi_composizione(giro_assegnato: GiroAssegnato) -> GiroAssegnato:
 # =====================================================================
 
 
-def assegna_e_rileva_eventi(giri: list[Giro], regole: list[_RegolaLike]) -> list[GiroAssegnato]:
+def assegna_e_rileva_eventi(
+    giri: Sequence[Giro], regole: Sequence[_RegolaLike]
+) -> list[GiroAssegnato]:
     """Pipeline completa: ``assegna_materiali`` + ``rileva_eventi_composizione``
     su tutti i giri in input.
 

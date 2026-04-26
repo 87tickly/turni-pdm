@@ -20,6 +20,7 @@ giusti (ORM, dataclass, qualunque). Le sue responsabilità:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, time
 from typing import Any, Protocol
@@ -219,7 +220,7 @@ def matches_all(filtri: list[dict[str, Any]], corsa: _CorsaLike, giorno_tipo: st
 
 def risolvi_corsa(
     corsa: _CorsaLike,
-    regole: list[_RegolaLike],
+    regole: Sequence[_RegolaLike],
     data: date,
 ) -> AssegnazioneRisolta | None:
     """Risolve l'assegnazione (rotabile + n_pezzi) di una corsa in una data.

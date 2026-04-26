@@ -99,7 +99,9 @@ async def _wipe_test_data() -> None:
 
 @pytest.fixture(autouse=True)
 async def clean_state() -> None:
-    """Stato pulito prima di ogni test."""
+    """Stato pulito prima e dopo ogni test (evita FK leftover)."""
+    await _wipe_test_data()
+    yield
     await _wipe_test_data()
 
 
@@ -124,6 +126,7 @@ async def _crea_localita(codice: str, stazione: str, az_id: int) -> int:
     async with session_scope() as session:
         loc = LocalitaManutenzione(
             codice=codice,
+            codice_breve="TST",  # placeholder valido (^[A-Z]{2,8}$)
             nome_canonico=codice,
             stazione_collegata_codice=stazione,
             azienda_id=az_id,

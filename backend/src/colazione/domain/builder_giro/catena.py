@@ -29,6 +29,7 @@ giusto (Protocol ``_CorsaLike``).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import time
 from typing import Any, Protocol
@@ -101,7 +102,7 @@ def _attraversa_mezzanotte(corsa: _CorsaLike) -> bool:
 
 
 def _trova_prossima(
-    pool: list[_CorsaLike],
+    pool: Sequence[_CorsaLike],
     visitate: set[int],
     ultima: _CorsaLike,
     gap_min: int,
@@ -138,7 +139,7 @@ def _trova_prossima(
 
 
 def costruisci_catene(
-    corse: list[_CorsaLike],
+    corse: Sequence[_CorsaLike],
     params: ParamCatena = _DEFAULT_PARAM,
 ) -> list[Catena]:
     """Costruisce catene massimali greedy a partire dalla lista corse.

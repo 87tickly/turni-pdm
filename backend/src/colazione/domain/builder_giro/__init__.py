@@ -23,13 +23,21 @@ Sub-moduli:
   ``persisti_giri()`` async che scrive ``GiroMateriale + GiroGiornata
   + GiroVariante + GiroBlocco + CorsaMaterialeVuoto``. Solo INSERT,
   no commit (lo decide il caller).
-- `builder.py` (Sprint 4.4.5b, futuro) — loader DB + orchestrator +
-  endpoint API.
+- `builder.py` (Sprint 4.4.5b) — loader DB + orchestrator end-to-end
+  ``genera_giri()``. Endpoint API in ``api/giri.py``.
 
 Tutto è **DB-agnostic**: ricevi dataclass/oggetti, ritorni dataclass.
 La persistenza è in `api/` o CLI in `interfaces/`.
 """
 
+from colazione.domain.builder_giro.builder import (
+    BuilderResult,
+    GiriEsistentiError,
+    ProgrammaNonAttivoError,
+    ProgrammaNonTrovatoError,
+    StrictModeViolation,
+    genera_giri,
+)
 from colazione.domain.builder_giro.catena import (
     Catena,
     ParamCatena,
@@ -83,10 +91,12 @@ __all__ = [
     "AssegnazioneRisolta",
     "BloccoAssegnato",
     "BloccoMaterialeVuoto",
+    "BuilderResult",
     "Catena",
     "CatenaPosizionata",
     "CorsaResidua",
     "EventoComposizione",
+    "GiriEsistentiError",
     "Giro",
     "GiornataAssegnata",
     "GiornataGiro",
@@ -100,7 +110,10 @@ __all__ = [
     "ParamMultiGiornata",
     "ParamPosizionamento",
     "PosizionamentoImpossibileError",
+    "ProgrammaNonAttivoError",
+    "ProgrammaNonTrovatoError",
     "RegolaAmbiguaError",
+    "StrictModeViolation",
     "TipoEvento",
     "assegna_e_rileva_eventi",
     "assegna_materiali",
@@ -108,6 +121,7 @@ __all__ = [
     "costruisci_giri_multigiornata",
     "determina_giorno_tipo",
     "estrai_valore_corsa",
+    "genera_giri",
     "matches_all",
     "matches_filtro",
     "persisti_giri",

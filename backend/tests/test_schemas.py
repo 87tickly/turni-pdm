@@ -68,6 +68,7 @@ def test_localita_manutenzione_read_pool_esterno() -> None:
     lm = LocalitaManutenzione(
         id=7,
         codice="POOL_TILO_SVIZZERA",
+        codice_breve="TILO",
         nome_canonico="(Pool TILO - servizi Svizzera-Italia)",
         nomi_alternativi_json=[],
         stazione_collegata_codice=None,

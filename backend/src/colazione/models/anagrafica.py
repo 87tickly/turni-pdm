@@ -70,6 +70,10 @@ class LocalitaManutenzione(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     codice: Mapped[str] = mapped_column(String(80), unique=True)
+    # Codice breve (max 8 char, ^[A-Z]{2,8}$) usato per generare il
+    # `numero_turno` dei giri secondo convenzione `G-{LOC_BREVE}-{NNN}`.
+    # Aggiunto in migration 0006 (Sprint 4.4.5b).
+    codice_breve: Mapped[str] = mapped_column(String(8))
     nome_canonico: Mapped[str] = mapped_column(Text)
     nomi_alternativi_json: Mapped[list[Any]] = mapped_column(JSONB, default=list)
     stazione_collegata_codice: Mapped[str | None] = mapped_column(

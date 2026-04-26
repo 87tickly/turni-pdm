@@ -10,6 +10,162 @@
 
 ---
 
+## 2026-04-26 (25) — Sprint 4.4.5b: orchestrator + endpoint API + migration codice_breve
+
+### Contesto
+
+Sub finale 4.4.5b chiude tutto: loader DB → pipeline pure → persister
++ endpoint REST `POST /api/programmi/{id}/genera-giri`. Il builder
+ora è invocabile end-to-end. Migration 0006 introduce
+`LocalitaManutenzione.codice_breve` per la convenzione numerazione
+giri ARTURO `G-{LOC_BREVE}-{NNN}` (decisione utente, non copia di
+Trenord).
+
+### Modifiche
+
+**Nuova migration `0006_localita_codice_breve.py`**:
+- `ALTER TABLE localita_manutenzione ADD COLUMN codice_breve VARCHAR(8)`
+- Backfill 7 località Trenord: `IMPMAN_MILANO_FIORENZA → FIO`,
+  `IMPMAN_NOVATE → NOV`, `IMPMAN_CAMNAGO → CAM`, `IMPMAN_LECCO → LEC`,
+  `IMPMAN_CREMONA → CRE`, `IMPMAN_ISEO → ISE`, `POOL_TILO_SVIZZERA → TILO`
+- Constraint NOT NULL + format `^[A-Z]{2,8}$` + UNIQUE per azienda
+
+**Aggiornato `models/anagrafica.py`**: campo `codice_breve` mappato
+in `LocalitaManutenzione`. Aggiornati 2 call site test
+(`test_schemas.py`, `test_persister.py`).
+
+**Nuovo `backend/src/colazione/domain/builder_giro/builder.py`** (~430 righe):
+
+`genera_giri()` async end-to-end:
+1. Carica programma + regole + località + corse del periodo (loader).
+2. Per ogni data: filtra corse via `valido_in_date_json`,
+   `costruisci_catene()`, `posiziona_su_localita()` per la località.
+3. `costruisci_giri_multigiornata()` (cross-notte).
+4. `assegna_e_rileva_eventi()` (regole + composizione).
+5. `_check_strict_mode()` (no_corse_residue, no_giro_non_chiuso_a_localita).
+6. Genera `numero_turno = f"G-{LOC_BREVE}-{NNN}"`, persisti, commit.
+
+Errori espliciti: `ProgrammaNonTrovatoError`, `ProgrammaNonAttivoError`,
+`GiriEsistentiError`, `StrictModeViolation`. `_count_giri_esistenti`
++ `_wipe_giri_programma` per la rigenerazione `force=True`.
+
+**Refactor variance**: `costruisci_catene`, `risolvi_corsa`,
+`assegna_materiali`, `assegna_e_rileva_eventi` ora accettano
+`Sequence[...]` invece di `list[...]` per gestire covariance con i
+modelli ORM (es. `list[CorsaCommerciale]` ↔ `Sequence[_CorsaLike]`).
+Test esistenti restano verdi.
+
+**Nuovo `backend/src/colazione/api/giri.py`**:
+
+Endpoint `POST /api/programmi/{programma_id}/genera-giri` con query
+params `data_inizio`, `n_giornate` (1-180), `localita_codice`,
+`force`. Auth `PIANIFICATORE_GIRO` (admin bypassa). Mapping errori:
+
+| Eccezione | HTTP |
+|---|---|
+| `ProgrammaNonTrovatoError`, `LocalitaNonTrovataError` | 404 |
+| `ProgrammaNonAttivoError`, `StrictModeViolation`, `RegolaAmbiguaError` | 400 |
+| `GiriEsistentiError` | 409 |
+| Query validation (Pydantic) | 422 |
+
+Response `BuilderResultResponse`: stats (giri_ids, n_giri_creati,
+n_corse_processate, n_residue, n_chiusi, n_non_chiusi,
+n_eventi_composizione, n_incompatibilita_materiale, warnings).
+
+**Modifica `main.py`**: registrato `giri_routes.router`.
+**Modifica `__init__.py`**: re-export 6 nuovi simboli builder.
+
+### Decisioni di design
+
+- **Una località per chiamata**: niente euristica geografica
+  "località naturale". Endpoint riceve `localita_codice` obbligatorio.
+  Per 7 località → 7 chiamate distinte. Onesto, controllabile.
+- **`numero_turno` ARTURO**: convenzione `G-{LOC_BREVE}-{SEQ:03d}`
+  (es. `G-FIO-001`, `G-TILO-003`). Niente copia 11xx Trenord.
+  Estendibile in futuro con suffissi/prefissi.
+- **Wipe via metadata**: `_wipe_giri_programma` cancella i giri
+  filtrando su `generation_metadata_json->>'programma_id'`. Nessun
+  campo FK `programma_id` su `giro_materiale` (manteniamo schema
+  cleaner, la lookup metadata basta per ora).
+- **`Sequence` invece di `list`** nei pure modules: variance
+  corretta per accettare ORM (subtype strutturale dei Protocol).
+- **Anti-rigenerazione 409 senza `?force=true`**: protegge da
+  rigenerazioni accidentali quando arriverà l'editor giro UI.
+  Per ora niente edit manuali, ma la disciplina è già in place.
+- **`valido_in_date_json` = verità**: filtra corse coerentemente con
+  feedback utente (parser PdE segue letteralmente Periodicità).
+  Lista vuota → corsa inerte (non assegnata).
+
+### Test
+
+**`backend/tests/test_builder_giri.py`** (10 test integration, 0.33s):
+- Happy path 1 corsa → 1 giro con `numero_turno="G-TBLD-001"`
+- Errori 4: programma non trovato, località non trovata, programma
+  non attivo, n_giornate=0
+- Anti-rigenerazione: 409 senza force, force=true wipe e ricrea
+- Strict `no_corse_residue` viola → `StrictModeViolation`
+- Multi-giornata cross-notte: G1 cross-notte 23:30→00:30, G2 06:00
+  → 1 giro 2 giornate
+- Corse fuori finestra → 0 giri creati
+
+**`backend/tests/test_genera_giri_api.py`** (10 test API, 2.12s):
+- Auth (3): 401 senza token, admin OK, pianificatore OK
+- Errori 4xx (5): 404 programma, 404 località, 400 bozza, 409
+  giri esistenti, 422 n_giornate=0
+- Force=true OK
+- Response shape completa con stats sensati (1 giro, 2 corse, 0
+  residue, 1 chiuso)
+
+**Fix collaterali**:
+- Wipe pre+post-test (yield) in test_persister/test_builder_giri/
+  test_genera_giri_api per evitare FK leftover che rompevano
+  test_pde_importer_db nel run completo.
+- Ordine wipe FK-safe: `giro_materiale` (cascade) prima di
+  `corsa_materiale_vuoto`.
+- Stazioni create con `flush` prima della località
+  (FK constraint).
+
+### Verifiche
+
+- `pytest` con DB: **313 passed** in 9.4s (era 293, +20: 10 builder +
+  10 API)
+- `pytest` SKIP_DB_TESTS=1: **231 passed + 82 skipped** (era 231+62,
+  +20 nuovi DB skip)
+- `ruff check` + `format` ✓ (auto-format applicato)
+- `mypy strict`: no issues in **47 source files** (era 45, +2:
+  builder.py + api/giri.py)
+- `alembic upgrade head`: applica migration 0006 OK
+
+### Stato
+
+**Sprint 4.4 chiuso!** Builder giro materiale completo end-to-end:
+
+```
+POST /api/programmi/{id}/genera-giri
+  ↓
+loader DB (corse + regole + località)
+  ↓
+costruisci_catene → posiziona_su_localita →
+costruisci_giri_multigiornata → assegna_e_rileva_eventi
+  ↓
+persisti_giri (ORM transaction)
+  ↓
+BuilderResultResponse (stats + warnings)
+```
+
+5 moduli pure DB-agnostic + 1 persister + 1 orchestrator + 1 endpoint
++ migration 0006. 313 test verdi (231 puri + 82 DB integration).
+
+### Prossimo step
+
+**Sub 4.4.6** (smoke test reale): CLI o test integration su PdE
+Trenord vero (es. linea S5 settimana feriale). Verifica numeri
+ragionevoli (≈ N giri attesi, copertura, eventi composizione
+plausibili). Se i tempi superano 30s → valutiamo job in coda
+(promessa originale del piano).
+
+---
+
 ## 2026-04-26 (24) — Sprint 4.4.5a: persister (dominio → ORM)
 
 ### Contesto
