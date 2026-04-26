@@ -483,7 +483,7 @@ cp "/Users/spant87/Library/Mobile Documents/com~apple~Numbers/Documents/All.1A5_
 
 # 3) Importa nel DB (durata ~25-30s per 10580 corse)
 cd backend
-uv run python -m colazione.importers.pde \
+uv run python -m colazione.importers.pde_importer \
     --file "data/pde-input/All.1A5_14dic2025-12dic2026_TRENI e BUS_Rev5_RL.numbers" \
     --azienda trenord
 ```
@@ -524,7 +524,7 @@ Rilanciare lo stesso comando sullo stesso file:
 
 Per **forzare un re-import** (es. dopo bug fix nel parser):
 ```bash
-uv run python -m colazione.importers.pde --file ... --azienda trenord --force
+uv run python -m colazione.importers.pde_importer --file ... --azienda trenord --force
 ```
 
 ### 9.6 Aggiornare la fixture di test

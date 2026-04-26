@@ -10,6 +10,113 @@
 
 ---
 
+## 2026-04-26 (12) — FASE D Sprint 3.6: DB importer + idempotenza + CLI
+
+### Contesto
+
+Chiusura Sprint 3.6 del PIANO-MVP. Il parser PdE puro (Sprint 3.1-3.5)
+era pronto, mancava il pezzo che lo collega al DB:
+
+- Bulk insert su `corsa_commerciale` + `corsa_composizione` + upsert
+  dinamico delle `stazione` di cui non c'è seed
+- Idempotenza basata su SHA-256 del file (skip se già importato, salvo
+  `--force`)
+- CLI argparse con `--file`, `--azienda`, `--force`
+- Tracking dell'esecuzione in `corsa_import_run`
+
+Tutto in **una transazione unica** per atomicità (rollback completo
+in caso di errore).
+
+### Modifiche
+
+**Nuovo `backend/src/colazione/importers/pde_importer.py`** (~330 righe):
+
+- `compute_sha256(path)`: hash streaming in chunk da 64KB
+- `get_azienda_id(session, codice)`: risolve `codice` → `id`, solleva
+  ValueError se non esiste
+- `find_existing_run(session, hash, azienda_id)`: cerca run completato
+  con stesso hash; più recente prima
+- `collect_stazioni(parsed_rows, raw_rows)`: estrae `codice → nome`
+  dalle 4 colonne PdE (Origine, Destinazione, Inizio CdS, Fine CdS),
+  dedup, fallback a `codice` se nome vuoto
+- `upsert_stazioni(session, stazioni, azienda_id)`: bulk INSERT con
+  `ON CONFLICT (codice) DO NOTHING`
+- `_corsa_payload(parsed, azienda_id, run_id)`: mappa `CorsaParsedRow`
+  → 35 colonne `corsa_commerciale`
+- `_composizione_rows(corsa_id, parsed)`: 9 dict per insert
+- `upsert_corsa(session, parsed, azienda_id, run_id)`: SELECT esistente
+  per chiave `(azienda_id, numero_treno, valido_da)`; UPDATE+REPLACE
+  composizioni se trovata, INSERT+9 composizioni altrimenti
+- `importa_pde(file_path, azienda_codice, force=False)`: top-level
+  orchestrator a 5 step (hash+read fuori transazione, poi tutto in
+  `session_scope()`)
+- `main(argv)`: CLI argparse, exit code 0/1/2
+
+**`docs/IMPORT-PDE.md`**: aggiornato §9.2 + §9.5 — comando passa da
+`colazione.importers.pde` a `colazione.importers.pde_importer`. Il
+modulo `pde.py` resta il parser puro (decisione utente Sprint 3.5).
+
+**`backend/data/pde-input/README.md`**: stesso aggiornamento + nota
+su `--force`.
+
+### Test (24 nuovi: 14 unit + 10 integration)
+
+**`tests/test_pde_importer.py`** (14 unit, no DB):
+- `compute_sha256`: deterministico, sensibile al contenuto, vector
+  NIST FIPS 180-4 (`abc` → noto), streaming su file >64KB
+- `collect_stazioni`: dedup codici, first-name-wins, include CdS,
+  skip None, fallback a codice come nome
+- `_corsa_payload`: 13 chiavi NOT NULL presenti, Decimal preservato,
+  optional None passa come None (non missing)
+- `_composizione_rows`: 9 entry con corsa_id, attributi preservati
+
+**`tests/test_pde_importer_db.py`** (10 integration, DB-skipif):
+- Primo import: 38 corse, 342 composizioni, run completato (con
+  source_hash 64-char hex), stazioni create dinamicamente con FK
+  valide su tutte le 38 corse
+- Idempotenza: re-import = skip, run_id stesso, no duplicato di run
+- `--force`: 0 create + 38 update, run_id nuovo, 342 composizioni
+  preservate (replace non duplica), 2 run totali
+- Round-trip: treno 13 in DB ha tutti i campi attesi (rete=FN,
+  origine=S01066, gg_anno=365, valido_in_date len=383)
+- 9 composizioni del treno 13 con tutte le combinazioni stagione×giorno
+- Edge cases: azienda inesistente → ValueError, file mancante →
+  FileNotFoundError
+
+### Verifiche end-to-end manuali
+
+- `--help`: usage chiaro
+- File mancante → exit 2 + messaggio
+- Primo run sulla fixture: `✓ Run ID 37: 38 create, 0 update, 23 warning, 0.3s`
+- Re-run: `⊘ skip: file già importato (run 37 il 2026-04-26 09:26), 0.1s`
+- Re-run con `--force`: `✓ Run ID 38: 0 create, 38 update, 23 warning, 0.3s`
+
+### Verifiche CI
+
+- `pytest`: **106/106 verdi** (era 82, +24: 14 unit + 10 integration)
+- `ruff check` / `ruff format`: tutti verdi (52 file)
+- `mypy strict`: no issues in **36 source files** (era 35, +1
+  pde_importer.py)
+
+### Stato
+
+Sprint 3 chiuso (3.1-3.6). Importer PdE end-to-end funzionante:
+parser puro + DB + idempotenza + CLI. Pronto per importare il file
+Trenord reale (10580 corse) quando l'utente lo richiede.
+
+### Prossimo step
+
+PIANO-MVP §4 — fine Sprint 3 (Strato 1 LIV 1 popolato). Possibili
+successivi:
+
+- **Sprint 4** (Strato 2): builder giro materiale dal PdE — primo
+  pezzo di logica algoritmica nativa. Riferimento `docs/ALGORITMO-BUILDER.md`
+  + `docs/ARCHITETTURA-BUILDER-V4.md` (storici, da riadattare).
+- **Sprint extra**: import del file PdE Trenord reale (smoke test
+  performance: target <30s per 10580 corse).
+
+---
+
 ## 2026-04-26 (11) — Sprint 3 raffinamento: testo Periodicità = verità
 
 ### Contesto

@@ -25,12 +25,15 @@ cp "/Users/spant87/Library/Mobile Documents/com~apple~Numbers/Documents/All.1A5_
 
 # 3) Importa
 cd backend
-uv run python -m colazione.importers.pde \
+uv run python -m colazione.importers.pde_importer \
     --file "data/pde-input/All.1A5_14dic2025-12dic2026_TRENI e BUS_Rev5_RL.numbers" \
     --azienda trenord
 ```
 
 Atteso: ~25-30s, 10580 corse + 95220 composizioni nel DB.
+
+Per **forzare un re-import** (file già visto via SHA-256), aggiungi
+`--force` al comando.
 
 ## Verifica post-import
 
