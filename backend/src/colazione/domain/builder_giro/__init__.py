@@ -19,7 +19,12 @@ Sub-moduli:
 - `composizione.py` (Sprint 4.4.4) — assegnazione regole a ogni
   blocco corsa (chiama ``risolvi_corsa``) + rilevamento eventi
   ``aggancio``/``sgancio`` (delta numero_pezzi intra-giornata).
-- `builder.py` (Sprint 4.4.5, futuro) — orchestrator che persiste sul DB.
+- `persister.py` (Sprint 4.4.5a) — bridge dataclass dominio → ORM:
+  ``persisti_giri()`` async che scrive ``GiroMateriale + GiroGiornata
+  + GiroVariante + GiroBlocco + CorsaMaterialeVuoto``. Solo INSERT,
+  no commit (lo decide il caller).
+- `builder.py` (Sprint 4.4.5b, futuro) — loader DB + orchestrator +
+  endpoint API.
 
 Tutto è **DB-agnostic**: ricevi dataclass/oggetti, ritorni dataclass.
 La persistenza è in `api/` o CLI in `interfaces/`.
@@ -49,6 +54,12 @@ from colazione.domain.builder_giro.multi_giornata import (
     ParamMultiGiornata,
     costruisci_giri_multigiornata,
 )
+from colazione.domain.builder_giro.persister import (
+    PERSISTER_VERSION,
+    GiroDaPersistere,
+    LocalitaNonTrovataError,
+    persisti_giri,
+)
 from colazione.domain.builder_giro.posizionamento import (
     BloccoMaterialeVuoto,
     CatenaPosizionata,
@@ -68,6 +79,7 @@ from colazione.domain.builder_giro.risolvi_corsa import (
 )
 
 __all__ = [
+    "PERSISTER_VERSION",
     "AssegnazioneRisolta",
     "BloccoAssegnato",
     "BloccoMaterialeVuoto",
@@ -79,7 +91,9 @@ __all__ = [
     "GiornataAssegnata",
     "GiornataGiro",
     "GiroAssegnato",
+    "GiroDaPersistere",
     "IncompatibilitaMateriale",
+    "LocalitaNonTrovataError",
     "LocalitaSenzaStazioneError",
     "MotivoChiusura",
     "ParamCatena",
@@ -96,6 +110,7 @@ __all__ = [
     "estrai_valore_corsa",
     "matches_all",
     "matches_filtro",
+    "persisti_giri",
     "posiziona_su_localita",
     "rileva_eventi_composizione",
     "risolvi_corsa",

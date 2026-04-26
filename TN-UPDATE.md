@@ -10,6 +10,121 @@
 
 ---
 
+## 2026-04-26 (24) — Sprint 4.4.5a: persister (dominio → ORM)
+
+### Contesto
+
+Sprint 4.4.5 originario (orchestrator + persistenza + endpoint API)
+spezzato in **4.4.5a** (persister stupido, solo bridge dataclass→ORM)
+e **4.4.5b** (loader + endpoint + strict mode + migration codice_breve).
+Motivazione: due responsabilità diverse, due commit più digeribili e
+isolati. Decisioni di rigenerazione/finestra/numero_turno tutte in
+4.4.5b; il persister non sa nulla di convenzioni.
+
+### Modifiche
+
+**Nuovo `backend/src/colazione/domain/builder_giro/persister.py`** (~380 righe):
+
+Funzione async `persisti_giri(giri, session, programma_id, azienda_id)
+→ list[int]`. Mapping completo:
+
+- `GiroAssegnato` → `GiroMateriale` (con `tipo_materiale` denormalizzato
+  dal primo blocco assegnato, fallback `"MISTO"`; metadata di
+  tracciabilità in `generation_metadata_json`)
+- `GiornataAssegnata` → `GiroGiornata` + `GiroVariante` con
+  `validita_dates_apply_json=[data]` (istanze 1:1)
+- Sequenza blocchi: `vuoto_testa? → [evento_composizione? → corsa]* →
+  vuoto_coda?`
+- `BloccoMaterialeVuoto` testa/coda → `CorsaMaterialeVuoto`
+  (`numero_treno_vuoto = "V-{numero_turno}-{NNN}"`,
+  `origine="generato_da_giro_materiale"`) + `GiroBlocco materiale_vuoto`
+- `EventoComposizione` → `GiroBlocco aggancio`/`sgancio` con
+  `is_validato_utente=False` e `metadata_json` (pezzi_delta,
+  note_builder, stazione_proposta_originale, stazione_finale)
+- Corse → `GiroBlocco corsa_commerciale` (FK su corsa.id) con
+  `metadata_json` (materiale_tipo, numero_pezzi, regola_id)
+
+Errore esplicito `LocalitaNonTrovataError` se `localita_codice` non
+in anagrafica per l'azienda.
+
+**Modifica `__init__.py`**: re-export `PERSISTER_VERSION`,
+`GiroDaPersistere`, `LocalitaNonTrovataError`, `persisti_giri`.
+
+### Decisioni di design
+
+- **Solo INSERT, no commit**: il persister usa `session.add` +
+  `session.flush()` ma non committa. Il caller (4.4.5b) controlla la
+  transazione (rollback su errore complessivo).
+- **`numero_turno` parametro**: il persister non genera nomi. Riceve
+  `GiroDaPersistere(numero_turno, giro)`. La convenzione
+  `G-{LOC_BREVE}-{SEQ:03d}` la applica 4.4.5b.
+- **`tipo_materiale="MISTO"` placeholder**: se il giro è tutto in
+  `corse_residue` (zero blocchi assegnati) il TEXT NOT NULL deve
+  comunque avere un valore. Onesto: segnala anomalia senza fallire.
+- **Vuoto numerato per giro intero** (non per giornata): `seq_vuoto`
+  cresce attraverso le giornate. Es. giro 2-giornate con vuoto coda
+  G1 + vuoto testa G2 → `V-G-FIO-001-000` e `V-G-FIO-001-001`.
+- **`is_validato_utente=False` SOLO per aggancio/sgancio**: corse e
+  vuoti sono "dati", non proposte. Lo flag serve solo agli eventi
+  composizione che richiedono validazione manuale del pianificatore.
+- **`seq` blocco parte da 1**: vincolo schema `seq >= 1`.
+- **`generation_metadata_json` ricco**: `persister_version`,
+  `generato_at`, motivo_chiusura, n_corse_residue, ecc. Permette
+  audit/debug.
+
+### Test
+
+**`backend/tests/test_persister.py`** (12 test integration, 0.48s):
+
+- 2 casi base (lista vuota, 1 giro 1 corsa con verifica completa
+  ORM)
+- 1 errore `LocalitaNonTrovataError`
+- 2 vuoti (testa + coda separati, verifica `numero_treno_vuoto`
+  formato `V-...-NNN`)
+- 2 eventi composizione (aggancio +3, sequenza 3→6→3 con aggancio
+  + sgancio in ordine corretto)
+- 1 multi-giornata (2 giornate con dataset distinte)
+- 1 multi-giri (2 giri persistiti, ids distinti, numero_turno
+  preservato)
+- 1 edge case (giro senza blocchi assegnati → `tipo_materiale="MISTO"`)
+- 2 smoke (PERSISTER_VERSION, GiroDaPersistere dataclass)
+
+Setup test: stazioni `S99NNN` (formato vincolo `^S\d+$`), località
+`TEST_LOC_*`, corse `TEST_*`. Wipe autouse. Fixture `azienda_id`
+recupera dinamicamente l'id Trenord dal seed (sequence può variare).
+
+### Verifiche
+
+- `pytest` con DB: **293 passed** (era 231 puri + 50 skip; ora 12
+  nuovi DB attivi → 231+62 quando SKIP_DB_TESTS=1)
+- `ruff check` + `format` ✓ (auto-format applicato)
+- `mypy strict`: no issues in **45 source files** (era 44, +1
+  persister.py)
+
+### Stato
+
+Sub 4.4.5a chiuso. Persister bridge dataclass dominio → ORM testato
+end-to-end con DB reale. Pipeline pure → ORM ora invocabile in 4.4.5b.
+
+### Prossimo step
+
+Sub 4.4.5b: orchestrator + endpoint API.
+
+1. Migration 0006: aggiungi `LocalitaManutenzione.codice_breve
+   VARCHAR(8) NOT NULL` + backfill per le 7 località Trenord (FIO,
+   NOV, CAM, LEC, CRE, ISE, TILO).
+2. Loader: dato `programma_id` + `data_inizio` + `n_giornate`, carica
+   corse/dotazione/regole dal DB → dataclass dominio.
+3. Orchestrator: pipeline pure (catene → posiziona → multi-giornata
+   → assegna+eventi) + chiama `persisti_giri()`.
+4. Generazione `numero_turno`: `G-{LOC_BREVE}-{SEQ:03d}` con seq
+   per (programma_id, località).
+5. Endpoint `POST /api/programmi/{id}/genera-giri?data_inizio=...&n_giornate=...`.
+6. Strict mode handling: 409 se programma ha già giri (no `?force=true`),
+   400 se `no_corse_residue=true` violato, ecc.
+
+---
+
 ## 2026-04-26 (23) — Sprint 4.4.4: assegnazione regole + eventi composizione
 
 ### Contesto
