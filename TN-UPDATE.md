@@ -10,6 +10,103 @@
 
 ---
 
+## 2026-04-26 (18) — Sprint 4.2: risolvi_corsa (funzione pura)
+
+### Contesto
+
+Sub 4.1 ha definito schema + modelli + validation Pydantic dei
+filtri. Ora il pezzo algoritmico centrale: una funzione **pura**
+(no DB, no I/O) che data una corsa + le regole di un programma +
+una data, ritorna l'assegnazione vincente. È il cuore del builder
+giro materiale di Sub 4.4.
+
+### Modifiche
+
+**Nuovo `backend/src/colazione/domain/builder_giro/risolvi_corsa.py`**:
+
+- `AssegnazioneRisolta` (frozen dataclass): `regola_id`,
+  `materiale_tipo_codice`, `numero_pezzi`.
+- `RegolaAmbiguaError`: con `corsa_id` + `regole_ids`, sollevato se
+  top-2 regole hanno stesse priorità + specificità.
+- `determina_giorno_tipo(d: date) → str`: festività italiane via
+  `holidays.italian_holidays`, weekend, feriale.
+- `estrai_valore_corsa(campo, corsa, giorno_tipo)`: dispatch sui
+  campi (giorno_tipo, fascia_oraria, getattr per gli altri).
+- `_parse_time_str`: HH:MM o HH:MM:SS → `time`.
+- `matches_filtro(filtro, corsa, giorno_tipo)`: dispatcher per i 5
+  operatori (eq, in, between, gte, lte). Per `fascia_oraria` parsa
+  i valori filtro (stringhe) in `time` per il confronto.
+- `matches_all(filtri, corsa, giorno_tipo)`: AND su tutti i filtri.
+  Lista vuota → matcha tutto (regola fallback).
+- `risolvi_corsa(corsa, regole, data)`: orchestrator. Filtra,
+  ordina per `(priorita DESC, specificita DESC)`, detect ambiguità
+  top-2, ritorna `AssegnazioneRisolta` o `None`.
+
+**Nuovo `backend/src/colazione/domain/builder_giro/__init__.py`**:
+re-export delle 7 funzioni/classi pubbliche.
+
+### Decisioni di design
+
+- **Tipo del parametro `corsa`**: `Any` (lazy duck-typing). I campi
+  richiesti dipendono dai filtri usati nelle regole. Il chiamante
+  passa ORM o dataclass, l'importante è che abbia gli attributi
+  giusti (vedi `CAMPI_AMMESSI` in `schemas/programmi.py`).
+- **Tipo del parametro `regole`**: `list[_RegolaLike]` con Protocol.
+  Niente lazy-load ORM: il builder carica le regole una volta per
+  programma, poi le passa.
+- **Specificità = `len(filtri_json)`**: numero di condizioni AND.
+  Tie-break naturale tra regole con stessa priorità.
+- **`fascia_oraria` con stringhe**: i valori filtro arrivano come
+  stringhe `"HH:MM"` da JSONB; `corsa.ora_partenza` è `time`.
+  Parsa solo per `fascia_oraria` per restare type-safe sugli altri
+  campi.
+- **`bool` cast esplicito** sui ritorni di `matches_filtro` per non
+  far indurre mypy a `bool | Any`.
+
+### Test
+
+**`backend/tests/test_risolvi_corsa.py`** (41 test puri, 0.03s):
+
+- 9 test `determina_giorno_tipo` (capodanno, Natale, 25 aprile,
+  Pasqua/Pasquetta, sabato/domenica/lunedì/venerdì normali)
+- 4 test `estrai_valore_corsa` (giorno_tipo, fascia_oraria,
+  codice_linea, bool)
+- 3 test `matches_filtro eq` (string match, no-match, bool)
+- 3 test `matches_filtro in` (categoria match/no-match, giorno_tipo)
+- 5 test `matches_filtro` con `fascia_oraria` (between dentro range,
+  estremi inclusi, fuori, gte, lte)
+- 1 test op sconosciuto raises
+- 3 test `matches_all` (lista vuota, tutti match, uno falso)
+- 13 test `risolvi_corsa`: nessuna regola, una regola match/no,
+  fallback vuoti, priorità più alta vince, specificità tie-break,
+  ambiguità (raises), ambiguità ignora terza, priorità diverse no
+  ambiguità, esempi Trenord realistici (S5 mattina/pomeriggio/
+  weekend, treno specifico vince su linea)
+
+Le 3 fixture dataclass `FakeCorsa` e `FakeRegola` simulano gli ORM
+con i campi minimi.
+
+### Verifiche
+
+- `pytest`: **185/185 verdi** (era 144, +41 nuovi)
+- `ruff check` + `format`: tutti verdi
+- `mypy strict`: no issues in **39 source files** (era 38, +1
+  risolvi_corsa.py)
+
+### Stato
+
+Sub 4.2 chiuso. Algoritmo di risoluzione corsa pronto, isolato dal
+DB, testato in profondità. Pronto per essere usato dal builder
+multi-giornata di Sub 4.4.
+
+### Prossimo step
+
+Sub 4.3: API REST CRUD per `programma_materiale` + regole. Il
+pianificatore deve poter creare/modificare programmi via UI (quando
+arriva).
+
+---
+
 ## 2026-04-26 (17) — Sprint 4.1: schema DB + modelli SQLAlchemy + Pydantic
 
 ### Contesto
