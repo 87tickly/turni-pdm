@@ -1,9 +1,12 @@
-"""Smoke test schemas Pydantic (Sprint 1.8).
+"""Smoke test schemas Pydantic (Sprint 1.8, aggiornato Sprint 4.1).
 
 Verifica:
-- I 31 schemi `Read` si importano da `colazione.schemas`
+- Gli schemi si importano da `colazione.schemas`
 - Parsing da dict fixture (input tipico API request/response body)
 - Parsing da modello ORM in memoria (path FastAPI route → response)
+
+Conteggio: 31 (Read base v0.5) + 7 (Sprint 4.1: FiltroRegola,
+StrictOptions, 2 Read + 2 Create + 1 Update per programma) = 38.
 """
 
 from datetime import UTC, date, datetime, time
@@ -15,7 +18,7 @@ from colazione.models.corse import CorsaCommerciale
 from colazione.schemas.anagrafica import AziendaRead, LocalitaManutenzioneRead
 from colazione.schemas.corse import CorsaCommercialeRead
 
-EXPECTED_SCHEMA_COUNT = 31
+EXPECTED_SCHEMA_COUNT = 38
 
 
 def test_schemas_all_exported() -> None:

@@ -10,6 +10,101 @@
 
 ---
 
+## 2026-04-26 (17) — Sprint 4.1: schema DB + modelli SQLAlchemy + Pydantic
+
+### Contesto
+
+Doc PROGRAMMA-MATERIALE.md v0.2 validato dall'utente ("iniziamo con
+questo schema per ora poi vediamo se modificare qualcosa"). Procedo
+con l'implementazione del modello dati: migration 0005 + modelli
+ORM + schemi Pydantic con validazione robusta dei filtri.
+
+### Modifiche
+
+**`backend/alembic/versions/0005_programma_materiale.py`** (nuova):
+- `CREATE TABLE programma_materiale` (14 colonne, 5 check constraint,
+  3 indici)
+- `CREATE TABLE programma_regola_assegnazione` (8 colonne, 2 check,
+  3 indici inclusi GIN su `filtri_json`)
+- ALTER `giro_blocco`: aggiunti `is_validato_utente BOOLEAN` e
+  `metadata_json JSONB`. Estesi i constraint
+  `giro_blocco_tipo_check` e `giro_blocco_link_coerente` per
+  ammettere `'aggancio'` e `'sgancio'` (pre-condizione per Sprint
+  4.4 builder che li produrrà).
+
+**`backend/src/colazione/models/programmi.py`** (nuovo):
+- `ProgrammaMateriale` (14 campi mappati)
+- `ProgrammaRegolaAssegnazione` (con `filtri_json` JSONB)
+
+**`backend/src/colazione/models/giri.py`**: aggiunti `is_validato_utente`
+e `metadata_json` su `GiroBlocco` (import `Boolean` da SQLAlchemy).
+
+**`backend/src/colazione/schemas/programmi.py`** (nuovo, ~250 righe):
+
+Validazione robusta dei filtri tramite la classe `FiltroRegola`:
+- 11 campi ammessi (`CAMPI_AMMESSI`): codice_linea, direttrice,
+  categoria, numero_treno, rete, codice_origine, codice_destinazione,
+  is_treno_garantito_feriale/festivo, fascia_oraria, giorno_tipo
+- 5 operatori (`OP_AMMESSI`): eq, in, between, gte, lte
+- Compatibilità campo×op (`_CAMPO_OP_COMPATIBILI`):
+  - bool: solo `eq`
+  - fascia_oraria: solo between/gte/lte
+  - stringhe: eq/in
+- Shape valore coerente con op:
+  - `eq/gte/lte` → scalare
+  - `in` → lista non vuota
+  - `between` → lista di esattamente 2
+- Validazione semantica:
+  - `giorno_tipo` valori in {feriale, sabato, festivo}
+  - `fascia_oraria` parsabile come HH:MM o HH:MM:SS
+
+`StrictOptions` (6 flag bool default false). `ProgrammaMaterialeCreate`
+(con regole nested), `ProgrammaMaterialeUpdate`, schemi `Read` ORM-
+ready.
+
+### Test
+
+**`backend/tests/test_programmi.py`** (nuovo, 31 test):
+
+- 6 casi positivi `FiltroRegola` (linea, categoria, fascia,
+  giorno_tipo, bool)
+- 9 casi negativi (campo non ammesso, op non ammesso, op
+  incompatibile, eq con lista, in vuoto, between con 1 solo
+  elemento, giorno_tipo "domenica", fascia formato errato, extra
+  field)
+- 3 test `StrictOptions` (default, personalizzata, extra field)
+- 5 test `ProgrammaMaterialeCreate` (minimo, validità invertita,
+  stagione invalida, regole nested, propagazione errori filtri)
+- 2 test `ProgrammaRegolaAssegnazioneCreate` (numero_pezzi=0,
+  priorita>100)
+- 6 test ORM smoke (registrazione metadata, columns attese,
+  istanziabilità, GiroBlocco ha nuovi campi)
+
+**`backend/tests/test_models.py`**: `EXPECTED_TABLE_COUNT` 31 → 33.
+**`backend/tests/test_schemas.py`**: `EXPECTED_SCHEMA_COUNT` 31 → 38.
+
+### Verifiche
+
+- `alembic upgrade head` applicato OK (migration `c4f7a92b1e30 →
+  a8e2f57d4c91`)
+- `pytest`: **144/144 verdi** (era 113, +31 test programmi)
+- `ruff check` + `ruff format`: tutti verdi
+- `mypy strict`: no issues in **38 source files** (era 36, +2:
+  models/programmi + schemas/programmi)
+
+### Stato
+
+Sub 4.1 chiuso. Schema dati + ORM + validazione filtri pronti per
+l'algoritmo `risolvi_corsa` di Sub 4.2.
+
+### Prossimo step
+
+Sub 4.2: funzione pura `risolvi_corsa(corsa, programma, data) →
+AssegnazioneRisolta | None` in `domain/builder_giro/`. Tests puri,
+no DB.
+
+---
+
 ## 2026-04-26 (16) — Sprint 4.0 v0.2: refinement post-feedback utente
 
 ### Contesto

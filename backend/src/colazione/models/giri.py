@@ -13,6 +13,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
@@ -133,3 +134,9 @@ class GiroBlocco(Base):
     ora_inizio: Mapped[time | None] = mapped_column(Time)
     ora_fine: Mapped[time | None] = mapped_column(Time)
     descrizione: Mapped[str | None] = mapped_column(Text)
+    # Sprint 4.1: per blocchi 'aggancio'/'sgancio' proposti dal builder,
+    # `is_validato_utente=False` finché il pianificatore non conferma in
+    # editor giro. `metadata_json` contiene es. {pezzi_delta: 3,
+    # note_builder: "...", stazione_proposta_originale: "S01066"}.
+    is_validato_utente: Mapped[bool] = mapped_column(Boolean, default=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)

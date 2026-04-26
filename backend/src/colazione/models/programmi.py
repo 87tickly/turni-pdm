@@ -1,0 +1,100 @@
+"""Strato 1bis — programma materiale (input umano del pianificatore).
+
+Definito in `docs/PROGRAMMA-MATERIALE.md` v0.2 (Sprint 4.0). Il
+programma materiale è il registro autorevole delle scelte di
+programmazione del pianificatore: per ogni gruppo di corse PdE
+(filtrate per linea/direttrice/categoria/orario/giorno_tipo/...),
+quale rotabile usare e in quante quantità.
+
+Multi-tenant: ogni `azienda` può avere più programmi (per stagione,
+periodo, ecc.). Solo i programmi `attivo` sono usati dall'algoritmo
+A (PdE → Giro Materiale).
+"""
+
+from datetime import date, datetime
+from typing import Any
+
+from sqlalchemy import (
+    BigInteger,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
+from colazione.db import Base
+
+
+class ProgrammaMateriale(Base):
+    """Intestazione del programma materiale per una azienda + finestra.
+
+    Container di N `ProgrammaRegolaAssegnazione`. Lo stato `bozza` →
+    editing, `attivo` → usato dall'algoritmo, `archiviato` → solo storico.
+    """
+
+    __tablename__ = "programma_materiale"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    azienda_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("azienda.id", ondelete="RESTRICT")
+    )
+
+    nome: Mapped[str] = mapped_column(Text)
+    stagione: Mapped[str | None] = mapped_column(String(20))
+    valido_da: Mapped[date] = mapped_column(Date)
+    valido_a: Mapped[date] = mapped_column(Date)
+    stato: Mapped[str] = mapped_column(String(20), default="bozza")
+
+    # Parametri globali
+    km_max_giornaliero: Mapped[int | None] = mapped_column(Integer)
+    n_giornate_default: Mapped[int] = mapped_column(Integer, default=1)
+    fascia_oraria_tolerance_min: Mapped[int] = mapped_column(Integer, default=30)
+
+    # Strict mode granulare (vedi PROGRAMMA-MATERIALE.md §2.7)
+    strict_options_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+
+    # Tracking
+    created_by_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("app_user.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProgrammaRegolaAssegnazione(Base):
+    """Singola regola di assegnazione: filtri AND → (tipo, n_pezzi).
+
+    Una regola matcha una corsa se TUTTI i filtri in `filtri_json`
+    sono soddisfatti. Vedi `risolvi_corsa()` in `domain/builder_giro/`
+    per l'algoritmo (Sprint 4.2).
+
+    Schema `filtri_json`:
+        [
+          {"campo": "codice_linea", "op": "eq", "valore": "S5"},
+          {"campo": "fascia_oraria", "op": "between", "valore": ["04:00", "15:59"]},
+          {"campo": "giorno_tipo", "op": "in", "valore": ["feriale"]}
+        ]
+
+    Validazione applicativa via Pydantic in `schemas/programmi.py`.
+    """
+
+    __tablename__ = "programma_regola_assegnazione"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    programma_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("programma_materiale.id", ondelete="CASCADE")
+    )
+
+    filtri_json: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+
+    materiale_tipo_codice: Mapped[str] = mapped_column(
+        String(50), ForeignKey("materiale_tipo.codice", ondelete="RESTRICT")
+    )
+    numero_pezzi: Mapped[int] = mapped_column(Integer)
+
+    priorita: Mapped[int] = mapped_column(Integer, default=60)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

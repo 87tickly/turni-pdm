@@ -51,6 +51,10 @@ from colazione.models.personale import (
     IndisponibilitaPersona,
     Persona,
 )
+from colazione.models.programmi import (
+    ProgrammaMateriale,
+    ProgrammaRegolaAssegnazione,
+)
 from colazione.models.revisioni import (
     RevisioneProvvisoria,
     RevisioneProvvisoriaBlocco,
@@ -96,6 +100,9 @@ __all__ = [
     "AssegnazioneGiornata",
     "IndisponibilitaPersona",
     "Persona",
+    # Strato 1bis — programma materiale (input umano del pianificatore)
+    "ProgrammaMateriale",
+    "ProgrammaRegolaAssegnazione",
     # Strato 5 — auth + audit
     "AppUser",
     "AppUserRuolo",

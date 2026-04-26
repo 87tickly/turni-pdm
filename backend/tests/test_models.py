@@ -1,10 +1,12 @@
-"""Smoke test dei modelli ORM (Sprint 1.7).
+"""Smoke test dei modelli ORM (Sprint 1.7, aggiornato Sprint 4.1).
 
 Verifica:
-- Tutti i 31 modelli si importano senza errori
+- Tutti i modelli si importano senza errori
 - Si registrano sul `Base.metadata`
 - Ogni nome tabella ORM corrisponde a una tabella reale del DB
-  (creata da migrazione 0001)
+
+Conteggio: 31 (modello v0.5 base) + 2 (Sprint 4.1: ProgrammaMateriale,
+ProgrammaRegolaAssegnazione) = 33.
 """
 
 import os
@@ -15,7 +17,7 @@ from sqlalchemy import text
 from colazione import models
 from colazione.db import Base, session_scope
 
-EXPECTED_TABLE_COUNT = 31
+EXPECTED_TABLE_COUNT = 33
 
 
 def _db_available() -> bool:

@@ -57,6 +57,15 @@ from colazione.schemas.personale import (
     IndisponibilitaPersonaRead,
     PersonaRead,
 )
+from colazione.schemas.programmi import (
+    FiltroRegola,
+    ProgrammaMaterialeCreate,
+    ProgrammaMaterialeRead,
+    ProgrammaMaterialeUpdate,
+    ProgrammaRegolaAssegnazioneCreate,
+    ProgrammaRegolaAssegnazioneRead,
+    StrictOptions,
+)
 from colazione.schemas.revisioni import (
     RevisioneProvvisoriaBloccoRead,
     RevisioneProvvisoriaPdcRead,
@@ -102,6 +111,14 @@ __all__ = [
     "AssegnazioneGiornataRead",
     "IndisponibilitaPersonaRead",
     "PersonaRead",
+    # Strato 1bis — programma materiale (input umano del pianificatore)
+    "FiltroRegola",
+    "ProgrammaMaterialeCreate",
+    "ProgrammaMaterialeRead",
+    "ProgrammaMaterialeUpdate",
+    "ProgrammaRegolaAssegnazioneCreate",
+    "ProgrammaRegolaAssegnazioneRead",
+    "StrictOptions",
     # Strato 5 — auth + audit
     "AppUserRead",
     "AppUserRuoloRead",
