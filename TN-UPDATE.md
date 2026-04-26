@@ -10,6 +10,75 @@
 
 ---
 
+## 2026-04-26 (16) — Sprint 4.0 v0.2: refinement post-feedback utente
+
+### Contesto
+
+L'utente ha letto v0.1 e dato 5 risposte mirate che richiedono
+modifiche significative al modello dati prima di procedere a SQL.
+
+### Risposte utente → modifiche al doc
+
+1. *"Metti più info possibili"* (scope estesi)
+   → §2.3: il modello passa da `scope_tipo` enum a **lista di filtri
+   AND** estendibile su 12+ campi (codice_linea, direttrice,
+   categoria, numero_treno, rete, codice_origine, codice_destinazione,
+   is_treno_garantito_feriale/festivo, fascia_oraria, giorno_tipo,
+   valido_in_data). Schema SQL: `filtri_json JSONB` con index GIN.
+
+3. *"Aggancio/sgancio: la decisione deve avvenire manualmente, il
+   sistema può dire 'questo dovrebbe agganciare'"*
+   → §5.2: il builder PROPONE stazione candidata, l'utente DECIDE.
+   Aggiunto campo `is_validato_utente` su `giro_blocco`. Strict
+   flag `no_aggancio_non_validato` blocca pubblicazione se ci sono
+   eventi non confermati.
+
+4. *"La fascia oraria è indicativa, non rigida"*
+   → §2.4: il modello tiene fasce esatte, ma il builder ragiona
+   morbido sulle borderline. Parametro `fascia_oraria_tolerance_min`
+   sul programma (default 30 min). Corse entro tolleranza generano
+   note "borderline" che il pianificatore valuta.
+
+5. *"Voglio molto più granularità per strict mode"*
+   → §2.7 + §6.8: passa da flag globale a JSONB `strict_options_json`
+   con 6 flag indipendenti (no_corse_residue, no_overcapacity,
+   no_aggancio_non_validato, no_orphan_blocks,
+   no_giro_non_chiuso_a_localita, no_km_eccesso). Editing tutto
+   false (tolerant), pre-pubblicazione tutto true (strict).
+
+6. *"Multi-giornata cross-notte: B (subito), inutile fare A poi
+   lavorare per B"*
+   → §6.7: il builder gestisce da subito giri che attraversano la
+   notte. `n_giornate_default` sul programma + 3 criteri di
+   chiusura giro (rientro a località, n giornate raggiunte, km
+   superati).
+
+### Modifiche al doc PROGRAMMA-MATERIALE.md
+
+Versione v0.2 — riscrittura sezioni:
+- §2.2-2.3 nuova ontologia "regola = lista di filtri AND"
+- §2.4 fasce indicative + tolerance
+- §2.7 strict_options_json granulare (sostituisce strict_mode bool)
+- §3.1 nuovo schema SQL con filtri_json + tolerance + JSONB strict
+- §3.2 schema dei filtri (Pydantic-validable)
+- §4.1 algoritmo risolvi_corsa con matches_all + RegolaAmbiguaError
+- §5 aggancio/sgancio con stazione_proposta + is_validato_utente
+- §6.7 multi-giornata cross-notte come prima cittadina
+- §7 6 esempi reali (era 4)
+
+### Stato
+
+- [x] Doc v0.2 scritto
+- [ ] Validazione utente sulle 5 modifiche (in corso)
+- [ ] Sub 4.1: migration 0005 + modello SQLAlchemy
+
+### Prossimo step
+
+Conferma utente che il v0.2 è coerente con la sua visione →
+parte 4.1.
+
+---
+
 ## 2026-04-26 (15) — Sprint 4.0: disegno PROGRAMMA-MATERIALE
 
 ### Contesto
