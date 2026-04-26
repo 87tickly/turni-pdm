@@ -10,6 +10,95 @@
 
 ---
 
+## 2026-04-26 (15) — Sprint 4.0: disegno PROGRAMMA-MATERIALE
+
+### Contesto
+
+Diagnosi pre-Sprint 4 (builder giro materiale). Letti documenti
+storici `ALGORITMO-BUILDER.md` e `ARCHITETTURA-BUILDER-V4.md`:
+risultano essere sul **builder PdC**, non giro materiale. Il
+documento corretto per Sprint 4 è `LOGICA-COSTRUZIONE.md` §3
+(Algoritmo A: PdE → Giro Materiale).
+
+**Trovato bloccante critico**: il vincolo §3.3.4 dell'algoritmo dice
+"tutti i blocchi del giro condividono lo stesso tipo materiale".
+Per applicarlo serve il mapping `corsa → tipo_materiale`. Verifica
+empirica sul file Trenord 2025-2026 reale: **27 colonne** del PdE
+relative al tipo rotabile (`Tipologia Treno × 9`,
+`CATEGORIA POSTI × 9`, `VINCOLO × 9`) sono **completamente vuote**
+(0 righe popolate su 10579). Il PdE Trenord non specifica il
+rotabile.
+
+### Decisione architetturale (utente, esplicita)
+
+> *"Prendere dal turno materiale solo il materiale rotabile che oggi
+> Trenord utilizza, e in fase di programmazione inserire noi i dati,
+> ovvero quanti km, che tipo di materiale per quella tratta. Questo
+> genera un algoritmo tutto nostro, non siamo vittime di copia e
+> incolla."*
+
+Il paradigma cambia da **"PdE → Algoritmo → Giri"** a **"PdE +
+Programma Materiale (input umano) → Algoritmo → Giri"**. COLAZIONE
+diventa lo strumento di programmazione vero, non un parser dei
+sistemi Trenord. Multi-tenant: ogni azienda compila il suo
+programma.
+
+### Modifiche
+
+**Nuovo `docs/PROGRAMMA-MATERIALE.md`** (draft v0.1, ~600 righe):
+
+- **Visione**: programma materiale come registro autorevole delle
+  scelte di programmazione del pianificatore. Versione fungibile
+  prima (quantità per tipo), individuale poi (matricola per pezzo,
+  obbligatoria in futuro per integrazione manutenzione).
+- **Concetti**: programma + regola_assegnazione con scope
+  (direttrice/codice_linea/categoria_linea/corsa_specifica) +
+  filtri (fascia oraria, giorno_tipo) + assegnazione (tipo,
+  numero_pezzi).
+- **Modello dati v0.1**: 2 tabelle nuove (`programma_materiale`,
+  `programma_regola_assegnazione`), DDL completo con check
+  constraint e indici.
+- **Risoluzione corsa**: funzione pura `risolvi_corsa(corsa, prog,
+  data) → AssegnazioneRisolta | None` con priorità + tie-break per
+  specificità.
+- **Composizione dinamica** (cit. utente: "ALe711 in singola fino
+  alle 16, poi aggancia 3 pezzi per fascia pendolare"): emerge
+  naturalmente dalla sovrapposizione di regole con fasce orarie
+  diverse. Algoritmo di rilevamento delta `+N`/`-N` → eventi
+  `aggancio`/`sgancio` come `tipo_blocco`.
+- **Edge case**: sovrapposizione regole, strict_mode, capacità
+  dotazione, programmi sovrapposti, materiale non in dotazione.
+- **Esempi reali Trenord**: 4 casi (S5 cambio fascia, TILO
+  Svizzera, treno specifico, default categoria).
+- **Versione individuale** (futura): anticipo modello `rotabile_individuale`
+  + tabella di link, migrazione graduale fungibile→individuale via
+  campo opzionale `assegnazione_individuale_json` su `giro_blocco`.
+
+### Decisioni architetturali prese in questo doc (da validare)
+
+1. **Scope tipo enum** con 4 valori: `direttrice`, `codice_linea`,
+   `categoria_linea`, `corsa_specifica`.
+2. **Priorità numerica** (0-100) con default suggeriti per scope
+   tipo. Pianificatore può forzare manualmente.
+3. **Tie-break su specificità** (numero filtri attivi).
+4. **Corsa di confine fascia oraria**: la **partenza** decide
+   (semplificazione realistica).
+5. **Strict mode globale al programma** (non per regola).
+
+### Stato
+
+- [x] Doc v0.1 scritto
+- [ ] Validazione utente
+- [ ] Sub 4.1: migration 0005 + modello SQLAlchemy
+- [ ] Sub 4.2-4.5: implementazione
+
+### Prossimo step
+
+Feedback utente sulle 5 decisioni architetturali sopra. Poi parto
+con migration 0005.
+
+---
+
 ## 2026-04-26 (14) — Sprint 3.7.2-3.7.3: bulk INSERT + quick wins
 
 ### Contesto
