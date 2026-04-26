@@ -10,6 +10,106 @@
 
 ---
 
+## 2026-04-26 (22) — Sprint 4.4.3: multi-giornata cross-notte
+
+### Contesto
+
+Sub 4.4.2 produce `CatenaPosizionata` chiuse o aperte
+(`chiusa_a_localita=True/False`). Sub 4.4.3 le concatena in **giri
+multi-giornata** che attraversano la mezzanotte senza tornare in
+deposito (decisione utente "B subito" su PROGRAMMA-MATERIALE.md
+§6.7).
+
+### Modifiche
+
+**Nuovo `backend/src/colazione/domain/builder_giro/multi_giornata.py`**:
+
+- `MotivoChiusura` (`Literal['naturale', 'max_giornate', 'non_chiuso']`).
+- `ParamMultiGiornata` (frozen): `n_giornate_max=5` (default ciclo
+  Trenord 5+2). Singleton `_DEFAULT_PARAM`.
+- `GiornataGiro` (frozen): `data + catena_posizionata`.
+- `Giro` (frozen): `localita_codice + giornate (tuple) + chiuso +
+  motivo_chiusura`. Output dominio (DB-agnostic). Mapperà su ORM
+  `GiroMateriale + GiroGiornata + GiroVariante + GiroBlocco` in 4.4.5.
+- `costruisci_giri_multigiornata(catene_per_data, params) → list[Giro]`:
+  itera date in ordine, per ogni catena non visitata avvia un giro,
+  estende cross-notte cercando catene nella data successiva (stessa
+  località + prima corsa parte da staz_arrivo dell'ultima corsa).
+
+**Algoritmo**:
+
+1. Iterazione date crono.
+2. Per ogni catena non visitata → nuovo giro.
+3. Estensione: continua finché ultima giornata non chiude E sotto
+   `n_giornate_max` E esiste catena in data+1 con stessa località e
+   prima corsa origine = arrivo precedente.
+4. Tie-break continuazioni: prima per `ora_partenza`.
+5. Determina `motivo_chiusura`: naturale | max_giornate | non_chiuso.
+
+**Modifica `__init__.py`**: re-export 5 nuovi simboli (Giro,
+GiornataGiro, MotivoChiusura, ParamMultiGiornata,
+costruisci_giri_multigiornata).
+
+### Decisioni di design
+
+- **Naming `Giro` (non `GiroMateriale`)**: evita collisione con ORM
+  `models.giri.GiroMateriale`. Nel dominio è la dataclass pure;
+  4.4.5 farà la traduzione esplicita.
+- **Vincolo "stessa località" rigido per la continuazione**: lo
+  stesso convoglio fisico non passa di mano tra località diverse
+  cross-notte. Anche se geografia matcha, località diversa = giri
+  separati.
+- **Niente check km_max_giornaliero**: il dato non è ancora cablato
+  nelle dataclass dominio (le `FakeCorsa` di test non hanno km).
+  Sarà aggiunto in 4.4.4/4.4.5 quando il builder lavorerà sui
+  metadati ORM. Onesto: meglio non check parziale.
+- **Niente normativa-aware**: non leggiamo `holidays.py` qui per
+  determinare `giorno_tipo`. Quel lavoro è in 4.4.4
+  (assegnazione regole) — la `data` di una `GiornataGiro` è
+  sufficiente per derivare il giorno_tipo on-demand.
+- **Sort delle catene per ora di prima partenza**: determinismo +
+  euristica FIFO (i convogli che entrano in servizio prima vengono
+  processati prima).
+
+### Test
+
+**`backend/tests/test_multi_giornata.py`** (17 test puri, 0.02s):
+
+- 3 casi base (mappa vuota, 1 catena chiusa, 1 catena non chiusa)
+- 4 cross-notte (legate, mancante = appeso, località diverse,
+  3-giornate)
+- 2 forza chiusura (cap=2 con 3 giornate, cap=1)
+- 2 tie-break + determinismo
+- 1 date non contigue (salto giorno → appeso)
+- 4 frozen dataclass + default param
+- 1 esempio realistico (ciclo 5 giornate Lun-Ven Trenord)
+
+### Verifiche
+
+- `pytest` (no DB): **211 passed + 50 skipped** (era 194+50; +17 nuovi)
+- `ruff check` + `format` ✓ (ruff ha auto-fixato organize imports)
+- `mypy strict`: no issues in **43 source files** (era 42, +1
+  multi_giornata.py)
+
+### Stato
+
+Sub 4.4.3 chiuso. Builder pure ha ora 4 moduli: `risolvi_corsa`,
+`catena`, `posizionamento`, `multi_giornata`. La pipeline completa
+pure è: `costruisci_catene` → `posiziona_su_localita` (per ogni
+catena) → `costruisci_giri_multigiornata` (concatenazione cross-notte)
+→ `Giro` finale.
+
+### Prossimo step
+
+Sub 4.4.4: assegnazione regole + rilevamento eventi composizione.
+Per ogni blocco corsa nel `Giro`, chiama `risolvi_corsa()` per
+assegnare materiale_tipo + numero_pezzi. Verifica compatibilità
+materiale per giornata. Rileva delta composizione (+3 / -3 alle
+soglie fascia oraria) e inserisce blocchi `aggancio`/`sgancio` con
+`is_validato_utente=False`.
+
+---
+
 ## 2026-04-26 (21) — Sprint 4.4.2: posizionamento catena su località
 
 ### Contesto

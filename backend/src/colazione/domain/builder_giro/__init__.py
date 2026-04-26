@@ -13,8 +13,10 @@ Sub-moduli:
 - `posizionamento.py` (Sprint 4.4.2) — funzione pura che chiude una
   catena su una località manutenzione, generando blocchi
   ``materiale_vuoto`` di testa/coda quando necessario.
-- `builder.py` (Sprint 4.4.5, futuro) — orchestrator multi-giornata
-  che persiste sul DB.
+- `multi_giornata.py` (Sprint 4.4.3) — concatenazione cross-notte:
+  da catene posizionate single-day a `Giro` multi-giornata che
+  attraversano la mezzanotte.
+- `builder.py` (Sprint 4.4.5, futuro) — orchestrator che persiste sul DB.
 
 Tutto è **DB-agnostic**: ricevi dataclass/oggetti, ritorni dataclass.
 La persistenza è in `api/` o CLI in `interfaces/`.
@@ -24,6 +26,13 @@ from colazione.domain.builder_giro.catena import (
     Catena,
     ParamCatena,
     costruisci_catene,
+)
+from colazione.domain.builder_giro.multi_giornata import (
+    GiornataGiro,
+    Giro,
+    MotivoChiusura,
+    ParamMultiGiornata,
+    costruisci_giri_multigiornata,
 )
 from colazione.domain.builder_giro.posizionamento import (
     BloccoMaterialeVuoto,
@@ -48,12 +57,17 @@ __all__ = [
     "BloccoMaterialeVuoto",
     "Catena",
     "CatenaPosizionata",
+    "Giro",
+    "GiornataGiro",
     "LocalitaSenzaStazioneError",
+    "MotivoChiusura",
     "ParamCatena",
+    "ParamMultiGiornata",
     "ParamPosizionamento",
     "PosizionamentoImpossibileError",
     "RegolaAmbiguaError",
     "costruisci_catene",
+    "costruisci_giri_multigiornata",
     "determina_giorno_tipo",
     "estrai_valore_corsa",
     "matches_all",
