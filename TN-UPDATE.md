@@ -10,6 +10,89 @@
 
 ---
 
+## 2026-04-26 (20) — Sprint 4.4.1: catena single-day greedy chain
+
+### Contesto
+
+Sprint 4.4 builder giro materiale è il pezzo più complesso del
+progetto. Spezzato in 6 sub-sprint (vedi piano in chat). Sub 4.4.1
+copre il primo step pure-function: dato un pool di corse single-day,
+produrre catene massimali rispettando continuità geografica + gap
+minimo. Niente località manutenzione, niente regole, niente DB.
+
+### Modifiche
+
+**Nuovo `backend/src/colazione/domain/builder_giro/catena.py`**:
+
+- `_CorsaLike` (Protocol): 4 attributi minimi (codice_origine,
+  codice_destinazione, ora_partenza, ora_arrivo).
+- `ParamCatena` (frozen dataclass): `gap_min: int = 5`. Singleton
+  `_DEFAULT_PARAM` come default arg (B008-safe).
+- `Catena` (frozen dataclass): `corse: tuple[Any, ...]` con invariante
+  documentata (continuità geo + gap rispettati).
+- `costruisci_catene(corse, params) → list[Catena]`: greedy
+  multi-iterazione. Sort per partenza, prendi prima libera, estendi
+  con `_trova_prossima` (origine match + soglia inclusiva), chiudi
+  su no-match o cross-notte.
+- Chiusura cross-notte: se `ora_arrivo < ora_partenza`, la catena
+  chiude lì. La concatenazione cross-notte è in Sprint 4.4.3.
+
+**Modifica `backend/src/colazione/domain/builder_giro/__init__.py`**:
+re-export di `Catena`, `ParamCatena`, `costruisci_catene`. Aggiornati
+`__all__` e docstring sub-moduli.
+
+### Decisioni di design
+
+- **`gap_min` unico** (non triplo 5'/15'/20' come spec §3.3). I
+  raffinamenti per tipo stazione richiedono metadati su `Stazione`
+  (capolinea sì/no) che oggi non abbiamo. Onesto: sviluppo quando
+  serve, non prima.
+- **Single-day rigido**: le corse cross-notte chiudono la catena.
+  Multi-giornata è 4.4.3, vogliamo 4.4.1 testabile in `time` puro
+  senza confusione su date.
+- **Tie-break deterministico**: a parità di matching geografico, vince
+  la corsa con partenza più precoce. A parità ulteriore, l'ordine
+  stable del pool sortato decide. Output = funzione pura degli input.
+- **`id()` per visitate**: le corse in input non sono hashable di
+  default (dataclass non frozen) e non vogliamo forzare `frozen=True`
+  sui modelli ORM. `id()` Python è univoco per oggetto in memoria,
+  perfetto per "questo oggetto è già in una catena".
+
+### Test
+
+**`backend/tests/test_catena.py`** (18 test puri, 0.02s):
+
+- 2 casi base (lista vuota, singola corsa)
+- 4 concatenamento (compatibili, geografia incomp., gap troppo corto,
+  gap esatto = soglia, gap=0)
+- 2 ordinamento (input non ordinato, ordine catene per prima partenza)
+- 2 cross-notte (corsa attraversa mezzanotte chiude, normale +
+  cross-notte attaccata)
+- 2 tie-break + determinismo
+- 2 esempi realistici (S5 mattina 4 corse 1 catena, due rotabili
+  indipendenti 2 catene)
+- 4 misc (default 5', frozen `ParamCatena`/`Catena`)
+
+### Verifiche
+
+- `pytest` (no DB): **176 passed + 50 skipped** (era 158+50; +18 nuovi)
+- `ruff check` + `format` ✓ (dopo fix B008 → singleton)
+- `mypy strict`: no issues in **41 source files** (era 40, +1 catena.py)
+
+### Stato
+
+Sub 4.4.1 chiuso. Catena pura testata in profondità. Pronta per
+4.4.2 che la posizionerà su località manutenzione (materiali vuoti
+apertura/chiusura).
+
+### Prossimo step
+
+Sub 4.4.2: `posiziona_su_localita(catena, localita, params) →
+CatenaPosizionata`. Genera blocchi `materiale_vuoto` testa/coda se
+necessario per chiudere il giro a una località manutenzione.
+
+---
+
 ## 2026-04-26 (19) — Sprint 4.3: API REST CRUD programma materiale
 
 ### Contesto
