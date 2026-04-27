@@ -10,6 +10,104 @@
 
 ---
 
+## 2026-04-27 (26) — Sprint 4.4 chiuso, Sprint 5 plan + bugfix wipe
+
+### Contesto
+
+Smoke test su PdE fixture (38 corse) + seconda sessione di smoke con
+l'utente (ex-pianificatore Trenord) ha rivelato che **Sprint 4.4 è
+stato un MVP funzionante con assunzioni di design sbagliate**.
+
+Critiche puntuali dell'utente:
+
+1. *"Tu lo fai rientrare praticamente sempre. In media un treno può
+   stare in giro 5000 km quando esce dalla sede manutentiva."* —
+   il mio greedy single-day forza rientro ogni sera, falso.
+2. *"Se abbiamo un treno presto al mattino ad Asso o Tirano noi non
+   facciamo un vuoto la mattina, è antiproduttivo. Facciamo in modo
+   che quel materiale faccia un treno viaggiatore la sera precedente."*
+   — i miei vuoti tecnici di posizionamento verso periferia non
+   esistono nella realtà: si usa una corsa commerciale serale.
+3. *"I materiali vuoti vengono fatti per le località commerciali
+   vicine: Mi.PG, Cadorna, Bovisa, Centrale."* — vuoti solo
+   intra-area-Milano, non Fiorenza→Asso.
+4. *"Non tutti i materiali possono andare su tutte le linee. Ricorda
+   i materiali in doppia hanno dei vincoli."* — la mia regola
+   "matcha tutto" del primo smoke è sbagliata; doppia composizione
+   con vincoli (526+526, 526+425, 421+421...) richiede estensione
+   modello.
+
+### Modifiche
+
+**Bugfix `_wipe_giri_programma`** ([builder.py:222-263](backend/src/colazione/domain/builder_giro/builder.py:222)):
+
+Il wipe cancellava `corsa_materiale_vuoto` PRIMA di `giro_materiale`,
+violando FK `giro_blocco_corsa_materiale_vuoto_id_fkey` (i blocchi
+tipo `materiale_vuoto` referenziavano ancora i vuoti). Test
+`force=True` non lo intercettavano perché creavano sempre giri senza
+vuoti. Smoke su PdE reale ha esposto il bug al primo `?force=true`.
+
+Fix: salva id vuoti prima di cancellare giri, poi cancella vuoti
+orfani dopo CASCADE su giro_materiale.
+
+**Salvato PdE Trenord 2025-2026 reale**:
+`backend/data/pde-input/All.1A5_14dic2025-12dic2026_TRENI e BUS_Rev5_RL.xlsx`
+(5.3 MB, 10580 righe, 124 colonne, 3 sheets). Gitignored come da
+pattern esistente.
+
+**Nuovo `docs/SPRINT-5-RIPENSAMENTO.md`** (~330 righe):
+
+Plan completo per Sprint 5 (riscrittura builder con modello operativo
+corretto). 6 sub-sprint:
+
+- 5.1 Migration 0007: `localita_stazione_vicina` (whitelist M:N) +
+  `materiale_accoppiamento_ammesso` + `composizione_json` su regola +
+  `km_max_ciclo` su programma.
+- 5.2 Seed whitelist (FIO=Garibaldi/Centrale/Lambrate/Rogoredo/Greco;
+  NOV=Cadorna/Bovisa) + accoppiamenti confermati (526+526, 526+425,
+  421+421). Lista completa altri da chiedere a utente.
+- 5.3 Riscrittura `posizionamento.py`: vuoti SOLO intra-whitelist,
+  rimossi vuoti tecnici verso periferia.
+- 5.4 Estensione `multi_giornata.py`: cumulo km + trigger rientro
+  programmato (corsa commerciale verso Milano + vuoto breve sede).
+- 5.5 Estensione `composizione.py`: composizione_json (lista) invece
+  di singolo materiale_tipo. Validazione vincoli accoppiamento.
+- 5.6 Smoke reale ETR526+ETR425 Mi.Centrale↔Tirano sul PdE vero.
+
+Domande aperte per utente (in §6.2 del plan):
+- Whitelist stazioni per CAM/LEC/CRE/ISE/TILO
+- Lista completa accoppiamenti ammessi (oltre 526/425/421)
+- Codice linea Trenord per Mi.Centrale-Tirano
+- Sede manutentiva ETR526/ETR425
+
+**Memoria persistente aggiornata**:
+- `feedback_no_inventare_dati.md` — mai inventare corse/dati per smoke,
+  sempre fonte reale o fixture committata.
+- `project_pianificazione_ferroviaria_modello.md` — i 6 principi
+  operativi corretti (posizionamento commerciale, vuoti
+  intra-whitelist, multi-giornata norma, composizioni con vincoli,
+  materiali↔linee, rientro programmato).
+
+### Verifiche
+
+- `pytest`: 313 verdi (post-fix wipe)
+- `mypy strict`: 47 files
+- `ruff`: clean
+
+### Stato
+
+**Sprint 4.4 chiuso** (codice resta come MVP, da rifattorizzare in
+Sprint 5).
+**Sprint 5 plan pronto**, da iniziare in nuova sessione.
+
+### Prossimo step
+
+Nuova sessione (utente apre): legge `CLAUDE.md` + `TN-UPDATE.md` +
+`docs/SPRINT-5-RIPENSAMENTO.md`. Risponde alle 4 domande aperte
+(§6.2). Inizia da Sub 5.1.
+
+---
+
 ## 2026-04-26 (25) — Sprint 4.4.5b: orchestrator + endpoint API + migration codice_breve
 
 ### Contesto

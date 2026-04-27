@@ -222,27 +222,46 @@ async def _count_giri_esistenti(session: AsyncSession, programma_id: int) -> int
 async def _wipe_giri_programma(session: AsyncSession, programma_id: int) -> None:
     """Cancella tutti i giri (e blocchi a cascade) di questo programma.
 
-    `giro_blocco`/`giro_variante`/`giro_giornata` hanno ON DELETE
-    CASCADE su `giro_materiale`. `corsa_materiale_vuoto` ha ON DELETE
-    SET NULL su `giro_materiale_id`, quindi va cancellata esplicitamente.
+    Ordine FK-safe critico:
+
+    1. Salva gli id dei vuoti collegati ai giri (li referenziano
+       i ``giro_blocco materiale_vuoto`` con FK RESTRICT).
+    2. ``DELETE giro_materiale`` → CASCADE cancella giornate/varianti/
+       blocchi → la FK ``giro_blocco_corsa_materiale_vuoto_id``
+       smette di proteggere i vuoti.
+    3. Cancella i vuoti orfani identificati al passo 1.
+
+    L'ordine inverso (vuoti prima dei giri) viola la FK
+    ``giro_blocco_corsa_materiale_vuoto_id_fkey``. Bug intercettato
+    da smoke test reale (2026-04-26).
     """
     pid_param = {"pid": str(programma_id)}
-    # Vuoti collegati ai giri
-    await session.execute(
-        text(
-            "DELETE FROM corsa_materiale_vuoto "
-            "WHERE giro_materiale_id IN ("
-            "  SELECT id FROM giro_materiale "
-            "  WHERE generation_metadata_json->>'programma_id' = :pid"
-            ")"
-        ),
-        pid_param,
+
+    cmv_ids = list(
+        (
+            await session.execute(
+                text(
+                    "SELECT cmv.id FROM corsa_materiale_vuoto cmv "
+                    "JOIN giro_materiale gm ON gm.id = cmv.giro_materiale_id "
+                    "WHERE gm.generation_metadata_json->>'programma_id' = :pid"
+                ),
+                pid_param,
+            )
+        )
+        .scalars()
+        .all()
     )
-    # Giri (cascade su giornate/varianti/blocchi)
+
     await session.execute(
         text("DELETE FROM giro_materiale WHERE generation_metadata_json->>'programma_id' = :pid"),
         pid_param,
     )
+
+    if cmv_ids:
+        await session.execute(
+            text("DELETE FROM corsa_materiale_vuoto WHERE id = ANY(:ids)"),
+            {"ids": cmv_ids},
+        )
 
 
 # =====================================================================
