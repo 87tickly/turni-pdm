@@ -74,12 +74,19 @@ class AssegnazioneRisolta:
 
 
 class _RegolaLike(Protocol):
-    """Una regola (ORM `ProgrammaRegolaAssegnazione` o dataclass test)."""
+    """Una regola (ORM `ProgrammaRegolaAssegnazione` o dataclass test).
+
+    `materiale_tipo_codice` e `numero_pezzi` sono nullable da Sprint 5.1
+    (migration 0007) — campi legacy in fase di deprecazione. Ma le regole
+    create dopo 0007 li hanno popolati dal primo elemento di
+    `composizione_json` (handler API) e quelle pre-esistenti dal backfill.
+    Quindi runtime sono sempre non-null. Sub 5.5 li rimuoverà del tutto.
+    """
 
     id: int
     filtri_json: list[Any]
-    materiale_tipo_codice: str
-    numero_pezzi: int
+    materiale_tipo_codice: str | None
+    numero_pezzi: int | None
     priorita: int
 
 
@@ -268,6 +275,15 @@ def risolvi_corsa(
                 regole_ids=[top.id, second.id],
             )
 
+    # Legacy fields nullable da migration 0007: tutte le regole post-5.1
+    # li hanno popolati dal primo elemento di composizione_json (handler API
+    # o backfill). Asserzione difensiva per soddisfare il typing fino a Sub
+    # 5.5 (quando il Protocol leggerà direttamente composizione_json).
+    if top.materiale_tipo_codice is None or top.numero_pezzi is None:
+        raise RuntimeError(
+            f"Regola {top.id}: campi legacy (materiale_tipo_codice, "
+            "numero_pezzi) NULL post-migration 0007. Verifica backfill."
+        )
     return AssegnazioneRisolta(
         regola_id=top.id,
         materiale_tipo_codice=top.materiale_tipo_codice,

@@ -145,7 +145,7 @@ async def _setup_completo(
             "no_overcapacity": False,
             "no_aggancio_non_validato": False,
             "no_orphan_blocks": False,
-            "no_giro_non_chiuso_a_localita": False,
+            "no_giro_appeso": False,
             "no_km_eccesso": False,
         }
         prog = ProgrammaMateriale(
@@ -361,7 +361,7 @@ async def test_strict_no_corse_residue_blocca(azienda_id: int) -> None:
             "no_overcapacity": False,
             "no_aggancio_non_validato": False,
             "no_orphan_blocks": False,
-            "no_giro_non_chiuso_a_localita": False,
+            "no_giro_appeso": False,
             "no_km_eccesso": False,
         },
     )

@@ -116,7 +116,7 @@ async def _setup_db_completo(stato_programma: str = "attivo") -> int:
                 "no_overcapacity": False,
                 "no_aggancio_non_validato": False,
                 "no_orphan_blocks": False,
-                "no_giro_non_chiuso_a_localita": False,
+                "no_giro_appeso": False,
                 "no_km_eccesso": False,
             },
         )

@@ -58,6 +58,7 @@ from colazione.schemas.personale import (
     PersonaRead,
 )
 from colazione.schemas.programmi import (
+    ComposizioneItem,
     FiltroRegola,
     ProgrammaMaterialeCreate,
     ProgrammaMaterialeRead,
@@ -112,6 +113,7 @@ __all__ = [
     "IndisponibilitaPersonaRead",
     "PersonaRead",
     # Strato 1bis — programma materiale (input umano del pianificatore)
+    "ComposizioneItem",
     "FiltroRegola",
     "ProgrammaMaterialeCreate",
     "ProgrammaMaterialeRead",

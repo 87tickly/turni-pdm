@@ -170,6 +170,11 @@ class StrictOptions(BaseModel):
 
     Default tutto `False` (tolerant) durante editing. Tutto `True`
     (strict) per pubblicazione.
+
+    Sprint 5.1 ha rinominato `no_giro_non_chiuso_a_localita` →
+    `no_giro_appeso` per riflettere la nuova semantica multi-giornata:
+    un giro non deve essere "appeso" (cioè avere un rientro programmato
+    a fine ciclo, NON ogni sera).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -178,8 +183,30 @@ class StrictOptions(BaseModel):
     no_overcapacity: bool = False
     no_aggancio_non_validato: bool = False
     no_orphan_blocks: bool = False
-    no_giro_non_chiuso_a_localita: bool = False
+    no_giro_appeso: bool = False
     no_km_eccesso: bool = False
+
+
+# =====================================================================
+# Composizione (Sprint 5.1)
+# =====================================================================
+
+
+class ComposizioneItem(BaseModel):
+    """Singolo elemento della composizione di una regola.
+
+    Una regola può avere una composizione di 1 o più elementi:
+    - 1 elemento → regola single-material (es. `[{ETR526, 2}]`)
+    - 2+ elementi → composizione mista
+      (es. `[{ETR526, 1}, {ETR425, 1}]` per Mi.Centrale↔Tirano)
+
+    Vedi `docs/SPRINT-5-RIPENSAMENTO.md` §3 ("Composizione regola").
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    materiale_tipo_codice: str = Field(min_length=1)
+    n_pezzi: int = Field(ge=1)
 
 
 # =====================================================================
@@ -193,8 +220,14 @@ class ProgrammaRegolaAssegnazioneRead(BaseModel):
     id: int
     programma_id: int
     filtri_json: list[Any]
-    materiale_tipo_codice: str
-    numero_pezzi: int
+    # Composizione "vera" (Sprint 5.1). Lista di 1+ elementi.
+    composizione_json: list[Any]
+    is_composizione_manuale: bool = False
+    # Campi legacy (deprecati, nullable da migration 0007). Esposti per
+    # retrocompat finché Sub 5.5 non rimuoverà l'ultimo consumatore
+    # (`risolvi_corsa()`).
+    materiale_tipo_codice: str | None = None
+    numero_pezzi: int | None = None
     priorita: int
     note: str | None = None
     created_at: datetime
@@ -211,6 +244,7 @@ class ProgrammaMaterialeRead(BaseModel):
     valido_a: date
     stato: str
     km_max_giornaliero: int | None = None
+    km_max_ciclo: int | None = None
     n_giornate_default: int
     fascia_oraria_tolerance_min: int
     strict_options_json: dict[str, Any]
@@ -225,13 +259,20 @@ class ProgrammaMaterialeRead(BaseModel):
 
 
 class ProgrammaRegolaAssegnazioneCreate(BaseModel):
-    """Payload per creare una regola dentro un programma esistente."""
+    """Payload per creare una regola dentro un programma esistente.
+
+    Sprint 5.1: la firma è cambiata. La composizione è ora una lista di
+    1+ elementi (`composizione: list[ComposizioneItem]`), invece dei
+    campi singoli `materiale_tipo_codice + numero_pezzi`. L'handler API
+    salva `composizione_json` e ri-popola i campi legacy dal primo
+    elemento per retrocompat con `risolvi_corsa()` fino a Sub 5.5.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     filtri_json: list[FiltroRegola] = Field(default_factory=list)
-    materiale_tipo_codice: str
-    numero_pezzi: int = Field(ge=1)
+    composizione: list[ComposizioneItem] = Field(min_length=1)
+    is_composizione_manuale: bool = False
     priorita: int = Field(default=60, ge=0, le=100)
     note: str | None = None
 
@@ -246,6 +287,7 @@ class ProgrammaMaterialeCreate(BaseModel):
     valido_da: date
     valido_a: date
     km_max_giornaliero: int | None = Field(default=None, ge=1)
+    km_max_ciclo: int | None = Field(default=None, ge=1)
     n_giornate_default: int = Field(default=1, ge=1)
     fascia_oraria_tolerance_min: int = Field(default=30, ge=0, le=120)
     strict_options_json: StrictOptions = Field(default_factory=StrictOptions)
@@ -269,6 +311,7 @@ class ProgrammaMaterialeUpdate(BaseModel):
     valido_a: date | None = None
     stato: Literal["bozza", "attivo", "archiviato"] | None = None
     km_max_giornaliero: int | None = Field(default=None, ge=1)
+    km_max_ciclo: int | None = Field(default=None, ge=1)
     n_giornate_default: int | None = Field(default=None, ge=1)
     fascia_oraria_tolerance_min: int | None = Field(default=None, ge=0, le=120)
     strict_options_json: StrictOptions | None = None

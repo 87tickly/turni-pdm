@@ -16,6 +16,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
@@ -52,6 +53,10 @@ class ProgrammaMateriale(Base):
 
     # Parametri globali
     km_max_giornaliero: Mapped[int | None] = mapped_column(Integer)
+    # Cap km cumulati sul ciclo intero (NON giornaliero). Quando raggiunto,
+    # il giro chiude con rientro programmato. Sprint 5.1 (migration 0007).
+    # Configurato dal pianificatore per ogni programma; tipici 5000-10000.
+    km_max_ciclo: Mapped[int | None] = mapped_column(Integer)
     n_giornate_default: Mapped[int] = mapped_column(Integer, default=1)
     fascia_oraria_tolerance_min: Mapped[int] = mapped_column(Integer, default=30)
 
@@ -90,10 +95,26 @@ class ProgrammaRegolaAssegnazione(Base):
 
     filtri_json: Mapped[list[Any]] = mapped_column(JSONB, default=list)
 
-    materiale_tipo_codice: Mapped[str] = mapped_column(
+    # Composizione del rotabile: lista
+    # `[{materiale_tipo_codice, n_pezzi}, ...]` (Sprint 5.1, migration
+    # 0007). Sostituisce a regime i campi legacy `materiale_tipo_codice`
+    # + `numero_pezzi`. Lista di 1 elemento per regola single-material;
+    # 2+ elementi per composizione mista (es. ETR526+ETR425). Validata
+    # da `ComposizioneItem` in schemas/programmi.py.
+    composizione_json: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    # Override manuale: se True, bypass del check
+    # `materiale_accoppiamento_ammesso` per composizioni custom decise
+    # dal pianificatore (Sprint 5.1).
+    is_composizione_manuale: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Campi LEGACY (deprecati ma non rimossi). Resi nullable in 0007.
+    # Letti ancora da `risolvi_corsa()` fino a Sprint 5.5; sulle nuove
+    # righe popolati dal primo elemento di `composizione_json` (handler
+    # API) per retrocompat.
+    materiale_tipo_codice: Mapped[str | None] = mapped_column(
         String(50), ForeignKey("materiale_tipo.codice", ondelete="RESTRICT")
     )
-    numero_pezzi: Mapped[int] = mapped_column(Integer)
+    numero_pezzi: Mapped[int | None] = mapped_column(Integer)
 
     priorita: Mapped[int] = mapped_column(Integer, default=60)
     note: Mapped[str | None] = mapped_column(Text)

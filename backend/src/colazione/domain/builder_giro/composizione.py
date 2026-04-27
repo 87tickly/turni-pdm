@@ -61,12 +61,16 @@ from colazione.domain.builder_giro.risolvi_corsa import (
 
 class _RegolaLike(Protocol):
     """Una regola del programma materiale (riusa lo stesso shape di
-    `risolvi_corsa._RegolaLike`)."""
+    `risolvi_corsa._RegolaLike`).
+
+    Legacy fields nullable da Sprint 5.1 — vedi nota in
+    `risolvi_corsa._RegolaLike`.
+    """
 
     id: int
     filtri_json: list[Any]
-    materiale_tipo_codice: str
-    numero_pezzi: int
+    materiale_tipo_codice: str | None
+    numero_pezzi: int | None
     priorita: int
 
 

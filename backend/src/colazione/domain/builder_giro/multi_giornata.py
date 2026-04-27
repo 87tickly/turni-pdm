@@ -23,8 +23,7 @@ Chiusura del giro:
 
 1. **Naturale**: l'ultima giornata ha ``chiusa_a_localita=True``.
 2. **Max giornate**: si raggiunge ``n_giornate_max`` (forza chiusura,
-   warning per il pianificatore — strict flag
-   ``no_giro_non_chiuso_a_localita``).
+   warning per il pianificatore — strict flag ``no_giro_appeso``).
 3. **Non chiusa**: nessuna continuazione disponibile e siamo sotto
    ``n_giornate_max`` (warning, il giro resta "appeso").
 

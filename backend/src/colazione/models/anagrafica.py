@@ -62,6 +62,12 @@ class MaterialeTipo(Base):
     azienda_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("azienda.id", ondelete="RESTRICT")
     )
+    # Sede manutentiva di default per il rotabile (Sprint 5.1, migration 0007).
+    # Nullable: configurato dal pianificatore via UI/seed. Usato come fallback
+    # quando una regola non specifica la sede.
+    localita_manutenzione_default_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("localita_manutenzione.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -138,3 +144,55 @@ class DepotMaterialeAbilitato(Base):
     materiale_tipo_codice: Mapped[str] = mapped_column(
         String(50), ForeignKey("materiale_tipo.codice", ondelete="RESTRICT")
     )
+
+
+class LocalitaStazioneVicina(Base):
+    """Whitelist M:N stazioni-vicine-sede (Sprint 5.1, migration 0007).
+
+    Per ogni sede manutentiva, l'insieme di stazioni in cui sono ammessi
+    i vuoti tecnici di posizionamento. Vedi
+    `docs/SPRINT-5-RIPENSAMENTO.md` §3 e §5.3 per la motivazione e la
+    logica di consumo nel builder.
+
+    Una stazione può appartenere a più sedi (es. Saronno per NOV+CAM).
+    """
+
+    __tablename__ = "localita_stazione_vicina"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    localita_manutenzione_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("localita_manutenzione.id", ondelete="CASCADE")
+    )
+    stazione_codice: Mapped[str] = mapped_column(
+        String(20), ForeignKey("stazione.codice", ondelete="RESTRICT")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MaterialeAccoppiamentoAmmesso(Base):
+    """Coppie ammesse di rotabili in doppia composizione
+    (Sprint 5.1, migration 0007).
+
+    Normalizzata lessicograficamente (`materiale_a_codice <=
+    materiale_b_codice`) per garantire unicità simmetrica: una sola
+    riga per coppia, indipendentemente dall'ordine di inserimento.
+
+    Esempi: ETR421+ETR421, ETR526+ETR526, ETR526+ETR425. La lista cresce
+    nel tempo; per ora questi 3 sono il seed Sprint 5.2.
+
+    Override manuale: la regola `programma_regola_assegnazione` può
+    avere `is_composizione_manuale=True` per bypassare il check su
+    questa tabella (override pianificatore per composizioni custom).
+    """
+
+    __tablename__ = "materiale_accoppiamento_ammesso"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    materiale_a_codice: Mapped[str] = mapped_column(
+        String(50), ForeignKey("materiale_tipo.codice", ondelete="RESTRICT")
+    )
+    materiale_b_codice: Mapped[str] = mapped_column(
+        String(50), ForeignKey("materiale_tipo.codice", ondelete="RESTRICT")
+    )
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

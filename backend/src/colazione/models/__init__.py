@@ -23,6 +23,8 @@ from colazione.models.anagrafica import (
     DepotMaterialeAbilitato,
     LocalitaManutenzione,
     LocalitaManutenzioneDotazione,
+    LocalitaStazioneVicina,
+    MaterialeAccoppiamentoAmmesso,
     MaterialeTipo,
     Stazione,
 )
@@ -74,6 +76,8 @@ __all__ = [
     "DepotMaterialeAbilitato",
     "LocalitaManutenzione",
     "LocalitaManutenzioneDotazione",
+    "LocalitaStazioneVicina",
+    "MaterialeAccoppiamentoAmmesso",
     "MaterialeTipo",
     "Stazione",
     # Strato 1 — corse

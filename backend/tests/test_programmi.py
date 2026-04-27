@@ -25,6 +25,7 @@ from colazione.models.programmi import (
     ProgrammaRegolaAssegnazione,
 )
 from colazione.schemas.programmi import (
+    ComposizioneItem,
     FiltroRegola,
     ProgrammaMaterialeCreate,
     ProgrammaRegolaAssegnazioneCreate,
@@ -143,7 +144,7 @@ def test_strict_options_default_tutto_false() -> None:
     assert s.no_overcapacity is False
     assert s.no_aggancio_non_validato is False
     assert s.no_orphan_blocks is False
-    assert s.no_giro_non_chiuso_a_localita is False
+    assert s.no_giro_appeso is False
     assert s.no_km_eccesso is False
 
 
@@ -206,6 +207,7 @@ def test_programma_create_con_regole_nested() -> None:
         valido_da=date(2025, 12, 14),
         valido_a=date(2026, 4, 30),
         km_max_giornaliero=800,
+        km_max_ciclo=5000,
         n_giornate_default=5,
         regole=[
             ProgrammaRegolaAssegnazioneCreate(
@@ -217,14 +219,16 @@ def test_programma_create_con_regole_nested() -> None:
                         valore=["04:00", "15:59"],
                     ),
                 ],
-                materiale_tipo_codice="ALe711",
-                numero_pezzi=3,
+                composizione=[ComposizioneItem(materiale_tipo_codice="ALe711", n_pezzi=3)],
                 priorita=80,
             ),
         ],
     )
+    assert p.km_max_ciclo == 5000
     assert len(p.regole) == 1
-    assert p.regole[0].numero_pezzi == 3
+    assert p.regole[0].composizione[0].n_pezzi == 3
+    assert p.regole[0].composizione[0].materiale_tipo_codice == "ALe711"
+    assert p.regole[0].is_composizione_manuale is False
     assert len(p.regole[0].filtri_json) == 2
 
 
@@ -245,24 +249,45 @@ def test_programma_create_regola_filtri_invalidi_propagano_errore() -> None:
                                 "valore": "x",
                             }
                         ],
-                        "materiale_tipo_codice": "ALe711",
-                        "numero_pezzi": 1,
+                        "composizione": [{"materiale_tipo_codice": "ALe711", "n_pezzi": 1}],
                     }
                 ],
             }
         )
 
 
-def test_regola_create_numero_pezzi_zero_raises() -> None:
+def test_regola_create_n_pezzi_zero_raises() -> None:
     with pytest.raises(ValidationError):
-        ProgrammaRegolaAssegnazioneCreate(materiale_tipo_codice="ALe711", numero_pezzi=0)
+        ProgrammaRegolaAssegnazioneCreate(
+            composizione=[ComposizioneItem(materiale_tipo_codice="ALe711", n_pezzi=0)]
+        )
+
+
+def test_regola_create_composizione_vuota_raises() -> None:
+    with pytest.raises(ValidationError):
+        ProgrammaRegolaAssegnazioneCreate(composizione=[])
 
 
 def test_regola_create_priorita_oltre_100_raises() -> None:
     with pytest.raises(ValidationError):
         ProgrammaRegolaAssegnazioneCreate(
-            materiale_tipo_codice="ALe711", numero_pezzi=1, priorita=150
+            composizione=[ComposizioneItem(materiale_tipo_codice="ALe711", n_pezzi=1)],
+            priorita=150,
         )
+
+
+def test_regola_create_composizione_mista_ok() -> None:
+    """Composizione di 2+ elementi (es. ETR526+ETR425 per Tirano)."""
+    r = ProgrammaRegolaAssegnazioneCreate(
+        composizione=[
+            ComposizioneItem(materiale_tipo_codice="ETR526", n_pezzi=1),
+            ComposizioneItem(materiale_tipo_codice="ETR425", n_pezzi=1),
+        ],
+        is_composizione_manuale=False,
+    )
+    assert len(r.composizione) == 2
+    assert r.composizione[0].materiale_tipo_codice == "ETR526"
+    assert r.composizione[1].materiale_tipo_codice == "ETR425"
 
 
 # =====================================================================
@@ -288,6 +313,7 @@ def test_programma_materiale_columns_attese() -> None:
         "valido_a",
         "stato",
         "km_max_giornaliero",
+        "km_max_ciclo",
         "n_giornate_default",
         "fascia_oraria_tolerance_min",
         "strict_options_json",
@@ -304,6 +330,8 @@ def test_regola_columns_attese() -> None:
         "id",
         "programma_id",
         "filtri_json",
+        "composizione_json",
+        "is_composizione_manuale",
         "materiale_tipo_codice",
         "numero_pezzi",
         "priorita",
@@ -345,3 +373,96 @@ def test_giro_blocco_ha_nuovi_campi() -> None:
     cols = {c.name for c in Base.metadata.tables["giro_blocco"].columns}
     assert "is_validato_utente" in cols
     assert "metadata_json" in cols
+
+
+# =====================================================================
+# Sprint 5.1: ComposizioneItem + tabelle nuove + materiale.localita_default
+# =====================================================================
+
+
+def test_composizione_item_valido() -> None:
+    c = ComposizioneItem(materiale_tipo_codice="ETR526", n_pezzi=2)
+    assert c.materiale_tipo_codice == "ETR526"
+    assert c.n_pezzi == 2
+
+
+def test_composizione_item_n_pezzi_zero_raises() -> None:
+    with pytest.raises(ValidationError):
+        ComposizioneItem(materiale_tipo_codice="ETR526", n_pezzi=0)
+
+
+def test_composizione_item_n_pezzi_negativo_raises() -> None:
+    with pytest.raises(ValidationError):
+        ComposizioneItem(materiale_tipo_codice="ETR526", n_pezzi=-1)
+
+
+def test_composizione_item_materiale_codice_vuoto_raises() -> None:
+    with pytest.raises(ValidationError):
+        ComposizioneItem(materiale_tipo_codice="", n_pezzi=1)
+
+
+def test_composizione_item_extra_field_raises() -> None:
+    with pytest.raises(ValidationError):
+        ComposizioneItem.model_validate(
+            {"materiale_tipo_codice": "ETR526", "n_pezzi": 1, "garbage": "x"}
+        )
+
+
+def test_localita_stazione_vicina_registrato() -> None:
+    """Sprint 5.1: tabella whitelist M:N stazioni-sede."""
+    assert "localita_stazione_vicina" in Base.metadata.tables
+    cols = {c.name for c in Base.metadata.tables["localita_stazione_vicina"].columns}
+    expected = {"id", "localita_manutenzione_id", "stazione_codice", "created_at"}
+    assert expected.issubset(cols)
+
+
+def test_materiale_accoppiamento_ammesso_registrato() -> None:
+    """Sprint 5.1: tabella vincoli accoppiamento materiali."""
+    assert "materiale_accoppiamento_ammesso" in Base.metadata.tables
+    cols = {c.name for c in Base.metadata.tables["materiale_accoppiamento_ammesso"].columns}
+    expected = {
+        "id",
+        "materiale_a_codice",
+        "materiale_b_codice",
+        "note",
+        "created_at",
+    }
+    assert expected.issubset(cols)
+
+
+def test_materiale_tipo_ha_localita_default() -> None:
+    """Sprint 5.1: materiale_tipo.localita_manutenzione_default_id (nullable)."""
+    cols = {c.name for c in Base.metadata.tables["materiale_tipo"].columns}
+    assert "localita_manutenzione_default_id" in cols
+
+
+def test_regola_orm_con_composizione_completa() -> None:
+    """ORM accetta sia composizione_json che legacy (post-migration 0007)."""
+    r = ProgrammaRegolaAssegnazione(
+        programma_id=1,
+        filtri_json=[],
+        composizione_json=[
+            {"materiale_tipo_codice": "ETR526", "n_pezzi": 1},
+            {"materiale_tipo_codice": "ETR425", "n_pezzi": 1},
+        ],
+        is_composizione_manuale=False,
+        # Legacy popolati dal primo elemento (per retrocompat fino a Sub 5.5)
+        materiale_tipo_codice="ETR526",
+        numero_pezzi=1,
+        priorita=80,
+    )
+    assert len(r.composizione_json) == 2
+    assert r.is_composizione_manuale is False
+
+
+def test_programma_materiale_orm_con_km_max_ciclo() -> None:
+    """ORM accetta km_max_ciclo (Sprint 5.1)."""
+    p = ProgrammaMateriale(
+        azienda_id=1,
+        nome="Test ciclo",
+        valido_da=date(2026, 1, 1),
+        valido_a=date(2026, 12, 31),
+        km_max_ciclo=10000,
+        strict_options_json={"no_giro_appeso": False},
+    )
+    assert p.km_max_ciclo == 10000

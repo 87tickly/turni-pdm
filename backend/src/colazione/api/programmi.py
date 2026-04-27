@@ -149,11 +149,17 @@ async def create_programma(
     await session.flush()  # popola programma.id
 
     for regola_payload in payload.regole:
+        # Sprint 5.1: composizione è la fonte autorevole. I campi legacy
+        # (materiale_tipo_codice, numero_pezzi) sono ri-popolati dal primo
+        # elemento per retrocompat con `risolvi_corsa()` fino a Sub 5.5.
+        composizione = regola_payload.composizione
         regola = ProgrammaRegolaAssegnazione(
             programma_id=programma.id,
             filtri_json=[f.model_dump() for f in regola_payload.filtri_json],
-            materiale_tipo_codice=regola_payload.materiale_tipo_codice,
-            numero_pezzi=regola_payload.numero_pezzi,
+            composizione_json=[item.model_dump() for item in composizione],
+            is_composizione_manuale=regola_payload.is_composizione_manuale,
+            materiale_tipo_codice=composizione[0].materiale_tipo_codice,
+            numero_pezzi=composizione[0].n_pezzi,
             priorita=regola_payload.priorita,
             note=regola_payload.note,
         )
@@ -285,11 +291,14 @@ async def add_regola(
             detail=f"programma in stato {p.stato!r}: regole modificabili solo in bozza",
         )
 
+    composizione = payload.composizione
     regola = ProgrammaRegolaAssegnazione(
         programma_id=programma_id,
         filtri_json=[f.model_dump() for f in payload.filtri_json],
-        materiale_tipo_codice=payload.materiale_tipo_codice,
-        numero_pezzi=payload.numero_pezzi,
+        composizione_json=[item.model_dump() for item in composizione],
+        is_composizione_manuale=payload.is_composizione_manuale,
+        materiale_tipo_codice=composizione[0].materiale_tipo_codice,
+        numero_pezzi=composizione[0].n_pezzi,
         priorita=payload.priorita,
         note=payload.note,
     )

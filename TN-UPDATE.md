@@ -10,6 +10,190 @@
 
 ---
 
+## 2026-04-27 (27) — Sprint 5.1: schema DB + ORM + Pydantic per il nuovo builder
+
+### Contesto
+
+Sub 5.1 del piano `docs/SPRINT-5-RIPENSAMENTO.md`: solo schema DB +
+modelli SQLAlchemy + schemi Pydantic. Niente algoritmo nuovo (5.3-5.5
+arriveranno dopo). Obiettivo: predisporre lo schema esteso che servirà
+al nuovo builder (whitelist stazioni-vicine-sede, vincoli accoppiamento
+materiali, composizione lista, cap km ciclo, sede manutentiva default
+per materiale, rinomina strict flag).
+
+### Modifiche
+
+**Nuova migration `0007_riprogettazione_materiale.py`** (revision
+`c4e7f3a92d68`, down_revision `b3f2e7a91d54`):
+
+1. `localita_stazione_vicina` (M:N, UNIQUE
+   `(localita_manutenzione_id, stazione_codice)` + 2 indici).
+2. `materiale_accoppiamento_ammesso` (con
+   `CHECK (materiale_a_codice <= materiale_b_codice)` per unicità
+   simmetrica).
+3. `programma_regola_assegnazione`:
+   - `+ composizione_json JSONB NOT NULL` (con backfill
+     `[{materiale_tipo_codice, n_pezzi}]` dai campi legacy)
+   - `+ is_composizione_manuale BOOLEAN NOT NULL DEFAULT FALSE`
+   - `materiale_tipo_codice`, `numero_pezzi` → nullable (deprecati,
+     letti ancora da `risolvi_corsa()` fino a Sub 5.5).
+4. `programma_materiale.+ km_max_ciclo INTEGER` (nullable, CHECK ≥ 1).
+5. Rinomina chiave JSONB strict
+   `no_giro_non_chiuso_a_localita → no_giro_appeso` (UPDATE righe
+   esistenti + `ALTER COLUMN ... SET DEFAULT` per nuove righe).
+6. `materiale_tipo.+ localita_manutenzione_default_id BIGINT` (nullable,
+   ON DELETE SET NULL, indice parziale).
+
+Downgrade simmetrico con guardia `RAISE EXCEPTION` se restano regole
+con legacy NULL al rollback.
+
+**ORM** (`models/anagrafica.py`, `models/programmi.py`,
+`models/__init__.py`):
+
+- `+ LocalitaStazioneVicina`, `+ MaterialeAccoppiamentoAmmesso`
+  (export in `__all__`).
+- `MaterialeTipo.localita_manutenzione_default_id` (nullable FK).
+- `ProgrammaRegolaAssegnazione.composizione_json` (NOT NULL JSONB),
+  `is_composizione_manuale` (NOT NULL Bool).
+- Legacy `materiale_tipo_codice` e `numero_pezzi` → `Mapped[str | None]`
+  e `Mapped[int | None]`.
+- `ProgrammaMateriale.km_max_ciclo` (nullable Integer).
+
+**Schemi Pydantic** (`schemas/programmi.py`,
+`schemas/__init__.py`):
+
+- `+ ComposizioneItem` (BaseModel: `materiale_tipo_codice` min_length=1,
+  `n_pezzi` ≥ 1, `extra=forbid`).
+- `ProgrammaRegolaAssegnazioneCreate`: cambia firma →
+  `composizione: list[ComposizioneItem] = Field(min_length=1)` +
+  `is_composizione_manuale`. Campi singoli `materiale_tipo_codice` +
+  `numero_pezzi` rimossi dal Create.
+- `ProgrammaRegolaAssegnazioneRead`: `+ composizione_json`,
+  `+ is_composizione_manuale`. Legacy `materiale_tipo_codice`,
+  `numero_pezzi` → `str | None` / `int | None` (esposti per retrocompat).
+- `ProgrammaMaterialeRead/Create/Update`: `+ km_max_ciclo`.
+- `StrictOptions`: rinomina `no_giro_non_chiuso_a_localita →
+  no_giro_appeso`.
+
+**API** (`api/programmi.py`):
+
+Handler POST `/api/programmi` (regole nested) e POST
+`/api/programmi/{id}/regole` aggiornati: leggono
+`payload.composizione`, salvano `composizione_json` (lista completa) +
+`is_composizione_manuale`, e **ri-popolano** i campi legacy
+(`materiale_tipo_codice` + `numero_pezzi`) **dal primo elemento di
+composizione** per retrocompat con `risolvi_corsa()` fino a Sub 5.5.
+
+**Builder pure** (`domain/builder_giro/risolvi_corsa.py`,
+`composizione.py`, `builder.py`, `multi_giornata.py`):
+
+- Protocol `_RegolaLike` aggiornato a `materiale_tipo_codice: str |
+  None` + `numero_pezzi: int | None` (per matchare ORM post-5.1).
+- `risolvi_corsa()`: aggiunto guard `RuntimeError` se i legacy sono
+  None (non dovrebbe accadere post-backfill, ma soddisfa mypy strict
+  e protegge runtime).
+- Rinominato `no_giro_non_chiuso_a_localita → no_giro_appeso` in
+  `_check_strict_mode()` + commenti del docstring.
+
+### Test
+
+**Nuovi test smoke** (`backend/tests/test_programmi.py`,
++8 test ORM/Pydantic):
+
+- `ComposizioneItem`: valido, n_pezzi=0/-1 → errore, codice vuoto →
+  errore, extra field → errore.
+- ORM `LocalitaStazioneVicina`, `MaterialeAccoppiamentoAmmesso`
+  registrati su `Base.metadata` + colonne attese.
+- `MaterialeTipo` ha `localita_manutenzione_default_id`.
+- `ProgrammaRegolaAssegnazione` accetta `composizione_json` +
+  `is_composizione_manuale` (smoke ORM).
+- `ProgrammaMateriale.km_max_ciclo` accettato dall'ORM.
+
+**Test esistenti aggiornati**:
+
+- `test_programmi.py`: 4 chiamate `Create(materiale_tipo_codice=...,
+  numero_pezzi=...)` → `Create(composizione=[ComposizioneItem(...)])`.
+  Nuovo test `test_regola_create_composizione_vuota_raises` e
+  `test_regola_create_composizione_mista_ok` (ETR526+ETR425).
+- `test_programmi_api.py`: fixture `_REGOLA_MIN` aggiornata
+  (`composizione: [{materiale_tipo_codice, n_pezzi}]`). Asserzioni
+  Read aggiunte per `composizione_json` + `is_composizione_manuale`.
+- `test_models.py`: `EXPECTED_TABLE_COUNT 33 → 35`.
+- `test_schemas.py`: `EXPECTED_SCHEMA_COUNT 38 → 39`
+  (+ `ComposizioneItem`).
+- `test_builder_giri.py`, `test_genera_giri_api.py`,
+  `test_programmi.py`: rinominato il flag strict
+  `no_giro_non_chiuso_a_localita → no_giro_appeso`.
+
+### Decisioni di design
+
+- **Cap km ciclo** (`km_max_ciclo`): nullable senza default DB. Il
+  pianificatore lo configura per ogni programma (tipici 5000-10000).
+  La logica di trigger fine-ciclo arriverà in Sub 5.4.
+- **Sede manutentiva default per materiale**:
+  `materiale_tipo.localita_manutenzione_default_id` nullable, ON
+  DELETE SET NULL. Inizialmente NULL per tutti i materiali; la UI/seed
+  li popola quando il pianificatore lo configura. Niente estrazione
+  automatica dal PDF turno (scope futuro).
+- **Vincoli accoppiamento normalizzati**: la tabella ha
+  `CHECK (materiale_a_codice <= materiale_b_codice)`. Un solo record
+  per coppia indipendentemente dall'ordine (es. ETR526+ETR425, non
+  ETR425+ETR526).
+- **Override manuale**: la regola può avere
+  `is_composizione_manuale=TRUE` per bypassare il check
+  `materiale_accoppiamento_ammesso`. Il pianificatore può forzare
+  composizioni custom.
+- **Retrocompat campi legacy fino a Sub 5.5**: la firma `Create` cambia
+  (composizione obbligatoria), ma l'handler API ri-popola
+  `materiale_tipo_codice` + `numero_pezzi` dal primo elemento di
+  composizione. Così `risolvi_corsa()` continua a leggere i legacy
+  finché Sub 5.5 non lo riscrive per leggere `composizione_json`
+  direttamente.
+- **Rinomina strict flag**: `no_giro_non_chiuso_a_localita →
+  no_giro_appeso`. Nuova semantica multi-giornata: un giro non deve
+  essere "appeso", cioè deve avere un rientro programmato a fine
+  ciclo (NON ogni sera). Coerente con principio §2.3 del plan.
+- **Default JSONB DB di `strict_options_json`**: aggiornato anche il
+  `DEFAULT` della colonna in 0007 per coerenza (era settato in 0005
+  col nome vecchio). Le nuove righe inserite senza valore esplicito
+  ricevono `no_giro_appeso: false`.
+
+### Verifiche
+
+- `alembic upgrade head`: applica 0007 OK
+- `alembic downgrade -1` + `upgrade head`: round-trip OK
+- `pytest`: **325 passed** in 9.99s (era 313, +12: 8 nuovi smoke + 4
+  composizione/whitelist/accoppiamento/km_max_ciclo)
+- `ruff check + format`: clean (73 file)
+- `mypy --strict src`: 47 source files, no issues
+
+### Stato
+
+**Sub 5.1 chiuso**. Schema DB + ORM + Pydantic + handler API estesi e
+allineati al nuovo modello operativo. Tutti i test esistenti
+funzionano con la nuova firma `Create(composizione=[...])`. I
+componenti pure (`risolvi_corsa`, `composizione`) compilano in mypy
+strict con il Protocol nullable e guard runtime.
+
+### Prossimo step
+
+**Sub 5.2 — Seed whitelist + accoppiamenti**: script
+`scripts/seed_whitelist_e_accoppiamenti.py` (NON migration: dipende
+dalle stazioni create dall'import PdE) per inserire:
+
+- Whitelist FIO (5 stazioni: Mi.Garibaldi, Mi.Centrale, Mi.Lambrate,
+  Mi.Rogoredo, Mi.Greco-Pirelli).
+- Whitelist NOV (3: Mi.Cadorna, Mi.Bovisa, Saronno).
+- Whitelist CAM (2: Seveso, Saronno — condivisa con NOV).
+- Whitelist LEC, CRE, ISE (1 stazione cad. — codice = nome sede).
+- Accoppiamenti: 421+421, 526+526, 526+425.
+
+Prerequisito: import PdE Trenord 2025-2026 (file in
+`backend/data/pde-input/All.1A5_14dic2025-12dic2026_TRENI e BUS_Rev5_RL.xlsx`)
+per avere le stazioni nel DB.
+
+---
+
 ## 2026-04-27 (26) — Sprint 4.4 chiuso, Sprint 5 plan + bugfix wipe
 
 ### Contesto

@@ -32,7 +32,8 @@ Limiti del sub-sprint 4.4.5b:
   (non assegnate). Coerente con feedback utente "PdE testo Periodicità
   = verità".
 - **Strict checks parziali**: implementati ``no_corse_residue`` e
-  ``no_giro_non_chiuso_a_localita``. Gli altri (overcapacity, ecc.)
+  ``no_giro_appeso`` (rinominato in 5.1, ex
+  ``no_giro_non_chiuso_a_localita``). Gli altri (overcapacity, ecc.)
   sono scope futuro.
 
 Spec:
@@ -288,10 +289,12 @@ def _corsa_vale_in_data(corsa: CorsaCommerciale, d: date) -> bool:
 def _check_strict_mode(programma: ProgrammaMateriale, giri: list[GiroAssegnato]) -> None:
     """Verifica i flag strict configurati sul programma.
 
-    Implementati in 4.4.5b:
+    Implementati in 4.4.5b (flag rinominato in 5.1):
     - ``no_corse_residue``: nessuna corsa senza regola applicabile.
-    - ``no_giro_non_chiuso_a_localita``: tutti i giri devono chiudere a
-      località (``motivo_chiusura='naturale'``).
+    - ``no_giro_appeso`` (ex ``no_giro_non_chiuso_a_localita``): tutti i
+      giri devono avere un rientro programmato a fine ciclo. Sprint 5.1
+      ha rinominato il flag per riflettere la nuova semantica
+      multi-giornata.
 
     Altri flag (``no_overcapacity``, ``no_aggancio_non_validato``,
     ``no_orphan_blocks``, ``no_km_eccesso``) sono scope futuro.
@@ -307,12 +310,10 @@ def _check_strict_mode(programma: ProgrammaMateriale, giri: list[GiroAssegnato])
         if n_residue > 0:
             violazioni.append(f"no_corse_residue=true ma {n_residue} corse senza regola")
 
-    if opts.get("no_giro_non_chiuso_a_localita"):
+    if opts.get("no_giro_appeso"):
         n_non_chiusi = sum(1 for g in giri if not g.chiuso)
         if n_non_chiusi > 0:
-            violazioni.append(
-                f"no_giro_non_chiuso_a_localita=true ma {n_non_chiusi} giri non chiusi"
-            )
+            violazioni.append(f"no_giro_appeso=true ma {n_non_chiusi} giri non chiusi")
 
     if violazioni:
         raise StrictModeViolation(violazioni)

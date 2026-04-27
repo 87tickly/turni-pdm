@@ -88,8 +88,7 @@ _PAYLOAD_MIN = {
 
 _REGOLA_MIN = {
     "filtri_json": [{"campo": "codice_linea", "op": "eq", "valore": "S5"}],
-    "materiale_tipo_codice": "ALe711",
-    "numero_pezzi": 3,
+    "composizione": [{"materiale_tipo_codice": "ALe711", "n_pezzi": 3}],
     "priorita": 80,
 }
 
@@ -152,6 +151,12 @@ def test_create_programma_con_regole_nested(client: TestClient) -> None:
     assert res2.status_code == 200
     body = res2.json()
     assert len(body["regole"]) == 1
+    # composizione è la fonte autorevole (Sprint 5.1)
+    assert body["regole"][0]["composizione_json"] == [
+        {"materiale_tipo_codice": "ALe711", "n_pezzi": 3}
+    ]
+    assert body["regole"][0]["is_composizione_manuale"] is False
+    # campi legacy ri-popolati dal primo elemento per retrocompat (fino a Sub 5.5)
     assert body["regole"][0]["materiale_tipo_codice"] == "ALe711"
     assert body["regole"][0]["numero_pezzi"] == 3
 
@@ -172,8 +177,7 @@ def test_create_programma_filtro_invalido_422(client: TestClient) -> None:
         "regole": [
             {
                 "filtri_json": [{"campo": "campo_inesistente", "op": "eq", "valore": "x"}],
-                "materiale_tipo_codice": "ALe711",
-                "numero_pezzi": 1,
+                "composizione": [{"materiale_tipo_codice": "ALe711", "n_pezzi": 1}],
             }
         ],
     }
@@ -217,9 +221,21 @@ def test_get_dettaglio_regole_ordine_priorita(client: TestClient) -> None:
     payload = {
         **_PAYLOAD_MIN,
         "regole": [
-            {**_REGOLA_MIN, "priorita": 30, "numero_pezzi": 1},
-            {**_REGOLA_MIN, "priorita": 90, "numero_pezzi": 2},
-            {**_REGOLA_MIN, "priorita": 60, "numero_pezzi": 3},
+            {
+                **_REGOLA_MIN,
+                "priorita": 30,
+                "composizione": [{"materiale_tipo_codice": "ALe711", "n_pezzi": 1}],
+            },
+            {
+                **_REGOLA_MIN,
+                "priorita": 90,
+                "composizione": [{"materiale_tipo_codice": "ALe711", "n_pezzi": 2}],
+            },
+            {
+                **_REGOLA_MIN,
+                "priorita": 60,
+                "composizione": [{"materiale_tipo_codice": "ALe711", "n_pezzi": 3}],
+            },
         ],
     }
     res = client.post("/api/programmi", json=payload, headers=_auth_headers(token))
