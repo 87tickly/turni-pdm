@@ -195,6 +195,23 @@ async def _carica_localita(
     return loc
 
 
+async def _carica_whitelist_stazioni(session: AsyncSession, localita_id: int) -> frozenset[str]:
+    """Carica i codici stazione "vicini" alla sede da
+    `localita_stazione_vicina` (Sprint 5.3).
+
+    Set vuoto se la sede non ha whitelist configurata (caso TILO o
+    aziende non-Trenord che non l'hanno ancora popolata): in quel caso
+    il builder non genera vuoti tecnici, tutte le chiusure sono
+    "naturali" o demandate a multi_giornata.
+    """
+    stmt = text(
+        "SELECT stazione_codice FROM localita_stazione_vicina "
+        "WHERE localita_manutenzione_id = :loc_id"
+    )
+    rows = (await session.execute(stmt, {"loc_id": localita_id})).scalars().all()
+    return frozenset(rows)
+
+
 async def _carica_corse(
     session: AsyncSession,
     azienda_id: int,
@@ -375,6 +392,7 @@ async def genera_giri(
 
     regole = await _carica_regole(session, programma_id)
     localita = await _carica_localita(session, localita_codice, azienda_id)
+    whitelist = await _carica_whitelist_stazioni(session, localita.id)
 
     # 2. Anti-rigenerazione (decisione utente: 409 senza force=true)
     n_esistenti = await _count_giri_esistenti(session, programma_id)
@@ -397,7 +415,7 @@ async def genera_giri(
         catene_pos: list[CatenaPosizionata] = []
         for cat in catene:
             try:
-                cat_pos = posiziona_su_localita(cat, localita)
+                cat_pos = posiziona_su_localita(cat, localita, whitelist)
             except (LocalitaSenzaStazioneError, PosizionamentoImpossibileError) as exc:
                 warnings.append(f"Catena del {d.isoformat()} scartata: {exc}")
                 continue

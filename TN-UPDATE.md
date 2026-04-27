@@ -10,6 +10,130 @@
 
 ---
 
+## 2026-04-27 (30) — Sprint 5.3: riscrittura `posizionamento.py` con whitelist
+
+### Contesto
+
+Sub 5.3 del piano `docs/SPRINT-5-RIPENSAMENTO.md` §5.3: il vecchio
+`posizionamento.py` generava vuoti tecnici dovunque (es. Fiorenza →
+Asso, Fiorenza → Tirano), violando il modello operativo Trenord. Ora
+i vuoti esistono **solo tra stazioni vicine alla sede** (whitelist
+`localita_stazione_vicina` da migration 0007 + seed Sub 5.2). Verso
+la periferia il convoglio si posiziona con corse commerciali della
+sera precedente: il treno dorme in linea.
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_giro/posizionamento.py`**
+(riscrittura logica, signature estesa):
+
+Nuova firma:
+```python
+def posiziona_su_localita(
+    catena: Catena,
+    localita: _LocalitaLike,
+    whitelist_stazioni: frozenset[str],   # NUOVO
+    params: ParamPosizionamento = _DEFAULT_PARAM,
+) -> CatenaPosizionata
+```
+
+Logica nuova:
+- **Vuoto testa**: SOLO se `prima.codice_origine ∈ whitelist`
+  AND `prima.codice_origine != stazione_collegata`. Se prima parte
+  da fuori whitelist → niente vuoto, treno è già lì da ieri.
+- **Vuoto coda**: SOLO se NON cross-notte AND
+  `ultima.codice_destinazione ∈ whitelist` AND
+  `ultima.codice_destinazione != stazione_collegata`.
+- **`chiusa_a_localita`**: True solo se l'ultima arriva alla sede
+  o è stato generato il vuoto coda. Ultima fuori whitelist →
+  chiusa=False (treno dorme in linea, multi_giornata gestirà).
+
+Docstring del modulo aggiornata con riferimento al modello operativo
+corretto e link a `docs/SPRINT-5-RIPENSAMENTO.md` §3.
+
+**`backend/src/colazione/domain/builder_giro/builder.py`**
+(orchestrator):
+
+- Nuovo `_carica_whitelist_stazioni(session, localita_id) → frozenset[str]`:
+  query su `localita_stazione_vicina` filtrata per `localita_manutenzione_id`.
+  Set vuoto = sede non configurata (caso TILO blackbox o azienda
+  non-Trenord) → niente vuoti generati, comportamento "treno già in
+  posizione".
+- `genera_giri()` carica la whitelist dopo la località e la passa a
+  `posiziona_su_localita(cat, localita, whitelist)` nel loop catene.
+
+### Test
+
+**`backend/tests/test_posizionamento.py`** — 18 test esistenti
+aggiornati (passano `_WL = frozenset({"MI_CADORNA","BG","BS","CV","VARESE"})`)
++ **8 nuovi test** per whitelist enforcement:
+
+- `test_prima_corsa_fuori_whitelist_no_vuoto_testa` (TIRANO ∉ WL FIO)
+- `test_ultima_corsa_fuori_whitelist_no_vuoto_coda_chiusa_false`
+  (ASSO ∉ WL → chiusa=False)
+- `test_entrambe_fuori_whitelist_nessun_vuoto_chiusa_false`
+  (giro intermedio multi-giornata)
+- `test_whitelist_vuota_no_vuoti_mai` (caso TILO/sede non configurata)
+- `test_solo_origine_in_whitelist_solo_vuoto_testa` (in/out)
+- `test_solo_destinazione_in_whitelist_solo_vuoto_coda` (out/in)
+- `test_origine_uguale_sede_no_vuoto_testa_anche_se_in_whitelist`
+  (sentinella su edge case)
+- `test_smoke_realistico_tirano_multi_giornata` (caso reale che Sub 5.6
+  testerà su PdE: Mi.Centrale↔Tirano con treno che dorme a Tirano)
+
+**Test integration** (`test_builder_giri.py`, `test_genera_giri_api.py`)
+**non richiedono modifiche**: il setup non popola `localita_stazione_vicina`,
+quindi `_carica_whitelist_stazioni` ritorna `frozenset()` vuoto. Gli
+scenari di test usano catene che chiudono "naturalmente" (ultima corsa
+arriva alla stazione collegata della sede), indipendenti dalla whitelist.
+
+### Decisioni di design
+
+- **Whitelist obbligatoria nella firma**: niente default `frozenset()`
+  implicito. Chiamanti devono passare esplicitamente — costringe
+  loader/test a essere intenzionali sulla whitelist.
+- **Set vuoto = comportamento "treno fermo in posizione"**: niente
+  vuoti generati mai. Coerente con TILO blackbox e con setup di test
+  minimali. Niente errore — è uno stato valido.
+- **Sede mai in whitelist (logicamente)**: la condizione
+  `!= stazione_localita` precede il check whitelist. Anche se per
+  errore il pianificatore mettesse la sede stessa in
+  `localita_stazione_vicina`, lo script non genererebbe il vuoto
+  (test `test_origine_uguale_sede_no_vuoto_testa_anche_se_in_whitelist`).
+- **Loader DB-only**: `_carica_whitelist_stazioni` usa text() puro
+  invece dell'ORM (`select(LocalitaStazioneVicina.stazione_codice)`)
+  per consistency col pattern degli altri loader (text() per query
+  semplici filter-by-id). Ritorna `frozenset` per immutabilità +
+  performance lookup `in`.
+
+### Verifiche
+
+- `pytest`: **343 passed** in 10s (era 335, +8 nuovi posizionamento)
+- `ruff check + format`: clean (75 file)
+- `mypy --strict src`: no issues, 47 source files
+
+### Stato
+
+**Sub 5.3 chiusa**. Vuoti tecnici ora rispettano il modello operativo
+Trenord (intra-area-Milano). I test smoke confermano i 4 casi base
+(in/out × in/out) + il caso TILO whitelist vuota + il caso realistico
+Tirano multi-giornata.
+
+### Prossimo step
+
+**Sub 5.4 — Estensione `multi_giornata.py` con cumulo km + trigger
+rientro programmato** (vedi piano §5.4):
+
+- Aggiunta `km_cumulati` per giro durante l'estensione cross-notte.
+- Trigger fine ciclo OR (km cap, n_giornate cap, geografia favorevole).
+- Identifica corsa di rientro commerciale (verso whitelist sede).
+- Eventuale vuoto breve finale (whitelist → sede) post-rientro.
+- Output `Giro` con `motivo_chiusura ∈ {km_cap, n_giornate,
+  fortunata, non_chiuso}`.
+- 8-10 test puri.
+
+---
+
 ## 2026-04-27 (29) — Sprint 5.2 parte 2: estensione materiali Trenord (11 nuovi famiglie + 5 nuovi accoppiamenti)
 
 ### Contesto

@@ -1,35 +1,47 @@
-"""Posizionamento catena su località manutenzione (Sprint 4.4.2).
+"""Posizionamento catena su località manutenzione (Sprint 4.4.2 →
+riscritto Sprint 5.3 con whitelist).
 
 Funzione **pura** che, data una `Catena` (output di `catena.py`) + una
-località manutenzione + parametri, genera blocchi ``materiale_vuoto``
-di **testa** e **coda** per chiudere il giro nella stazione collegata
-alla località.
+località manutenzione + una **whitelist di stazioni vicine ammesse**,
+genera blocchi ``materiale_vuoto`` di **testa** e **coda** SOLO quando
+la prima/ultima corsa cade dentro la whitelist (vuoti tecnici
+intra-area-Milano).
 
-Spec: ``docs/LOGICA-COSTRUZIONE.md`` §3.2 (rami "posizionamento
-iniziale" e "rientro a località" in ``costruisci_giri_da_localita``).
+Spec: ``docs/SPRINT-5-RIPENSAMENTO.md`` §3 e §5.3.
+
+Modello operativo corretto (Sprint 5):
+
+- I vuoti tecnici esistono **solo tra stazioni vicine alla sede
+  manutentiva** (whitelist configurata in ``localita_stazione_vicina``,
+  vedi script ``scripts/seed_whitelist_e_accoppiamenti.py``).
+- Verso la periferia (Tirano, Asso, Laveno, ecc.) il convoglio si
+  posiziona con **corse commerciali**: dorme in stazione la sera,
+  riparte il mattino dopo.
+- Una catena con prima/ultima corsa **fuori whitelist** non genera
+  vuoti, e il giro chiude in modalità ``chiusa_a_localita=False`` —
+  segnale a ``costruisci_giri_multigiornata`` che il giro continua il
+  giorno dopo o si chiude in modo "non programmato".
 
 Quando serve un materiale vuoto:
 
-- **Testa**: se la prima corsa NON parte dalla stazione collegata alla
-  località → vuoto da ``stazione_collegata`` → ``prima.codice_origine``,
-  che arriva in tempo per essere agganciato (``prima.ora_partenza -
-  gap_min``).
-- **Coda**: se l'ultima corsa NON arriva nella stazione collegata
-  → vuoto da ``ultima.codice_destinazione`` →
-  ``stazione_collegata``, partendo dopo l'arrivo dell'ultima
-  (``ultima.ora_arrivo + gap_min``).
+- **Testa**: se ``prima.codice_origine ∈ whitelist`` AND
+  ``prima.codice_origine != stazione_collegata`` → vuoto da
+  ``stazione_collegata`` → ``prima.codice_origine``,
+  ``ora_arrivo = prima.ora_partenza - gap_min``. Se
+  ``prima.codice_origine == stazione_collegata`` → niente vuoto
+  (chiusura naturale). Se ``prima.codice_origine ∉ whitelist`` →
+  niente vuoto, il treno è già lì da ieri.
+- **Coda**: simmetrico, sull'ultima corsa.
 
-Limiti del sub-sprint 4.4.2:
+Limiti residui:
 
-- **Single-day rigido**: se la catena chiude cross-notte (ultima
-  corsa con ``ora_arrivo < ora_partenza``) **NON** generiamo il vuoto
-  di coda — la chiusura è demandata a Sprint 4.4.3 (multi-giornata).
-  Indichiamo ``chiusa_a_localita=False``.
+- **Single-day rigido**: catena cross-notte (``ora_arrivo <
+  ora_partenza``) → niente vuoto coda, ``chiusa_a_localita=False``.
+  La chiusura è gestita da ``multi_giornata.py``.
 - **Durata vuoto stimata**: parametro ``durata_vuoto_default_min``
-  (default 30'). Niente matrice km/velocità reale qui — raffinamento
-  futuro quando servirà.
-- **Niente check capacità località**: la verifica che la località
-  abbia pezzi del tipo richiesto è in Sprint 4.4.4 (assegnazione).
+  (default 30'). Niente matrice km/velocità reale qui.
+- **Niente check capacità località**: la verifica pezzi/tipo è in
+  ``composizione.py``.
 
 Il modulo è **DB-agnostic**: accetta qualunque oggetto col duck-typing
 giusto (Protocol ``_LocalitaLike``).
@@ -181,29 +193,43 @@ def _attraversa_mezzanotte(ora_partenza: time, ora_arrivo: time) -> bool:
 def posiziona_su_localita(
     catena: Catena,
     localita: _LocalitaLike,
+    whitelist_stazioni: frozenset[str],
     params: ParamPosizionamento = _DEFAULT_PARAM,
 ) -> CatenaPosizionata:
-    """Posiziona una catena su una località manutenzione.
+    """Posiziona una catena su una località manutenzione (Sprint 5.3).
 
     Algoritmo:
 
     1. Valida input (catena non vuota, località con stazione collegata).
-    2. **Vuoto di testa**: se ``prima.codice_origine != stazione_localita``,
-       genera blocco vuoto che parte da ``stazione_localita`` e arriva in
-       ``prima.codice_origine`` con ``ora_arrivo = prima.ora_partenza -
-       gap_min``. Se la partenza calcolata è < 00:00, alza
+    2. **Vuoto di testa** — generato SOLO se entrambe:
+       - ``prima.codice_origine ∈ whitelist_stazioni``
+       - ``prima.codice_origine != stazione_localita``
+       Se ``prima.codice_origine == stazione_localita`` → niente vuoto
+       (chiusura naturale). Se ``prima.codice_origine ∉ whitelist`` →
+       niente vuoto, il treno è già nella stazione di partenza dalla
+       sera precedente (multi-giornata).
+       Se la partenza calcolata cade < 00:00, alza
        ``PosizionamentoImpossibileError``.
-    3. **Vuoto di coda**: se la catena NON chiude cross-notte e
-       ``ultima.codice_destinazione != stazione_localita``, genera
-       blocco vuoto inverso. Se l'arrivo calcolato supera la
-       mezzanotte, salta la generazione e marca ``chiusa_a_localita
-       = False`` (la chiusura sarà gestita da 4.4.3).
-    4. Calcola ``chiusa_a_localita`` finale.
+    3. **Vuoto di coda** — simmetrico, sull'ultima corsa: generato SOLO
+       se NON cross-notte AND ``ultima.codice_destinazione ∈
+       whitelist_stazioni`` AND ``ultima.codice_destinazione !=
+       stazione_localita``. Se l'arrivo calcolato supera la mezzanotte,
+       salta la generazione e marca ``chiusa_a_localita = False`` (la
+       chiusura sarà gestita da ``multi_giornata.py``).
+    4. ``chiusa_a_localita`` = True solo se l'ultima corsa arriva in
+       ``stazione_localita`` (chiusura naturale) OPPURE è stato generato
+       il vuoto di coda. Se ultima è fuori whitelist e ≠ stazione →
+       False (treno dorme in linea).
 
     Args:
         catena: ``Catena`` non vuota (output di ``costruisci_catene``).
         localita: oggetto con ``codice`` e ``stazione_collegata_codice``
             non null.
+        whitelist_stazioni: insieme di codici stazione "vicini" alla
+            sede in cui sono ammessi i vuoti tecnici. Letto da
+            ``localita_stazione_vicina`` (DB) — vedi loader in
+            ``builder.py``. ``frozenset()`` vuoto = nessun vuoto mai
+            generato.
         params: ``ParamPosizionamento``.
 
     Returns:
@@ -226,9 +252,9 @@ def posiziona_su_localita(
     prima = catena.corse[0]
     ultima = catena.corse[-1]
 
-    # ---- Vuoto di testa ----
+    # ---- Vuoto di testa: solo se prima.origine ∈ whitelist e ≠ sede ----
     vuoto_testa: BloccoMaterialeVuoto | None = None
-    if prima.codice_origine != s:
+    if prima.codice_origine != s and prima.codice_origine in whitelist_stazioni:
         arrivo_min = _time_to_min(prima.ora_partenza) - params.gap_min
         partenza_min = arrivo_min - params.durata_vuoto_default_min
         if partenza_min < 0:
@@ -237,7 +263,7 @@ def posiziona_su_localita(
                 f"{prima.ora_partenza.isoformat()} partirebbe prima delle "
                 f"00:00 (durata stimata {params.durata_vuoto_default_min}' + "
                 f"gap {params.gap_min}'). Riduci durata stimata o "
-                "rimanda la chiusura a 4.4.3 multi-giornata."
+                "rimanda la chiusura a multi_giornata."
             )
         vuoto_testa = BloccoMaterialeVuoto(
             codice_origine=s,
@@ -247,15 +273,19 @@ def posiziona_su_localita(
             motivo="testa",
         )
 
-    # ---- Vuoto di coda ----
+    # ---- Vuoto di coda: solo se ultima.dest ∈ whitelist e ≠ sede ----
     vuoto_coda: BloccoMaterialeVuoto | None = None
     cross_notte = _attraversa_mezzanotte(ultima.ora_partenza, ultima.ora_arrivo)
     coda_oltre_mezzanotte = False
-    if not cross_notte and ultima.codice_destinazione != s:
+    if (
+        not cross_notte
+        and ultima.codice_destinazione != s
+        and ultima.codice_destinazione in whitelist_stazioni
+    ):
         partenza_min = _time_to_min(ultima.ora_arrivo) + params.gap_min
         arrivo_min = partenza_min + params.durata_vuoto_default_min
         if arrivo_min > 24 * 60 - 1:
-            # Vuoto finirebbe dopo le 23:59 → demando a 4.4.3.
+            # Vuoto finirebbe dopo le 23:59 → demando a multi_giornata.
             coda_oltre_mezzanotte = True
         else:
             vuoto_coda = BloccoMaterialeVuoto(
@@ -267,6 +297,10 @@ def posiziona_su_localita(
             )
 
     # ---- Flag di chiusura ----
+    # True solo se ultima corsa arriva alla sede (chiusura naturale)
+    # oppure abbiamo generato il vuoto di coda. In ogni altro caso
+    # (cross-notte, ultima fuori whitelist, coda oltre mezzanotte) →
+    # False, il giro continua il giorno dopo (multi_giornata).
     chiusa = (
         not cross_notte
         and not coda_oltre_mezzanotte
