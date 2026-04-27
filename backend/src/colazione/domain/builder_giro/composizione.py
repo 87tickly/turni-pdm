@@ -160,14 +160,15 @@ class GiornataAssegnata:
 class GiroAssegnato:
     """Output completo: `Giro` (4.4.3) + assegnazioni + warning.
 
-    I campi `localita_codice`, `chiuso`, `motivo_chiusura` ricalcano
-    `Giro` per pass-through al chiamante.
+    I campi `localita_codice`, `chiuso`, `motivo_chiusura`,
+    `km_cumulati` ricalcano `Giro` per pass-through al chiamante.
     """
 
     localita_codice: str
     giornate: tuple[GiornataAssegnata, ...]
     chiuso: bool
     motivo_chiusura: MotivoChiusura
+    km_cumulati: float = 0.0
     corse_residue: tuple[CorsaResidua, ...] = field(default_factory=tuple)
     incompatibilita_materiale: tuple[IncompatibilitaMateriale, ...] = field(default_factory=tuple)
 
@@ -244,6 +245,7 @@ def assegna_materiali(giro: Giro, regole: Sequence[_RegolaLike]) -> GiroAssegnat
         giornate=tuple(giornate_out),
         chiuso=giro.chiuso,
         motivo_chiusura=giro.motivo_chiusura,
+        km_cumulati=giro.km_cumulati,
         corse_residue=tuple(residue),
         incompatibilita_materiale=tuple(incompat),
     )

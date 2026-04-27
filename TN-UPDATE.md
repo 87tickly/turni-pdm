@@ -10,6 +10,129 @@
 
 ---
 
+## 2026-04-27 (31) — Sprint 5.4: multi_giornata con cumulo km + trigger km_max_ciclo
+
+### Contesto
+
+Sub 5.4 del piano `docs/SPRINT-5-RIPENSAMENTO.md` §5.4: il convoglio
+operativo Trenord sta in linea 5000-10000 km prima di rientrare in
+sede manutentiva. Senza un **cap km cumulativo**, il builder
+estenderebbe i giri a oltranza (fino a `n_giornate_max`) anche per
+materiali che hanno già fatto il loro chilometraggio. Sub 5.4 cabla
+il cumulo km e il trigger di chiusura.
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_giro/multi_giornata.py`**:
+
+- Nuovo campo `Giro.km_cumulati: float = 0.0` (somma dei `km_tratta`
+  delle corse di tutte le giornate, default 0 per backward compat
+  con test che non popolano il campo).
+- `MotivoChiusura` → 4 valori: `naturale | km_cap | max_giornate |
+  non_chiuso`. Aggiunto `km_cap`.
+- `ParamMultiGiornata.km_max_ciclo: float | None = None` (None =
+  no cap, default).
+- Nuovo helper `_km_giornata(cat_pos) -> float`: somma `km_tratta`
+  duck-typed (`getattr(c, "km_tratta", None)`, fallback 0).
+- Loop estensione cross-notte: aggiunto break su
+  `km_cumulati >= km_max_ciclo` PRIMA di cercare la continuazione.
+  Il km della giornata successiva non viene contato (il giro chiude
+  prima).
+- Determinazione `motivo_chiusura` con priorità:
+  `naturale > km_cap > max_giornate > non_chiuso`. La priorità di
+  `km_cap` su `max_giornate` è onesta verso il pianificatore: se il
+  giro ha 5 giornate E ha già fatto 8000km > 5000 cap, il vero motivo
+  è km_cap (sarebbe stato chiuso comunque al primo trigger).
+- Il caso `naturale` ha priorità assoluta: se la giornata corrente
+  chiude geograficamente, il giro chiude `naturale` anche se ha già
+  superato il cap.
+
+**`backend/src/colazione/domain/builder_giro/composizione.py`**:
+
+- `GiroAssegnato.km_cumulati: float = 0.0` (pass-through dal `Giro`).
+- `assegna_materiali()` propaga `giro.km_cumulati` nel `GiroAssegnato`
+  costruito.
+- `rileva_eventi_composizione` usa `dataclasses.replace`, preserva
+  automaticamente `km_cumulati`.
+
+**`backend/src/colazione/domain/builder_giro/builder.py`** (orchestrator):
+
+- Importa `ParamMultiGiornata` da `multi_giornata`.
+- `genera_giri()` costruisce `ParamMultiGiornata` da
+  `programma.n_giornate_default` e `programma.km_max_ciclo`
+  (campi Sub 5.1) e lo passa a `costruisci_giri_multigiornata`.
+- `BuilderResult.n_giri_km_cap: int = 0` (counter giri chiusi per cap
+  km) — sottoinsieme di `n_giri_non_chiusi`.
+
+### Test
+
+**`backend/tests/test_multi_giornata.py`** (17 esistenti + **8 nuovi**):
+
+- 17 test esistenti restano verdi grazie al default `km_cumulati=0.0`
+  (non li tocco).
+- `FakeCorsa.km_tratta: float | None = None` (opzionale per i nuovi
+  test che vogliono testare cumulo).
+- Nuovi test:
+  - `test_km_cumulati_sommati_su_singola_giornata`
+  - `test_km_cumulati_su_giro_multi_giornata` (160 km su 2 giornate)
+  - `test_km_tratta_none_contribuisce_zero` (duck-typing)
+  - `test_km_max_ciclo_none_no_trigger` (cap None → no break)
+  - `test_km_cap_chiude_giro_e_motivo_km_cap` (6000km cumulati, cap 5000)
+  - `test_km_cap_priorita_su_max_giornate` (km cap batte n_giornate)
+  - `test_km_cap_non_blocca_chiusura_naturale` (priorità naturale)
+  - `test_param_multi_giornata_km_max_ciclo_default_none`
+
+### Decisioni di design
+
+- **Duck-typing su `km_tratta`**: il modulo pure non importa
+  `CorsaCommerciale` ORM; usa `getattr(c, "km_tratta", None)` per
+  permettere ai test FakeCorsa di non avere il campo (compatibility).
+  Il valore None è trattato come 0, coerente col PdE
+  (`Decimal | None`).
+- **Cumulo solo informativo se cap None**: se il programma non
+  configura `km_max_ciclo`, il `Giro.km_cumulati` viene comunque
+  calcolato (utile per UI di debug/reporting), ma non triggera
+  alcuna chiusura.
+- **`km_cap` non implica `chiuso=True`**: `chiuso` resta legato alla
+  chiusura geografica (ultima corsa arriva alla sede). Un giro
+  chiuso per km_cap è "chiuso operativamente" (va a manutenzione)
+  ma può finire ovunque geograficamente — il pianificatore vede
+  il warning per organizzare il rientro fisico (vuoto tecnico oltre
+  whitelist o trasferimento con altro convoglio).
+- **Identificazione corsa di rientro programmata** (piano §5.4 bullet
+  4): rimandata a Sub 5.4 v2 (eventuale futuro). La logica attuale
+  chiude il giro al cap; lo "smart routing" verso la sede è
+  raffinamento.
+
+### Verifiche
+
+- `pytest`: **351 passed** in 9.9s (era 343, +8 nuovi km)
+- `ruff check + format`: clean (75 file)
+- `mypy --strict src`: no issues, 47 source files
+
+### Stato
+
+**Sub 5.4 chiusa**. Il builder ora rispetta il cap km cumulativo del
+programma: niente più giri infiniti per cumulo chilometrico
+irrealistico. Il pianificatore configura `km_max_ciclo` per programma
+(vedi `programma_materiale` Sub 5.1) e il builder onora il vincolo.
+
+### Prossimo step
+
+**Sub 5.5 — Estensione `composizione.py` per lista materiali**
+(piano §5.5):
+
+- `risolvi_corsa()` legge `regola.composizione_json` invece dei campi
+  legacy `materiale_tipo_codice + numero_pezzi`.
+- `AssegnazioneRisolta` con `composizione: list[ComposizioneItem]`.
+- `rileva_eventi_composizione()`: confronta liste per delta
+  (es. da `[{526,1},{425,1}]` a `[{526,1}]` = sgancio del 425).
+- Validazione con `materiale_accoppiamento_ammesso` se
+  `is_composizione_manuale=False`.
+- 10-15 test puri.
+
+---
+
 ## 2026-04-27 (30) — Sprint 5.3: riscrittura `posizionamento.py` con whitelist
 
 ### Contesto

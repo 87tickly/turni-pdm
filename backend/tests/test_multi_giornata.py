@@ -49,10 +49,19 @@ class FakeCorsa:
     ora_partenza: time
     ora_arrivo: time
     numero_treno: str = ""
+    # Sprint 5.4: km_tratta opzionale per cumulo km. Test che non lo
+    # fornisce vede km_cumulati=0 (duck-typed: getattr fallisce → 0).
+    km_tratta: float | None = None
 
 
-def _c(o: str, d: str, p: tuple[int, int], a: tuple[int, int]) -> FakeCorsa:
-    return FakeCorsa(o, d, time(*p), time(*a))
+def _c(
+    o: str,
+    d: str,
+    p: tuple[int, int],
+    a: tuple[int, int],
+    km: float | None = None,
+) -> FakeCorsa:
+    return FakeCorsa(o, d, time(*p), time(*a), km_tratta=km)
 
 
 def _cat_pos(
@@ -452,3 +461,172 @@ def test_esempio_ciclo_5_giornate_settimanale() -> None:
     assert [g.data for g in giri[0].giornate] == [D_LUN, D_MAR, D_MER, D_GIO, D_VEN]
     # Verifica oggetto Giro è frozen e tipato
     assert isinstance(giri[0], Giro)
+
+
+# =====================================================================
+# Sprint 5.4 — Cumulo km + trigger km_max_ciclo
+# =====================================================================
+
+
+def test_km_cumulati_sommati_su_singola_giornata() -> None:
+    """km_tratta delle corse sommati nel giro, anche con 1 sola giornata."""
+    g = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(
+            _c("MI_FIO", "BG", (8, 0), (9, 0), km=50.0),
+            _c("BG", "MI_FIO", (10, 0), (11, 0), km=50.0),
+        ),
+        chiusa=True,
+    )
+    giri = costruisci_giri_multigiornata({D_LUN: [g]})
+    assert len(giri) == 1
+    assert giri[0].km_cumulati == 100.0
+    assert giri[0].motivo_chiusura == "naturale"
+
+
+def test_km_cumulati_su_giro_multi_giornata() -> None:
+    """km sommati attraverso N giornate cross-notte."""
+    g1 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (8, 0), (9, 0), km=80.0),),
+        chiusa=False,
+    )
+    g2 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("BG", "MI_FIO", (8, 0), (9, 0), km=80.0),),
+        chiusa=True,
+    )
+    giri = costruisci_giri_multigiornata({D_LUN: [g1], D_MAR: [g2]})
+    assert len(giri) == 1
+    assert giri[0].km_cumulati == 160.0
+    assert giri[0].motivo_chiusura == "naturale"
+
+
+def test_km_tratta_none_contribuisce_zero() -> None:
+    """Corse senza km_tratta non rompono il calcolo (contribuiscono 0)."""
+    g = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(
+            _c("MI_FIO", "BG", (8, 0), (9, 0), km=None),
+            _c("BG", "MI_FIO", (10, 0), (11, 0), km=50.0),
+        ),
+        chiusa=True,
+    )
+    giri = costruisci_giri_multigiornata({D_LUN: [g]})
+    assert giri[0].km_cumulati == 50.0
+
+
+def test_km_max_ciclo_none_no_trigger() -> None:
+    """km_max_ciclo None (default): nessun cap, cumulo solo informativo."""
+    g1 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (8, 0), (9, 0), km=10000.0),),
+        chiusa=False,
+    )
+    g2 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("BG", "MI_FIO", (8, 0), (9, 0), km=10000.0),),
+        chiusa=True,
+    )
+    giri = costruisci_giri_multigiornata(
+        {D_LUN: [g1], D_MAR: [g2]},
+        ParamMultiGiornata(km_max_ciclo=None),
+    )
+    # Senza cap, il giro chiude naturalmente al 2° giorno
+    assert giri[0].km_cumulati == 20000.0
+    assert giri[0].motivo_chiusura == "naturale"
+
+
+def test_km_cap_chiude_giro_e_motivo_km_cap() -> None:
+    """km_cumulati >= km_max_ciclo dopo G1 → niente estensione, motivo km_cap.
+
+    Anche se G2 esisterebbe geograficamente, il cap blocca."""
+    g1 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (8, 0), (9, 0), km=6000.0),),
+        chiusa=False,  # geograficamente non chiuso
+    )
+    g2 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("BG", "MI_FIO", (8, 0), (9, 0), km=80.0),),
+        chiusa=True,
+    )
+    giri = costruisci_giri_multigiornata(
+        {D_LUN: [g1], D_MAR: [g2]},
+        ParamMultiGiornata(km_max_ciclo=5000.0),
+    )
+    # Solo 1 giro (con G1), G2 non legata. G1 ha km cap → motivo km_cap
+    assert len(giri) == 2  # G1 + G2 isolata (orphan, nuovo giro)
+    primo = giri[0]
+    assert len(primo.giornate) == 1
+    assert primo.km_cumulati == 6000.0
+    assert primo.motivo_chiusura == "km_cap"
+    assert primo.chiuso is False  # km_cap NON è chiusura geografica
+
+
+def test_km_cap_priorita_su_max_giornate() -> None:
+    """Se km_cap E max_giornate scattano insieme, motivo='km_cap' (più
+    informativo per il pianificatore)."""
+    # 3 giornate, km cap a 100, n_giornate_max=3
+    # Giornata 1: 60km (totale 60, sotto cap)
+    # Giornata 2: 60km (totale 120, sopra cap → trigger)
+    g1 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (8, 0), (9, 0), km=60.0),),
+        chiusa=False,
+    )
+    g2 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("BG", "BS", (8, 0), (9, 0), km=60.0),),
+        chiusa=False,
+    )
+    g3 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("BS", "MI_FIO", (8, 0), (9, 0), km=10.0),),
+        chiusa=True,
+    )
+    giri = costruisci_giri_multigiornata(
+        {D_LUN: [g1], D_MAR: [g2], D_MER: [g3]},
+        ParamMultiGiornata(n_giornate_max=3, km_max_ciclo=100.0),
+    )
+    # Estensione: G1 (60km, sotto cap) → G2 (120km, sopra cap → break dopo G2)
+    primo = giri[0]
+    assert len(primo.giornate) == 2
+    assert primo.km_cumulati == 120.0
+    assert primo.motivo_chiusura == "km_cap"
+
+
+def test_km_cap_non_blocca_chiusura_naturale() -> None:
+    """Se la giornata corrente chiude naturalmente, il giro chiude
+    'naturale' anche se km_cumulati > cap (priorità: naturale > km_cap)."""
+    g1 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "MI_FIO", (8, 0), (9, 0), km=10000.0),),
+        chiusa=True,  # geograficamente chiuso
+    )
+    giri = costruisci_giri_multigiornata(
+        {D_LUN: [g1]},
+        ParamMultiGiornata(km_max_ciclo=5000.0),
+    )
+    assert giri[0].motivo_chiusura == "naturale"
+    assert giri[0].chiuso is True
+    assert giri[0].km_cumulati == 10000.0
+
+
+def test_param_multi_giornata_km_max_ciclo_default_none() -> None:
+    """Default ParamMultiGiornata: km_max_ciclo=None (no cap)."""
+    p = ParamMultiGiornata()
+    assert p.km_max_ciclo is None
+    assert p.n_giornate_max == 5

@@ -1,4 +1,5 @@
-"""Multi-giornata cross-notte (Sprint 4.4.3).
+"""Multi-giornata cross-notte (Sprint 4.4.3 → esteso Sprint 5.4 con
+cumulo km + trigger km_max_ciclo).
 
 Funzione **pura** che concatena `CatenaPosizionata` di giornate
 consecutive in `Giro` multi-giornata, gestendo i giri che
@@ -9,10 +10,11 @@ Spec:
 - ``docs/PROGRAMMA-MATERIALE.md`` §6.7 (cross-notte gestito da subito,
   decisione utente "B subito").
 - ``docs/LOGICA-COSTRUZIONE.md`` §3.4 (ciclo multi-giornata).
+- ``docs/SPRINT-5-RIPENSAMENTO.md`` §5.4 (km cumulati + trigger).
 
 Logica cross-notte:
 
-Una `CatenaPosizionata` (output di Sprint 4.4.2) ha un flag
+Una `CatenaPosizionata` (output di posizionamento) ha un flag
 ``chiusa_a_localita``. Se ``True``, il giro chiude in giornata e
 diventa un `Giro` di una sola giornata. Se ``False``, il convoglio
 fisico **non torna in deposito a mezzanotte**: nella giornata
@@ -24,16 +26,28 @@ Chiusura del giro:
 1. **Naturale**: l'ultima giornata ha ``chiusa_a_localita=True``.
 2. **Max giornate**: si raggiunge ``n_giornate_max`` (forza chiusura,
    warning per il pianificatore — strict flag ``no_giro_appeso``).
-3. **Non chiusa**: nessuna continuazione disponibile e siamo sotto
-   ``n_giornate_max`` (warning, il giro resta "appeso").
+3. **Km cap** (Sprint 5.4): si raggiunge ``km_max_ciclo`` cumulativo.
+   Il convoglio sta in linea da troppi km, va a manutenzione (anche
+   se la giornata non chiude geograficamente).
+4. **Non chiusa**: nessuna continuazione disponibile e siamo sotto
+   tutti i cap (warning, il giro resta "appeso").
 
-Limiti del sub-sprint 4.4.3:
+Cumulo km (Sprint 5.4):
 
-- **Niente check km_max_giornaliero**: il dato km/distanza non è
-  ancora cablato nelle dataclass dominio. Sarà aggiunto in 4.4.4 o
-  4.4.5 quando il builder lavorerà su corse con metadati km.
+Ogni giornata aggiunge la somma dei `km_tratta` delle sue corse al
+totale del giro. La logica è duck-typed: se la corsa non ha l'attributo
+``km_tratta`` o vale ``None``, contribuisce 0. Coerente con il dato
+PdE: ``CorsaCommerciale.km_tratta: Decimal | None``.
+
+Limiti residui:
+
+- **Niente identificazione corsa di rientro programmata**: quando si
+  raggiunge ``km_cap`` o ``max_giornate`` e la giornata corrente non
+  arriva alla sede, il giro resta "non chiuso geograficamente".
+  L'estensione "cerca attivamente una corsa che riporti il treno
+  verso la whitelist sede" è scope futuro (raffinamento Sub 5.4 v2).
 - **Niente persistenza**: solo dataclass in/out. La traduzione su
-  ``models.giri.GiroMateriale`` è in 4.4.5.
+  ``models.giri.GiroMateriale`` resta in `persister.py`.
 
 Il modulo è **DB-agnostic**.
 """
@@ -51,7 +65,7 @@ from colazione.domain.builder_giro.posizionamento import CatenaPosizionata
 # =====================================================================
 
 
-MotivoChiusura = Literal["naturale", "max_giornate", "non_chiuso"]
+MotivoChiusura = Literal["naturale", "max_giornate", "km_cap", "non_chiuso"]
 
 
 @dataclass(frozen=True)
@@ -63,9 +77,14 @@ class ParamMultiGiornata:
             chiusura). Default 5 (allineato a ciclo Trenord 5+2).
             Il programma materiale ha ``n_giornate_default``: il
             chiamante lo passa qui.
+        km_max_ciclo: km cumulati massimi sul ciclo intero. ``None``
+            = nessun cap (default). Quando il giro raggiunge questo
+            valore, viene chiuso con ``motivo_chiusura='km_cap'``.
+            Tipici 5000-10000 (decisione utente per programma).
     """
 
     n_giornate_max: int = 5
+    km_max_ciclo: float | None = None
 
 
 _DEFAULT_PARAM = ParamMultiGiornata()
@@ -84,7 +103,7 @@ class Giro:
     """Output multi-giornata del builder pure (DB-agnostic).
 
     Mappa su ORM ``GiroMateriale + GiroGiornata + GiroVariante +
-    GiroBlocco`` in Sprint 4.4.5 (persistenza).
+    GiroBlocco`` in `persister.py`.
 
     Attributi:
         localita_codice: codice località manutenzione del giro
@@ -94,13 +113,19 @@ class Giro:
             (``catena_posizionata.chiusa_a_localita=True``). Allineato a
             ``motivo_chiusura == 'naturale'``.
         motivo_chiusura: ``'naturale'`` | ``'max_giornate'`` |
-            ``'non_chiuso'``. Utile per pianificatore + strict mode.
+            ``'km_cap'`` | ``'non_chiuso'``. Utile per pianificatore +
+            strict mode.
+        km_cumulati: somma dei ``km_tratta`` di tutte le corse di tutte
+            le giornate (Sprint 5.4). Corse senza ``km_tratta``
+            contribuiscono 0. Float per semplicità (l'ORM mantiene
+            Decimal).
     """
 
     localita_codice: str
     giornate: tuple[GiornataGiro, ...]
     chiuso: bool
     motivo_chiusura: MotivoChiusura
+    km_cumulati: float = 0.0
 
 
 # =====================================================================
@@ -111,6 +136,21 @@ class Giro:
 def _time_to_min(t: time) -> int:
     """``time`` → minuti dall'inizio giornata (per sort deterministico)."""
     return t.hour * 60 + t.minute
+
+
+def _km_giornata(cat_pos: CatenaPosizionata) -> float:
+    """Somma ``km_tratta`` delle corse di una giornata.
+
+    Duck-typed: corse senza ``km_tratta`` o con valore ``None``
+    contribuiscono 0. Coerente con il dato PdE (
+    ``CorsaCommerciale.km_tratta: Decimal | None``).
+    """
+    total = 0.0
+    for c in cat_pos.catena.corse:
+        km = getattr(c, "km_tratta", None)
+        if km is not None:
+            total += float(km)
+    return total
 
 
 def _trova_continuazione(
@@ -160,16 +200,21 @@ def costruisci_giri_multigiornata(
 
     1. Itera sulle date in ordine cronologico.
     2. Per ogni catena non già usata, inizia un nuovo giro.
-    3. Estende il giro alla data successiva se:
+       ``km_cumulati`` parte dalla giornata 1.
+    3. Estende il giro alla data successiva se TUTTE:
        - la giornata corrente NON chiude a località
          (``chiusa_a_localita=False``)
-       - non si è raggiunto ``n_giornate_max``
+       - ``len(giornate) < n_giornate_max``
+       - ``km_cumulati < km_max_ciclo`` (se ``km_max_ciclo`` definito,
+         Sprint 5.4)
        - esiste una catena nella data successiva con stessa località
          e prima corsa che parte dalla stazione di arrivo dell'ultima
          corsa
-    4. Determina ``motivo_chiusura`` finale:
+    4. Determina ``motivo_chiusura`` finale (priorità in caso di
+       trigger multipli: naturale > km_cap > max_giornate > non_chiuso):
        - ``'naturale'`` se l'ultima giornata chiude a località
-       - ``'max_giornate'`` se si è forzata chiusura per cap
+       - ``'km_cap'`` se ``km_cumulati >= km_max_ciclo`` (Sprint 5.4)
+       - ``'max_giornate'`` se si è forzata chiusura per cap giornate
        - ``'non_chiuso'`` se mancava continuazione (giro appeso)
 
     Args:
@@ -209,6 +254,7 @@ def costruisci_giri_multigiornata(
 
             giornate: list[GiornataGiro] = [GiornataGiro(data=d_inizio, catena_posizionata=cat_pos)]
             visitate.add(id(cat_pos))
+            km_cumulati = _km_giornata(cat_pos)
 
             # Loop di estensione cross-notte
             while True:
@@ -216,6 +262,8 @@ def costruisci_giri_multigiornata(
                 if ultima_g.catena_posizionata.chiusa_a_localita:
                     break
                 if len(giornate) >= params.n_giornate_max:
+                    break
+                if params.km_max_ciclo is not None and km_cumulati >= params.km_max_ciclo:
                     break
 
                 d_prossima = d_inizio + timedelta(days=len(giornate))
@@ -236,12 +284,20 @@ def costruisci_giri_multigiornata(
 
                 giornate.append(GiornataGiro(data=d_prossima, catena_posizionata=prossima))
                 visitate.add(id(prossima))
+                km_cumulati += _km_giornata(prossima)
 
-            # Determina motivo chiusura
+            # Determina motivo chiusura.
+            # Priorità: naturale > km_cap > max_giornate > non_chiuso.
+            # km_cap batte max_giornate per onestà al pianificatore: se il
+            # giro ha 5 giornate E ha già fatto 8000 km > 5000 cap, il
+            # vero motivo di chiusura è il km cap (sarebbe stato chiuso
+            # comunque al primo trigger).
             chiuso = giornate[-1].catena_posizionata.chiusa_a_localita
             motivo: MotivoChiusura
             if chiuso:
                 motivo = "naturale"
+            elif params.km_max_ciclo is not None and km_cumulati >= params.km_max_ciclo:
+                motivo = "km_cap"
             elif len(giornate) >= params.n_giornate_max:
                 motivo = "max_giornate"
             else:
@@ -253,6 +309,7 @@ def costruisci_giri_multigiornata(
                     giornate=tuple(giornate),
                     chiuso=chiuso,
                     motivo_chiusura=motivo,
+                    km_cumulati=km_cumulati,
                 )
             )
 

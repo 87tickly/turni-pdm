@@ -55,6 +55,7 @@ from colazione.domain.builder_giro.composizione import (
     assegna_e_rileva_eventi,
 )
 from colazione.domain.builder_giro.multi_giornata import (
+    ParamMultiGiornata,
     costruisci_giri_multigiornata,
 )
 from colazione.domain.builder_giro.persister import (
@@ -136,7 +137,12 @@ class BuilderResult:
         n_corse_processate: corse incluse in almeno un giro.
         n_corse_residue: corse senza regola applicabile.
         n_giri_chiusi: giri con ``motivo_chiusura='naturale'``.
-        n_giri_non_chiusi: giri non chiusi (max_giornate o non_chiuso).
+        n_giri_non_chiusi: giri non chiusi (km_cap, max_giornate o
+            non_chiuso).
+        n_giri_km_cap: giri chiusi per ``km_cumulati >= km_max_ciclo``
+            (Sprint 5.4). Sottoinsieme di ``n_giri_non_chiusi``: il giro
+            è "chiuso operativamente" (va a manutenzione) ma non
+            geograficamente alla sede.
         n_eventi_composizione: blocchi aggancio/sgancio inseriti.
         n_incompatibilita_materiale: warning più tipi materiale per giornata.
         warnings: messaggi human-readable per il pianificatore (UI).
@@ -150,6 +156,7 @@ class BuilderResult:
     n_giri_non_chiusi: int
     n_eventi_composizione: int
     n_incompatibilita_materiale: int
+    n_giri_km_cap: int = 0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -422,8 +429,12 @@ async def genera_giri(
             catene_pos.append(cat_pos)
         catene_per_data[d] = catene_pos
 
-    # 4. Multi-giornata (cross-notte)
-    giri_dom = costruisci_giri_multigiornata(catene_per_data)
+    # 4. Multi-giornata (cross-notte) con cumulo km e cap dal programma
+    param_mg = ParamMultiGiornata(
+        n_giornate_max=programma.n_giornate_default,
+        km_max_ciclo=float(programma.km_max_ciclo) if programma.km_max_ciclo else None,
+    )
+    giri_dom = costruisci_giri_multigiornata(catene_per_data, param_mg)
 
     # 5. Assegnazione regole + eventi composizione
     giri_assegnati = assegna_e_rileva_eventi(giri_dom, regole)
@@ -447,6 +458,7 @@ async def genera_giri(
     n_corse_residue = sum(len(g.corse_residue) for g in giri_assegnati)
     n_giri_chiusi = sum(1 for g in giri_assegnati if g.chiuso)
     n_giri_non_chiusi = sum(1 for g in giri_assegnati if not g.chiuso)
+    n_giri_km_cap = sum(1 for g in giri_assegnati if g.motivo_chiusura == "km_cap")
     n_eventi = sum(len(gg.eventi_composizione) for g in giri_assegnati for gg in g.giornate)
     n_incompat = sum(len(g.incompatibilita_materiale) for g in giri_assegnati)
 
@@ -457,6 +469,7 @@ async def genera_giri(
         n_corse_residue=n_corse_residue,
         n_giri_chiusi=n_giri_chiusi,
         n_giri_non_chiusi=n_giri_non_chiusi,
+        n_giri_km_cap=n_giri_km_cap,
         n_eventi_composizione=n_eventi,
         n_incompatibilita_materiale=n_incompat,
         warnings=warnings,
