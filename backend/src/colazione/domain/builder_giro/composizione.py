@@ -51,6 +51,8 @@ from colazione.domain.builder_giro.multi_giornata import (
 from colazione.domain.builder_giro.posizionamento import CatenaPosizionata
 from colazione.domain.builder_giro.risolvi_corsa import (
     AssegnazioneRisolta,
+    ComposizioneItem,
+    IsAccoppiamentoAmmesso,
     risolvi_corsa,
 )
 
@@ -61,16 +63,12 @@ from colazione.domain.builder_giro.risolvi_corsa import (
 
 class _RegolaLike(Protocol):
     """Una regola del programma materiale (riusa lo stesso shape di
-    `risolvi_corsa._RegolaLike`).
-
-    Legacy fields nullable da Sprint 5.1 — vedi nota in
-    `risolvi_corsa._RegolaLike`.
-    """
+    `risolvi_corsa._RegolaLike`, Sprint 5.5)."""
 
     id: int
     filtri_json: list[Any]
-    materiale_tipo_codice: str | None
-    numero_pezzi: int | None
+    composizione_json: list[Any]
+    is_composizione_manuale: bool
     priorita: int
 
 
@@ -100,15 +98,22 @@ class EventoComposizione:
     """Aggancio o sgancio rilevato tra due blocchi corsa consecutivi.
 
     Persiste in DB come `giro_blocco` di tipo ``'aggancio'``/``'sgancio'``
-    con ``is_validato_utente=False`` e ``metadata_json`` popolato
-    (Sprint 4.4.5 persistenza).
+    con ``is_validato_utente=False`` e ``metadata_json`` popolato.
+
+    Sprint 5.5: l'evento ora identifica esplicitamente **quale**
+    materiale entra/esce (``materiale_tipo_codice``). Una transizione
+    da ``[526]`` a ``[526, 425]`` genera un evento aggancio del 425.
+    Una transizione swap (``[526]`` → ``[425]``) genera 2 eventi:
+    sgancio del 526 + aggancio del 425.
 
     Attributi:
         tipo: ``'aggancio'`` (delta > 0) o ``'sgancio'`` (delta < 0).
-        pezzi_delta: variazione signed di ``numero_pezzi``.
+        materiale_tipo_codice: il rotabile coinvolto nell'evento
+            (Sprint 5.5).
+        pezzi_delta: variazione signed di ``n_pezzi`` per quel
+            materiale.
         stazione_proposta: stazione candidata per l'evento (default:
-            origine del blocco corrente). Il pianificatore può
-            spostarla in UI.
+            origine del blocco corrente).
         posizione_dopo_blocco: indice (0-based) del blocco precedente
             nella giornata. L'evento sta tra blocco[i] e blocco[i+1].
         note_builder: spiegazione testuale per UI/tooltip.
@@ -117,6 +122,7 @@ class EventoComposizione:
     """
 
     tipo: TipoEvento
+    materiale_tipo_codice: str
     pezzi_delta: int
     stazione_proposta: str
     posizione_dopo_blocco: int
@@ -178,33 +184,47 @@ class GiroAssegnato:
 # =====================================================================
 
 
-def assegna_materiali(giro: Giro, regole: Sequence[_RegolaLike]) -> GiroAssegnato:
-    """Assegna materiale a ogni corsa del giro chiamando ``risolvi_corsa``.
+def assegna_materiali(
+    giro: Giro,
+    regole: Sequence[_RegolaLike],
+    is_accoppiamento_ammesso: IsAccoppiamentoAmmesso | None = None,
+) -> GiroAssegnato:
+    """Assegna composizione a ogni corsa del giro chiamando ``risolvi_corsa``.
 
     Algoritmo:
 
     1. Per ogni `GiornataGiro`, scorri le corse della catena.
-    2. Per ogni corsa: ``risolvi_corsa(corsa, regole, giornata.data)``.
+    2. Per ogni corsa: ``risolvi_corsa(corsa, regole, giornata.data,
+       is_accoppiamento_ammesso)``.
        - Se ``None`` → la corsa va in ``corse_residue`` (warning).
        - Se ``AssegnazioneRisolta`` → blocco assegnato.
-       - Se ``RegolaAmbiguaError`` → bubble up (caller decide).
-    3. Se la giornata usa > 1 ``materiale_tipo`` → registra
-       ``IncompatibilitaMateriale``.
+       - Se ``RegolaAmbiguaError`` o ``ComposizioneNonAmmessaError`` →
+         bubble up (caller decide).
+    3. ``materiali_tipo_giornata`` = unione di tutti i materiali usati
+       da tutte le composizioni della giornata (Sprint 5.5).
+       ``IncompatibilitaMateriale`` viene registrata se l'**unione**
+       supera 1 elemento. Una composizione doppia ``[526, 425]`` su
+       una corsa NON è incompatibile in sé (è una doppia voluta);
+       diventa incompatibilità solo se in altri blocchi della stessa
+       giornata appare ``[E464]`` o simili.
     4. ``eventi_composizione`` resta vuoto (popolato da
        `rileva_eventi_composizione`).
 
     Args:
-        giro: ``Giro`` da Sprint 4.4.3.
+        giro: ``Giro`` da multi-giornata.
         regole: lista regole del programma materiale (caricata
             dal chiamante; nessun lazy-load ORM).
+        is_accoppiamento_ammesso: callback opzionale per validare le
+            composizioni doppie (Sprint 5.5).
 
     Returns:
         ``GiroAssegnato`` con assegnazioni + corse residue +
         incompatibilità.
 
     Raises:
-        RegolaAmbiguaError: se una corsa ha regole ambigue
-            (re-raise da ``risolvi_corsa``).
+        RegolaAmbiguaError: se una corsa ha regole ambigue.
+        ComposizioneNonAmmessaError: se una composizione viola gli
+            accoppiamenti ammessi (Sprint 5.5).
     """
     giornate_out: list[GiornataAssegnata] = []
     residue: list[CorsaResidua] = []
@@ -215,12 +235,13 @@ def assegna_materiali(giro: Giro, regole: Sequence[_RegolaLike]) -> GiroAssegnat
         tipi_materiale: set[str] = set()
 
         for corsa in giornata.catena_posizionata.catena.corse:
-            assegnazione = risolvi_corsa(corsa, regole, giornata.data)
+            assegnazione = risolvi_corsa(corsa, regole, giornata.data, is_accoppiamento_ammesso)
             if assegnazione is None:
                 residue.append(CorsaResidua(data=giornata.data, corsa=corsa))
                 continue
             blocchi.append(BloccoAssegnato(corsa=corsa, assegnazione=assegnazione))
-            tipi_materiale.add(assegnazione.materiale_tipo_codice)
+            # Sprint 5.5: unione di tutti i materiali della composizione.
+            tipi_materiale.update(assegnazione.materiali_codici)
 
         if len(tipi_materiale) > 1:
             incompat.append(
@@ -256,23 +277,48 @@ def assegna_materiali(giro: Giro, regole: Sequence[_RegolaLike]) -> GiroAssegnat
 # =====================================================================
 
 
-def rileva_eventi_composizione(giro_assegnato: GiroAssegnato) -> GiroAssegnato:
-    """Inserisce `EventoComposizione` per ogni delta ``numero_pezzi``
-    tra blocchi assegnati consecutivi della stessa giornata.
+def _composizione_to_dict(
+    composizione: tuple[ComposizioneItem, ...],
+) -> dict[str, int]:
+    """Converte una composizione in mapping ``{materiale_codice: n_pezzi}``.
 
-    Algoritmo (vedi ``PROGRAMMA-MATERIALE.md`` §5.3):
+    Sprint 5.5: serve a rilevare delta per-tipo. Se un materiale appare
+    2+ volte nella tupla (improbabile dopo Pydantic ma non vietato),
+    le quantità si sommano.
+    """
+    out: dict[str, int] = {}
+    for item in composizione:
+        out[item.materiale_tipo_codice] = out.get(item.materiale_tipo_codice, 0) + item.n_pezzi
+    return out
+
+
+def rileva_eventi_composizione(giro_assegnato: GiroAssegnato) -> GiroAssegnato:
+    """Inserisce `EventoComposizione` per ogni delta di composizione
+    per-materiale tra blocchi assegnati consecutivi della stessa
+    giornata (Sprint 5.5 — riscritto).
+
+    Algoritmo:
 
     1. Per ogni giornata, scorre i ``blocchi_assegnati`` mantenendo
-       ``prev_pezzi``.
-    2. Per ogni blocco, calcola ``delta = curr_pezzi - prev_pezzi``.
-    3. Se ``delta != 0``: crea un ``EventoComposizione`` con:
-       - ``tipo``: ``'aggancio'`` se delta > 0, ``'sgancio'`` se < 0
-       - ``stazione_proposta``: ``corsa.codice_origine`` del blocco
-         corrente
-       - ``posizione_dopo_blocco``: indice del blocco precedente
-       - ``is_validato_utente``: ``False``
-    4. Eventi cross-notte tra giornate diverse sono **fuori scope**
-       (li gestirà 4.4.5 orchestrator).
+       il dict ``prev_per_tipo: {codice: n_pezzi}``.
+    2. Per ogni blocco, calcola ``curr_per_tipo`` analogo.
+    3. Per ogni materiale in ``prev_keys ∪ curr_keys``:
+       - ``delta = curr.get(m, 0) - prev.get(m, 0)``
+       - se ``delta > 0``: evento ``aggancio`` per il materiale m
+       - se ``delta < 0``: evento ``sgancio`` per il materiale m
+       - se ``delta == 0``: niente evento
+
+       Ordine eventi per blocco: prima sganci poi agganci (così si
+       svuota il convoglio prima di rimettere materiali nuovi).
+       Materiali ordinati lex per determinismo.
+
+    Esempi:
+
+    - ``[526]`` → ``[526, 425]``: 1 evento aggancio 425 (+1 pezzo)
+    - ``[526, 425]`` → ``[526]``: 1 evento sgancio 425 (-1 pezzo)
+    - ``[526]`` → ``[526, 526]``: 1 evento aggancio 526 (+1 pezzo)
+      (raddoppio doppia)
+    - ``[526]`` → ``[425]``: 2 eventi (sgancio 526, aggancio 425, swap)
 
     Args:
         giro_assegnato: output di ``assegna_materiali`` (eventi
@@ -286,27 +332,38 @@ def rileva_eventi_composizione(giro_assegnato: GiroAssegnato) -> GiroAssegnato:
 
     for giornata in giro_assegnato.giornate:
         eventi: list[EventoComposizione] = []
-        prev_pezzi: int | None = None
+        prev_per_tipo: dict[str, int] = {}
 
         for i, blocco in enumerate(giornata.blocchi_assegnati):
-            curr_pezzi = blocco.assegnazione.numero_pezzi
-            if prev_pezzi is not None and curr_pezzi != prev_pezzi:
-                delta = curr_pezzi - prev_pezzi
-                tipo: TipoEvento = "aggancio" if delta > 0 else "sgancio"
-                eventi.append(
-                    EventoComposizione(
+            curr_per_tipo = _composizione_to_dict(blocco.assegnazione.composizione)
+            if i > 0:
+                # Calcola delta per ogni materiale presente prev OR curr.
+                tutti_codici = sorted(set(prev_per_tipo) | set(curr_per_tipo))
+                # Sgancio prima (delta < 0), poi aggancio (delta > 0).
+                sganci: list[EventoComposizione] = []
+                agganci: list[EventoComposizione] = []
+                for m in tutti_codici:
+                    delta = curr_per_tipo.get(m, 0) - prev_per_tipo.get(m, 0)
+                    if delta == 0:
+                        continue
+                    tipo: TipoEvento = "aggancio" if delta > 0 else "sgancio"
+                    ev = EventoComposizione(
                         tipo=tipo,
+                        materiale_tipo_codice=m,
                         pezzi_delta=delta,
                         stazione_proposta=blocco.corsa.codice_origine,
                         posizione_dopo_blocco=i - 1,
                         note_builder=(
-                            f"Transizione composizione: {prev_pezzi} → {curr_pezzi} "
+                            f"Transizione composizione su {m}: "
+                            f"{prev_per_tipo.get(m, 0)} → {curr_per_tipo.get(m, 0)} "
                             f"pezzi al blocco {i}."
                         ),
                         is_validato_utente=False,
                     )
-                )
-            prev_pezzi = curr_pezzi
+                    (sganci if delta < 0 else agganci).append(ev)
+                eventi.extend(sganci)
+                eventi.extend(agganci)
+            prev_per_tipo = curr_per_tipo
 
         giornate_out.append(dataclasses.replace(giornata, eventi_composizione=tuple(eventi)))
 
@@ -319,18 +376,28 @@ def rileva_eventi_composizione(giro_assegnato: GiroAssegnato) -> GiroAssegnato:
 
 
 def assegna_e_rileva_eventi(
-    giri: Sequence[Giro], regole: Sequence[_RegolaLike]
+    giri: Sequence[Giro],
+    regole: Sequence[_RegolaLike],
+    is_accoppiamento_ammesso: IsAccoppiamentoAmmesso | None = None,
 ) -> list[GiroAssegnato]:
     """Pipeline completa: ``assegna_materiali`` + ``rileva_eventi_composizione``
     su tutti i giri in input.
 
     Equivalente a::
 
-        [rileva_eventi_composizione(assegna_materiali(g, regole)) for g in giri]
+        [
+            rileva_eventi_composizione(
+                assegna_materiali(g, regole, is_accoppiamento_ammesso)
+            )
+            for g in giri
+        ]
 
     Esposto come funzione separata per chiarezza nel chiamante.
     """
-    return [rileva_eventi_composizione(assegna_materiali(g, regole)) for g in giri]
+    return [
+        rileva_eventi_composizione(assegna_materiali(g, regole, is_accoppiamento_ammesso))
+        for g in giri
+    ]
 
 
 __all__ = [

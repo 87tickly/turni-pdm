@@ -166,6 +166,7 @@ async def _setup_completo(
         regola = ProgrammaRegolaAssegnazione(
             programma_id=prog_id,
             filtri_json=[],
+            composizione_json=[{"materiale_tipo_codice": MATERIALE_TIPO, "n_pezzi": 3}],
             materiale_tipo_codice=MATERIALE_TIPO,
             numero_pezzi=3,
             priorita=10,
@@ -375,6 +376,7 @@ async def test_strict_no_corse_residue_blocca(azienda_id: int) -> None:
             ProgrammaRegolaAssegnazione(
                 programma_id=prog_id,
                 filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "INESISTENTE"}],
+                composizione_json=[{"materiale_tipo_codice": MATERIALE_TIPO, "n_pezzi": 3}],
                 materiale_tipo_codice=MATERIALE_TIPO,
                 numero_pezzi=3,
                 priorita=10,

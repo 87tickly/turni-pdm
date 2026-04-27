@@ -34,6 +34,7 @@ from colazione.domain.builder_giro import (
     BloccoMaterialeVuoto,
     Catena,
     CatenaPosizionata,
+    ComposizioneItem,
     EventoComposizione,
     GiornataAssegnata,
     GiroAssegnato,
@@ -193,8 +194,7 @@ def _giro_assegnato_singolo(
             corsa=c,
             assegnazione=AssegnazioneRisolta(
                 regola_id=1,
-                materiale_tipo_codice=materiale_tipo,
-                numero_pezzi=p,
+                composizione=(ComposizioneItem(materiale_tipo, p),),
             ),
         )
         for c, p in zip(corse_orm, pezzi_per_corsa, strict=True)
@@ -209,7 +209,8 @@ def _giro_assegnato_singolo(
         chiusa_a_localita=chiusa,
     )
 
-    # Eventi: 1 evento per ogni delta consecutivo
+    # Eventi: 1 evento per ogni delta consecutivo (Sprint 5.5: ogni
+    # evento ha materiale_tipo_codice = materiale_tipo del test)
     eventi: list[EventoComposizione] = []
     for i in range(1, len(pezzi_per_corsa)):
         delta = pezzi_per_corsa[i] - pezzi_per_corsa[i - 1]
@@ -217,6 +218,7 @@ def _giro_assegnato_singolo(
             eventi.append(
                 EventoComposizione(
                     tipo="aggancio" if delta > 0 else "sgancio",
+                    materiale_tipo_codice=materiale_tipo,
                     pezzi_delta=delta,
                     stazione_proposta=corse_orm[i].codice_origine,
                     posizione_dopo_blocco=i - 1,
@@ -656,7 +658,8 @@ async def test_due_giornate_due_GiroGiornata_due_GiroVariante(azienda_id: int) -
                 BloccoAssegnato(
                     corsa=c1_orm,
                     assegnazione=AssegnazioneRisolta(
-                        regola_id=1, materiale_tipo_codice=MATERIALE_TIPO, numero_pezzi=3
+                        regola_id=1,
+                        composizione=(ComposizioneItem(MATERIALE_TIPO, 3),),
                     ),
                 ),
             ),
@@ -669,7 +672,8 @@ async def test_due_giornate_due_GiroGiornata_due_GiroVariante(azienda_id: int) -
                 BloccoAssegnato(
                     corsa=c2_orm,
                     assegnazione=AssegnazioneRisolta(
-                        regola_id=1, materiale_tipo_codice=MATERIALE_TIPO, numero_pezzi=3
+                        regola_id=1,
+                        composizione=(ComposizioneItem(MATERIALE_TIPO, 3),),
                     ),
                 ),
             ),

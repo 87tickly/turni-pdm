@@ -78,6 +78,9 @@ from colazione.domain.builder_giro.posizionamento import (
 )
 from colazione.domain.builder_giro.risolvi_corsa import (
     AssegnazioneRisolta,
+    ComposizioneItem,
+    ComposizioneNonAmmessaError,
+    IsAccoppiamentoAmmesso,
     RegolaAmbiguaError,
     determina_giorno_tipo,
     estrai_valore_corsa,
@@ -94,6 +97,8 @@ __all__ = [
     "BuilderResult",
     "Catena",
     "CatenaPosizionata",
+    "ComposizioneItem",
+    "ComposizioneNonAmmessaError",
     "CorsaResidua",
     "EventoComposizione",
     "GiriEsistentiError",
@@ -103,6 +108,7 @@ __all__ = [
     "GiroAssegnato",
     "GiroDaPersistere",
     "IncompatibilitaMateriale",
+    "IsAccoppiamentoAmmesso",
     "LocalitaNonTrovataError",
     "LocalitaSenzaStazioneError",
     "MotivoChiusura",

@@ -128,6 +128,7 @@ async def _setup_db_completo(stato_programma: str = "attivo") -> int:
             ProgrammaRegolaAssegnazione(
                 programma_id=prog_id,
                 filtri_json=[],
+                composizione_json=[{"materiale_tipo_codice": "ALe711", "n_pezzi": 3}],
                 materiale_tipo_codice="ALe711",
                 numero_pezzi=3,
                 priorita=10,

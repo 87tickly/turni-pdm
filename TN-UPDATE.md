@@ -10,6 +10,181 @@
 
 ---
 
+## 2026-04-27 (32) — Sprint 5.5: composizione lista materiali + validazione accoppiamento
+
+### Contesto
+
+Sub 5.5 del piano `docs/SPRINT-5-RIPENSAMENTO.md` §5.5: l'algoritmo
+finora ragionava su singolo `materiale_tipo_codice + numero_pezzi`
+(legacy), ma le doppie composizioni (es. ETR526+ETR425 per
+Mi.Centrale↔Tirano) richiedono `list[ComposizioneItem]` come prima
+classe. Migration 0007 ha già introdotto `composizione_json` sul DB
+(Sub 5.1) e Sub 5.2 ha popolato `materiale_accoppiamento_ammesso`. Ora
+il builder pure consuma direttamente la lista e valida le coppie via
+callback DI.
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_giro/risolvi_corsa.py`**
+(riscrittura del cuore di Sprint 4.2):
+
+- Nuovo dataclass interno `ComposizioneItem(materiale_tipo_codice,
+  n_pezzi)` (mappa al `schemas.programmi.ComposizioneItem` Pydantic).
+- `AssegnazioneRisolta` cambia firma: ora ha
+  `composizione: tuple[ComposizioneItem, ...]` +
+  `is_composizione_manuale: bool`. Niente più campi singoli
+  (rimossi). Properties helper: `numero_pezzi_totali` (somma) e
+  `materiali_codici` (frozenset).
+- Nuovo type alias `IsAccoppiamentoAmmesso = Callable[[str, str], bool]`.
+- Nuova exception `ComposizioneNonAmmessaError(regola_id, coppia)`.
+- `_RegolaLike` Protocol: ora richiede `composizione_json: list[Any]`
+  + `is_composizione_manuale: bool`. Campi legacy rimossi dal Protocol.
+- `risolvi_corsa()` legge `composizione_json` via nuovo helper
+  `_composizione_da_json()`, valida via nuovo helper
+  `_valida_accoppiamenti()` (se callback fornita e composizione ha 2+
+  elementi e non è manuale).
+- Logica validazione coppie: aggrega i pezzi per codice (somma per
+  duplicati), per ogni coppia di codici **distinti** ordinati lex
+  valida; per ogni codice con `n_pezzi >= 2` valida self-pair
+  (es. 526+526 doppia stessa famiglia).
+
+**`backend/src/colazione/domain/builder_giro/composizione.py`**:
+
+- `_RegolaLike` allineato a `risolvi_corsa._RegolaLike`.
+- `EventoComposizione` aggiunge campo `materiale_tipo_codice: str`:
+  l'evento ora identifica esplicitamente quale rotabile entra/esce
+  (es. aggancio del 425 vs aggancio del 526).
+- `assegna_materiali()` accetta `is_accoppiamento_ammesso` opzionale,
+  lo propaga a `risolvi_corsa()`. `materiali_tipo_giornata` ora è
+  l'**unione** di tutti i materiali di tutte le composizioni
+  (Sprint 5.5). Una doppia [526, 425] genera tipi {526, 425} →
+  IncompatibilitaMateriale registrata (warning, comportamento
+  intenzionale: anche le doppie volute richiedono review utente).
+- `rileva_eventi_composizione()` riscritto con logica delta per-tipo:
+  - Costruisce mapping `prev_per_tipo`/`curr_per_tipo`.
+  - Per ogni materiale in `prev ∪ curr`, calcola delta.
+  - Sgancio prima (delta < 0), aggancio dopo (delta > 0). Materiali
+    ordinati lex per determinismo.
+  - Esempi: `[526]→[526,425]` = 1 evento aggancio 425;
+    `[526]→[425]` (swap) = 2 eventi (sgancio 526 + aggancio 425);
+    `[526]→[526,526]` (raddoppio) = 1 evento aggancio 526 +1 pezzo.
+- `assegna_e_rileva_eventi()` propaga `is_accoppiamento_ammesso`.
+
+**`backend/src/colazione/domain/builder_giro/persister.py`**:
+
+- `_primo_tipo_materiale()` legge `composizione[0].materiale_tipo_codice`
+  invece dei legacy.
+- `metadata_json` di `GiroBlocco` corsa ora include `composizione`
+  completa (lista di dict) + `is_composizione_manuale`. I campi
+  singoli legacy NON vengono più scritti (sostituiti dalla lista).
+- `_build_metadata_evento()` include `materiale_tipo_codice`
+  dell'evento (utile a editor giro UI).
+
+**`backend/src/colazione/domain/builder_giro/builder.py`** (orchestrator):
+
+- Nuovo loader `_carica_accoppiamenti_ammessi()` → `frozenset[tuple[str, str]]`
+  da `materiale_accoppiamento_ammesso` (coppie già normalizzate lex
+  da CHECK constraint Sub 5.1).
+- `genera_giri()` carica gli accoppiamenti e crea closure
+  `is_accoppiamento_ammesso(a, b) -> bool` lookup O(1).
+- Closure passata a `assegna_e_rileva_eventi()`.
+
+**`backend/src/colazione/domain/builder_giro/__init__.py`**: export
+nuovi simboli (`ComposizioneItem`, `ComposizioneNonAmmessaError`,
+`IsAccoppiamentoAmmesso`).
+
+### Test
+
+**13 nuovi test** divisi tra `test_risolvi_corsa.py` (+7) e
+`test_composizione.py` (+6):
+
+- Composizione singola (lista 1 elemento) → AssegnazioneRisolta OK
+- Composizione doppia ammessa con callback → OK
+- Composizione doppia NON ammessa → `ComposizioneNonAmmessaError`
+  con `coppia_non_ammessa` normalizzata lex
+- `is_composizione_manuale=True` → bypass del check
+- Self-pair (526+526) → richiede (526, 526) ammessa
+- Composizione singola non chiama il callback (no coppie)
+- Callback `None` → skip validazione
+- Delta aggancio per materiale specifico ([526]→[526,425])
+- Delta sgancio per materiale specifico ([526,425]→[526])
+- Delta swap → 2 eventi (sgancio prima, aggancio dopo)
+- Delta doppia → singola → doppia (re-attach)
+- Delta self-aggancio (raddoppio doppia 526+526)
+- Composizione doppia ⇒ `IncompatibilitaMateriale` registrata
+
+**Test esistenti aggiornati** (~15 test):
+- `FakeRegola` in test_risolvi_corsa, test_composizione: aggiunto
+  `composizione_json` + `is_composizione_manuale`, con
+  `__post_init__` che backfilla da `materiale_tipo_codice/numero_pezzi`
+  legacy se non passati (test legacy continuano a funzionare).
+- `AssegnazioneRisolta(...)` costruzioni: ora con
+  `composizione=(ComposizioneItem(codice, n),)`.
+- `EventoComposizione(...)` costruzioni: ora con
+  `materiale_tipo_codice="..."` esplicito.
+- `assegnazione.materiale_tipo_codice` → `assegnazione.composizione[0].materiale_tipo_codice`
+- `assegnazione.numero_pezzi` → `assegnazione.numero_pezzi_totali`
+- Test integration (`test_builder_giri.py`, `test_genera_giri_api.py`):
+  setup `ProgrammaRegolaAssegnazione` ORM ora popola anche
+  `composizione_json` (oltre ai legacy ri-popolati per retrocompat).
+
+### Decisioni di design
+
+- **Validazione via callback DI**: il modulo pure non importa
+  `materiale_accoppiamento_ammesso` ORM; riceve un callable. Mantiene
+  il modulo DB-agnostic, testabile con mock.
+- **Self-pair logic**: 526+526 è una coppia distinta da 526+425.
+  Il codice valida self-pair SOLO se un materiale appare 2+ volte
+  nella composizione (es. `[526, 526]` o `[ComposizioneItem(526, 2)]`).
+  Composizione `[526, 425]` (1 pezzo per tipo) NON valida self-pair
+  fittizia.
+- **Ordering eventi sgancio/aggancio**: sgancio prima dell'aggancio
+  garantisce che il convoglio si "svuoti" prima di rimettere
+  materiali nuovi. Coerente con la realtà operativa.
+- **Materiali ordinati lex per determinismo**: gli eventi di una
+  transizione hanno ordine deterministico (utile per snapshot test).
+- **Incompatibilità su doppia voluta**: scelta conservativa. Una
+  doppia ETR526+ETR425 genera `IncompatibilitaMateriale` (>1 tipo)
+  come warning. Il pianificatore vede e conferma. Strict mode è
+  separato (`no_orphan_blocks` non implementato qui).
+- **Legacy fields retrocompat sul DB**: handler API e setup di test
+  popolano sia `composizione_json` (fonte autorevole) sia
+  `materiale_tipo_codice + numero_pezzi` legacy. Quando rimuoveremo
+  i legacy completamente (futuro), basterà togliere i 2 campi dai
+  setup. La logica builder ora ignora i legacy.
+
+### Verifiche
+
+- `pytest`: **364 passed** in 10s (era 351, +13 nuovi: 7 risolvi_corsa + 6 composizione)
+- `ruff check + format`: clean (75 file)
+- `mypy --strict src`: no issues, 47 source files
+
+### Stato
+
+**Sub 5.5 chiusa**. Il builder ora supporta nativamente le
+composizioni multiple (es. ETR526+ETR425) con validazione automatica
+contro `materiale_accoppiamento_ammesso`. Gli eventi composizione
+identificano il materiale specifico coinvolto (utile per editor UI).
+La pipeline pure è completa per il modello operativo Trenord
+estensione doppia composizione.
+
+### Prossimo step
+
+**Sub 5.6 — Smoke reale Mi.Centrale↔Tirano** (piano §5.6):
+
+- Import PdE Trenord 2025-2026 reale (~25-30s, 10579 corse)
+- Run script seed `seed_whitelist_e_accoppiamenti.py` per popolare
+  whitelist + accoppiamenti
+- Crea programma "Trenord 2025-2026 invernale Mi.Centrale-Tirano"
+  con regola direttrice="Milano-Tirano" + composizione=[526, 425]
+- Lancia `genera_giri()` su una settimana
+- Verifica numeri reali: giri multi-giornata, treno dorme a Tirano,
+  vuoti SOLO intra-Milano whitelist, cap km rispettato, eventi
+  composizione plausibili
+- Stop, mostro numeri all'utente, chiusura Sprint 5
+
+---
+
 ## 2026-04-27 (31) — Sprint 5.4: multi_giornata con cumulo km + trigger km_max_ciclo
 
 ### Contesto

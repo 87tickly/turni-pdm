@@ -219,6 +219,26 @@ async def _carica_whitelist_stazioni(session: AsyncSession, localita_id: int) ->
     return frozenset(rows)
 
 
+async def _carica_accoppiamenti_ammessi(session: AsyncSession) -> frozenset[tuple[str, str]]:
+    """Carica le coppie ammesse da `materiale_accoppiamento_ammesso`
+    (Sprint 5.5).
+
+    Le coppie sono già normalizzate lex (a <= b) dalla migration 0007
+    via CHECK constraint. Ritorna ``frozenset[tuple]`` per lookup O(1)
+    nel callback ``is_accoppiamento_ammesso``.
+
+    Set vuoto = nessun accoppiamento configurato → ogni composizione
+    doppia con ``is_composizione_manuale=False`` viene rifiutata da
+    `risolvi_corsa()`. Le composizioni singole (1 elemento) non sono
+    affette.
+    """
+    stmt = text(
+        "SELECT materiale_a_codice, materiale_b_codice FROM materiale_accoppiamento_ammesso"
+    )
+    rows = (await session.execute(stmt)).all()
+    return frozenset((str(r[0]), str(r[1])) for r in rows)
+
+
 async def _carica_corse(
     session: AsyncSession,
     azienda_id: int,
@@ -400,6 +420,12 @@ async def genera_giri(
     regole = await _carica_regole(session, programma_id)
     localita = await _carica_localita(session, localita_codice, azienda_id)
     whitelist = await _carica_whitelist_stazioni(session, localita.id)
+    accoppiamenti = await _carica_accoppiamenti_ammessi(session)
+
+    def is_accoppiamento_ammesso(a: str, b: str) -> bool:
+        """Lookup nella set degli accoppiamenti ammessi (Sprint 5.5).
+        Coppie normalizzate lex dal chiamante."""
+        return (a, b) in accoppiamenti
 
     # 2. Anti-rigenerazione (decisione utente: 409 senza force=true)
     n_esistenti = await _count_giri_esistenti(session, programma_id)
@@ -436,8 +462,9 @@ async def genera_giri(
     )
     giri_dom = costruisci_giri_multigiornata(catene_per_data, param_mg)
 
-    # 5. Assegnazione regole + eventi composizione
-    giri_assegnati = assegna_e_rileva_eventi(giri_dom, regole)
+    # 5. Assegnazione regole + eventi composizione (Sprint 5.5: validazione
+    #    accoppiamenti via callback)
+    giri_assegnati = assegna_e_rileva_eventi(giri_dom, regole, is_accoppiamento_ammesso)
 
     # 6. Strict mode pre-persistenza
     _check_strict_mode(programma, giri_assegnati)

@@ -67,11 +67,25 @@ class FakeCorsa:
 
 @dataclass
 class FakeRegola:
+    """Regola minimale (Sprint 5.5: composizione_json derivato dai
+    legacy se non passato)."""
+
     id: int
     filtri_json: list[dict[str, Any]] = field(default_factory=list)
     materiale_tipo_codice: str = "ALe711"
     numero_pezzi: int = 3
     priorita: int = 60
+    composizione_json: list[dict[str, Any]] = field(default_factory=list)
+    is_composizione_manuale: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.composizione_json:
+            self.composizione_json = [
+                {
+                    "materiale_tipo_codice": self.materiale_tipo_codice,
+                    "n_pezzi": self.numero_pezzi,
+                }
+            ]
 
 
 def _giro_singolo(corse: tuple[FakeCorsa, ...], data_g: date) -> Giro:
@@ -111,8 +125,8 @@ def test_una_corsa_una_regola_match() -> None:
     blocco = out.giornate[0].blocchi_assegnati[0]
     assert blocco.corsa is c
     assert blocco.assegnazione.regola_id == 1
-    assert blocco.assegnazione.materiale_tipo_codice == "ALe711"
-    assert blocco.assegnazione.numero_pezzi == 3
+    assert blocco.assegnazione.composizione[0].materiale_tipo_codice == "ALe711"
+    assert blocco.assegnazione.numero_pezzi_totali == 3
     assert out.corse_residue == ()
     assert out.incompatibilita_materiale == ()
 
@@ -429,12 +443,13 @@ def test_determinismo_due_chiamate_stesso_output() -> None:
 
 
 def test_blocco_assegnato_frozen() -> None:
-    from colazione.domain.builder_giro import AssegnazioneRisolta
+    from colazione.domain.builder_giro import AssegnazioneRisolta, ComposizioneItem
 
     b = BloccoAssegnato(
         corsa=FakeCorsa(),
         assegnazione=AssegnazioneRisolta(
-            regola_id=1, materiale_tipo_codice="ALe711", numero_pezzi=3
+            regola_id=1,
+            composizione=(ComposizioneItem("ALe711", 3),),
         ),
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
@@ -444,6 +459,7 @@ def test_blocco_assegnato_frozen() -> None:
 def test_evento_composizione_frozen() -> None:
     e = EventoComposizione(
         tipo="aggancio",
+        materiale_tipo_codice="ALe711",
         pezzi_delta=3,
         stazione_proposta="BG",
         posizione_dopo_blocco=0,
@@ -485,3 +501,209 @@ def test_corsa_residua_e_incompat_dataclass() -> None:
     assert r.corsa is c
     i = IncompatibilitaMateriale(data=D_LUN, tipi_materiale=frozenset({"X", "Y"}))
     assert i.tipi_materiale == frozenset({"X", "Y"})
+
+
+# =====================================================================
+# Sprint 5.5 — Delta su composizione lista
+# =====================================================================
+
+
+def test_delta_aggancio_per_materiale_specifico() -> None:
+    """Composizione [526] → [526, 425]: 1 aggancio del 425."""
+    c1 = FakeCorsa(numero_treno="A", codice_linea="L1")
+    c2 = FakeCorsa(
+        numero_treno="B",
+        codice_linea="L2",
+        codice_origine="BG",
+        codice_destinazione="MI_FIO",
+    )
+    r1 = FakeRegola(
+        id=1,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "L1"}],
+        composizione_json=[{"materiale_tipo_codice": "ETR526", "n_pezzi": 1}],
+    )
+    r2 = FakeRegola(
+        id=2,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "L2"}],
+        composizione_json=[
+            {"materiale_tipo_codice": "ETR526", "n_pezzi": 1},
+            {"materiale_tipo_codice": "ETR425", "n_pezzi": 1},
+        ],
+    )
+    giro = _giro_singolo((c1, c2), D_LUN)
+    out = rileva_eventi_composizione(assegna_materiali(giro, [r1, r2]))
+    eventi = out.giornate[0].eventi_composizione
+    assert len(eventi) == 1
+    assert eventi[0].tipo == "aggancio"
+    assert eventi[0].materiale_tipo_codice == "ETR425"
+    assert eventi[0].pezzi_delta == 1
+
+
+def test_delta_sgancio_per_materiale_specifico() -> None:
+    """Composizione [526, 425] → [526]: 1 sgancio del 425."""
+    c1 = FakeCorsa(numero_treno="A", codice_linea="L1")
+    c2 = FakeCorsa(
+        numero_treno="B",
+        codice_linea="L2",
+        codice_origine="BG",
+        codice_destinazione="MI_FIO",
+    )
+    r1 = FakeRegola(
+        id=1,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "L1"}],
+        composizione_json=[
+            {"materiale_tipo_codice": "ETR526", "n_pezzi": 1},
+            {"materiale_tipo_codice": "ETR425", "n_pezzi": 1},
+        ],
+    )
+    r2 = FakeRegola(
+        id=2,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "L2"}],
+        composizione_json=[{"materiale_tipo_codice": "ETR526", "n_pezzi": 1}],
+    )
+    giro = _giro_singolo((c1, c2), D_LUN)
+    out = rileva_eventi_composizione(assegna_materiali(giro, [r1, r2]))
+    eventi = out.giornate[0].eventi_composizione
+    assert len(eventi) == 1
+    assert eventi[0].tipo == "sgancio"
+    assert eventi[0].materiale_tipo_codice == "ETR425"
+    assert eventi[0].pezzi_delta == -1
+
+
+def test_delta_swap_due_eventi_sgancio_prima_aggancio() -> None:
+    """[526] → [425]: 2 eventi (sgancio 526, aggancio 425). Sgancio
+    appare PRIMA dell'aggancio (ordering deterministico)."""
+    c1 = FakeCorsa(numero_treno="A", codice_linea="L1")
+    c2 = FakeCorsa(
+        numero_treno="B",
+        codice_linea="L2",
+        codice_origine="BG",
+        codice_destinazione="MI_FIO",
+    )
+    r1 = FakeRegola(
+        id=1,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "L1"}],
+        composizione_json=[{"materiale_tipo_codice": "ETR526", "n_pezzi": 1}],
+    )
+    r2 = FakeRegola(
+        id=2,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "L2"}],
+        composizione_json=[{"materiale_tipo_codice": "ETR425", "n_pezzi": 1}],
+    )
+    giro = _giro_singolo((c1, c2), D_LUN)
+    out = rileva_eventi_composizione(assegna_materiali(giro, [r1, r2]))
+    eventi = out.giornate[0].eventi_composizione
+    assert len(eventi) == 2
+    # Sgancio prima
+    assert eventi[0].tipo == "sgancio"
+    assert eventi[0].materiale_tipo_codice == "ETR526"
+    assert eventi[0].pezzi_delta == -1
+    # Aggancio dopo
+    assert eventi[1].tipo == "aggancio"
+    assert eventi[1].materiale_tipo_codice == "ETR425"
+    assert eventi[1].pezzi_delta == 1
+
+
+def test_delta_doppia_a_singola_e_viceversa() -> None:
+    """Test composizione di test che simula un giro 2-bloccchi:
+    [526, 425] → [526] (sgancio 425) → [526, 425] (riaggancio 425).
+    """
+    c1 = FakeCorsa(numero_treno="A", codice_linea="L1")
+    c2 = FakeCorsa(
+        numero_treno="B",
+        codice_linea="L2",
+        codice_origine="BG",
+        codice_destinazione="BS",
+    )
+    c3 = FakeCorsa(
+        numero_treno="C",
+        codice_linea="L3",
+        codice_origine="BS",
+        codice_destinazione="MI_FIO",
+    )
+    r1 = FakeRegola(
+        id=1,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "L1"}],
+        composizione_json=[
+            {"materiale_tipo_codice": "ETR526", "n_pezzi": 1},
+            {"materiale_tipo_codice": "ETR425", "n_pezzi": 1},
+        ],
+    )
+    r2 = FakeRegola(
+        id=2,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "L2"}],
+        composizione_json=[{"materiale_tipo_codice": "ETR526", "n_pezzi": 1}],
+    )
+    r3 = FakeRegola(
+        id=3,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "L3"}],
+        composizione_json=[
+            {"materiale_tipo_codice": "ETR526", "n_pezzi": 1},
+            {"materiale_tipo_codice": "ETR425", "n_pezzi": 1},
+        ],
+    )
+    giro = _giro_singolo((c1, c2, c3), D_LUN)
+    out = rileva_eventi_composizione(assegna_materiali(giro, [r1, r2, r3]))
+    eventi = out.giornate[0].eventi_composizione
+    # 2 eventi: sgancio 425 al blocco c2, aggancio 425 al blocco c3
+    assert len(eventi) == 2
+    assert eventi[0].tipo == "sgancio"
+    assert eventi[0].materiale_tipo_codice == "ETR425"
+    assert eventi[0].posizione_dopo_blocco == 0
+    assert eventi[1].tipo == "aggancio"
+    assert eventi[1].materiale_tipo_codice == "ETR425"
+    assert eventi[1].posizione_dopo_blocco == 1
+
+
+def test_delta_doppia_self_aggancio() -> None:
+    """[526] → [526, 526] (raddoppio della stessa famiglia): aggancio
+    di un secondo 526."""
+    c1 = FakeCorsa(numero_treno="A", codice_linea="L1")
+    c2 = FakeCorsa(
+        numero_treno="B",
+        codice_linea="L2",
+        codice_origine="BG",
+        codice_destinazione="MI_FIO",
+    )
+    r1 = FakeRegola(
+        id=1,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "L1"}],
+        composizione_json=[{"materiale_tipo_codice": "ETR526", "n_pezzi": 1}],
+    )
+    r2 = FakeRegola(
+        id=2,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "L2"}],
+        composizione_json=[{"materiale_tipo_codice": "ETR526", "n_pezzi": 2}],
+    )
+    giro = _giro_singolo((c1, c2), D_LUN)
+    out = rileva_eventi_composizione(assegna_materiali(giro, [r1, r2]))
+    eventi = out.giornate[0].eventi_composizione
+    assert len(eventi) == 1
+    assert eventi[0].tipo == "aggancio"
+    assert eventi[0].materiale_tipo_codice == "ETR526"
+    assert eventi[0].pezzi_delta == 1
+
+
+def test_giornata_doppia_no_incompatibilita_se_unione_consistente() -> None:
+    """Composizione doppia [526, 425] su tutte le corse: tipi_materiale =
+    {526, 425}, IncompatibilitaMateriale registrata (>1 tipo).
+
+    Sprint 5.5: il check `len(tipi_materiale) > 1` resta. Una doppia
+    voluta è comunque un caso che il pianificatore può rivedere — il
+    builder lo segnala come warning."""
+    c1 = FakeCorsa(numero_treno="A", codice_linea="X")
+    c2 = FakeCorsa(
+        numero_treno="B", codice_linea="X", codice_origine="BG", codice_destinazione="MI_FIO"
+    )
+    r = FakeRegola(
+        id=1,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "X"}],
+        composizione_json=[
+            {"materiale_tipo_codice": "ETR526", "n_pezzi": 1},
+            {"materiale_tipo_codice": "ETR425", "n_pezzi": 1},
+        ],
+    )
+    giro = _giro_singolo((c1, c2), D_LUN)
+    out = assegna_materiali(giro, [r])
+    assert out.giornate[0].materiali_tipo_giornata == frozenset({"ETR526", "ETR425"})
+    assert len(out.incompatibilita_materiale) == 1

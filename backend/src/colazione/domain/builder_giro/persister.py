@@ -123,10 +123,18 @@ async def _carica_localita(
 
 def _primo_tipo_materiale(giro: GiroAssegnato) -> str | None:
     """Primo ``materiale_tipo_codice`` usato dal giro, ``None`` se nessun
-    blocco assegnato (giro tutto in corse residue)."""
+    blocco assegnato (giro tutto in corse residue).
+
+    Sprint 5.5: legge il primo elemento della ``composizione`` del primo
+    blocco. Per regole single-material la lista ha 1 elemento; per
+    composizioni doppie prende il primo (es. ETR526 da [ETR526, ETR425]).
+    Usato per popolare ``GiroMateriale.tipo_materiale`` (denormalizzato
+    leggibile per UI).
+    """
     for giornata in giro.giornate:
         for blocco in giornata.blocchi_assegnati:
-            return blocco.assegnazione.materiale_tipo_codice
+            if blocco.assegnazione.composizione:
+                return blocco.assegnazione.composizione[0].materiale_tipo_codice
     return None
 
 
@@ -151,8 +159,13 @@ def _build_metadata_giro(
 
 
 def _build_metadata_evento(ev: EventoComposizione) -> dict[str, Any]:
-    """Metadata di un blocco aggancio/sgancio (vedi PROGRAMMA-MATERIALE.md §5.4)."""
+    """Metadata di un blocco aggancio/sgancio (vedi PROGRAMMA-MATERIALE.md §5.4).
+
+    Sprint 5.5: include ``materiale_tipo_codice`` per identificare quale
+    rotabile entra/esce nell'evento (utile per editor giro UI).
+    """
     return {
+        "materiale_tipo_codice": ev.materiale_tipo_codice,
         "pezzi_delta": ev.pezzi_delta,
         "note_builder": ev.note_builder,
         "stazione_proposta_originale": ev.stazione_proposta,
@@ -292,8 +305,16 @@ async def _persisti_blocchi_giornata(
                 descrizione=str(blocco.corsa.numero_treno),
                 is_validato_utente=True,
                 metadata_json={
-                    "materiale_tipo_codice": blocco.assegnazione.materiale_tipo_codice,
-                    "numero_pezzi": blocco.assegnazione.numero_pezzi,
+                    # Sprint 5.5: composizione completa serializzata,
+                    # sostituisce i campi singoli legacy.
+                    "composizione": [
+                        {
+                            "materiale_tipo_codice": item.materiale_tipo_codice,
+                            "n_pezzi": item.n_pezzi,
+                        }
+                        for item in blocco.assegnazione.composizione
+                    ],
+                    "is_composizione_manuale": blocco.assegnazione.is_composizione_manuale,
                     "regola_id": blocco.assegnazione.regola_id,
                 },
             )

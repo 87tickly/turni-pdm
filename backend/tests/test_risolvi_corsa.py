@@ -20,7 +20,8 @@ from typing import Any
 import pytest
 
 from colazione.domain.builder_giro import (
-    AssegnazioneRisolta,
+    ComposizioneItem,
+    ComposizioneNonAmmessaError,
     RegolaAmbiguaError,
     determina_giorno_tipo,
     estrai_valore_corsa,
@@ -52,13 +53,32 @@ class FakeCorsa:
 
 @dataclass
 class FakeRegola:
-    """Regola minimale per test."""
+    """Regola minimale per test.
+
+    Sprint 5.5: la regola ha ora ``composizione_json`` come lista di
+    dict ``[{"materiale_tipo_codice": str, "n_pezzi": int}, ...]``.
+    Per backward compat con i test esistenti, accetta anche i parametri
+    legacy ``materiale_tipo_codice`` + ``numero_pezzi``: se forniti e
+    ``composizione_json`` non è popolato, costruisce composizione da
+    quelli (1 elemento).
+    """
 
     id: int
     filtri_json: list[dict[str, Any]] = field(default_factory=list)
     materiale_tipo_codice: str = "ALe711"
     numero_pezzi: int = 3
     priorita: int = 60
+    composizione_json: list[dict[str, Any]] = field(default_factory=list)
+    is_composizione_manuale: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.composizione_json:
+            self.composizione_json = [
+                {
+                    "materiale_tipo_codice": self.materiale_tipo_codice,
+                    "n_pezzi": self.numero_pezzi,
+                }
+            ]
 
 
 # =====================================================================
@@ -292,7 +312,11 @@ def test_risolvi_corsa_una_regola_match() -> None:
         priorita=60,
     )
     out = risolvi_corsa(c, [r], date(2026, 4, 20))
-    assert out == AssegnazioneRisolta(regola_id=1, materiale_tipo_codice="ALe711", numero_pezzi=3)
+    assert out is not None
+    assert out.regola_id == 1
+    assert out.composizione == (ComposizioneItem("ALe711", 3),)
+    assert out.numero_pezzi_totali == 3
+    assert out.materiali_codici == frozenset({"ALe711"})
 
 
 def test_risolvi_corsa_una_regola_no_match() -> None:
@@ -335,7 +359,7 @@ def test_risolvi_corsa_priorita_piu_alta_vince() -> None:
     out = risolvi_corsa(c, [r_low, r_high], date(2026, 4, 20))
     assert out is not None
     assert out.regola_id == 2
-    assert out.materiale_tipo_codice == "ETR526"
+    assert out.composizione[0].materiale_tipo_codice == "ETR526"
 
 
 def test_risolvi_corsa_a_parita_priorita_vince_piu_specifica() -> None:
@@ -463,7 +487,7 @@ def test_risolvi_corsa_s5_mattina_3_pezzi() -> None:
     out = risolvi_corsa(c, [r_mattina, r_pomeriggio], date(2026, 4, 20))  # lunedì = feriale
     assert out is not None
     assert out.regola_id == 1
-    assert out.numero_pezzi == 3
+    assert out.numero_pezzi_totali == 3
 
 
 def test_risolvi_corsa_s5_pomeriggio_6_pezzi() -> None:
@@ -494,7 +518,7 @@ def test_risolvi_corsa_s5_pomeriggio_6_pezzi() -> None:
     out = risolvi_corsa(c, [r_mattina, r_pomeriggio], date(2026, 4, 20))
     assert out is not None
     assert out.regola_id == 2
-    assert out.numero_pezzi == 6
+    assert out.numero_pezzi_totali == 6
 
 
 def test_risolvi_corsa_s5_sabato_default() -> None:
@@ -549,4 +573,153 @@ def test_risolvi_corsa_treno_specifico_vince_su_linea() -> None:
     out = risolvi_corsa(c, [r_linea, r_specifica], date(2026, 4, 20))
     assert out is not None
     assert out.regola_id == 2
-    assert out.materiale_tipo_codice == "ETR526"
+    assert out.composizione[0].materiale_tipo_codice == "ETR526"
+
+
+# =====================================================================
+# Sprint 5.5 — Composizione lista + validazione accoppiamento
+# =====================================================================
+
+
+def test_risolvi_corsa_composizione_singola_da_json() -> None:
+    """Una regola single-material genera AssegnazioneRisolta con
+    composizione di 1 elemento."""
+    c = FakeCorsa(codice_linea="S5")
+    r = FakeRegola(
+        id=1,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "S5"}],
+        composizione_json=[{"materiale_tipo_codice": "ETR526", "n_pezzi": 1}],
+    )
+    out = risolvi_corsa(c, [r], date(2026, 4, 20))
+    assert out is not None
+    assert len(out.composizione) == 1
+    assert out.composizione[0] == ComposizioneItem("ETR526", 1)
+    assert out.is_composizione_manuale is False
+
+
+def test_risolvi_corsa_composizione_doppia_ammessa() -> None:
+    """Composizione doppia ETR526+ETR425 con callback che la ammette."""
+    c = FakeCorsa(direttrice="MILANO-TIRANO")
+    r = FakeRegola(
+        id=1,
+        filtri_json=[{"campo": "direttrice", "op": "eq", "valore": "MILANO-TIRANO"}],
+        composizione_json=[
+            {"materiale_tipo_codice": "ETR526", "n_pezzi": 1},
+            {"materiale_tipo_codice": "ETR425", "n_pezzi": 1},
+        ],
+    )
+
+    # Callback che ammette ETR425+ETR526 (normalizzato lex)
+    def is_ammesso(a: str, b: str) -> bool:
+        return (a, b) == ("ETR425", "ETR526")
+
+    out = risolvi_corsa(c, [r], date(2026, 4, 20), is_ammesso)
+    assert out is not None
+    assert len(out.composizione) == 2
+    assert out.materiali_codici == frozenset({"ETR425", "ETR526"})
+    assert out.numero_pezzi_totali == 2
+
+
+def test_risolvi_corsa_composizione_doppia_non_ammessa_raises() -> None:
+    """Composizione doppia non in materiale_accoppiamento_ammesso →
+    ComposizioneNonAmmessaError."""
+    c = FakeCorsa(direttrice="MILANO-TIRANO")
+    r = FakeRegola(
+        id=42,
+        filtri_json=[{"campo": "direttrice", "op": "eq", "valore": "MILANO-TIRANO"}],
+        composizione_json=[
+            {"materiale_tipo_codice": "ETR526", "n_pezzi": 1},
+            {"materiale_tipo_codice": "ALe711", "n_pezzi": 1},
+        ],
+    )
+
+    def is_ammesso(a: str, b: str) -> bool:
+        return False  # niente è ammesso
+
+    with pytest.raises(ComposizioneNonAmmessaError) as excinfo:
+        risolvi_corsa(c, [r], date(2026, 4, 20), is_ammesso)
+    err = excinfo.value
+    assert err.regola_id == 42
+    # Coppia normalizzata lex: ALe711 < ETR526
+    assert err.coppia_non_ammessa == ("ALe711", "ETR526")
+
+
+def test_risolvi_corsa_doppia_non_ammessa_bypassata_da_manuale() -> None:
+    """is_composizione_manuale=True → bypass del check, niente errore."""
+    c = FakeCorsa(direttrice="X")
+    r = FakeRegola(
+        id=7,
+        filtri_json=[{"campo": "direttrice", "op": "eq", "valore": "X"}],
+        composizione_json=[
+            {"materiale_tipo_codice": "ETR526", "n_pezzi": 1},
+            {"materiale_tipo_codice": "TAF", "n_pezzi": 1},
+        ],
+        is_composizione_manuale=True,
+    )
+
+    def is_ammesso(a: str, b: str) -> bool:
+        return False  # rifiuterebbe tutto, ma manuale=True bypassa
+
+    out = risolvi_corsa(c, [r], date(2026, 4, 20), is_ammesso)
+    assert out is not None
+    assert out.is_composizione_manuale is True
+    assert len(out.composizione) == 2
+
+
+def test_risolvi_corsa_doppia_self_pair_validata() -> None:
+    """Composizione 526+526 (doppia stesso materiale) richiede comunque
+    la coppia (526, 526) in materiale_accoppiamento_ammesso."""
+    c = FakeCorsa(direttrice="X")
+    r = FakeRegola(
+        id=1,
+        filtri_json=[{"campo": "direttrice", "op": "eq", "valore": "X"}],
+        composizione_json=[
+            {"materiale_tipo_codice": "ETR526", "n_pezzi": 1},
+            {"materiale_tipo_codice": "ETR526", "n_pezzi": 1},
+        ],
+    )
+
+    def is_ammesso_solo_526526(a: str, b: str) -> bool:
+        return (a, b) == ("ETR526", "ETR526")
+
+    out = risolvi_corsa(c, [r], date(2026, 4, 20), is_ammesso_solo_526526)
+    assert out is not None
+    assert len(out.composizione) == 2
+
+
+def test_risolvi_corsa_singola_no_validazione_accoppiamento() -> None:
+    """Composizione di 1 elemento: il callback non viene chiamato
+    (non ci sono coppie da validare)."""
+    c = FakeCorsa(codice_linea="S5")
+    r = FakeRegola(
+        id=1,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "S5"}],
+        composizione_json=[{"materiale_tipo_codice": "ALe711", "n_pezzi": 3}],
+    )
+
+    callback_calls: list[tuple[str, str]] = []
+
+    def is_ammesso(a: str, b: str) -> bool:
+        callback_calls.append((a, b))
+        return True
+
+    out = risolvi_corsa(c, [r], date(2026, 4, 20), is_ammesso)
+    assert out is not None
+    assert callback_calls == [], "Callback non deve essere chiamato per composizione singola"
+
+
+def test_risolvi_corsa_callback_none_skip_validazione() -> None:
+    """Callback None → niente validazione (default per testing semplice)."""
+    c = FakeCorsa(direttrice="X")
+    r = FakeRegola(
+        id=1,
+        filtri_json=[{"campo": "direttrice", "op": "eq", "valore": "X"}],
+        composizione_json=[
+            {"materiale_tipo_codice": "ETR526", "n_pezzi": 1},
+            {"materiale_tipo_codice": "ALe711", "n_pezzi": 1},
+        ],
+    )
+    # is_accoppiamento_ammesso=None (default) → no errore
+    out = risolvi_corsa(c, [r], date(2026, 4, 20))
+    assert out is not None
+    assert len(out.composizione) == 2
