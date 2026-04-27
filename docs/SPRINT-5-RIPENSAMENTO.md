@@ -81,11 +81,18 @@ I 6 principi che il nuovo builder deve rispettare:
 |---|---|
 | **Whitelist stazioni-sede** | Tabella M:N `localita_stazione_vicina` (sede_id, stazione_codice). Configurabile per ogni sede. |
 | **FIO whitelist** | Mi.Garibaldi, Mi.Centrale, Mi.Lambrate, Mi.Rogoredo, Mi.Greco-Pirelli (5 stazioni) |
-| **NOV whitelist** | Mi.Cadorna, Mi.Bovisa (2 stazioni) |
-| **CAM/LEC/CRE/ISE/TILO whitelist** | TBD — chiedere all'utente |
+| **NOV whitelist** | Mi.Cadorna, Mi.Bovisa, **Saronno** (3 stazioni, Saronno condivisa con CAM) |
+| **CAM whitelist** | Seveso, Saronno (2 stazioni, Saronno condivisa con NOV) |
+| **LEC whitelist** | Lecco (1 stazione) |
+| **CRE whitelist** | Cremona (1 stazione) |
+| **ISE whitelist** | Iseo (1 stazione) |
+| **TILO** | Pool esterno: i giri TILO restano "blackbox" (girano sulle tracce del PdE TILO). Vincolo rigido **unico**: ogni giro TILO deve rientrare in Svizzera ogni sera. Niente whitelist Italia. |
+| **Stazioni condivise** | Es. Saronno appartiene a NOV E a CAM. La M:N `localita_stazione_vicina` lo supporta naturalmente: la scelta di quale sede usa Saronno per un dato giro dipende dal giro stesso (il builder può scegliere). |
 | **Composizione regola** | Estensione `programma_regola_assegnazione.composizione_json: list[{materiale_tipo_codice, n_pezzi}]`. Regola single-material esistente migrata a `[{tipo, n}]`. |
-| **Vincoli accoppiamento** | Tabella `materiale_accoppiamento_ammesso` (mat_a, mat_b, simmetrica). Confermati: 421+421, 526+526, 526+425. **Lista completa: chiedere a utente.** |
-| **Override manuale composizione** | Flag `is_composizione_manuale: bool` sulla regola. Se True, bypass del check su `materiale_accoppiamento_ammesso` (il pianificatore sa cosa sta facendo). |
+| **Vincoli accoppiamento** | Tabella `materiale_accoppiamento_ammesso` (mat_a, mat_b, simmetrica). Inizio con 421+421, 526+526, 526+425. La lista cresce nel tempo; per ora questi 3 bastano. |
+| **Override manuale composizione** | Flag `is_composizione_manuale: bool` sulla regola. Se True, bypass del check su `materiale_accoppiamento_ammesso` (il pianificatore sceglie qualunque combinazione). |
+| **Menu materiali UI** | Scope frontend (futuro): UI elenca tutti i `materiale_tipo` disponibili dell'azienda → il pianificatore seleziona N materiali per costruire la composizione_json di una regola. Backend Sprint 5: assicura che esista un endpoint `GET /api/materiali` (creiamolo se mancante) per popolare il menu. |
+| **Sede manutentiva di default per materiale** | Nuovo campo nullable `materiale_tipo.localita_manutenzione_default_id`, **assegnabile fin da subito** (approccio (b) scelto dall'utente). Inizialmente NULL per tutti i materiali; il pianificatore lo configura via UI/seed/API. Niente estrazione automatica dal PDF turno materiale (scope futuro). |
 | **Cap km ciclo** | Nuovo campo `programma_materiale.km_max_ciclo INTEGER` (default 5000, configurabile per programma fino 10000+). Cumulato su tutto il ciclo, NON giornaliero. |
 | **`km_max_giornaliero` legacy** | Deprecato ma non rimosso (FK retro-compat). |
 | **Strict mode rinominato** | `no_giro_non_chiuso_a_localita` → `no_giro_appeso`. Nuova semantica: "ogni giro deve avere un rientro programmato a fine ciclo, non ogni sera". |
@@ -314,28 +321,31 @@ uv run python -m colazione.importers.pde_importer \
 
 Atteso ~25-30s, 10579 corse + ~95k composizioni nel DB.
 
-### 6.2 Domande aperte per l'utente
+### 6.2 Risposte utente (2026-04-27) e domande residue
 
-Prima di iniziare 5.2 (seed) e 5.6 (smoke):
+**Risposte confermate:**
 
-1. **Whitelist stazioni vicine** per le sedi:
-   - **CAM** (Camnago)?
-   - **LEC** (Lecco)?
-   - **CRE** (Cremona)?
-   - **ISE** (Iseo)?
-   - **TILO** (pool Svizzera)?
+1. ✅ Whitelist stazioni vicine: vedi tabella in §3 (FIO/NOV/CAM/LEC/
+   CRE/ISE complete; TILO è blackbox con vincolo "rientra in CH ogni
+   sera").
 
-2. **Lista completa accoppiamenti ammessi materiali**: confermati
-   421+421, 526+526, 526+425. Mancano:
-   - ALe711 + ALe711? (singolo o ammesso doppio?)
-   - 526 + 526 confermato; 425 + 425 ammesso?
-   - Altri tipi del seed (ETR524, E464N, ATR115, ...)?
+2. ✅ Accoppiamenti: iniziamo con 421+421, 526+526, 526+425. La lista
+   cresce nel tempo. UI menu materiali permetterà override manuale.
 
-3. **Linea Mi.Centrale-Tirano** nel PdE: che `codice_linea` ha?
-   (Probabilmente RE2/RE5/altro — verifico nel PdE quando lo
-   importiamo.)
+3. ⏳ Codice linea Mi.Centrale-Tirano: lo **scopriamo nel PdE** quando
+   lo importiamo (filtro su `codice_origine` Mi.Centrale +
+   `codice_destinazione` Tirano). Non serve chiedere all'utente.
 
-4. **Sede manutentiva ETR526/ETR425**: dove vengono manutenuti?
+4. ⏳ Sede manutentiva default per ETR526 / ETR425: presumibilmente
+   Fiorenza per entrambi. **Verificare con utente all'inizio di
+   Sprint 5.6** prima di lanciare lo smoke.
+
+**Domande residue (rispondere quando si arriva al punto):**
+
+- **5.6 setup**: per il smoke ETR526+425 Mi.Centrale-Tirano, sede
+  manutentiva Fiorenza? Il "vincolo" Tirano = sempre doppia →
+  basta una regola con `composizione_json=[{ETR526,1},{ETR425,1}]`?
+  `km_max_ciclo` per questo programma: 5000 o 10000?
 
 ### 6.3 Sequenza operativa raccomandata
 
