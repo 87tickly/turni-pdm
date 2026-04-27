@@ -10,6 +10,131 @@
 
 ---
 
+## 2026-04-27 (28) — Sprint 5.2 parte 1: script seed materiali famiglia + whitelist + accoppiamenti
+
+### Contesto
+
+Sub 5.2 del piano `docs/SPRINT-5-RIPENSAMENTO.md`: popolare le tabelle
+introdotte da migration 0007 (whitelist stazioni-vicine-sede +
+accoppiamenti materiali) con dati operativi Trenord. Spostato da
+migration alembic a script `scripts/seed_whitelist_e_accoppiamenti.py`
+perché dipende dalle stazioni create dall'import PdE (eseguibile a
+parte, non automatico in `alembic upgrade`).
+
+Decisioni utente (2026-04-27):
+
+- **(A) Materiali famiglia ETR**: i `materiale_tipo` del seed 0002 sono
+  pezzi singoli (es. `TN-Ale421-DM1`, `TN-Le421-TA`...), non
+  convogli interi. Per rappresentare un convoglio in una regola
+  `composizione_json` serve un `materiale_tipo` aggregato. Lo script
+  crea 5 famiglie con `componenti_json={n_casse, pezzi_inventario}`.
+- **(Y) Pattern matching nome**: la whitelist usa `ILIKE` su nome
+  stazione (es. `%MILANO%CENTRALE%`) invece di hardcodare codici.
+  Multi-tenant friendly e robusto a rinumerazioni del PdE annuale.
+
+### Modifiche
+
+**Nuovo `backend/scripts/seed_whitelist_e_accoppiamenti.py`** (~470 righe):
+
+CLI async con 3 sezioni atomiche e idempotenti:
+
+1. **5 materiali famiglia ETR** (`MATERIALI_FAMIGLIA_TRENORD`):
+   - **Coradia Meridian** (Alstom): ETR425 (5 casse), ETR526 (6 casse)
+   - **Caravaggio** (Hitachi, anche detto Rock): ETR421 (4 casse),
+     ETR521 (5 casse, **non accoppiabile**), ETR522 (5 casse)
+   - `componenti_json={n_casse, pezzi_inventario}` (pezzi dal seed 0002).
+
+2. **Whitelist stazioni-vicine-sede** (`WHITELIST_TRENORD`):
+   - FIO (Mi.Garibaldi, Centrale, Lambrate, Rogoredo, Greco-Pirelli)
+   - NOV (Mi.Cadorna, Bovisa, Saronno)
+   - CAM (Seveso, Saronno — condivisa con NOV)
+   - LEC (Lecco), CRE (Cremona), ISE (Iseo)
+   - TILO escluso (pool esterno, blackbox).
+   - Pattern `ILIKE %...%`: errore esplicito se 0 o >1 match (lista
+     candidate per raffinare).
+
+3. **Accoppiamenti materiali ammessi** (`ACCOPPIAMENTI_TRENORD`):
+   - 421+421, 425+526, 526+526 (i 3 confermati da utente).
+   - Normalizzazione lessicografica `a <= b` enforced sia da CHECK DB
+     sia da assert nello script.
+   - ETR521 esplicitamente **assente** (vincolo "solo singola").
+
+**Design dependency injection**: `seed_all()` accetta opzionalmente
+`materiali`, `whitelist`, `accoppiamenti` come parametri (default ai
+const di modulo). Permette test isolati con dati mock.
+
+**CLI args**:
+- `--azienda <codice>` (default `trenord`)
+- `--dry-run` (esegue tutto, rollback a fine)
+- `-v/--verbose` (log DEBUG, mostra anche skippati)
+
+**Errori espliciti** (`SeedError`):
+- Azienda inesistente
+- Sede whitelist non trovata
+- Pattern stazione 0 match (suggerisce import PdE)
+- Pattern stazione >1 match (lista candidate)
+- Materiale di accoppiamento mancante
+- Accoppiamento non normalizzato (a > b lex)
+
+### Test
+
+**Nuovo `backend/tests/test_seed_whitelist_e_accoppiamenti.py`**
+(10 test integration, 0.53s):
+
+- **Setup completamente isolato**: azienda `trenord_test_seed` + 6 sedi
+  `TEST_SEED_*` + 12 stazioni `TS*` con nomi reali. Wipe pre+post FK-safe.
+- `test_seed_happy_path`: seed crea 5 materiali + 13 entry whitelist
+  (Saronno×2 sedi) + 3 accoppiamenti.
+- `test_seed_etr521_non_in_accoppiamenti`: verifica che ETR521 non
+  appaia in nessuna riga di `materiale_accoppiamento_ammesso`.
+- `test_seed_idempotente_seconda_run_zero_inserts`: 2× → 0 inserts,
+  N skip.
+- 5 test errori (azienda, località, pattern 0/N, materiale mancante,
+  accoppiamento non normalizzato).
+- `test_seed_dry_run_non_scrive`: counter popolato, DB resta vuoto.
+
+### Bug fix scoperto
+
+`pg_insert(...).on_conflict_do_nothing()` SENZA `.returning(...)`
+restituisce `result.rowcount = -1` (non 0/1) in SQLAlchemy + psycopg
+async. Il counter inserts/skip era totalmente spurio. Fix: aggiunto
+`.returning(<col>)` a tutte le 3 INSERT, e check
+`if result.scalar() is not None` (None = skip su conflict).
+
+### Verifiche
+
+- `pytest`: **335 passed** in 9.90s (era 325, +10 nuovi seed test)
+- `ruff check + format`: clean (75 file)
+- `mypy --strict src`: 47 source files, no issues
+- `mypy --strict scripts/seed_whitelist_e_accoppiamenti.py`: no issues
+
+### Stato
+
+**Sub 5.2 parte 1 chiusa**. Script seed funzionante e testato in
+isolamento. La parte 2 attende dati `n_casse` / `famiglia` /
+`nome_commerciale` per i materiali aggiuntivi citati dall'utente:
+
+- **Donizetti** (Alstom): ETR103, ETR104, ETR204
+- **ATR** (diesel): ATR803, ATR125, ATR115
+- **ALn668** (diesel singolo)
+- **E464** (locomotiva elettrica)
+- **ALe245** (treno tradizionale)
+- **ALe711** (TSR — Treno Servizio Regionale)
+- **TAF** (Treno ad Alta Frequentazione)
+- **Locomotori manovra**: D520, D744
+
+### Prossimo step
+
+**Sub 5.2 parte 2**: utente conferma dati per i ~12 materiali aggiuntivi
+sopra → estendo `MATERIALI_FAMIGLIA_TRENORD` + eventuali nuovi
+accoppiamenti. Nessun cambio di schema, solo dati.
+
+In parallelo si può lanciare **Sub 5.3** (riscrittura
+`posizionamento.py`) — non dipende da Sub 5.2 chiuso completamente, le
+strutture DB sono già pronte da migration 0007.
+
+---
+
 ## 2026-04-27 (27) — Sprint 5.1: schema DB + ORM + Pydantic per il nuovo builder
 
 ### Contesto
