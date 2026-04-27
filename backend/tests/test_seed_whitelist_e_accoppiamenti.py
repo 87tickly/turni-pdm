@@ -97,11 +97,25 @@ _TEST_WHITELIST: dict[str, list[str]] = {
     "TEST_SEED_ISE": ["Iseo"],
 }
 
-# Materiali e accoppiamenti: stessi del seed di produzione (default in seed_all).
-# Atteso: 5 materiali, 3 accoppiamenti, 13 entry whitelist (5+3+2+1+1+1).
-_EXPECTED_MATERIALI = 5
+# Materiali: 16 famiglie create dallo script.
+# Whitelist: 13 entry (5+3+2+1+1+1, Saronno×2 sedi).
+# Accoppiamenti: 6 di 8 testabili in isolamento. Esclusi ATR115+ATR125 e
+# ATR125+ATR125 perché ATR115/ATR125 sono pezzi del seed 0002 (azienda
+# trenord reale, vincolo UNIQUE globale su codice — non riproducibili
+# nell'azienda mock `trenord_test_seed`).
+_EXPECTED_MATERIALI = 16
 _EXPECTED_WHITELIST = 13
-_EXPECTED_ACCOPPIAMENTI = 3
+_EXPECTED_ACCOPPIAMENTI = 6
+
+# Accoppiamenti testabili in isolamento (escludono ATR115/ATR125).
+_TEST_ACCOPPIAMENTI: list[tuple[str, str]] = [
+    ("ETR421", "ETR421"),
+    ("ETR425", "ETR526"),
+    ("ETR526", "ETR526"),
+    ("ETR204", "ETR204"),
+    ("E464", "MD"),
+    ("E464", "Vivalto"),
+]
 
 
 async def _wipe_seed_test_data() -> None:
@@ -124,12 +138,19 @@ async def _wipe_seed_test_data() -> None:
         await session.execute(
             text("DELETE FROM localita_stazione_vicina WHERE stazione_codice LIKE 'TS%'")
         )
-        # accoppiamenti (FK su materiale_tipo) — scope isolato sui 5 ETR
+        # accoppiamenti FK su materiale_tipo. I codici ETR*/ATR*/ALe*/E464/
+        # Vivalto/MD/TAF coprono i 16 materiali famiglia creati dallo script.
         await session.execute(
             text(
                 "DELETE FROM materiale_accoppiamento_ammesso "
-                "WHERE materiale_a_codice LIKE 'ETR%' OR materiale_b_codice LIKE 'ETR%'"
-            )
+                "WHERE materiale_a_codice IN "
+                "  (SELECT codice FROM materiale_tipo WHERE azienda_id IN "
+                "   (SELECT id FROM azienda WHERE codice = :cod))"
+                "OR materiale_b_codice IN "
+                "  (SELECT codice FROM materiale_tipo WHERE azienda_id IN "
+                "   (SELECT id FROM azienda WHERE codice = :cod))"
+            ),
+            {"cod": _TEST_AZIENDA_CODICE},
         )
         # sedi mock
         await session.execute(
@@ -137,15 +158,19 @@ async def _wipe_seed_test_data() -> None:
         )
         # stazioni mock
         await session.execute(text("DELETE FROM stazione WHERE codice LIKE 'TS%'"))
-        # materiali famiglia ETR (scope isolato: solo i 5 nostri)
+        # tutti i materiali dell'azienda mock (16 famiglie create dallo script)
         await session.execute(
             text(
-                "DELETE FROM materiale_tipo WHERE codice IN "
-                "('ETR421','ETR521','ETR522','ETR425','ETR526')"
-            )
+                "DELETE FROM materiale_tipo WHERE azienda_id IN "
+                "(SELECT id FROM azienda WHERE codice = :cod)"
+            ),
+            {"cod": _TEST_AZIENDA_CODICE},
         )
         # azienda mock
-        await session.execute(text(f"DELETE FROM azienda WHERE codice = '{_TEST_AZIENDA_CODICE}'"))
+        await session.execute(
+            text("DELETE FROM azienda WHERE codice = :cod"),
+            {"cod": _TEST_AZIENDA_CODICE},
+        )
 
 
 async def _setup_isolated_db() -> int:
@@ -209,7 +234,7 @@ async def cleanup_engine() -> None:
 
 
 async def test_seed_happy_path() -> None:
-    """Setup isolato + seed_all → 5 materiali + 13 whitelist + 3 accoppiamenti."""
+    """Setup isolato + seed_all → 16 materiali + 13 whitelist + 6 accoppiamenti."""
     await _setup_isolated_db()
 
     async with session_scope() as session:
@@ -217,6 +242,7 @@ async def test_seed_happy_path() -> None:
             session,
             _TEST_AZIENDA_CODICE,
             whitelist=_TEST_WHITELIST,
+            accoppiamenti=_TEST_ACCOPPIAMENTI,
         )
 
     assert report.materiali_inseriti == _EXPECTED_MATERIALI, report
@@ -226,11 +252,15 @@ async def test_seed_happy_path() -> None:
     assert report.accoppiamenti_inseriti == _EXPECTED_ACCOPPIAMENTI, report
     assert report.accoppiamenti_skippati == 0, report
 
-    # Verifica righe persistite
+    # Verifica righe persistite (filtra per azienda mock)
     async with session_scope() as session:
         n_mat = (
             await session.execute(
-                text("SELECT COUNT(*) FROM materiale_tipo WHERE codice LIKE 'ETR%'")
+                text(
+                    "SELECT COUNT(*) FROM materiale_tipo WHERE azienda_id IN "
+                    "(SELECT id FROM azienda WHERE codice = :cod)"
+                ),
+                {"cod": _TEST_AZIENDA_CODICE},
             )
         ).scalar_one()
         n_white = (
@@ -244,8 +274,11 @@ async def test_seed_happy_path() -> None:
             await session.execute(
                 text(
                     "SELECT COUNT(*) FROM materiale_accoppiamento_ammesso "
-                    "WHERE materiale_a_codice LIKE 'ETR%'"
-                )
+                    "WHERE materiale_a_codice IN "
+                    "  (SELECT codice FROM materiale_tipo WHERE azienda_id IN "
+                    "   (SELECT id FROM azienda WHERE codice = :cod))"
+                ),
+                {"cod": _TEST_AZIENDA_CODICE},
             )
         ).scalar_one()
     assert n_mat == _EXPECTED_MATERIALI
@@ -262,6 +295,7 @@ async def test_seed_etr521_non_in_accoppiamenti() -> None:
             session,
             _TEST_AZIENDA_CODICE,
             whitelist=_TEST_WHITELIST,
+            accoppiamenti=_TEST_ACCOPPIAMENTI,
         )
 
     async with session_scope() as session:
@@ -287,10 +321,20 @@ async def test_seed_idempotente_seconda_run_zero_inserts() -> None:
     await _setup_isolated_db()
 
     async with session_scope() as session:
-        await seed_all(session, _TEST_AZIENDA_CODICE, whitelist=_TEST_WHITELIST)
+        await seed_all(
+            session,
+            _TEST_AZIENDA_CODICE,
+            whitelist=_TEST_WHITELIST,
+            accoppiamenti=_TEST_ACCOPPIAMENTI,
+        )
 
     async with session_scope() as session:
-        report = await seed_all(session, _TEST_AZIENDA_CODICE, whitelist=_TEST_WHITELIST)
+        report = await seed_all(
+            session,
+            _TEST_AZIENDA_CODICE,
+            whitelist=_TEST_WHITELIST,
+            accoppiamenti=_TEST_ACCOPPIAMENTI,
+        )
 
     assert report.materiali_inseriti == 0
     assert report.materiali_skippati == _EXPECTED_MATERIALI
@@ -412,6 +456,7 @@ async def test_seed_dry_run_non_scrive() -> None:
             session,
             _TEST_AZIENDA_CODICE,
             whitelist=_TEST_WHITELIST,
+            accoppiamenti=_TEST_ACCOPPIAMENTI,
             dry_run=True,
         )
 
@@ -423,14 +468,30 @@ async def test_seed_dry_run_non_scrive() -> None:
     async with session_scope() as session:
         n_mat = (
             await session.execute(
-                text("SELECT COUNT(*) FROM materiale_tipo WHERE codice LIKE 'ETR%'")
+                text(
+                    "SELECT COUNT(*) FROM materiale_tipo WHERE azienda_id IN "
+                    "(SELECT id FROM azienda WHERE codice = :cod)"
+                ),
+                {"cod": _TEST_AZIENDA_CODICE},
             )
         ).scalar_one()
         n_white = (
-            await session.execute(text("SELECT COUNT(*) FROM localita_stazione_vicina"))
+            await session.execute(
+                text(
+                    "SELECT COUNT(*) FROM localita_stazione_vicina WHERE stazione_codice LIKE 'TS%'"
+                )
+            )
         ).scalar_one()
         n_accop = (
-            await session.execute(text("SELECT COUNT(*) FROM materiale_accoppiamento_ammesso"))
+            await session.execute(
+                text(
+                    "SELECT COUNT(*) FROM materiale_accoppiamento_ammesso "
+                    "WHERE materiale_a_codice IN "
+                    "  (SELECT codice FROM materiale_tipo WHERE azienda_id IN "
+                    "   (SELECT id FROM azienda WHERE codice = :cod))"
+                ),
+                {"cod": _TEST_AZIENDA_CODICE},
+            )
         ).scalar_one()
     assert n_mat == 0, "Dry-run non deve scrivere materiali"
     assert n_white == 0, "Dry-run non deve scrivere whitelist"

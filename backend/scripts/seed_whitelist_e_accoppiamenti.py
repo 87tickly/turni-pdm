@@ -3,23 +3,35 @@
 Popola le tabelle introdotte da migration 0007 con i dati operativi di
 Trenord, in 3 sezioni atomiche e idempotenti:
 
-1. **Materiali famiglia ETR**: aggiunge `materiale_tipo` aggregati per
-   le 2 famiglie operative Trenord (decisione utente 2026-04-27):
+1. **Materiali famiglia** (16 in totale, decisione utente 2026-04-27):
+
      - **Coradia Meridian** (Alstom): ETR425 (5 casse), ETR526 (6 casse)
      - **Caravaggio** (Hitachi, anche detto **Rock**):
-       ETR421 (4 casse), ETR521 (5 casse, **solo singola, non
-       accoppiabile**), ETR522 (5 casse)
+       ETR421 (4 casse), ETR521 (5 casse, **solo singola**),
+       ETR522 (5 casse)
+     - **Donizetti** (Alstom Coradia Stream):
+       ETR103 (3 casse, mai doppia, poche unità),
+       ETR104 (4 casse, mai doppia),
+       ETR204 (4 casse, può andare in doppia)
+     - **ATR Diesel**: ATR803 (mai doppia), ATR125, ATR115
+       (questi 2 sono già nel seed 0002 come pezzi singoli — non
+       creati di nuovo, solo accoppiamenti aggiunti)
+     - **TSR** (Treno Servizio Regionale): ALe711_3 (3 casse),
+       ALe711_4 (4 casse) — varianti
+     - **Treno tradizionale**: ALe245_treno (motrice + rimorchiata,
+       quasi sempre singola)
+     - **TAF** (Treno Alta Frequentazione, sempre singola)
+     - **Locomotiva elettrica**: E464 (1 cassa, traina Vivalto o MD)
+     - **Carrozze**: Vivalto (a 2 piani), MD (Media Distanza)
+
    Il `componenti_json` include `n_casse` (lunghezza tipica del
    convoglio) e `pezzi_inventario` (codici pezzi nominali dal seed
-   0002 — varianti di motrici/rimorchiate). Senza queste famiglie non
-   si può rappresentare un convoglio intero in una regola
-   `programma_regola_assegnazione.composizione_json`.
+   0002). Senza queste famiglie non si può rappresentare un convoglio
+   intero in una regola `composizione_json`.
 
-   **Sub 5.2 parte 1** inserisce solo i 5 materiali con dati certi.
-   Altri (Donizetti ETR103/104/204, ATR 803/125/115, ALn668, E464,
-   ALe245, ALe711 TSR, TAF, locomotori manovra D520/D744) saranno
-   aggiunti in Sub 5.2 parte 2 dopo conferma utente sui dati
-   `n_casse` e `famiglia`.
+   **Esclusi**: ALn668 (dismesso), D520/D744 (locomotori di manovra
+   non commerciale), ATR125/ATR115 (già `materiale_tipo` nel seed
+   0002 come pezzi singoli, riutilizzati per accoppiamenti).
 
 2. **Whitelist stazioni-vicine-sede** (`localita_stazione_vicina`):
    per ogni sede manutentiva (FIO/NOV/CAM/LEC/CRE/ISE) un set di
@@ -95,11 +107,18 @@ logger = logging.getLogger("seed_whitelist_e_accoppiamenti")
 #: convoglio fisico sono un sottoinsieme di `pezzi_inventario` con
 #: cardinalità `n_casse`; la configurazione esatta è scope futuro.
 #:
-#: Le 2 famiglie operative confermate dall'utente (2026-04-27):
+#: Famiglie operative confermate dall'utente (2026-04-27):
 #:   - Coradia Meridian (Alstom): ETR425 (5 casse) + ETR526 (6 casse)
 #:   - Caravaggio (Hitachi, anche detto Rock):
 #:     ETR421 (4 casse) + ETR521 (5 casse, NON accoppiabile) +
 #:     ETR522 (5 casse)
+#:   - Donizetti (Alstom Coradia Stream): ETR103 (3) + ETR104 (4) +
+#:     ETR204 (4)
+#:   - ATR Diesel: ATR803 (4 placeholder), ATR125+ATR115 già nel seed
+#:   - TSR: ALe711_3, ALe711_4
+#:   - Treno tradizionale: ALe245_treno
+#:   - TAF (sempre singola)
+#:   - Locomotiva + carrozze: E464 + Vivalto + MD
 @dataclass(frozen=True)
 class _MaterialeFamiglia:
     codice: str
@@ -176,6 +195,127 @@ MATERIALI_FAMIGLIA_TRENORD: list[_MaterialeFamiglia] = [
             "TN-Le526-A43",
         ],
     ),
+    # -----------------------------------------------------------------
+    # Sub 5.2 parte 2: Donizetti, ATR, ALe245, TSR, TAF, E464+carrozze
+    # -----------------------------------------------------------------
+    _MaterialeFamiglia(
+        # ETR103 — Donizetti 3 casse, mai in doppia (poche unità).
+        codice="ETR103",
+        nome_commerciale="ETR103",
+        famiglia="Donizetti",
+        n_casse=3,
+        pezzi_inventario=[
+            "TN-Ale103-A1",
+            "TN-Ale103-A4",
+            "TN-Le103-A2",
+        ],
+    ),
+    _MaterialeFamiglia(
+        # ETR104 — Donizetti 4 casse, mai in doppia.
+        codice="ETR104",
+        nome_commerciale="ETR104",
+        famiglia="Donizetti",
+        n_casse=4,
+        pezzi_inventario=[
+            "TN-Ale104-A1",
+            "TN-Ale104-A4",
+            "TN-Le104-A2",
+            "TN-Le104-A3",
+        ],
+    ),
+    _MaterialeFamiglia(
+        # ETR204 — Donizetti 4 casse, può andare in doppia (204+204).
+        codice="ETR204",
+        nome_commerciale="ETR204",
+        famiglia="Donizetti",
+        n_casse=4,
+        pezzi_inventario=[
+            "TN-Ale204-A1",
+            "TN-Ale204-A4",
+            "TN-Le204-A2",
+            "TN-Le204-A3",
+        ],
+    ),
+    _MaterialeFamiglia(
+        # ATR803 — Diesel, mai in doppia. n_casse=4 placeholder
+        # (l'utente ha indicato "non serve sapere le casse").
+        codice="ATR803",
+        nome_commerciale="ATR803",
+        famiglia="ATR Diesel",
+        n_casse=4,
+        pezzi_inventario=[
+            "TN-Aln803-A",
+            "TN-Aln803-B",
+            "TN-Ln803-C",
+            "TN-Ln803-PP",
+        ],
+    ),
+    _MaterialeFamiglia(
+        # ALe245 — treno tradizionale (motrice + rimorchiata), quasi
+        # sempre in singola.
+        codice="ALe245_treno",
+        nome_commerciale="ALe245 (treno)",
+        famiglia="Treno tradizionale",
+        n_casse=2,
+        pezzi_inventario=["ALe245", "Le245"],
+    ),
+    _MaterialeFamiglia(
+        # TSR (Treno Servizio Regionale) variante 3 casse.
+        # Pezzi inventario: ALe710/ALe711 motrici TSR del seed 0002.
+        codice="ALe711_3",
+        nome_commerciale="ALe711 TSR (3 casse)",
+        famiglia="TSR (Treno Servizio Regionale)",
+        n_casse=3,
+        pezzi_inventario=["ALe710", "ALe711"],
+    ),
+    _MaterialeFamiglia(
+        # TSR variante 4 casse.
+        codice="ALe711_4",
+        nome_commerciale="ALe711 TSR (4 casse)",
+        famiglia="TSR (Treno Servizio Regionale)",
+        n_casse=4,
+        pezzi_inventario=["ALe710", "ALe711"],
+    ),
+    _MaterialeFamiglia(
+        # TAF (Treno ad Alta Frequentazione), sempre in singola.
+        # n_casse=6 placeholder. Pezzi candidati ALe426/ALe506 dal seed
+        # 0002 (motrici note ad alta frequentazione).
+        codice="TAF",
+        nome_commerciale="TAF",
+        famiglia="TAF (Treno Alta Frequentazione)",
+        n_casse=6,
+        pezzi_inventario=["ALe426", "ALe506"],
+    ),
+    _MaterialeFamiglia(
+        # E464 — locomotiva elettrica isolata (n_casse=1). Si accoppia
+        # con materiale Vivalto o MD (vedi ACCOPPIAMENTI_TRENORD).
+        # Una regola tipica: composizione=[{E464, 1}, {Vivalto, N}].
+        codice="E464",
+        nome_commerciale="E464",
+        famiglia="Locomotiva elettrica",
+        n_casse=1,
+        pezzi_inventario=["E464N"],
+    ),
+    _MaterialeFamiglia(
+        # Vivalto — carrozza a 2 piani (n_casse=1, è una singola
+        # carrozza). Il numero di carrozze in un treno è dato dalla
+        # `numero_pezzi` della regola (es. 5 Vivalto + 1 E464).
+        codice="Vivalto",
+        nome_commerciale="Vivalto",
+        famiglia="Carrozza",
+        n_casse=1,
+        pezzi_inventario=[],
+    ),
+    _MaterialeFamiglia(
+        # MD (Media Distanza) — carrozza tradizionale (n_casse=1).
+        # Pezzi inventario candidati: carrozze npB**/nB** del seed 0002.
+        # Da raffinare con utente.
+        codice="MD",
+        nome_commerciale="MD (Media Distanza)",
+        famiglia="Carrozza",
+        n_casse=1,
+        pezzi_inventario=[],
+    ),
 ]
 
 
@@ -219,15 +359,27 @@ WHITELIST_TRENORD: dict[str, list[str]] = {
 #: Normalizzati lessicograficamente (a <= b) — la migration 0007 ha
 #: un CHECK che lo enforza.
 #:
-#: I 3 confermati al 2026-04-27. ETR521 è esplicitamente NON
-#: accoppiabile (solo singola, decisione utente). Plausibili (da
-#: chiedere all'utente prima di aggiungere): ETR522+ETR522,
-#: ETR421+ETR522 (stessa famiglia Caravaggio/Rock); ETR425+ETR425
-#: (stessa famiglia Coradia Meridian).
+#: ETR521, ATR803, ALe245, TAF, ETR103/104, ALe711_3/4 sono
+#: esplicitamente NON accoppiabili (mai doppia, decisione utente).
+#: La loro assenza in questa lista è il vincolo: la tabella registra
+#: solo coppie ammesse.
+#:
+#: Plausibili da confermare in futuro: ETR522+ETR522, ETR421+ETR522
+#: (Caravaggio); ETR425+ETR425 (Coradia Meridian); ATR115+ATR115.
 ACCOPPIAMENTI_TRENORD: list[tuple[str, str]] = [
+    # Caravaggio (Rock)
     ("ETR421", "ETR421"),
+    # Coradia Meridian
     ("ETR425", "ETR526"),  # 425 < 526 lex
     ("ETR526", "ETR526"),
+    # Donizetti (solo ETR204 va in doppia; 103/104 mai)
+    ("ETR204", "ETR204"),
+    # ATR Diesel (115+125 e 125+125, mai 803)
+    ("ATR115", "ATR125"),  # ATR115 < ATR125 lex
+    ("ATR125", "ATR125"),
+    # E464 con materiale Vivalto / MD
+    ("E464", "MD"),  # E < M lex
+    ("E464", "Vivalto"),  # E < V lex
 ]
 
 

@@ -10,6 +10,111 @@
 
 ---
 
+## 2026-04-27 (29) — Sprint 5.2 parte 2: estensione materiali Trenord (11 nuovi famiglie + 5 nuovi accoppiamenti)
+
+### Contesto
+
+Sub 5.2 parte 1 (commit 30b5780) aveva chiuso il seed con i 5 materiali
+famiglia certi (Caravaggio Rock 421/521/522, Coradia Meridian 425/526)
++ 3 accoppiamenti. L'utente ha poi fornito l'elenco completo dei
+materiali Trenord operativi, con i dati n_casse e i vincoli di
+accoppiamento per ognuno. Sub 5.2 parte 2 estende il seed.
+
+### Modifiche
+
+**`backend/scripts/seed_whitelist_e_accoppiamenti.py`** —
+`MATERIALI_FAMIGLIA_TRENORD` da 5 a **16** elementi. Nuove famiglie:
+
+| Codice | n_casse | Famiglia | Accoppiabile |
+|---|---|---|---|
+| ETR103 | 3 | Donizetti | mai (poche unità) |
+| ETR104 | 4 | Donizetti | mai |
+| ETR204 | 4 | Donizetti | ✓ 204+204 |
+| ATR803 | 4 (placeholder) | ATR Diesel | mai |
+| ALe245_treno | 2 | Treno tradizionale | mai |
+| ALe711_3 | 3 | TSR | non confermato |
+| ALe711_4 | 4 | TSR | non confermato |
+| TAF | 6 (placeholder) | TAF | mai |
+| E464 | 1 | Locomotiva elettrica | ✓ con MD/Vivalto |
+| Vivalto | 1 | Carrozza | ✓ con E464 |
+| MD | 1 | Carrozza Media Distanza | ✓ con E464 |
+
+`ACCOPPIAMENTI_TRENORD` da 3 a **8**. Nuovi: `ETR204+ETR204`,
+`ATR115+ATR125`, `ATR125+ATR125`, `E464+MD`, `E464+Vivalto`.
+
+**Esclusi esplicitamente** (decisione utente):
+- ALn668 (dismesso) → no famiglia
+- D520, D744 (manovra non commerciale) → no famiglia
+- ATR125, ATR115 (già `materiale_tipo` "pezzi" nel seed 0002,
+  riutilizzati per accoppiamenti, non duplicati)
+
+**Pezzi inventario incerti** (da raffinare con utente):
+- ALe711_3/ALe711_4: motrici ALe710/ALe711 dal seed (ipotesi)
+- TAF: motrici ALe426/ALe506 dal seed (ipotesi)
+- Vivalto, MD: nessun pezzo nel seed 0002 (lasciati `[]`)
+- ATR803: 4 pezzi del seed (TN-Aln803-A/B + TN-Ln803-C/PP)
+
+**`backend/tests/test_seed_whitelist_e_accoppiamenti.py`** counter
+aggiornati:
+- `_EXPECTED_MATERIALI`: 5 → 16
+- `_EXPECTED_ACCOPPIAMENTI`: 3 → 6 (testabili in isolamento; 2
+  esclusi: ATR115+ATR125 e ATR125+ATR125 perché ATR115/ATR125 sono
+  globali UNIQUE su `materiale_tipo.codice` e già appartengono a
+  `azienda=trenord` reale, non riproducibili nell'azienda mock).
+- Nuovo `_TEST_ACCOPPIAMENTI` lista override che il test passa a
+  `seed_all` per gli accoppiamenti testabili.
+- Wipe FK-safe esteso: `DELETE FROM materiale_tipo WHERE azienda_id
+  IN (azienda_mock_id)` cancella tutti e 16 invece dei soli 5 ETR.
+- Count finale filtrato per `azienda_id` invece di `LIKE 'ETR%'`
+  (16 famiglie ora hanno prefissi diversi: ETR/ATR/ALe/TAF/E464/MD/Vivalto).
+
+### Decisioni di design
+
+- **n_casse placeholder**: per ATR803 e TAF, l'utente ha esplicitamente
+  detto "non serve sapere le casse" (mai in doppia). Metto valori
+  ipotetici (4, 6) con commento, perché il modello `componenti_json`
+  richiede la chiave; il builder non li userà.
+- **ALe711 doppia variante**: TSR ha varianti 3-casse e 4-casse → 2
+  `materiale_tipo` separati con codici `ALe711_3` / `ALe711_4`.
+  Coerente con la modellazione "1 materiale_tipo = 1 convoglio
+  intero".
+- **E464 + carrozze come materiali separati**: E464 (locomotiva, 1
+  cassa), Vivalto (carrozza, 1 cassa), MD (carrozza, 1 cassa) sono 3
+  `materiale_tipo` distinti. Una regola tipica avrà
+  `composizione_json=[{E464, 1}, {Vivalto, 5}]` per esprimere "1
+  locomotiva + 5 carrozze". Gli accoppiamenti `materiale_accoppiamento_ammesso`
+  registrano "E464 può andare con Vivalto" e "E464 può andare con MD".
+- **ALe245_treno** (suffix `_treno`): codice unico per non collidere
+  con `ALe245` del seed 0002 (che è il pezzo singolo motrice).
+  Discrimina la famiglia "treno completo" dal pezzo singolo.
+
+### Verifiche
+
+- `pytest`: **335 passed** in 10.0s (10 test seed verdi)
+- `ruff check + format`: clean (75 file)
+- `mypy --strict src + scripts/seed_whitelist_e_accoppiamenti.py`:
+  no issues, 48 source files
+
+### Stato
+
+**Sub 5.2 chiusa** (parte 1 + parte 2). Seed Trenord completo: 16
+materiali famiglia + 13 entry whitelist + 8 accoppiamenti. Lo script
+è invocabile in produzione dopo l'import PdE (per popolare le stazioni
+necessarie alla risoluzione dei pattern whitelist).
+
+Restano dati incerti per **pezzi_inventario** di ALe711_3/4, TAF,
+Vivalto, MD — non bloccanti (campo opaco JSONB, il builder non li usa
+finché Sub 5.5 non lo richiede). Da raffinare quando si arriva a Sub
+5.5 o per UI menu materiali futura.
+
+### Prossimo step
+
+Procedere con **Sub 5.3** — riscrittura `posizionamento.py` con
+whitelist (vedi `docs/SPRINT-5-RIPENSAMENTO.md` §5.3). Niente più
+dipendenze da Sub 5.2; le strutture DB e i materiali sono pronti.
+
+---
+
 ## 2026-04-27 (28) — Sprint 5.2 parte 1: script seed materiali famiglia + whitelist + accoppiamenti
 
 ### Contesto
