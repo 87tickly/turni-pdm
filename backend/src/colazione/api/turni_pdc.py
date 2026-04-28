@@ -1,0 +1,422 @@
+"""Route HTTP turni PdC — Sprint 7.2.
+
+Endpoint:
+
+- ``POST /api/giri/{giro_id}/genera-turno-pdc`` — genera 1 turno PdC
+  derivato dal giro materiale (builder MVP).
+- ``GET /api/giri/{giro_id}/turni-pdc`` — lista turni PdC associati al
+  giro (lookup via `generation_metadata_json->>'giro_materiale_id'`).
+- ``GET /api/turni-pdc/{turno_id}`` — dettaglio turno PdC (giornate +
+  blocchi ordinati) per visualizzatore Gantt.
+
+Auth: ruolo ``PIANIFICATORE_PDC`` (admin bypassa). Multi-tenant:
+``azienda_id`` dal JWT.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime, time
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import BigInteger, cast, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from colazione.auth import require_role
+from colazione.db import get_session
+from colazione.domain.builder_pdc.builder import (
+    BuilderTurnoPdcResult,
+    GiriEsistentiError,
+    GiroNonTrovatoError,
+    GiroVuotoError,
+    genera_turno_pdc,
+)
+from colazione.models.anagrafica import Stazione
+from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
+from colazione.models.turni_pdc import TurnoPdc, TurnoPdcBlocco, TurnoPdcGiornata
+from colazione.schemas.security import CurrentUser
+
+router = APIRouter(prefix="/api/giri", tags=["turni-pdc"])
+turni_pdc_router = APIRouter(prefix="/api/turni-pdc", tags=["turni-pdc"])
+
+_authz = Depends(require_role("PIANIFICATORE_GIRO"))
+# MVP: il bottone "Genera turno PdC" parte dal dettaglio giro, quindi
+# l'azione resta nel contesto del Pianificatore Giro. Quando avremo
+# la dashboard Pianificatore Turno PdC dedicata, scinderemo i ruoli.
+
+
+# =====================================================================
+# Schemi response
+# =====================================================================
+
+
+class TurnoPdcGenerazioneResponse(BaseModel):
+    turno_pdc_id: int
+    codice: str
+    n_giornate: int
+    prestazione_totale_min: int
+    condotta_totale_min: int
+    violazioni: list[str]
+    warnings: list[str]
+
+
+class TurnoPdcListItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    codice: str
+    impianto: str
+    profilo: str
+    ciclo_giorni: int
+    valido_da: date
+    stato: str
+    created_at: datetime
+    n_giornate: int
+    prestazione_totale_min: int
+    condotta_totale_min: int
+    n_violazioni: int
+    n_dormite_fr: int
+
+
+class TurnoPdcBloccoRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    seq: int
+    tipo_evento: str
+    corsa_commerciale_id: int | None
+    corsa_materiale_vuoto_id: int | None
+    giro_blocco_id: int | None
+    stazione_da_codice: str | None
+    stazione_a_codice: str | None
+    stazione_da_nome: str | None
+    stazione_a_nome: str | None
+    numero_treno: str | None
+    ora_inizio: time | None
+    ora_fine: time | None
+    durata_min: int | None
+    is_accessori_maggiorati: bool
+    accessori_note: str | None
+    fonte_orario: str
+
+
+class TurnoPdcGiornataRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    numero_giornata: int
+    variante_calendario: str
+    stazione_inizio: str | None
+    stazione_fine: str | None
+    stazione_inizio_nome: str | None
+    stazione_fine_nome: str | None
+    inizio_prestazione: time | None
+    fine_prestazione: time | None
+    prestazione_min: int
+    condotta_min: int
+    refezione_min: int
+    is_notturno: bool
+    blocchi: list[TurnoPdcBloccoRead]
+
+
+class TurnoPdcDettaglioRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    codice: str
+    impianto: str
+    profilo: str
+    ciclo_giorni: int
+    valido_da: date
+    stato: str
+    created_at: datetime
+    updated_at: datetime
+    generation_metadata_json: dict[str, Any]
+    giornate: list[TurnoPdcGiornataRead]
+
+
+# =====================================================================
+# POST /api/giri/{giro_id}/genera-turno-pdc
+# =====================================================================
+
+
+@router.post(
+    "/{giro_id}/genera-turno-pdc",
+    response_model=TurnoPdcGenerazioneResponse,
+    summary="Genera turno PdC dal giro materiale (MVP builder)",
+)
+async def genera_turno_pdc_endpoint(
+    giro_id: int,
+    valido_da: date | None = Query(default=None, description="Data validità turno (default: oggi)"),
+    force: bool = Query(default=False, description="Sovrascrive turni precedenti"),
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> TurnoPdcGenerazioneResponse:
+    try:
+        result: BuilderTurnoPdcResult = await genera_turno_pdc(
+            session=session,
+            azienda_id=user.azienda_id,
+            giro_id=giro_id,
+            valido_da=valido_da,
+            force=force,
+        )
+    except GiroNonTrovatoError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except GiroVuotoError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)) from e
+    except GiriEsistentiError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+
+    return TurnoPdcGenerazioneResponse(
+        turno_pdc_id=result.turno_pdc_id,
+        codice=result.codice,
+        n_giornate=result.n_giornate,
+        prestazione_totale_min=result.prestazione_totale_min,
+        condotta_totale_min=result.condotta_totale_min,
+        violazioni=result.violazioni,
+        warnings=result.warnings,
+    )
+
+
+# =====================================================================
+# GET /api/giri/{giro_id}/turni-pdc
+# =====================================================================
+
+
+@router.get(
+    "/{giro_id}/turni-pdc",
+    response_model=list[TurnoPdcListItem],
+    summary="Lista turni PdC associati al giro",
+)
+async def list_turni_pdc_giro(
+    giro_id: int,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> list[TurnoPdcListItem]:
+    stmt = (
+        select(TurnoPdc)
+        .where(
+            TurnoPdc.azienda_id == user.azienda_id,
+            cast(
+                TurnoPdc.generation_metadata_json["giro_materiale_id"].astext,
+                BigInteger,
+            )
+            == giro_id,
+        )
+        .order_by(TurnoPdc.codice)
+    )
+    turni = list((await session.execute(stmt)).scalars())
+    if not turni:
+        return []
+
+    turno_ids = [t.id for t in turni]
+    giornate = list(
+        (
+            await session.execute(
+                select(TurnoPdcGiornata).where(TurnoPdcGiornata.turno_pdc_id.in_(turno_ids))
+            )
+        ).scalars()
+    )
+    giornate_per_turno: dict[int, list[TurnoPdcGiornata]] = {}
+    for g in giornate:
+        giornate_per_turno.setdefault(g.turno_pdc_id, []).append(g)
+
+    out: list[TurnoPdcListItem] = []
+    for t in turni:
+        gg = giornate_per_turno.get(t.id, [])
+        meta = t.generation_metadata_json or {}
+        out.append(
+            TurnoPdcListItem(
+                id=t.id,
+                codice=t.codice,
+                impianto=t.impianto,
+                profilo=t.profilo,
+                ciclo_giorni=t.ciclo_giorni,
+                valido_da=t.valido_da,
+                stato=t.stato,
+                created_at=t.created_at,
+                n_giornate=len(gg),
+                prestazione_totale_min=sum(g.prestazione_min for g in gg),
+                condotta_totale_min=sum(g.condotta_min for g in gg),
+                n_violazioni=len(meta.get("violazioni", []) or []),
+                n_dormite_fr=len(meta.get("fr_giornate", []) or []),
+            )
+        )
+    return out
+
+
+# =====================================================================
+# GET /api/turni-pdc/{turno_id}
+# =====================================================================
+
+
+@turni_pdc_router.get(
+    "/{turno_id}",
+    response_model=TurnoPdcDettaglioRead,
+    summary="Dettaglio turno PdC per visualizzatore Gantt",
+)
+async def get_turno_pdc_dettaglio(
+    turno_id: int,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> TurnoPdcDettaglioRead:
+    turno = (
+        await session.execute(
+            select(TurnoPdc).where(
+                TurnoPdc.id == turno_id,
+                TurnoPdc.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if turno is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Turno PdC non trovato"
+        )
+
+    giornate_orm = list(
+        (
+            await session.execute(
+                select(TurnoPdcGiornata)
+                .where(TurnoPdcGiornata.turno_pdc_id == turno_id)
+                .order_by(TurnoPdcGiornata.numero_giornata)
+            )
+        ).scalars()
+    )
+    giornata_ids = [g.id for g in giornate_orm]
+
+    blocchi_orm: list[TurnoPdcBlocco] = []
+    if giornata_ids:
+        blocchi_orm = list(
+            (
+                await session.execute(
+                    select(TurnoPdcBlocco)
+                    .where(TurnoPdcBlocco.turno_pdc_giornata_id.in_(giornata_ids))
+                    .order_by(TurnoPdcBlocco.turno_pdc_giornata_id, TurnoPdcBlocco.seq)
+                )
+            ).scalars()
+        )
+
+    # Lookup batch nomi stazione + numero treno
+    codici_stazione: set[str] = set()
+    for b in blocchi_orm:
+        for c in (b.stazione_da_codice, b.stazione_a_codice):
+            if c is not None:
+                codici_stazione.add(c)
+    for g in giornate_orm:
+        for c in (g.stazione_inizio, g.stazione_fine):
+            if c is not None:
+                codici_stazione.add(c)
+
+    nome_stazione: dict[str, str] = {}
+    if codici_stazione:
+        nome_stazione = dict(
+            (
+                await session.execute(
+                    select(Stazione.codice, Stazione.nome).where(
+                        Stazione.codice.in_(codici_stazione),
+                        Stazione.azienda_id == user.azienda_id,
+                    )
+                )
+            ).all()
+        )
+
+    corsa_ids = {b.corsa_commerciale_id for b in blocchi_orm if b.corsa_commerciale_id is not None}
+    numero_treno_corsa: dict[int, str] = {}
+    if corsa_ids:
+        numero_treno_corsa = dict(
+            (
+                await session.execute(
+                    select(CorsaCommerciale.id, CorsaCommerciale.numero_treno).where(
+                        CorsaCommerciale.id.in_(corsa_ids)
+                    )
+                )
+            ).all()
+        )
+
+    vuoto_ids = {
+        b.corsa_materiale_vuoto_id for b in blocchi_orm if b.corsa_materiale_vuoto_id is not None
+    }
+    numero_treno_vuoto: dict[int, str] = {}
+    if vuoto_ids:
+        numero_treno_vuoto = dict(
+            (
+                await session.execute(
+                    select(CorsaMaterialeVuoto.id, CorsaMaterialeVuoto.numero_treno_vuoto).where(
+                        CorsaMaterialeVuoto.id.in_(vuoto_ids)
+                    )
+                )
+            ).all()
+        )
+
+    blocchi_per_giornata: dict[int, list[TurnoPdcBloccoRead]] = {}
+    for b in blocchi_orm:
+        num: str | None = None
+        if b.corsa_commerciale_id is not None:
+            num = numero_treno_corsa.get(b.corsa_commerciale_id)
+        elif b.corsa_materiale_vuoto_id is not None:
+            num = numero_treno_vuoto.get(b.corsa_materiale_vuoto_id)
+        blocchi_per_giornata.setdefault(b.turno_pdc_giornata_id, []).append(
+            TurnoPdcBloccoRead(
+                id=b.id,
+                seq=b.seq,
+                tipo_evento=b.tipo_evento,
+                corsa_commerciale_id=b.corsa_commerciale_id,
+                corsa_materiale_vuoto_id=b.corsa_materiale_vuoto_id,
+                giro_blocco_id=b.giro_blocco_id,
+                stazione_da_codice=b.stazione_da_codice,
+                stazione_a_codice=b.stazione_a_codice,
+                stazione_da_nome=(
+                    nome_stazione.get(b.stazione_da_codice) if b.stazione_da_codice else None
+                ),
+                stazione_a_nome=(
+                    nome_stazione.get(b.stazione_a_codice) if b.stazione_a_codice else None
+                ),
+                numero_treno=num,
+                ora_inizio=b.ora_inizio,
+                ora_fine=b.ora_fine,
+                durata_min=b.durata_min,
+                is_accessori_maggiorati=b.is_accessori_maggiorati,
+                accessori_note=b.accessori_note,
+                fonte_orario=b.fonte_orario,
+            )
+        )
+
+    giornate_out: list[TurnoPdcGiornataRead] = []
+    for g in giornate_orm:
+        giornate_out.append(
+            TurnoPdcGiornataRead(
+                id=g.id,
+                numero_giornata=g.numero_giornata,
+                variante_calendario=g.variante_calendario,
+                stazione_inizio=g.stazione_inizio,
+                stazione_fine=g.stazione_fine,
+                stazione_inizio_nome=(
+                    nome_stazione.get(g.stazione_inizio) if g.stazione_inizio else None
+                ),
+                stazione_fine_nome=(
+                    nome_stazione.get(g.stazione_fine) if g.stazione_fine else None
+                ),
+                inizio_prestazione=g.inizio_prestazione,
+                fine_prestazione=g.fine_prestazione,
+                prestazione_min=g.prestazione_min,
+                condotta_min=g.condotta_min,
+                refezione_min=g.refezione_min,
+                is_notturno=g.is_notturno,
+                blocchi=blocchi_per_giornata.get(g.id, []),
+            )
+        )
+
+    return TurnoPdcDettaglioRead(
+        id=turno.id,
+        codice=turno.codice,
+        impianto=turno.impianto,
+        profilo=turno.profilo,
+        ciclo_giorni=turno.ciclo_giorni,
+        valido_da=turno.valido_da,
+        stato=turno.stato,
+        created_at=turno.created_at,
+        updated_at=turno.updated_at,
+        generation_metadata_json=dict(turno.generation_metadata_json or {}),
+        giornate=giornate_out,
+    )

@@ -1,13 +1,16 @@
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AlertCircle, ArrowLeft } from "lucide-react";
+import { AlertCircle, ArrowLeft, Users } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { useGiroDettaglio } from "@/hooks/useGiri";
+import { useTurniPdcGiro } from "@/hooks/useTurniPdc";
 import { ApiError } from "@/lib/api/client";
 import type { GiroBlocco, GiroDettaglio } from "@/lib/api/giri";
 import { formatNumber } from "@/lib/format";
+import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdcDialog";
 
 export function GiroDettaglioRoute() {
   const { giroId: giroIdParam } = useParams<{ giroId: string }>();
@@ -53,7 +56,7 @@ export function GiroDettaglioRoute() {
         <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Lista giri
       </Link>
 
-      <Header giro={giro} />
+      <HeaderRow giro={giro} />
       <Stats giro={giro} />
 
       <section className="flex flex-col gap-4">
@@ -68,16 +71,41 @@ export function GiroDettaglioRoute() {
   );
 }
 
-function Header({ giro }: { giro: GiroDettaglio }) {
+function HeaderRow({ giro }: { giro: GiroDettaglio }) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const turniQuery = useTurniPdcGiro(giro.id);
+  const turni = turniQuery.data ?? [];
+
   return (
-    <header className="flex flex-col gap-1">
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight">{giro.numero_turno}</h1>
-        <Badge variant="outline">{giro.tipo_materiale}</Badge>
+    <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-2xl font-semibold tracking-tight">{giro.numero_turno}</h1>
+          <Badge variant="outline">{giro.tipo_materiale}</Badge>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          #{giro.id} · {giro.numero_giornate} giornate · stato {giro.stato}
+        </p>
       </div>
-      <p className="text-sm text-muted-foreground">
-        #{giro.id} · {giro.numero_giornate} giornate · stato {giro.stato}
-      </p>
+      <div className="flex flex-col items-end gap-2">
+        <Button onClick={() => setDialogOpen(true)} className="gap-2">
+          <Users className="h-4 w-4" aria-hidden /> Genera turno PdC
+        </Button>
+        {turni.length > 0 && (
+          <Link
+            to={`/pianificatore-giro/giri/${giro.id}/turni-pdc`}
+            className="text-xs text-muted-foreground hover:text-primary"
+          >
+            {turni.length} turn{turni.length === 1 ? "o" : "i"} PdC già generat
+            {turni.length === 1 ? "o" : "i"} →
+          </Link>
+        )}
+      </div>
+      <GeneraTurnoPdcDialog
+        giroId={giro.id}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+      />
     </header>
   );
 }

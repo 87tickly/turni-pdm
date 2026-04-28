@@ -10,6 +10,203 @@
 
 ---
 
+## 2026-04-28 (42) — Sprint 7.2 — Builder turno PdC MVP + flusso Genera→Lista→Gantt
+
+### Contesto
+
+Sessione notturna. L'utente prima di andare a dormire ha chiesto:
+*«fai tutti gli step senza interruzioni, io ora vado a dormire,
+domani voglio vedere il localhost pronto»*. Obiettivo: un bottone
+«Genera turno PdC» sul dettaglio giro che produce un turno PdC
+visualizzabile in Gantt, end-to-end. L'utente ha esplicitamente
+richiesto anche le **dormite FR** nel MVP (non rimandate a Sprint 7.4
+come avevo proposto).
+
+Lo Sprint 7.0 (lettura `NORMATIVA-PDC.md` 1292 righe + storici
+`ALGORITMO-BUILDER.md` + `ARCHITETTURA-BUILDER-V4.md` + `schema-pdc.md`)
+è stato delegato a un sub-agent Explore che ha tornato la sintesi
+scope MVP. Decisioni autonome (motivate):
+
+- **1 turno PdC = 1 giornata di giro** (1:1, no PdC che accavalla 2
+  giornate).
+- **NO split per CV intermedio** (rimandato a Sprint 7.4): se la
+  prestazione/condotta sfora i limiti, il MVP segna **violazioni**
+  visibili in UI invece di splittare. Onesto, non taccia il problema.
+- **SÌ dormite FR** (richiesta utente): rilevate confrontando
+  stazione_fine giornata N con stazione_inizio giornata N+1, se ≠
+  stazione sede del PdC.
+
+### Modifiche
+
+**Schema dati**: i modelli `TurnoPdc/Giornata/Blocco` esistevano già
+in `models/turni_pdc.py` (creati da migration 0001). Niente nuova
+tabella. Il legame `turno_pdc → giro_materiale` va in
+`generation_metadata_json` come per i giri verso il programma.
+
+**Migration 0009** (`alembic/versions/0009_dormita_pdc.py`):
+
+Aggiunge `'DORMITA'` al check constraint
+`turno_pdc_blocco_tipo_check`. Lista finale dei tipi ammessi:
+CONDOTTA, VETTURA, REFEZ, ACCp, ACCa, CVp, CVa, PK, SCOMP, PRESA,
+FINE, **DORMITA**.
+
+**Backend builder MVP**
+(`backend/src/colazione/domain/builder_pdc/builder.py`, ex skeleton
+vuoto):
+
+- Costanti normativa: `PRESA_SERVIZIO_MIN=15`, `FINE_SERVIZIO_MIN=15`,
+  `ACCESSORI_MIN_STANDARD=40`, `PRESTAZIONE_MAX_STANDARD=510`,
+  `PRESTAZIONE_MAX_NOTTURNO=420`, `CONDOTTA_MAX_MIN=330`,
+  `REFEZIONE_MIN_DURATA=30`, `REFEZIONE_SOGLIA_MIN=360`,
+  `REFEZIONE_FINESTRE` `[(11:30,15:30),(18:30,22:30)]`.
+- `_build_giornata_pdc(numero, variante, blocchi_giro)`: per ogni
+  giornata del giro produce sequenza `PRESA → ACCp → CONDOTTA·N
+  con PK intermedi → ACCa → FINE`. Calcola
+  `prestazione_min/condotta_min/refezione_min/is_notturno`. Marca
+  violazioni: `prestazione_max`, `condotta_max`, `refezione_mancante`.
+- `_inserisci_refezione`: quando prestazione > 6h, cerca un PK ≥30'
+  con overlap in finestra 11:30-15:30 o 18:30-22:30. Se trovato,
+  splitta `[PK pre, REFEZ 30, PK post]` ancorato al centro. Se non
+  trovato, lascia segnalare `refezione_mancante`.
+- `_aggiungi_dormite_fr(drafts, stazione_sede)`: per ogni coppia di
+  giornate consecutive, se `stazione_fine[N] == stazione_inizio[N+1]
+  ≠ stazione_sede`, prepende un blocco `DORMITA` a giornata N+1 e
+  registra in `fr_giornate` (numero giornata + stazione + ore di
+  pernotto). Bug-fix in fase di test: il calcolo gap pernotto era
+  rotto per giornate notturne (fine dopo mezzanotte) — ora il caso
+  notturno usa `inizio_n+1 - fine_n` direttamente invece del wrap
+  `(24h - fine_n) + inizio_n+1`.
+- `genera_turno_pdc(session, azienda_id, giro_id, valido_da?,
+  force=False)`: entry point. Risolve `stazione_sede` dalla
+  `LocalitaManutenzione.stazione_collegata_codice` del giro
+  (es. FIO → S01700 Mi.Centrale). Se esiste già un turno PdC per il
+  giro e `force=False` → `GiriEsistentiError` (HTTP 409). Persiste
+  TurnoPdc + N TurnoPdcGiornata + blocchi.
+
+**API**
+(`backend/src/colazione/api/turni_pdc.py`, nuovo):
+
+- `POST /api/giri/{giro_id}/genera-turno-pdc?valido_da&force` →
+  `TurnoPdcGenerazioneResponse` (id, codice, n_giornate, totali,
+  violazioni, warnings). 404 se giro non trovato, 422 se vuoto,
+  409 se esistente.
+- `GET /api/giri/{giro_id}/turni-pdc` → `list[TurnoPdcListItem]`
+  con stats e contatori (`n_violazioni`, `n_dormite_fr`).
+- `GET /api/turni-pdc/{turno_id}` → `TurnoPdcDettaglioRead` con
+  giornate + blocchi + nomi stazione + numero treno (lookup batch
+  Stazione/CorsaCommerciale/CorsaMaterialeVuoto).
+
+Auth MVP: `PIANIFICATORE_GIRO` (il bottone parte dal contesto giro;
+quando avremo dashboard PdC dedicata, scinderemo i ruoli).
+
+**Frontend client + hooks**
+(`frontend/src/lib/api/turniPdc.ts`,
+`frontend/src/hooks/useTurniPdc.ts`):
+
+- Type `TurnoPdcDettaglio`, `TurnoPdcListItem`,
+  `TurnoPdcGenerazioneResponse`, `FrGiornata`.
+- Hooks React Query: `useTurniPdcGiro`, `useTurnoPdcDettaglio`,
+  `useGeneraTurnoPdc` (con invalidate).
+
+**Frontend `GeneraTurnoPdcDialog`**
+(`frontend/src/routes/pianificatore-giro/GeneraTurnoPdcDialog.tsx`):
+
+Dialog 3-stati come `GeneraGiriDialog`: form / running / done.
+Banner amber che dichiara la natura MVP (split CV in 7.4) — onesto
+con l'utente. Su 409 mostra "Sovrascrivi". Su success mostra card
+con codice + totali + collapsible "N violazioni normativa". CTA
+finale "Apri turno PdC" naviga a `/turni-pdc/{id}`.
+
+**Frontend bottone su dettaglio giro**
+(`GiroDettaglioRoute.tsx`):
+
+Sostituito `Header` con `HeaderRow` (flex-row): a sinistra titolo
+giro + meta, a destra bottone primario «Genera turno PdC» (icona
+`Users`) + sotto link «N turni PdC già generati →» se presenti.
+
+**Frontend lista turni PdC del giro**
+(`TurniPdcGiroRoute.tsx`, route `giri/:giroId/turni-pdc`):
+
+Tabella con codice (link), impianto, profilo, giornate, prestazione,
+condotta, badge avvisi (`n_violazioni` warning ambra +
+`n_dormite_fr` viola), stato.
+
+**Frontend visualizzatore Gantt turno PdC**
+(`TurnoPdcDettaglioRoute.tsx`, route `turni-pdc/:turnoId`):
+
+- Header: codice + impianto + profilo + ref al giro padre
+- Stats 4-colonne: prestazione/condotta/refezione totali + giornate
+- `Avvisi`: collapsible amber con violazioni (e disclaimer "Sprint
+  7.4 introdurrà lo split") + box viola con dormite FR (numero
+  giornata, stazione codice, ore pernotto)
+- `GiornataPanel` per ogni giornata: header con
+  `inizio→fine prestazione`, totali h/min, badge `notturno` lunatico
+- Mini-Gantt 24 colonne con blocchi colorati per `tipo_evento`:
+  CONDOTTA blu, ACCp/ACCa amber, REFEZ emerald, PK/SCOMP secondary,
+  PRESA/FINE slate, CVp/CVa orange, **DORMITA viola**
+- Tabella sequenza blocchi: #, tipo (badge), treno, da/a (nome +
+  codice mono sotto), inizio/fine, durata min
+
+### Verifiche
+
+- `pnpm typecheck`: clean
+- `pnpm test`: 31/31 verdi
+- `pnpm build`: 361.86 KB JS / 107.27 KB gzip / 21.81 KB CSS
+  (+22 KB su 339 KB precedente)
+- Backend reload OK senza errori
+- Migration 0009 applicata in container Docker
+- Smoke E2E giro G-FIO-001 (id 10358, programma reale Trenord
+  2025-2026, 5 giornate, materiale Vivalto, partenza FIO):
+  - POST genera-turno-pdc 200, 409 se esistente, 200 dopo force
+  - Card success: «T-G-FIO-001 creato · 5 giornate · 84h12
+    prestazione totale · 52h22 condotta totale · 8 violazioni»
+  - Navigazione a `/pianificatore-giro/turni-pdc/2`
+  - Avvisi: 8 violazioni (`prestazione_max:1193>420min`,
+    `condotta_max:741>330min`, …) visibili in collapsible amber
+  - 2 dormite FR rilevate: «Giornata 2: pernotto a S00034 · 4.1h»,
+    «Giornata 3: pernotto a S00034 · 3.6h» (= MORTARA, sede del giro
+    = FIORENZA → S01700, quindi MORTARA è fuori sede → corretto)
+  - Console preview: nessun errore
+  - Gantt ogni giornata: PRESA→ACCp→CONDOTTA·N→ACCa→FINE corretti,
+    REFEZ inserita dove fattibile
+
+### Stato
+
+Sprint 7.2 chiuso end-to-end. L'utente domani trova localhost al
+giro 10358 con bottone funzionante e flusso completo:
+1. Click «Genera turno PdC» → dialog
+2. Click «Genera» (o «Sovrascrivi» se rigenerazione) → builder
+3. Card risultato con stats + violazioni
+4. Click «Apri turno PdC» → visualizzatore Gantt completo
+
+Residui dichiarati per Sprint 7.4+ (con motivazione):
+- **Split CV intermedio**: una giornata di giro materiale è ~17h, oltre
+  il limite PdC 8h30. Per rispettare la normativa servirà splittare
+  in N segmenti PdC con CV (Cambio Volante) tra una stazione e
+  l'altra. È modifica architetturale: ogni segmento diventa un
+  turno_pdc separato. Decisione consapevole: in MVP segno violazioni,
+  non splitto in modo arbitrario.
+- **Vincoli FR settimanali** (max 1/sett, max 3/28gg): richiedono
+  lookup cross-PdC e finestra temporale; rimandato a quando avremo
+  l'assegnazione persone.
+- **Vettura passiva**: i blocchi del giro sono tutti trattati come
+  CONDOTTA. Nei casi reali (es. PdC che si sposta come passeggero)
+  serve tag `VETTURA`. Rimandato.
+- **Ciclo settimanale 5+2 + riposo ≥62h**: richiede modello PdC
+  multi-giornata e calendario reale. Rimandato.
+
+### Prossimo step
+
+Decidere con l'utente se:
+- **A** — Sprint 7.3: dashboard Pianificatore Turno PdC dedicata
+  (lista globale turni, ruolo separato, vista trans-giro)
+- **B** — Sprint 7.4: split CV intermedio (chiude le violazioni
+  prestazione/condotta su giornate lunghe)
+- **C** — Sospendere Sprint 7 e tornare ai bug aperti sul giro
+  materiale (l'utente li ha menzionati senza dettagli)
+
+---
+
 ## 2026-04-28 (41) — Fix UX dettaglio giro: nomi stazione + numero treno
 
 ### Contesto

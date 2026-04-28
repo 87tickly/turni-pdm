@@ -10,6 +10,8 @@ import { GiroDettaglioRoute } from "@/routes/pianificatore-giro/GiroDettaglioRou
 import { ProgrammaDettaglioRoute } from "@/routes/pianificatore-giro/ProgrammaDettaglioRoute";
 import { ProgrammaGiriRoute } from "@/routes/pianificatore-giro/ProgrammaGiriRoute";
 import { ProgrammiRoute } from "@/routes/pianificatore-giro/ProgrammiRoute";
+import { TurniPdcGiroRoute } from "@/routes/pianificatore-giro/TurniPdcGiroRoute";
+import { TurnoPdcDettaglioRoute } from "@/routes/pianificatore-giro/TurnoPdcDettaglioRoute";
 
 const ROLE_PIANIFICATORE_GIRO = "PIANIFICATORE_GIRO";
 
@@ -36,6 +38,8 @@ export function AppRoutes() {
             <Route path="programmi/:programmaId" element={<ProgrammaDettaglioRoute />} />
             <Route path="programmi/:programmaId/giri" element={<ProgrammaGiriRoute />} />
             <Route path="giri/:giroId" element={<GiroDettaglioRoute />} />
+            <Route path="giri/:giroId/turni-pdc" element={<TurniPdcGiroRoute />} />
+            <Route path="turni-pdc/:turnoId" element={<TurnoPdcDettaglioRoute />} />
           </Route>
         </Route>
       </Route>

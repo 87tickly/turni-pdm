@@ -1,0 +1,211 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
+
+import { Button } from "@/components/ui/Button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/Dialog";
+import { Spinner } from "@/components/ui/Spinner";
+import { useGeneraTurnoPdc } from "@/hooks/useTurniPdc";
+import { ApiError } from "@/lib/api/client";
+import type { TurnoPdcGenerazioneResponse } from "@/lib/api/turniPdc";
+
+interface GeneraTurnoPdcDialogProps {
+  giroId: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+/**
+ * Dialog per `POST /api/giri/{id}/genera-turno-pdc`.
+ *
+ * Flusso:
+ * 1. open: card iniziale con CTA "Genera"
+ * 2. running: spinner
+ * 3. done: card risultato con stats e CTA "Apri turno PdC"
+ *
+ * Se il backend ritorna 409 (turno PdC esistente), mostra opzione
+ * "Sovrascrivi" e ri-tenta con `force=true`.
+ */
+export function GeneraTurnoPdcDialog({
+  giroId,
+  open,
+  onOpenChange,
+}: GeneraTurnoPdcDialogProps) {
+  const navigate = useNavigate();
+  const [error, setError] = useState<string | null>(null);
+  const [needsForce, setNeedsForce] = useState(false);
+  const [result, setResult] = useState<TurnoPdcGenerazioneResponse | null>(null);
+
+  const generaMutation = useGeneraTurnoPdc();
+
+  const handleClose = (next: boolean) => {
+    if (!next) {
+      setError(null);
+      setNeedsForce(false);
+      setResult(null);
+    }
+    onOpenChange(next);
+  };
+
+  const submit = async (forceFlag: boolean) => {
+    setError(null);
+    try {
+      const r = await generaMutation.mutateAsync({
+        giroId,
+        params: { force: forceFlag },
+      });
+      setResult(r);
+      setNeedsForce(false);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        setNeedsForce(true);
+        setError(e.message);
+      } else {
+        const msg = e instanceof Error ? e.message : "Errore sconosciuto";
+        setError(msg);
+      }
+    }
+  };
+
+  const running = generaMutation.isPending;
+  const showForm = result === null;
+  const showResult = result !== null;
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Genera turno PdC</DialogTitle>
+          <DialogDescription>
+            Costruisce un turno PdC dai blocchi di questo giro materiale: una
+            giornata PdC per ogni giornata del giro, con presa servizio,
+            accessori, refezione (se &gt;6h), e dormite FR per i pernotti
+            fuori sede.
+          </DialogDescription>
+        </DialogHeader>
+
+        {showForm && (
+          <div className="flex flex-col gap-3 text-sm">
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <strong>MVP Sprint 7.2.</strong> Il builder costruisce un turno
+              monolitico per giornata. Il CV intermedio (split per
+              prestazione/condotta) arriva nello Sprint 7.4: aspettati
+              violazioni di prestazione/condotta che evidenziano i punti
+              dove servirà uno scambio PdC.
+            </p>
+            {needsForce && error !== null && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                <div className="flex flex-col gap-1">
+                  <span>{error}</span>
+                  <span>
+                    Cliccando &quot;Sovrascrivi&quot; il vecchio turno PdC
+                    associato al giro viene eliminato e ricreato.
+                  </span>
+                </div>
+              </div>
+            )}
+            {error !== null && !needsForce && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                {error}
+              </div>
+            )}
+          </div>
+        )}
+
+        {running && (
+          <div className="flex items-center justify-center py-6">
+            <Spinner label="Generazione in corso…" />
+          </div>
+        )}
+
+        {showResult && result !== null && <ResultCard result={result} />}
+
+        <DialogFooter>
+          {showForm && !needsForce && (
+            <>
+              <Button variant="outline" onClick={() => handleClose(false)} disabled={running}>
+                Annulla
+              </Button>
+              <Button onClick={() => void submit(false)} disabled={running}>
+                Genera
+              </Button>
+            </>
+          )}
+          {showForm && needsForce && (
+            <>
+              <Button variant="outline" onClick={() => handleClose(false)} disabled={running}>
+                Annulla
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => void submit(true)}
+                disabled={running}
+              >
+                Sovrascrivi
+              </Button>
+            </>
+          )}
+          {showResult && result !== null && (
+            <>
+              <Button variant="outline" onClick={() => handleClose(false)}>
+                Chiudi
+              </Button>
+              <Button
+                onClick={() => {
+                  handleClose(false);
+                  navigate(`/pianificatore-giro/turni-pdc/${result.turno_pdc_id}`);
+                }}
+              >
+                Apri turno PdC
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ResultCard({ result }: { result: TurnoPdcGenerazioneResponse }) {
+  const violazioni = result.violazioni;
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-900">
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+        <div className="flex flex-col gap-0.5">
+          <span className="font-medium">{result.codice} creato</span>
+          <span className="text-xs text-emerald-800">
+            {result.n_giornate} giornate · {formatHM(result.prestazione_totale_min)} prestazione
+            totale · {formatHM(result.condotta_totale_min)} condotta totale
+          </span>
+        </div>
+      </div>
+      {violazioni.length > 0 && (
+        <details className="rounded-md border border-amber-300 bg-amber-50 text-xs text-amber-900">
+          <summary className="cursor-pointer px-3 py-2 font-medium">
+            {violazioni.length} violazion{violazioni.length === 1 ? "e" : "i"} normativa rilevate
+          </summary>
+          <ul className="space-y-1 px-4 pb-2 font-mono">
+            {violazioni.map((v, i) => (
+              <li key={i}>· {v}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function formatHM(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${h}h${m.toString().padStart(2, "0")}`;
+}
