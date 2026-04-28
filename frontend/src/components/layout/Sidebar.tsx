@@ -17,7 +17,7 @@ const NAV_PIANIFICATORE_GIRO: NavItem[] = [
 
 export function Sidebar() {
   return (
-    <aside className="flex w-60 flex-col border-r border-border bg-secondary/40">
+    <aside className="flex w-60 flex-col border-r border-border bg-white/70 backdrop-blur">
       <div className="flex h-14 items-center border-b border-border px-4">
         <ArturoLogo size="sm" />
       </div>

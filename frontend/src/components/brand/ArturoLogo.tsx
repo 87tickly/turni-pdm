@@ -1,13 +1,15 @@
 /**
- * Wordmark "ARTURO • Live" — variante testuale (skill `arturo-brand-logo`).
+ * Wordmark "ARTURO • Business" — questo prodotto è ARTURO Business
+ * (gestione turni / pianificazione / operations sul sito arturo.travel).
  *
  * Tre elementi inline:
- *   1. "ARTURO"  — Exo 2, weight 900, #0062CC
- *   2. punto    — cerchio #30D158 con animazione `pulse-dot` (1.6s loop)
- *   3. "Live"    — Exo 2, weight 900, #0070B5
+ *   1. "ARTURO"    — Exo 2, weight 900, #0062CC (blu ecosistema)
+ *   2. punto       — cerchio #B88B5C con animazione `pulse-dot` (1.6s loop)
+ *   3. "Business"  — Exo 2, weight 900, #B88B5C (terracotta Business)
  *
- * Non modificare colori, pesi o animazione senza approvazione del
- * brand owner (regola assoluta della skill).
+ * Pattern direttamente derivato dalla skill `arturo-brand-logo` per
+ * il fratello "Live" — qui adattato a Business con il colore proprio
+ * del prodotto (cambio approvato dall'utente in chat 2026-04-28).
  */
 
 import { cn } from "@/lib/utils";
@@ -37,14 +39,17 @@ export function ArturoLogo({ size = "sm", className }: ArturoLogoProps) {
         TEXT_CLASS[size],
         className,
       )}
-      aria-label="ARTURO Live"
+      aria-label="ARTURO Business"
     >
       <span className="text-primary">ARTURO</span>
       <span
-        className={cn("inline-block animate-pulse-dot rounded-full bg-arturo-dot", DOT_CLASS[size])}
+        className={cn(
+          "inline-block animate-pulse-dot rounded-full bg-arturo-business",
+          DOT_CLASS[size],
+        )}
         aria-hidden
       />
-      <span className="text-arturo-live">Live</span>
+      <span className="text-arturo-business">Business</span>
     </span>
   );
 }

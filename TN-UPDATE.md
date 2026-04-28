@@ -10,6 +10,109 @@
 
 ---
 
+## 2026-04-28 (37) — Rebrand: ARTURO Live → ARTURO Business + brand globale UI
+
+### Contesto
+
+Due correzioni in sequenza dell'utente sullo stesso turno:
+
+1. **Rebrand prodotto**: con uno screenshot di arturo.travel l'utente
+   ha chiarito che questo prodotto NON è ARTURO Live (monitoraggio
+   treni in tempo reale) ma **ARTURO Business** — strumenti digitali
+   per operatori ferroviari, gestione turni, pianificazione e operations.
+   Sul sito Business ha la sua identità cromatica distinta: terracotta
+   caldo (mentre Live è verde acceso).
+
+2. **Brand globale UI**: ricevuto il logo aggiornato, l'utente ha
+   notato che la pagina di destra restava monocromatica (nero/grigio).
+   Il brand era applicato solo al wordmark ARTURO Live; il resto della
+   dashboard non comunicava il prodotto.
+
+### Modifiche
+
+**Rebrand Live → Business**:
+
+- `frontend/src/components/brand/ArturoLogo.tsx`: wordmark
+  "ARTURO • Business" (era Live). Aria-label aggiornata. Punto +
+  parola "Business" entrambi in `bg-arturo-business` /
+  `text-arturo-business`. Nessun cambio al primary blu né
+  all'animazione `pulse-dot`.
+- `frontend/tailwind.config.ts`: rimosse `arturo-live: #0070B5` e
+  `arturo-dot: #30D158`. Aggiunta singola key
+  `arturo-business: #B88B5C` (terracotta caldo, stimato dallo
+  screenshot di arturo.travel — se brand owner ha valore canonico
+  diverso, basta aggiornare questa costante).
+- `frontend/index.html`: `<title>` da "ARTURO Live — Pianificatore" a
+  "ARTURO Business — Pianificatore".
+- `frontend/src/App.test.tsx`: assertion aggiornata a
+  `getByLabelText("ARTURO Business")`.
+
+**Brand globale UI**:
+
+- `frontend/src/index.css`:
+  - body font globale Exo 2 (con fallback `-apple-system`)
+  - background body con doppio gradiente radiale tenue
+    (azzurro `rgba(0,98,204,0.045)` + terracotta `rgba(184,139,92,0.04)`)
+    su base `#f7f9fc` — sostituisce il bianco freddo precedente
+  - `@layer base { h1 { @apply text-primary; font-weight: 700 } }`
+    (h2 weight 600) — tutti i titoli di pagina ora blu ARTURO senza
+    dover taggare ogni componente.
+- `frontend/tailwind.config.ts`: `fontFamily.sans` sovrascritto a
+  Exo 2 — tutto il markup eredita Exo 2 senza che servano classi
+  esplicite. La key `font-brand` resta come alias.
+- `frontend/index.html`: aggiunti weight 500/700 alla request Google
+  Fonts Exo 2 (servono per body weight medio + heading 700).
+- `frontend/src/components/ui/Card.tsx`: `CardTitle` ora include
+  `text-primary` di default — i 4 cards della dashboard e tutte le
+  card future hanno automaticamente il titolo in blu ARTURO.
+- `frontend/src/components/layout/Header.tsx`: testo
+  "Pianificatore Giro Materiale" da `text-muted-foreground` a
+  `text-primary/80 font-medium tracking-wide` — header allineato al
+  brand invece che generico.
+- `frontend/src/components/layout/Sidebar.tsx`: sfondo da
+  `bg-secondary/40` a `bg-white/70 backdrop-blur` — più morbido,
+  lascia trasparire il gradiente del body.
+- `frontend/src/components/layout/AppLayout.tsx`: rimosso
+  `bg-background` dal wrapper principale per non sovrastare il
+  gradiente del body.
+
+### Verifiche
+
+- `pnpm typecheck`: clean
+- `pnpm test`: **26/26 verdi**
+- `pnpm format`: clean
+- `pnpm build`: clean (297 KB JS / 94 KB gzip; 17 KB CSS / 4 KB gzip
+  — +1 KB CSS per il gradient body + base styles brand)
+- **Preview live** (backend reale, utente seed):
+  - inspect computed styles del logo:
+    - "ARTURO" → `rgb(0, 98, 204)` (#0062CC) ✓ Exo 2 weight 900
+    - punto → `rgb(184, 139, 92)` (#B88B5C) ✓ animation `pulse-dot`
+      attiva ✓
+    - "Business" → `rgb(184, 139, 92)` (#B88B5C) ✓ Exo 2
+  - h1 "Dashboard Pianificatore Giro" → `rgb(0, 98, 204)` blu primary,
+    Exo 2 weight 600 ✓
+  - h2 CardTitle "Programmi materiale" → blu primary, Exo 2 ✓
+  - body font → "Exo 2" caricato dal Google Fonts ✓
+  - body background → gradient tenue azzurro/terracotta su `#f7f9fc` ✓
+  - screenshot dashboard e screenshot lista programmi confermano
+    l'uniformità brand (heading blu, font Exo 2 ovunque, sfondo
+    leggermente caldo, sidebar trasparente).
+
+### Stato
+
+Brand ARTURO Business applicato in modo sistemico: logo, palette,
+font, heading, sfondo, header. La dashboard non è più "nero e grigio"
+ma comunica subito il prodotto. Niente residui (regola 7): il pattern
+è applicato a tutti i punti di contatto utente, non solo al wordmark.
+
+### Prossimo step
+
+Resta inalterato: **Sub 6.3 — Editor regole programma**
+(`/pianificatore-giro/programmi/:id` con dettaglio + lista regole +
+editor regola). Endpoint anagrafiche già pronti dalla R1 di Sprint 5.6.
+
+---
+
 ## 2026-04-28 (36) — Sprint 6.2 — Lista programmi + crea/pubblica/archivia + brand ARTURO Live
 
 ### Contesto

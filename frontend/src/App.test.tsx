@@ -24,7 +24,7 @@ describe("App", () => {
       expect(screen.getByLabelText(/utente/i)).toBeInTheDocument();
     });
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
-    // Brand wordmark "ARTURO Live" visibile
-    expect(screen.getByLabelText("ARTURO Live")).toBeInTheDocument();
+    // Brand wordmark "ARTURO Business" visibile
+    expect(screen.getByLabelText("ARTURO Business")).toBeInTheDocument();
   });
 });

@@ -8,7 +8,9 @@ export function Header() {
 
   return (
     <header className="flex h-14 items-center justify-between border-b border-border bg-white px-6">
-      <div className="text-sm text-muted-foreground">Pianificatore Giro Materiale</div>
+      <div className="text-sm font-medium tracking-wide text-primary/80">
+        Pianificatore Giro Materiale
+      </div>
       <div className="flex items-center gap-3">
         {user !== null && (
           <span className="flex items-center gap-2 text-sm">

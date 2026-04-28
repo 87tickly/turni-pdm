@@ -1,10 +1,11 @@
 import type { Config } from "tailwindcss";
 
 /**
- * Palette brand ARTURO Live (sorgente: skill `arturo-brand-logo`).
- * - `primary` = #0062CC (blu ARTURO)
- * - `arturo-live` = #0070B5 (azzurro "Live")
- * - `arturo-dot` = #30D158 (verde puntino animato)
+ * Palette brand ARTURO Business (questo prodotto = COLAZIONE: gestione
+ * turni / pianificazione / operations per operatori ferroviari).
+ * - `primary` = #0062CC (blu ARTURO, comune a tutto l'ecosistema)
+ * - `arturo-business` = #B88B5C (terracotta/caramel di Business sul
+ *    sito arturo.travel, distingue il prodotto dai fratelli Live e Travel)
  * Font brand: Exo 2 (Google Fonts), weight 900 per il wordmark.
  */
 const config: Config = {
@@ -21,8 +22,7 @@ const config: Config = {
           DEFAULT: "#0062CC",
           foreground: "#FFFFFF",
         },
-        "arturo-live": "#0070B5",
-        "arturo-dot": "#30D158",
+        "arturo-business": "#B88B5C",
         secondary: {
           DEFAULT: "hsl(210 40% 96.1%)",
           foreground: "hsl(222.2 47.4% 11.2%)",
@@ -41,6 +41,9 @@ const config: Config = {
         },
       },
       fontFamily: {
+        // `font-sans` (default Tailwind) sovrascritto a Exo 2: tutto il
+        // markup eredita Exo 2 senza dover taggare ogni elemento.
+        sans: ['"Exo 2"', "system-ui", "sans-serif"],
         brand: ['"Exo 2"', "system-ui", "sans-serif"],
       },
       borderRadius: {
