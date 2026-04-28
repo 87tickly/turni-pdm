@@ -14,8 +14,10 @@ import {
 } from "@tanstack/react-query";
 
 import {
+  addRegola,
   archiviaProgramma,
   createProgramma,
+  deleteRegola,
   getProgramma,
   listProgrammi,
   pubblicaProgramma,
@@ -23,6 +25,8 @@ import {
   type ProgrammaDettaglioRead,
   type ProgrammaMaterialeCreate,
   type ProgrammaMaterialeRead,
+  type ProgrammaRegolaAssegnazioneCreate,
+  type ProgrammaRegolaAssegnazioneRead,
 } from "@/lib/api/programmi";
 
 const PROGRAMMI_KEY = ["programmi"] as const;
@@ -77,6 +81,40 @@ export function useArchiviaProgramma(): UseMutationResult<ProgrammaMaterialeRead
   const qc = useQueryClient();
   return useMutation({
     mutationFn: archiviaProgramma,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: PROGRAMMI_KEY });
+    },
+  });
+}
+
+interface AddRegolaArgs {
+  programmaId: number;
+  payload: ProgrammaRegolaAssegnazioneCreate;
+}
+
+export function useAddRegola(): UseMutationResult<
+  ProgrammaRegolaAssegnazioneRead,
+  Error,
+  AddRegolaArgs
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ programmaId, payload }) => addRegola(programmaId, payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: PROGRAMMI_KEY });
+    },
+  });
+}
+
+interface DeleteRegolaArgs {
+  programmaId: number;
+  regolaId: number;
+}
+
+export function useDeleteRegola(): UseMutationResult<void, Error, DeleteRegolaArgs> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ programmaId, regolaId }) => deleteRegola(programmaId, regolaId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: PROGRAMMI_KEY });
     },

@@ -10,6 +10,158 @@
 
 ---
 
+## 2026-04-28 (38) — Sprint 6.3 — Dettaglio programma + editor regole
+
+### Contesto
+
+Continuazione di Sub 6.2 (entry 36). La pagina
+`/pianificatore-giro/programmi/:id` era un placeholder; Sub 6.3 la
+costruisce davvero. L'utente arriva qui dalla lista programmi (Sub
+6.2) per:
+- visualizzare la configurazione del programma
+- aggiungere/rimuovere regole di assegnazione (filtri + composizione)
+- pubblicare (bozza→attivo) o archiviare (attivo→archiviato)
+- aprire la lista giri persistiti (Sub 6.4, ancora placeholder)
+
+### Modifiche
+
+**API client** (`frontend/src/lib/api/`):
+
+- `anagrafiche.ts`: 5 funzioni read-only allineate a
+  `colazione.api.anagrafiche` — `listStazioni`, `listMateriali`,
+  `listDepots`, `listDirettrici`, `listLocalitaManutenzione`. Tipi
+  `StazioneRead`, `MaterialeRead`, `DepotRead`,
+  `LocalitaManutenzioneRead`.
+- `programmi.ts`: aggiunte `addRegola(programmaId, payload)` (POST) e
+  `deleteRegola(programmaId, regolaId)` (DELETE 204). Allineate a
+  `POST/DELETE /api/programmi/{id}/regole[/{regolaId}]`.
+
+**React Query hooks** (`frontend/src/hooks/`):
+
+- `useAnagrafiche.ts`: 5 hooks (`useStazioni`, `useMateriali`,
+  `useDepots`, `useDirettrici`, `useLocalitaManutenzione`) con
+  `staleTime: 5min` (le anagrafiche cambiano raramente).
+- `useProgrammi.ts`: aggiunti `useAddRegola()` e `useDeleteRegola()`
+  con invalidate `["programmi"]` su success.
+
+**Schema regola condiviso** (`frontend/src/lib/regola/schema.ts`):
+
+Sorgente unica del modello dei filtri sul frontend. Allineato a
+`colazione.schemas.programmi` (CAMPI_AMMESSI + _CAMPO_OP_COMPATIBILI).
+Esporta:
+- `CAMPI_REGOLA` (11 campi, ordinati per UX: direttrice/categoria
+  primari, codice_linea/numero_treno avanzati — decisione utente:
+  pianificatore non conosce codici tecnici)
+- `OP_PER_CAMPO`: matrice campo→ops permessi
+- `LABEL_CAMPO`/`LABEL_OP`: traduzioni italiane per UI
+- `GIORNI_TIPO`, `CATEGORIE_COMUNI`: enum con valori (categoria libera
+  con datalist suggerimenti)
+- `FiltroRow`/`ComposizioneRow`: tipi per editing locale
+- `rowToPayload(row)`: parse stringa UI → payload backend (split CSV,
+  bool, etc), valida shape; `payloadToRow(payload)` per il caricamento.
+
+**UI primitives nuovi** (`frontend/src/components/ui/`):
+
+- `Textarea.tsx`: stile shadcn coerente con `Input`.
+
+**Editor regola** (`frontend/src/routes/pianificatore-giro/regola/`):
+
+- `FiltriEditor.tsx`: builder visuale di filtri. Una riga =
+  `{campo, op, valore}`. Cambiando campo, l'op si reset al primo
+  compatibile. Il widget del valore cambia per coppia (campo, op):
+  - direttrice + eq → `<Select>` da `useDirettrici()`
+  - codice_origine/destinazione + eq → `<Select>` da `useStazioni()`
+  - giorno_tipo + eq → `<Select>` enum
+  - categoria + eq → `<Input list=datalist>` con suggerimenti
+  - is_treno_garantito_* → `<Select>` Sì/No
+  - fascia_oraria + between → `<Input>` "HH:MM, HH:MM"
+  - fascia_oraria + gte/lte → `<Input type=time>`
+  - default (in/altri) → `<Input>` testo libero (CSV per `in`)
+- `ComposizioneEditor.tsx`: lista di `{materiale, n_pezzi}` con
+  `<Select>` da `useMateriali()` + `<Input type=number>`.
+- `RegolaEditor.tsx`: Dialog con sezioni Filtri / Composizione /
+  Priorità / Note + checkbox "composizione manuale" + Spinner
+  durante il submit. Submit → `useAddRegola.mutateAsync` → invalidate
+  → close dialog.
+- `RegolaCard.tsx`: visualizzazione di una regola (chips filtri +
+  badge composizione + note + bottone rimuovi se editable).
+
+**Pagina dettaglio** (`frontend/src/routes/pianificatore-giro/
+ProgrammaDettaglioRoute.tsx`):
+
+Sostituisce il vecchio PlaceholderPage. Layout:
+- Link "← Lista programmi"
+- Header: nome (h1 blu primary) + badge stato + meta (`#id · periodo
+  · stagione`)
+- Bottoni azione: Pubblica (bozza, disabled se 0 regole) /
+  Archivia (attivo) / Giri generati (sempre, naviga a Sub 6.4)
+- ConfigurazioneCard: 8 campi readonly (periodo, stagione, n_giornate,
+  fascia_oraria_tolerance, km/giorno max, km/ciclo max, sosta extra,
+  aggiornato)
+- Sezione "Regole di assegnazione": empty state con CTA per la prima
+  regola, oppure lista RegolaCard. Bottone "Nuova regola" solo in
+  bozza. Apre il `RegolaEditor` dialog.
+
+Stato 3-vie: loading (Spinner), error (banner+retry), data (layout
+sopra). 404/programmaId NaN → ErrorBlock dedicato.
+
+**Test** (`ProgrammaDettaglioRoute.test.tsx`, 5 test):
+
+1. mostra header + configurazione + regole con filtri/composizione
+   formattati (Direttrice uguale a TIRANO-..., ETR526 × 1, ETR425 × 1,
+   km/ciclo 10.000 it-IT)
+2. bottone Pubblica disabled senza regole + empty state
+3. stato attivo: Archivia visibile, Nuova regola assente, Rimuovi
+   regola assente (readonly)
+4. dialog Nuova regola apre con FiltriEditor + ComposizioneEditor +
+   bottoni Aggiungi filtro / Aggiungi regola
+5. rimuovi regola: conferma window.confirm + DELETE chiamato +
+   invalidate (re-fetch dettaglio)
+
+### Verifiche
+
+- `pnpm typecheck`: clean
+- `pnpm test`: **31/31 verdi** (5 nuovi test + 26 preesistenti)
+- `pnpm format`: clean
+- `pnpm lint`: 0 errori, 1 warning fast-refresh AuthContext (preesistente)
+- `pnpm build`: clean, **317 KB JS / 99 KB gzip / 18 KB CSS** (+20 KB
+  per 4 nuovi componenti regola, accettabile)
+
+**Preview live con backend reale**:
+
+- `/pianificatore-giro/programmi/1287` (Test Trenord 2026, archiviato):
+  header con badge muted, ConfigurazioneCard con km null come "—",
+  1 regola con filtro `codice_linea uguale a S5` + composizione
+  `ALe711 × 3`. Niente bottoni di azione (programma archiviato).
+- `/pianificatore-giro/programmi/1288` (Cremona ATR803, attivo):
+  header con badge success + bottone Archivia + Giri generati,
+  ConfigurazioneCard con km/ciclo 5000, n_giornate 30. 1 regola
+  priorità 80 con filtro `direttrice uguale a MANTOVA-CREMONA-LODI-
+  MILANO` + composizione `ATR803 × 1` + note "Smoke 5.6 R5 —
+  direttrice MANTOVA-CREMONA-LODI-MILANO + ATR803 singolo".
+- Console clean, niente errori di rendering.
+
+### Stato
+
+Sub 6.3 chiusa. CRUD regole end-to-end via UI (add via dialog
+visuale, delete via bottone + confirm). Niente residui (regola 7):
+- l'edit di regola esistente non c'è perché il backend non lo
+  supporta — il workflow utente "rimuovi+aggiungi" è documentato nel
+  componente
+- categoria è input libero (non endpoint dedicato) ma con datalist
+  suggerimenti — accettabile finché il backend non espone
+  /api/categorie
+
+### Prossimo step
+
+**Sub 6.4 — Lista giri del programma**: pagina
+`/pianificatore-giro/programmi/:id/giri` consuma
+`GET /api/programmi/{id}/giri` con stats (km, n_giornate, motivo
+chiusura). Tabella + filtri stato/motivo, click su riga →
+`/pianificatore-giro/giri/:id` (Sub 6.5: visualizzatore Gantt).
+
+---
+
 ## 2026-04-28 (37) — Rebrand: ARTURO Live → ARTURO Business + brand globale UI
 
 ### Contesto

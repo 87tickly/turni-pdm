@@ -161,3 +161,19 @@ export async function archiviaProgramma(id: number): Promise<ProgrammaMaterialeR
     method: "POST",
   });
 }
+
+export async function addRegola(
+  programmaId: number,
+  payload: ProgrammaRegolaAssegnazioneCreate,
+): Promise<ProgrammaRegolaAssegnazioneRead> {
+  return apiJson<ProgrammaRegolaAssegnazioneRead>(`/api/programmi/${programmaId}/regole`, {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function deleteRegola(programmaId: number, regolaId: number): Promise<void> {
+  await apiJson<void>(`/api/programmi/${programmaId}/regole/${regolaId}`, {
+    method: "DELETE",
+  });
+}
