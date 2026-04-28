@@ -21,9 +21,10 @@ describe("App", () => {
   it("mostra la login page quando non autenticato", async () => {
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: /colazione/i })).toBeInTheDocument();
+      expect(screen.getByLabelText(/utente/i)).toBeInTheDocument();
     });
-    expect(screen.getByLabelText(/utente/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+    // Brand wordmark "ARTURO Live" visibile
+    expect(screen.getByLabelText("ARTURO Live")).toBeInTheDocument();
   });
 });

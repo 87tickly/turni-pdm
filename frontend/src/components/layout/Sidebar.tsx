@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { LayoutDashboard, ListOrdered } from "lucide-react";
 
+import { ArturoLogo } from "@/components/brand/ArturoLogo";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -18,10 +19,7 @@ export function Sidebar() {
   return (
     <aside className="flex w-60 flex-col border-r border-border bg-secondary/40">
       <div className="flex h-14 items-center border-b border-border px-4">
-        <span className="text-base font-semibold">Colazione</span>
-        <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase text-primary">
-          beta
-        </span>
+        <ArturoLogo size="sm" />
       </div>
       <div className="flex flex-col gap-1 p-3">
         <p className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">

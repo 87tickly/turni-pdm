@@ -10,6 +10,181 @@
 
 ---
 
+## 2026-04-28 (36) — Sprint 6.2 — Lista programmi + crea/pubblica/archivia + brand ARTURO Live
+
+### Contesto
+
+Continuazione di Sub 6.1 (entry 35). Sub 6.2 implementa la pagina
+`/pianificatore-giro/programmi` come prima vera consumatrice degli
+endpoint backend (`GET /api/programmi`, `POST`, `POST /pubblica`,
+`POST /archivia`). Inoltre, su richiesta dell'utente in corso di
+sessione, è stato applicato il **branding ARTURO Live** (skill
+`arturo-brand-logo`): wordmark testuale ARTURO • Live con punto verde
+animato, palette `#0062CC` / `#0070B5` / `#30D158`, font Exo 2.
+
+### Modifiche
+
+**API client + hooks programmi** (`frontend/src/lib/api/programmi.ts`,
+`frontend/src/hooks/useProgrammi.ts`):
+
+- Tipi TS allineati a `colazione.schemas.programmi`:
+  `ProgrammaMaterialeRead/Create/Update`, `ProgrammaDettaglioRead`,
+  `ProgrammaRegolaAssegnazioneRead/Create`, `StrictOptions`,
+  `ComposizioneItemPayload`, `FiltroRegolaPayload`. Stagione literal
+  `"invernale"|"estiva"|"agosto"`, stato literal
+  `"bozza"|"attivo"|"archiviato"`.
+- Funzioni: `listProgrammi(params)` con query string (`stato`,
+  `stagione`), `getProgramma(id)`, `createProgramma(payload)`,
+  `updateProgramma(id, payload)`, `pubblicaProgramma(id)`,
+  `archiviaProgramma(id)`.
+- React Query hooks: `useProgrammi`, `useProgramma` (enabled
+  condizionale), `useCreateProgramma`, `usePubblicaProgramma`,
+  `useArchiviaProgramma` con `invalidateQueries(["programmi"])` su
+  successo.
+
+**UI primitives nuovi** (`frontend/src/components/ui/`):
+
+- `Badge.tsx` con cva variants (default/secondary/destructive/outline/
+  success/warning/muted)
+- `Table.tsx` (Table, TableHeader, TableBody, TableRow, TableHead,
+  TableCell) con scroll-x su overflow
+- `Dialog.tsx` wrapper Radix con Overlay, Content centrato, Header,
+  Footer, Title, Description + close button con icona `X`
+- `Select.tsx` nativo HTML stile shadcn
+- `Label.tsx` standard
+
+**Componente dominio** (`frontend/src/components/domain/`):
+
+- `ProgrammaStatoBadge.tsx`: badge colorato per lo stato
+  (bozza=warning, attivo=success, archiviato=muted)
+
+**ProgrammiRoute** (`frontend/src/routes/pianificatore-giro/`):
+
+- Tabella con colonne: ID, Nome, Stagione, Periodo, Stato, n. Giornate,
+  km/ciclo, Aggiornato, Azioni. Click su riga → `/programmi/:id`.
+  Azioni rapide: bottone "Pubblica" (variant primary) se `bozza`,
+  "Archivia" (variant outline) se `attivo`, niente se `archiviato`.
+  Conferma via `window.confirm`, errori via `window.alert`.
+- Filtri: Select stato (tutti/bozza/attivo/archiviato), Select stagione
+  (tutte/invernale/estiva/agosto). Bottone "Azzera filtri" appare solo
+  con almeno un filtro attivo. Counter "N programmi" allineato a destra.
+- 4 stati visivi:
+  - `isLoading` → Spinner full-section
+  - `isError` → ErrorBanner con messaggio + bottone Riprova
+  - empty senza filtri → onboarding "Nessun programma materiale" + CTA
+  - empty con filtri → "Nessun programma corrisponde ai filtri" + Azzera
+  - dati presenti → tabella
+- Bottone "Nuovo programma" in header → apre `CreaProgrammaDialog`.
+
+**CreaProgrammaDialog** (`frontend/src/routes/pianificatore-giro/`):
+
+Form modale Radix con campi: nome (required), stagione (select
+opzionale), n_giornate_default (default 1), valido_da/valido_a (HTML5
+date), km_max_ciclo (number opzionale). Validazione client:
+`valido_a >= valido_da`, nome non vuoto. Sumbit → POST `/api/programmi`
+in stato `bozza`, niente regole (le regole arrivano in Sub 6.3). Su
+successo: navigazione a `/programmi/:id` del nuovo programma. Errori
+backend mostrati in alert role nel dialog.
+
+**Helpers** (`frontend/src/lib/format.ts`):
+
+- `formatDateIt(iso)`: ISO `YYYY-MM-DD` → `DD/MM/YYYY`. Tollera
+  timestamp (slice prima 10 char) e null/undefined → `"—"`.
+- `formatPeriodo(da, a)`: `DD/MM/YYYY → DD/MM/YYYY`.
+- `formatNumber(n)`: `Intl.NumberFormat('it-IT')` per separatore migliaia.
+
+**Branding ARTURO Live**:
+
+- `frontend/src/components/brand/ArturoLogo.tsx`: wordmark con tre
+  span: "ARTURO" `text-primary`, dot `bg-arturo-dot animate-pulse-dot`,
+  "Live" `text-arturo-live`. Variants `size: "sm" | "lg"`. Aria-label
+  "ARTURO Live". Spec direttamente dalla skill `arturo-brand-logo`
+  (regola assoluta: niente modifiche a colori/pesi/animazione senza
+  approvazione brand owner).
+- `frontend/tailwind.config.ts` aggiornato:
+  - palette: `primary=#0062CC` (era hsl quasi-nero), `arturo-live=#0070B5`,
+    `arturo-dot=#30D158`, `ring=#0062CC`
+  - `fontFamily.brand = ['"Exo 2"', "system-ui", "sans-serif"]`
+  - keyframe `pulse-dot` (1.6s ease-in-out infinite, scale 1↔0.78,
+    opacity 1↔0.45)
+- `frontend/index.html`:
+  - `<title>` da "Colazione" a "ARTURO Live — Pianificatore"
+  - preconnect + link Google Fonts Exo 2 (weights 400/600/900)
+- `Sidebar.tsx`: rimosso testo "Colazione" + badge BETA, sostituito con
+  `<ArturoLogo size="sm" />`
+- `LoginRoute.tsx`: rimosso `<CardTitle>Colazione</CardTitle>`,
+  sostituito con `<ArturoLogo size="lg" />` (CardDescription pt-1 per
+  spacing dopo logo)
+- `App.test.tsx`: aggiornata assertion: cerca `getByLabelText("ARTURO Live")`
+  invece del vecchio heading "Colazione" (rimosso dal markup)
+
+**Test infrastructure** (`frontend/src/test/renderWithProviders.tsx`):
+
+Helper `renderWithProviders(ui, { routerProps, queryClient, withAuth })`
+che wrappa con QueryClientProvider + MemoryRouter + (opt) AuthProvider.
+`makeQueryClient()` factory con `retry: false, staleTime: 0` per test
+deterministici.
+
+**Test ProgrammiRoute** (`frontend/src/routes/pianificatore-giro/ProgrammiRoute.test.tsx`, 7 test):
+
+- mostra la lista (2 righe, conta "2 programmi", bottoni Pubblica/Archivia)
+- empty state vuoto con CTA "Crea il primo programma"
+- empty state "filtri attivi" con bottone Azzera
+- query string serializzata correttamente per stato + stagione
+- error banner + retry → tabella ricomposta
+- click "Nuovo programma" apre dialog
+- crea programma + verifica POST body + invalidate
+
+**Test API client** (`frontend/src/lib/api/programmi.test.ts`, 3 test):
+list senza/con filtri, create POST con body JSON.
+
+### Verifiche
+
+- `pnpm typecheck`: clean
+- `pnpm lint`: 0 errori, 1 warning fast-refresh AuthContext (preesistente)
+- `pnpm format:check`: clean
+- `pnpm test`: **26/26 verdi** (5 file Sub 6.1 + 2 file Sub 6.2)
+- `pnpm build`: clean (297 KB JS / 94 KB gzip; 16 KB CSS / 4 KB gzip;
+  +60 KB JS rispetto Sub 6.1 = Radix Dialog + Table layout + brand)
+
+**Preview live con backend reale** (`docker compose up -d backend`,
+utente seed `pianificatore_giro_demo`/`demo12345`):
+
+- login flow funziona end-to-end (POST /login → POST /me → redirect
+  dashboard)
+- dashboard renderizza con sidebar ARTURO Live + 4 cards intro
+- `/pianificatore-giro/programmi` mostra 2 programmi reali della
+  azienda 2 (Test Trenord 2026, Trenord 2025-2026 invernale Cremona
+  ATR803)
+- Verifica computed styles del logo:
+  - "ARTURO" → `rgb(0, 98, 204)` = `#0062CC` ✓, font Exo 2 weight 900 ✓
+  - punto → `rgb(48, 209, 88)` = `#30D158` ✓, animation `pulse-dot` attiva
+    (bbox dimensioni che oscillano 8px↔6.9px = scale animato) ✓
+  - "Live" → `rgb(0, 112, 181)` = `#0070B5` ✓, font Exo 2 ✓
+- Filtri stato/stagione, contatore programmi, sidebar nav attiva tutti
+  visibili nello screenshot finale.
+
+### Stato
+
+**Sub 6.2 chiusa**. Pagina lista programmi completa: tabella, filtri,
+empty/loading/error state, dialog crea, azioni pubblica/archivia. Brand
+ARTURO Live applicato a tutto il frontend. Niente residui (regola 7
+CLAUDE.md): non ho rimandato la creazione (la POST funziona
+end-to-end), non ho rimandato la conferma azioni (uso `window.confirm`
+nativo che basta per MVP), non ho rimandato l'invalidate React Query
+(automatico via `useMutation.onSuccess`).
+
+### Prossimo step
+
+**Sub 6.3 — Editor regole programma**: pagina
+`/pianificatore-giro/programmi/:id` con dettaglio programma + lista
+regole + editor regola (filtri + composizione). Servono le anagrafiche
+da `GET /api/{stazioni,materiali,direttrici,localita-manutenzione,depots}`
+per popolare i menu a tendina del builder regole. Endpoint backend
+disponibili dalla R1 di Sub 5.6.
+
+---
+
 ## 2026-04-28 (35) — Sprint 6.1 — Frontend layout + auth flow + router
 
 ### Contesto
