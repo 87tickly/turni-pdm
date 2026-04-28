@@ -51,6 +51,10 @@ const config: Config = {
         md: "0.375rem",
         sm: "0.25rem",
       },
+      gridTemplateColumns: {
+        // Per la mini-Gantt giro: 24 colonne ore (00..23)
+        "24": "repeat(24, minmax(0, 1fr))",
+      },
       keyframes: {
         "pulse-dot": {
           "0%, 100%": { opacity: "1", transform: "scale(1)" },

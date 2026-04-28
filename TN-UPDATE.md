@@ -10,6 +10,131 @@
 
 ---
 
+## 2026-04-28 (40) — Sprint 6.5 — Visualizzatore Gantt giro + fix UX editor regola
+
+### Contesto
+
+L'utente ha provato a creare una regola via UI (programma "prova",
+id 1290) e ha sbagliato in due modi che la UI non gli ha impedito:
+
+1. **Filtri multipli AND interpretati come OR**: ha inserito 3 filtri
+   `direttrice = X`, `direttrice = Y`, `direttrice = Z` aspettandosi
+   "una di queste tre". I filtri si combinano in AND → 0 corse → 0 giri.
+2. **Composizione su pezzo atomico**: ha selezionato `E464N × 6`
+   (= la singola locomotiva E464). I pezzi atomici (`E464N`,
+   `TN-Ale526-A41`, …) non hanno `famiglia` valorizzata e non sono
+   assegnabili come materiale di una corsa — solo i macro
+   (`MD`, `Vivalto`, `ETR526`, …) hanno la composizione completa.
+
+Inoltre, dopo la creazione il pianificatore non poteva *vedere* i giri
+generati: la pagina `/giri/:id` era ancora placeholder (Sub 6.5 da
+fare).
+
+### Modifiche
+
+**Fix UX editor regola**:
+
+- `frontend/src/routes/pianificatore-giro/regola/ComposizioneEditor.tsx`:
+  filtra `useMateriali()` per mostrare solo i materiali con `famiglia`
+  valorizzata (= 19 macro selezionabili). I 66 pezzi atomici non
+  appaiono più nel dropdown. Le opzioni sono raggruppate per famiglia
+  via `<optgroup label={famiglia}>` (Caravaggio Rock, Coradia Meridian,
+  Donizetti, Flirt TILO, POP, TAF, TSR, …).
+- `frontend/src/routes/pianificatore-giro/regola/FiltriEditor.tsx`:
+  banner amber visibile solo con ≥2 filtri: «Filtri multipli = AND.
+  Una corsa deve soddisfare TUTTI i filtri per essere coperta. Per
+  "una direttrice tra X, Y, Z" usa *un solo* filtro con operatore
+  `tra le opzioni`».
+
+**Sub 6.5 — visualizzatore Gantt giro**
+(`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`):
+
+Sostituisce il placeholder con il visualizzatore vero che consuma
+`GET /api/giri/{id}`:
+
+- **Header**: numero turno (h1) + badge tipo materiale + meta
+  (`#id · n giornate · stato`)
+- **Stats** 4-colonne: km/giorno media, km/anno media, materiale,
+  n. giornate
+- **GiornataPanel** per ogni giornata: header con n. variante (1 o
+  M varianti calendario), poi per ogni variante:
+  - `validita_testo` se presente (es. "GG", "LV 1:5 escl 2-3-4/3")
+  - **GanttRow**: header con 24 colonne ore (00..23, `grid-cols-24`
+    aggiunto a tailwind.config) + riga blocchi posizionati assolute
+    via `style={{ left: `${%}`, width: `${%}` }}` calcolati da
+    `ora_inizio/ora_fine` in minuti dall'inizio giornata
+  - **GanttBlocco** colorato per `tipo_blocco`:
+    - `corsa_commerciale` → blu primary
+    - `materiale_vuoto` → amber-200
+    - `cambio_composizione` / `evento_composizione` → emerald-200
+    - `sosta_notturna` / `sosta` → secondary
+    - default → muted
+  - Tooltip nativo con `tipo · ora_inizio→ora_fine · descrizione`
+  - Label nel blocco: `metadata_json.numero_treno` se presente,
+    altrimenti `stazione_da_codice→stazione_a_codice`
+  - **BlocchiList** collapsibile (`<details>`) con tabella dettagliata
+    seq/tipo/treno/stazione_da/stazione_a/ora_inizio/ora_fine
+
+Link "← Lista giri" che torna a `/programmi/{programma_id}/giri` se il
+metadata del giro lo contiene, altrimenti generico `/programmi`.
+
+**Tailwind config**:
+
+`gridTemplateColumns.24 = repeat(24, minmax(0, 1fr))` per la mini-Gantt.
+Senza questo Tailwind genera solo fino a `grid-cols-12` di default.
+
+### Verifiche
+
+- `pnpm typecheck`: clean
+- `pnpm test`: 31/31 verdi
+- `pnpm format`: clean
+- `pnpm build`: clean, **338 KB JS / 103 KB gzip / 20 KB CSS** (+8 KB
+  per visualizzatore Gantt + fix editor)
+
+**Preview live con backend reale, giro G-FIO-001 (id 6380, programma
+1289 Trenord 2025-2026)**:
+
+- Header `G-FIO-001` + badge `ETR526` + "#6380 · 6 giornate · stato
+  bozza"
+- Stats: 769 km/giorno · 1.551.809 km/anno · ETR526 · 6 giornate
+- 6 pannelli giornata, 1 variante ciascuno, validità "GG"
+- Per ogni variante: 24 colonne ore (00..23), blocchi blu posizionati
+  alle ore corrette (`05:20→05:55`, `06:12→08:40`, `09:20→11:52`, …)
+  con label `S01430→S01440` (Lecco→Tirano), `S01440→S01700` (Tirano→
+  Mi.Centrale), ecc.
+- Sezione blocchi expandable mostra tabella dettagliata dei 7 blocchi
+  della giornata 1
+- Verifica computed: i blocchi hanno `style="left: 22.22%; width:
+  10.27%"` calcolati correttamente dalle ore HH:MM:SS
+
+### Stato
+
+**Sprint 6 chiuso al 100%.** Il pianificatore giro materiale ora ha
+flusso completo end-to-end via UI:
+
+1. Crea programma (Sub 6.2)
+2. Configura regole (Sub 6.3) — con i 2 fix UX di stasera, errori
+   ricorrenti come "filtri AND" e "pezzi atomici" sono prevenuti
+3. Pubblica programma (Sub 6.3)
+4. Genera giri (Sub 6.4)
+5. Lista giri con stats (Sub 6.4)
+6. Visualizzatore Gantt giro singolo (Sub 6.5) ← chiuso ora
+
+Niente residui (regola 7): il visualizzatore Gantt è funzionante con
+dati reali, niente placeholder. Il fix editor non è "miglioria
+opzionale" ma cura il bug riproducibile dell'utente.
+
+### Prossimo step
+
+Sprint 6 finito. **Sprint 7 — Frontend Pianificatore Turno PdC** o,
+in parallelo, **Sprint 7-bis — Backend builder turno PdC** (zero
+codice, tutto da scrivere).
+
+Decisione utente: backend prima (algoritmo) o frontend prima
+(scaffold + interfaccia readonly che consuma turni dummy)?
+
+---
+
 ## 2026-04-28 (39) — Sprint 6.4 — Genera giri + lista giri + dashboard usabile
 
 ### Contesto

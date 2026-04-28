@@ -1,15 +1,305 @@
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
+import { AlertCircle, ArrowLeft } from "lucide-react";
 
-import { PlaceholderPage } from "@/routes/pianificatore-giro/PlaceholderPage";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
+import { useGiroDettaglio } from "@/hooks/useGiri";
+import { ApiError } from "@/lib/api/client";
+import type { GiroBlocco, GiroDettaglio } from "@/lib/api/giri";
+import { formatNumber } from "@/lib/format";
 
 export function GiroDettaglioRoute() {
-  const { giroId } = useParams<{ giroId: string }>();
+  const { giroId: giroIdParam } = useParams<{ giroId: string }>();
+  const giroId = giroIdParam !== undefined ? Number(giroIdParam) : undefined;
+  const query = useGiroDettaglio(giroId);
+
+  if (giroId === undefined || Number.isNaN(giroId)) {
+    return <ErrorBlock message="ID giro non valido nell'URL." />;
+  }
+
+  if (query.isLoading) {
+    return (
+      <div className="flex items-center justify-center rounded-md border border-border bg-white py-16">
+        <Spinner label="Caricamento giro…" />
+      </div>
+    );
+  }
+
+  if (query.isError) {
+    const msg =
+      query.error instanceof ApiError ? query.error.message : (query.error as Error).message;
+    return <ErrorBlock message={msg} onRetry={() => void query.refetch()} />;
+  }
+
+  if (query.data === undefined) {
+    return <ErrorBlock message="Giro non trovato." />;
+  }
+
+  const giro = query.data;
+  const meta = giro.generation_metadata_json as Record<string, unknown>;
+  const programmaId = typeof meta.programma_id === "number" ? meta.programma_id : null;
+
   return (
-    <PlaceholderPage
-      title={`Giro #${giroId ?? "?"}`}
-      description="Visualizzatore Gantt del giro: giornate, blocchi commerciali, vuoti, rientro 9NNNN."
-      sub="Sub 6.5"
-      endpoint={`GET /api/giri/${giroId ?? ":id"}`}
-    />
+    <div className="flex flex-col gap-5">
+      <Link
+        to={
+          programmaId !== null
+            ? `/pianificatore-giro/programmi/${programmaId}/giri`
+            : "/pianificatore-giro/programmi"
+        }
+        className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-primary"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Lista giri
+      </Link>
+
+      <Header giro={giro} />
+      <Stats giro={giro} />
+
+      <section className="flex flex-col gap-4">
+        <h2 className="text-lg font-semibold tracking-tight">Giornate ({giro.numero_giornate})</h2>
+        <div className="flex flex-col gap-3">
+          {giro.giornate.map((g) => (
+            <GiornataPanel key={g.id} giornata={g} />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Header({ giro }: { giro: GiroDettaglio }) {
+  return (
+    <header className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="text-2xl font-semibold tracking-tight">{giro.numero_turno}</h1>
+        <Badge variant="outline">{giro.tipo_materiale}</Badge>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        #{giro.id} · {giro.numero_giornate} giornate · stato {giro.stato}
+      </p>
+    </header>
+  );
+}
+
+function Stats({ giro }: { giro: GiroDettaglio }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 rounded-md border border-border bg-white p-4 md:grid-cols-4">
+      <Stat
+        label="km/giorno (media)"
+        value={
+          giro.km_media_giornaliera !== null
+            ? formatNumber(Math.round(giro.km_media_giornaliera))
+            : "—"
+        }
+      />
+      <Stat
+        label="km/anno (media)"
+        value={giro.km_media_annua !== null ? formatNumber(Math.round(giro.km_media_annua)) : "—"}
+      />
+      <Stat label="Materiale" value={giro.materiale_tipo_codice ?? "—"} />
+      <Stat label="N. giornate" value={String(giro.numero_giornate)} />
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <span className="text-base font-semibold tabular-nums text-foreground">{value}</span>
+    </div>
+  );
+}
+
+function GiornataPanel({ giornata }: { giornata: GiroDettaglio["giornate"][number] }) {
+  return (
+    <div className="overflow-hidden rounded-md border border-border bg-white">
+      <div className="flex items-center justify-between border-b border-border bg-secondary/40 px-4 py-2">
+        <span className="text-sm font-semibold">Giornata {giornata.numero_giornata}</span>
+        <span className="text-xs text-muted-foreground">
+          {giornata.varianti.length === 1
+            ? "1 variante"
+            : `${giornata.varianti.length} varianti calendario`}
+        </span>
+      </div>
+      <div className="flex flex-col gap-2 p-3">
+        {giornata.varianti.map((v) => (
+          <VariantePanel key={v.id} variante={v} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function VariantePanel({
+  variante,
+}: {
+  variante: GiroDettaglio["giornate"][number]["varianti"][number];
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      {variante.validita_testo !== null && variante.validita_testo.length > 0 && (
+        <p className="text-xs italic text-muted-foreground">Validità: {variante.validita_testo}</p>
+      )}
+      <GanttRow blocchi={variante.blocchi} />
+      <BlocchiList blocchi={variante.blocchi} />
+    </div>
+  );
+}
+
+const ORE = Array.from({ length: 24 }, (_, i) => i);
+const MINUTI_GIORNO = 24 * 60;
+
+function GanttRow({ blocchi }: { blocchi: GiroBlocco[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <div className="relative min-w-[768px]">
+        <div className="grid grid-cols-24 border-b border-border text-[10px] text-muted-foreground">
+          {ORE.map((h) => (
+            <div key={h} className="border-l border-border/60 px-1 py-0.5 first:border-l-0">
+              {h.toString().padStart(2, "0")}
+            </div>
+          ))}
+        </div>
+        <div className="relative h-9 border-b border-border bg-secondary/20">
+          {blocchi.map((b) => (
+            <GanttBlocco key={b.id} blocco={b} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function timeToMin(t: string | null): number | null {
+  if (t === null || t.length === 0) return null;
+  const parts = t.split(":");
+  if (parts.length < 2) return null;
+  const h = Number.parseInt(parts[0], 10);
+  const m = Number.parseInt(parts[1], 10);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+function colorForTipo(tipo: string): string {
+  switch (tipo) {
+    case "corsa_commerciale":
+      return "bg-primary text-primary-foreground";
+    case "materiale_vuoto":
+      return "bg-amber-200 text-amber-900";
+    case "cambio_composizione":
+    case "evento_composizione":
+      return "bg-emerald-200 text-emerald-900";
+    case "sosta_notturna":
+    case "sosta":
+      return "bg-secondary text-secondary-foreground";
+    default:
+      return "bg-muted text-muted-foreground";
+  }
+}
+
+function GanttBlocco({ blocco }: { blocco: GiroBlocco }) {
+  const inizio = timeToMin(blocco.ora_inizio);
+  const fine = timeToMin(blocco.ora_fine);
+  if (inizio === null || fine === null) return null;
+  const left = (inizio / MINUTI_GIORNO) * 100;
+  const width = Math.max(0.5, ((fine - inizio) / MINUTI_GIORNO) * 100);
+  const label = bloccoLabel(blocco);
+  return (
+    <div
+      className={`absolute top-1 flex h-7 items-center overflow-hidden rounded px-1.5 text-[10px] font-medium ${colorForTipo(blocco.tipo_blocco)}`}
+      style={{ left: `${left}%`, width: `${width}%` }}
+      title={`${blocco.tipo_blocco} · ${blocco.ora_inizio ?? "?"}→${blocco.ora_fine ?? "?"} · ${label}`}
+    >
+      <span className="truncate">{label}</span>
+    </div>
+  );
+}
+
+function bloccoLabel(b: GiroBlocco): string {
+  const num =
+    typeof b.metadata_json?.numero_treno === "string"
+      ? (b.metadata_json.numero_treno as string)
+      : null;
+  if (num !== null) return num;
+  const da = b.stazione_da_codice ?? "?";
+  const a = b.stazione_a_codice ?? "?";
+  return `${da}→${a}`;
+}
+
+function BlocchiList({ blocchi }: { blocchi: GiroBlocco[] }) {
+  if (blocchi.length === 0) {
+    return (
+      <p className="px-3 py-2 text-xs italic text-muted-foreground">
+        Nessun blocco in questa variante.
+      </p>
+    );
+  }
+  return (
+    <details className="rounded-md border border-border bg-white text-xs">
+      <summary className="cursor-pointer px-3 py-2 font-medium text-muted-foreground">
+        Sequenza blocchi ({blocchi.length})
+      </summary>
+      <table className="w-full">
+        <thead className="bg-secondary/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+          <tr>
+            <th className="px-2 py-1 text-left">#</th>
+            <th className="px-2 py-1 text-left">Tipo</th>
+            <th className="px-2 py-1 text-left">Treno/Vuoto</th>
+            <th className="px-2 py-1 text-left">Da</th>
+            <th className="px-2 py-1 text-left">A</th>
+            <th className="px-2 py-1 text-left">Inizio</th>
+            <th className="px-2 py-1 text-left">Fine</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {blocchi.map((b) => (
+            <tr key={b.id}>
+              <td className="px-2 py-1 font-mono text-muted-foreground">{b.seq}</td>
+              <td className="px-2 py-1">
+                <BloccoTipoBadge tipo={b.tipo_blocco} />
+              </td>
+              <td className="px-2 py-1 font-medium">{bloccoLabel(b)}</td>
+              <td className="px-2 py-1">{b.stazione_da_codice ?? "—"}</td>
+              <td className="px-2 py-1">{b.stazione_a_codice ?? "—"}</td>
+              <td className="px-2 py-1 tabular-nums">{b.ora_inizio ?? "—"}</td>
+              <td className="px-2 py-1 tabular-nums">{b.ora_fine ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
+  );
+}
+
+function BloccoTipoBadge({ tipo }: { tipo: string }) {
+  if (tipo === "corsa_commerciale") return <Badge variant="default">commerciale</Badge>;
+  if (tipo === "materiale_vuoto") return <Badge variant="warning">vuoto</Badge>;
+  if (tipo === "cambio_composizione" || tipo === "evento_composizione")
+    return <Badge variant="success">comp.</Badge>;
+  if (tipo === "sosta_notturna" || tipo === "sosta")
+    return <Badge variant="secondary">sosta</Badge>;
+  return <Badge variant="outline">{tipo}</Badge>;
+}
+
+function ErrorBlock({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div
+      role="alert"
+      className="flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-4"
+    >
+      <AlertCircle className="mt-0.5 h-5 w-5 text-destructive" aria-hidden />
+      <div className="flex flex-1 flex-col gap-2">
+        <p className="text-sm font-medium text-destructive">{message}</p>
+        {onRetry !== undefined && (
+          <Button variant="outline" size="sm" onClick={onRetry} className="self-start">
+            Riprova
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }

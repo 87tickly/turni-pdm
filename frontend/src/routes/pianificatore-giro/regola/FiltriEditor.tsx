@@ -52,12 +52,18 @@ export function FiltriEditor({ filtri, onChange, disabled = false }: FiltriEdito
 
   return (
     <div className="flex flex-col gap-3">
-      {filtri.length === 0 && (
+      {filtri.length === 0 ? (
         <p className="rounded-md border border-dashed border-border bg-secondary/40 px-3 py-3 text-sm text-muted-foreground">
           Nessun filtro: la regola si applica a tutte le corse del programma. Aggiungi un filtro per
           restringere (es. solo direttrice X, solo categoria REG).
         </p>
-      )}
+      ) : filtri.length > 1 ? (
+        <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <strong>Filtri multipli = AND.</strong> Una corsa deve soddisfare TUTTI i filtri per
+          essere coperta. Per "una direttrice tra X, Y, Z" usa <em>un solo</em> filtro con operatore{" "}
+          <code className="rounded bg-amber-100 px-1">tra le opzioni</code>.
+        </p>
+      ) : null}
 
       {filtri.map((row, idx) => {
         const opsAvailable = OP_PER_CAMPO[row.campo];

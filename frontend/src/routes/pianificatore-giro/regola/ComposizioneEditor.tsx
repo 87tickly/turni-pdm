@@ -30,7 +30,13 @@ export function ComposizioneEditor({
   disabled = false,
 }: ComposizioneEditorProps) {
   const materialiQuery = useMateriali();
-  const materiali = materialiQuery.data ?? [];
+  // Solo i materiali "macro" (con famiglia valorizzata) sono selezionabili.
+  // I pezzi atomici (E464N, TN-Ale526-A41, …) non sono assegnabili
+  // direttamente a una regola — sono inclusi nei macro (es. MD include
+  // E464 + carrozze; ETR526 include TN-Ale526-A41/A42/…).
+  const materiali = (materialiQuery.data ?? []).filter(
+    (m) => m.famiglia !== null && m.famiglia.length > 0,
+  );
 
   const updateRow = (idx: number, patch: Partial<ComposizioneRow>) => {
     onChange(composizione.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -69,14 +75,27 @@ export function ComposizioneEditor({
               onChange={(e) => updateRow(idx, { materiale_tipo_codice: e.target.value })}
             >
               <option value="">— seleziona —</option>
-              {materiali.map((m) => (
-                <option key={m.codice} value={m.codice}>
-                  {m.codice}
-                  {m.nome_commerciale !== null && m.nome_commerciale !== ""
-                    ? ` — ${m.nome_commerciale}`
-                    : ""}
-                </option>
-              ))}
+              {Object.entries(
+                materiali.reduce<Record<string, typeof materiali>>((acc, m) => {
+                  const fam = m.famiglia ?? "Altro";
+                  acc[fam] = acc[fam] ?? [];
+                  acc[fam].push(m);
+                  return acc;
+                }, {}),
+              )
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([famiglia, items]) => (
+                  <optgroup key={famiglia} label={famiglia}>
+                    {items.map((m) => (
+                      <option key={m.codice} value={m.codice}>
+                        {m.codice}
+                        {m.nome_commerciale !== null && m.nome_commerciale !== ""
+                          ? ` — ${m.nome_commerciale}`
+                          : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
             </Select>
           </div>
 
