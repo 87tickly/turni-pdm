@@ -54,6 +54,9 @@ export interface GiroBlocco {
   corsa_materiale_vuoto_id: number | null;
   stazione_da_codice: string | null;
   stazione_a_codice: string | null;
+  stazione_da_nome: string | null;
+  stazione_a_nome: string | null;
+  numero_treno: string | null;
   ora_inizio: string | null;
   ora_fine: string | null;
   descrizione: string | null;

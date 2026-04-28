@@ -208,11 +208,15 @@ function GanttBlocco({ blocco }: { blocco: GiroBlocco }) {
   const left = (inizio / MINUTI_GIORNO) * 100;
   const width = Math.max(0.5, ((fine - inizio) / MINUTI_GIORNO) * 100);
   const label = bloccoLabel(blocco);
+  const da = stazioneLabel(blocco.stazione_da_nome, blocco.stazione_da_codice);
+  const a = stazioneLabel(blocco.stazione_a_nome, blocco.stazione_a_codice);
+  const tipoLabel = tipoBloccoLabel(blocco.tipo_blocco);
+  const tooltip = `${tipoLabel} · ${blocco.ora_inizio ?? "?"}→${blocco.ora_fine ?? "?"}\n${da} → ${a}${blocco.numero_treno !== null ? `\nTreno ${blocco.numero_treno}` : ""}`;
   return (
     <div
       className={`absolute top-1 flex h-7 items-center overflow-hidden rounded px-1.5 text-[10px] font-medium ${colorForTipo(blocco.tipo_blocco)}`}
       style={{ left: `${left}%`, width: `${width}%` }}
-      title={`${blocco.tipo_blocco} · ${blocco.ora_inizio ?? "?"}→${blocco.ora_fine ?? "?"} · ${label}`}
+      title={tooltip}
     >
       <span className="truncate">{label}</span>
     </div>
@@ -220,14 +224,39 @@ function GanttBlocco({ blocco }: { blocco: GiroBlocco }) {
 }
 
 function bloccoLabel(b: GiroBlocco): string {
-  const num =
+  if (b.numero_treno !== null && b.numero_treno.length > 0) return b.numero_treno;
+  const meta =
     typeof b.metadata_json?.numero_treno === "string"
       ? (b.metadata_json.numero_treno as string)
       : null;
-  if (num !== null) return num;
-  const da = b.stazione_da_codice ?? "?";
-  const a = b.stazione_a_codice ?? "?";
+  if (meta !== null) return meta;
+  const da = b.stazione_da_nome ?? b.stazione_da_codice ?? "?";
+  const a = b.stazione_a_nome ?? b.stazione_a_codice ?? "?";
   return `${da}→${a}`;
+}
+
+function stazioneLabel(nome: string | null, codice: string | null): string {
+  if (nome !== null && nome.length > 0) return nome;
+  if (codice !== null && codice.length > 0) return codice;
+  return "—";
+}
+
+function tipoBloccoLabel(tipo: string): string {
+  switch (tipo) {
+    case "corsa_commerciale":
+      return "Commerciale";
+    case "materiale_vuoto":
+      return "Vuoto";
+    case "cambio_composizione":
+    case "evento_composizione":
+      return "Composizione";
+    case "sosta_notturna":
+      return "Sosta notturna";
+    case "sosta":
+      return "Sosta";
+    default:
+      return tipo;
+  }
 }
 
 function BlocchiList({ blocchi }: { blocchi: GiroBlocco[] }) {
@@ -248,7 +277,7 @@ function BlocchiList({ blocchi }: { blocchi: GiroBlocco[] }) {
           <tr>
             <th className="px-2 py-1 text-left">#</th>
             <th className="px-2 py-1 text-left">Tipo</th>
-            <th className="px-2 py-1 text-left">Treno/Vuoto</th>
+            <th className="px-2 py-1 text-left">Treno</th>
             <th className="px-2 py-1 text-left">Da</th>
             <th className="px-2 py-1 text-left">A</th>
             <th className="px-2 py-1 text-left">Inizio</th>
@@ -262,9 +291,13 @@ function BlocchiList({ blocchi }: { blocchi: GiroBlocco[] }) {
               <td className="px-2 py-1">
                 <BloccoTipoBadge tipo={b.tipo_blocco} />
               </td>
-              <td className="px-2 py-1 font-medium">{bloccoLabel(b)}</td>
-              <td className="px-2 py-1">{b.stazione_da_codice ?? "—"}</td>
-              <td className="px-2 py-1">{b.stazione_a_codice ?? "—"}</td>
+              <td className="px-2 py-1 font-mono font-medium">{b.numero_treno ?? "—"}</td>
+              <td className="px-2 py-1">
+                <StazioneCell nome={b.stazione_da_nome} codice={b.stazione_da_codice} />
+              </td>
+              <td className="px-2 py-1">
+                <StazioneCell nome={b.stazione_a_nome} codice={b.stazione_a_codice} />
+              </td>
               <td className="px-2 py-1 tabular-nums">{b.ora_inizio ?? "—"}</td>
               <td className="px-2 py-1 tabular-nums">{b.ora_fine ?? "—"}</td>
             </tr>
@@ -272,6 +305,18 @@ function BlocchiList({ blocchi }: { blocchi: GiroBlocco[] }) {
         </tbody>
       </table>
     </details>
+  );
+}
+
+function StazioneCell({ nome, codice }: { nome: string | null; codice: string | null }) {
+  if (nome === null && codice === null) return <span>—</span>;
+  return (
+    <div className="flex flex-col leading-tight">
+      <span className="font-medium">{nome ?? codice}</span>
+      {nome !== null && codice !== null && (
+        <span className="font-mono text-[10px] text-muted-foreground">{codice}</span>
+      )}
+    </div>
   );
 }
 

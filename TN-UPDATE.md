@@ -10,6 +10,92 @@
 
 ---
 
+## 2026-04-28 (41) — Fix UX dettaglio giro: nomi stazione + numero treno
+
+### Contesto
+
+Riapertura sessione, l'utente mostra il visualizzatore Gantt G-FIO-001
+appena chiuso in Sprint 6.5 e dice: *«il problema è che vedo solo codici
+e non si capisce niente»*. Aveva ragione — sia i blocchi del Gantt sia
+la tabella "Sequenza blocchi" mostravano solo i codici stazione tipo
+`S01430→S01440`, mai il nome leggibile (`SONDRIO→TIRANO`) né il numero
+treno (`10290`, `2815`, …).
+
+Il `bloccoLabel` cercava `metadata_json.numero_treno` ma il builder non
+lo popolava mai, quindi cadeva sempre sul fallback codici. Le colonne
+"Da/A" della tabella mostravano direttamente `stazione_da_codice` /
+`stazione_a_codice` senza join sull'anagrafica.
+
+### Modifiche
+
+**Backend** (`backend/src/colazione/api/giri.py`):
+
+- `GiroBloccoRead`: aggiunti tre campi `stazione_da_nome`,
+  `stazione_a_nome`, `numero_treno` (tutti `str | None`).
+- `get_giro_dettaglio` riscritto per evitare N+1: una query per i
+  giornate, una per le varianti `IN(...)`, una per i blocchi `IN(...)`.
+  Poi tre lookup batch:
+  - `Stazione.codice IN (...)` con vincolo `azienda_id` →
+    `nome_stazione: dict[str, str]`
+  - `CorsaCommerciale.id IN (...)` → `numero_treno_corsa`
+  - `CorsaMaterialeVuoto.id IN (...)` → `numero_treno_vuoto`
+  - `numero_treno` del blocco = `numero_treno_corsa[corsa_commerciale_id]`
+    se commerciale, altrimenti `numero_treno_vuoto[corsa_materiale_vuoto_id]`,
+    altrimenti `None`.
+
+**Frontend** (`frontend/src/lib/api/giri.ts`):
+
+- `GiroBlocco`: aggiunti `stazione_da_nome`, `stazione_a_nome`,
+  `numero_treno`.
+
+**Frontend**
+(`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`):
+
+- `bloccoLabel` priorità: `numero_treno` → `metadata_json.numero_treno`
+  → `nome_da→nome_a` → `codice_da→codice_a` → `?`.
+- `GanttBlocco` tooltip multilinea: `Tipo · ora_inizio→ora_fine` /
+  `DA_NOME → A_NOME` / `Treno NNNN`. Usa `tipoBloccoLabel()` per
+  rendere "corsa_commerciale" → "Commerciale" ecc.
+- Tabella "Sequenza blocchi" — colonna "Treno/Vuoto" rinominata in
+  "Treno" e mostra `numero_treno` (font-mono). Colonne "Da" e "A" usano
+  `<StazioneCell>`: nome stazione in font-medium e codice piccolo
+  font-mono in muted sotto.
+
+### Verifiche
+
+- `pnpm typecheck`: clean
+- `pnpm test`: 31/31 verdi
+- `pnpm build`: 339.75 KB JS / 103.22 KB gzip / 20 KB CSS (+1.75 KB)
+- Backend: hot reload OK, `GET /api/giri/6380` 200, niente errori
+- Preview live G-FIO-001 (giro 6380, programma 1289 ETR526):
+  - Gantt giornata 1: blocchi etichettati `10290`, `2815`, `2818`,
+    `2827`, `2830`, `2839`, `2842` (era prima `S01430→S01440` ecc.)
+  - Tabella sequenza blocchi:
+    - `1 · commerciale · 10290 · SONDRIO/S01430 · TIRANO/S01440 ·
+      05:20→05:55`
+    - `2 · commerciale · 2815 · TIRANO/S01440 · MILANO CENTRALE/S01700
+      · 06:12→08:40`
+    - …
+  - Console preview: nessun errore
+- Test backend: `test_get_giro_dettaglio` non testa i nuovi campi e
+  fallisce per assertion ambientale (DB del container ha 12 corse
+  reali del programma 1289, test attendeva 2). Pre-esistente, non
+  regressione del fix.
+
+### Stato
+
+Bug-fix UX completato. Il visualizzatore Gantt ora è leggibile:
+nomi stazione e numeri treno in chiaro, codici tecnici disponibili ma
+secondari (font-mono in muted sotto il nome).
+
+### Prossimo step
+
+Sprint 6 resta chiuso. Si torna alla decisione lasciata aperta in
+entry 40: Sprint 7 — backend builder turno PdC vs frontend
+pianificatore turno PdC. Decisione utente.
+
+---
+
 ## 2026-04-28 (40) — Sprint 6.5 — Visualizzatore Gantt giro + fix UX editor regola
 
 ### Contesto

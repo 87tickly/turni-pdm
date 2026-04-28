@@ -41,6 +41,8 @@ from colazione.domain.builder_giro.builder import (
 )
 from colazione.domain.builder_giro.persister import LocalitaNonTrovataError
 from colazione.domain.builder_giro.risolvi_corsa import RegolaAmbiguaError
+from colazione.models.anagrafica import Stazione
+from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
 from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
 from colazione.schemas.security import CurrentUser
 
@@ -173,7 +175,11 @@ class GiroMaterialeListItem(BaseModel):
 
 
 class GiroBloccoRead(BaseModel):
-    """Singolo blocco di un giro (corsa, vuoto, evento)."""
+    """Singolo blocco di un giro (corsa, vuoto, evento).
+
+    Include i nomi stazione e il numero treno risolti via lookup
+    anagrafico, così il frontend non deve mappare codici a mano.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -184,6 +190,9 @@ class GiroBloccoRead(BaseModel):
     corsa_materiale_vuoto_id: int | None
     stazione_da_codice: str | None
     stazione_a_codice: str | None
+    stazione_da_nome: str | None
+    stazione_a_nome: str | None
+    numero_treno: str | None
     ora_inizio: time | None
     ora_fine: time | None
     descrizione: str | None
@@ -317,43 +326,116 @@ async def get_giro_dettaglio(
         .order_by(GiroGiornata.numero_giornata)
     )
     giornate_orm = (await session.execute(gg_stmt)).scalars().all()
+    giornata_ids = [gg.id for gg in giornate_orm]
 
-    giornate_out: list[GiroGiornataRead] = []
-    for gg in giornate_orm:
+    # Tutte le varianti del giro in una query
+    varianti_orm: list[GiroVariante] = []
+    if giornata_ids:
         gv_stmt = (
             select(GiroVariante)
-            .where(GiroVariante.giro_giornata_id == gg.id)
-            .order_by(GiroVariante.variant_index)
+            .where(GiroVariante.giro_giornata_id.in_(giornata_ids))
+            .order_by(GiroVariante.giro_giornata_id, GiroVariante.variant_index)
         )
-        varianti_orm = (await session.execute(gv_stmt)).scalars().all()
+        varianti_orm = list((await session.execute(gv_stmt)).scalars().all())
+    variante_ids = [gv.id for gv in varianti_orm]
 
-        varianti_out: list[GiroVarianteRead] = []
-        for gv in varianti_orm:
-            gb_stmt = (
-                select(GiroBlocco)
-                .where(GiroBlocco.giro_variante_id == gv.id)
-                .order_by(GiroBlocco.seq)
-            )
-            blocchi_orm = (await session.execute(gb_stmt)).scalars().all()
-            blocchi_out = [GiroBloccoRead.model_validate(b) for b in blocchi_orm]
-            varianti_out.append(
-                GiroVarianteRead(
-                    id=gv.id,
-                    variant_index=gv.variant_index,
-                    validita_testo=gv.validita_testo,
-                    validita_dates_apply_json=list(gv.validita_dates_apply_json or []),
-                    validita_dates_skip_json=list(gv.validita_dates_skip_json or []),
-                    blocchi=blocchi_out,
-                )
-            )
+    # Tutti i blocchi del giro in una query (ordine seq mantenuto per variante)
+    blocchi_orm: list[GiroBlocco] = []
+    if variante_ids:
+        gb_stmt = (
+            select(GiroBlocco)
+            .where(GiroBlocco.giro_variante_id.in_(variante_ids))
+            .order_by(GiroBlocco.giro_variante_id, GiroBlocco.seq)
+        )
+        blocchi_orm = list((await session.execute(gb_stmt)).scalars().all())
 
-        giornate_out.append(
-            GiroGiornataRead(
-                id=gg.id,
-                numero_giornata=gg.numero_giornata,
-                varianti=varianti_out,
+    # Lookup batch: nome stazione + numero treno (commerciale e vuoto)
+    codici_stazione = {
+        c
+        for b in blocchi_orm
+        for c in (b.stazione_da_codice, b.stazione_a_codice)
+        if c is not None
+    }
+    nome_stazione: dict[str, str] = {}
+    if codici_stazione:
+        st_stmt = select(Stazione.codice, Stazione.nome).where(
+            Stazione.codice.in_(codici_stazione),
+            Stazione.azienda_id == user.azienda_id,
+        )
+        nome_stazione = dict((await session.execute(st_stmt)).all())
+
+    corsa_ids = {b.corsa_commerciale_id for b in blocchi_orm if b.corsa_commerciale_id is not None}
+    numero_treno_corsa: dict[int, str] = {}
+    if corsa_ids:
+        cc_stmt = select(CorsaCommerciale.id, CorsaCommerciale.numero_treno).where(
+            CorsaCommerciale.id.in_(corsa_ids)
+        )
+        numero_treno_corsa = dict((await session.execute(cc_stmt)).all())
+
+    vuoto_ids = {
+        b.corsa_materiale_vuoto_id for b in blocchi_orm if b.corsa_materiale_vuoto_id is not None
+    }
+    numero_treno_vuoto: dict[int, str] = {}
+    if vuoto_ids:
+        cv_stmt = select(
+            CorsaMaterialeVuoto.id, CorsaMaterialeVuoto.numero_treno_vuoto
+        ).where(CorsaMaterialeVuoto.id.in_(vuoto_ids))
+        numero_treno_vuoto = dict((await session.execute(cv_stmt)).all())
+
+    def _to_blocco_read(b: GiroBlocco) -> GiroBloccoRead:
+        num: str | None = None
+        if b.corsa_commerciale_id is not None:
+            num = numero_treno_corsa.get(b.corsa_commerciale_id)
+        elif b.corsa_materiale_vuoto_id is not None:
+            num = numero_treno_vuoto.get(b.corsa_materiale_vuoto_id)
+        return GiroBloccoRead(
+            id=b.id,
+            seq=b.seq,
+            tipo_blocco=b.tipo_blocco,
+            corsa_commerciale_id=b.corsa_commerciale_id,
+            corsa_materiale_vuoto_id=b.corsa_materiale_vuoto_id,
+            stazione_da_codice=b.stazione_da_codice,
+            stazione_a_codice=b.stazione_a_codice,
+            stazione_da_nome=(
+                nome_stazione.get(b.stazione_da_codice) if b.stazione_da_codice else None
+            ),
+            stazione_a_nome=(
+                nome_stazione.get(b.stazione_a_codice) if b.stazione_a_codice else None
+            ),
+            numero_treno=num,
+            ora_inizio=b.ora_inizio,
+            ora_fine=b.ora_fine,
+            descrizione=b.descrizione,
+            is_validato_utente=b.is_validato_utente,
+            metadata_json=dict(b.metadata_json or {}),
+        )
+
+    # Indici per riassemblare la struttura ad albero
+    blocchi_per_variante: dict[int, list[GiroBloccoRead]] = {}
+    for b in blocchi_orm:
+        blocchi_per_variante.setdefault(b.giro_variante_id, []).append(_to_blocco_read(b))
+
+    varianti_per_giornata: dict[int, list[GiroVarianteRead]] = {}
+    for gv in varianti_orm:
+        varianti_per_giornata.setdefault(gv.giro_giornata_id, []).append(
+            GiroVarianteRead(
+                id=gv.id,
+                variant_index=gv.variant_index,
+                validita_testo=gv.validita_testo,
+                validita_dates_apply_json=list(gv.validita_dates_apply_json or []),
+                validita_dates_skip_json=list(gv.validita_dates_skip_json or []),
+                blocchi=blocchi_per_variante.get(gv.id, []),
             )
         )
+
+    giornate_out = [
+        GiroGiornataRead(
+            id=gg.id,
+            numero_giornata=gg.numero_giornata,
+            varianti=varianti_per_giornata.get(gg.id, []),
+        )
+        for gg in giornate_orm
+    ]
 
     return GiroMaterialeDettaglioRead(
         id=g.id,
