@@ -10,6 +10,150 @@
 
 ---
 
+## 2026-04-28 (35) — Sprint 6.1 — Frontend layout + auth flow + router
+
+### Contesto
+
+Sprint 5 chiuso (entry 34). Lo scaffold frontend è React 18 + TS + Vite +
+Tailwind + Radix UI + React Query 5 + React Router 6, ma `App.tsx`
+mostrava solo un health check. Sub 6.1 costruisce l'infrastruttura di
+base (auth + routing + layout) per le sub successive (6.2-6.5: lista
+programmi, dettaglio + editor regole, lista giri, visualizzatore Gantt).
+
+### Modifiche
+
+**HTTP client + Auth API** (`frontend/src/lib/`):
+
+- `api/client.ts`: fetch wrapper con `Authorization: Bearer <access>` +
+  retry singolo su 401 via `/api/auth/refresh` + `setOnAuthInvalid`
+  callback per notificare il context quando il refresh fallisce.
+  `ApiError` class espone status/detail per branching UI. `apiJson<T>`
+  parser tipizzato. `tryRefresh()` con singleton in-flight per evitare
+  N refresh simultanei in race.
+- `api/auth.ts`: `loginApi`, `fetchCurrentUser` con tipi
+  `LoginRequest/TokenResponse/CurrentUser` allineati a
+  `colazione.schemas.security`.
+- `auth/tokenStorage.ts`: `localStorage` (sopravvive a chiusura tab,
+  pronto per Tauri desktop wrap futuro). Helpers
+  get/set/clear access+refresh.
+- `auth/AuthContext.tsx`: provider con stati
+  `loading|authenticated|unauthenticated`; bootstrap chiama `/api/auth/me`
+  se token presente; `login()` scambia credenziali → tokens → /me;
+  `logout()` cancella tokens + state; `hasRole(role)` con bypass admin.
+  Registra `setOnAuthInvalid` in useEffect per sincronizzare lo state
+  quando il client cancella i token su refresh fail.
+- `queryClient.ts`: factory `QueryClient` con default `retry: 1,
+  staleTime: 30s, refetchOnWindowFocus: false`.
+
+**UI primitives** (`frontend/src/components/ui/`):
+
+shadcn-style scritti a mano (no shadcn-cli). `Button` con variants
+(primary, secondary, ghost, destructive, outline) × size (sm/md/lg) via
+`class-variance-authority`. `Input`, `Spinner` (Loader2 lucide-react +
+SR text), `Card` + sub-componenti (Header/Title/Description/Content/Footer).
+
+**Layout shell** (`frontend/src/components/layout/`):
+
+- `AppLayout.tsx`: sidebar + header + `<Outlet />` per pages, con
+  scroll isolato a main.
+- `Sidebar.tsx`: nav pianificatore-giro (Home, Programmi).
+  `NavLink` con stato attivo via Tailwind primary.
+- `Header.tsx`: utente loggato (icon + username + admin badge + azienda),
+  bottone Esci con icon `LogOut`.
+
+**Routing** (`frontend/src/routes/`):
+
+- `ProtectedRoute.tsx`: gate 3-stati (spinner loading; redirect a
+  `/login` con `state.from`; redirect a `/forbidden` se ruolo manca).
+- `AppRoutes.tsx`: tabella `<Routes>` declarativa.
+  - Pubblico: `/login`, `/forbidden`.
+  - Protetto (ruolo `PIANIFICATORE_GIRO`, admin bypassa): `/`,
+    `/pianificatore-giro/{dashboard,programmi,programmi/:programmaId,
+    programmi/:programmaId/giri,giri/:giroId}`. Index redirect a
+    `/pianificatore-giro/dashboard`.
+  - 404 fallback su `*`.
+- `LoginRoute.tsx`: form controllato (Card + Input + Spinner durante
+  submit), gestisce `ApiError(401)` → "Credenziali non valide" e
+  network error → "Errore di rete: <msg>". Redirect post-login a
+  `state.from` o default `/pianificatore-giro/dashboard`.
+- `pianificatore-giro/DashboardRoute.tsx`: home con 4 cards di intro
+  alle sub successive.
+- `pianificatore-giro/PlaceholderPage.tsx` + 4 route che la usano
+  (Programmi, ProgrammaDettaglio, ProgrammaGiri, GiroDettaglio): ogni
+  pagina dichiara il proprio sub e l'endpoint backend che consumerà.
+- `ForbiddenRoute.tsx`, `NotFoundRoute.tsx`: pagine errore standalone.
+
+**App entry** (`frontend/src/App.tsx`): provider tree
+QueryClient → BrowserRouter (con `future.v7_startTransition` +
+`v7_relativeSplatPath`) → AuthProvider → AppRoutes.
+
+**Test** (`frontend/src/...`):
+
+- `lib/auth/tokenStorage.test.ts` (4): set/get/clear access+refresh,
+  null-removal.
+- `lib/auth/AuthContext.test.tsx` (5): bootstrap unauthenticated senza
+  token; login completo (tokens salvati, status authenticated, user
+  popolato); logout svuota state+storage; admin bypassa hasRole;
+  bootstrap con token in storage chiama /me.
+- `routes/ProtectedRoute.test.tsx` (3): redirect a /login senza auth;
+  render content con auth+role; redirect a /forbidden con role mancante.
+- `routes/LoginRoute.test.tsx` (3): submit valido naviga a dashboard;
+  401 mostra "credenziali non valide" in `[role=alert]`; bottone
+  disabilitato con campi vuoti.
+- `App.test.tsx` aggiornato (1): senza token mostra login page (la
+  vecchia assertion "Sprint 0.2" non è più applicabile).
+
+`test/setup.ts` aggiunto polyfill `MemoryStorage` (jsdom in vitest 2 non
+espone `localStorage.clear` funzionante; in-memory deterministico). Auto
+`clear()` in `beforeEach`+`afterEach`.
+
+`test/utils.tsx` helper: `mockFetchSequence(responses)` per simulare
+una sequenza di Response, `FAKE_TOKENS`/`FAKE_USER`/`FAKE_ADMIN`.
+
+### Verifiche
+
+- `pnpm typecheck`: clean (0 errori TS, `erasableSyntaxOnly` rispettato
+  tramite campi espliciti su `ApiError`).
+- `pnpm lint`: 0 errori, 1 warning fast-refresh accettabile su
+  `AuthContext.tsx` (export combinato componente+hook).
+- `pnpm format:check`: clean (tutti i file in stile prettier).
+- `pnpm test`: **16/16 verdi** (5 file).
+- `pnpm build`: clean (235 KB JS / 74 KB gzip, 11 KB CSS / 3 KB gzip).
+- **Preview visivo (`pnpm dev` via Claude Preview)**:
+  - `/` → redirect a `/login` ✅
+  - login page renderizza Card "Colazione" con form (Utente/Password)
+    e bottone "Entra" disabilitato a campi vuoti ✅
+  - submit con backend offline → alert role=alert "Errore di rete:
+    Failed to fetch" (gestione errori OK) ✅
+  - `/pianificatore-giro/programmi` senza auth → redirect a `/login` ✅
+  - `/forbidden` renderizza pagina 403 standalone ✅
+  - console clean (no errors).
+
+### Stato
+
+**Sub 6.1 chiusa** secondo CLAUDE.md regola 7 (no scope-cutting): auth
+flow funzionante end-to-end (login + refresh automatico + logout +
+role-based gate), router completo con 5 path pianificatore-giro
+(placeholder per le sub successive ma navigabili e tipizzati), layout
+shell stile shadcn pronto per le pagine reali, copertura test sui flussi
+critici (16 test).
+
+**Stack frontend confermato**: React 18 + TS + Vite + Tailwind + Radix
++ React Query 5 + React Router 6.28 (con future flags v7) + lucide-react
++ class-variance-authority. Niente shadcn-cli (UI scritte a mano per
+controllo totale, niente noise di file generati).
+
+### Prossimo step
+
+**Sub 6.2 — Lista programmi**: pagina `/pianificatore-giro/programmi`
+consuma `GET /api/programmi` (filtri stato/stagione), tabella con stato
++ azioni (apri dettaglio, archivia, pubblica). Bottone "Nuovo programma"
++ form di creazione che costruisce regole iniziali. Per testarla sarà
+necessario avviare backend (docker-compose up backend db) e creare un
+utente `PIANIFICATORE_GIRO` di test.
+
+---
+
 ## 2026-04-28 (34) — Sprint 5.6 chiusura definitiva: R1-R5 + CLAUDE.md regola anti-pigrizia
 
 ### Contesto
