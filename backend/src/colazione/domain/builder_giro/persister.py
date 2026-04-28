@@ -32,7 +32,7 @@ Si **assume** che ogni ``corsa`` in `BloccoAssegnato.corsa` sia un ORM
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -142,6 +142,57 @@ def _km_totali_giro(giro: GiroAssegnato) -> float:
             if km is not None:
                 total += float(km)
     return total
+
+
+def _km_media_annua_giro(
+    giro: GiroAssegnato,
+    valido_da: date,
+    valido_a: date,
+) -> float | None:
+    """Stima km annui del giro materiale (Sprint 5.6 R3).
+
+    Algoritmo:
+    1. Per ogni giornata K del giro, prendi la prima corsa e leggi il
+       suo ``valido_in_date_json`` (lista di date in cui la corsa è
+       applicabile).
+    2. Conta le date che cadono nel periodo
+       ``[valido_da, valido_a]`` del programma → ``n_giorni_K``.
+    3. Stima km annui di K = ``km_giornata_K * n_giorni_K``.
+    4. Somma su tutte le giornate.
+
+    Approssimazione: assume che la prima corsa di K sia
+    rappresentativa della periodicità di tutta la giornata. Per
+    giornate con corse a periodicità mista, è una stima al rialzo
+    o al ribasso a seconda del mix. Sufficiente per dashboard
+    manutenzione (Sprint 7); raffinabile.
+
+    Returns:
+        Stima `float` km/anno del giro. ``None`` se nessuna corsa
+        ha ``valido_in_date_json``, oppure se nessuna data cade in
+        ``[valido_da, valido_a]``.
+    """
+    valido_da_iso = valido_da.isoformat()
+    valido_a_iso = valido_a.isoformat()
+    km_anno = 0.0
+    qualcosa_calcolato = False
+    for giornata in giro.giornate:
+        corse = giornata.catena_posizionata.catena.corse
+        if not corse:
+            continue
+        prima = corse[0]
+        valido_dates = getattr(prima, "valido_in_date_json", None)
+        if not valido_dates:
+            continue
+        n_giorni = sum(1 for d in valido_dates if valido_da_iso <= str(d) <= valido_a_iso)
+        if n_giorni == 0:
+            continue
+        km_giornata = sum(
+            float(c.km_tratta) for c in corse if getattr(c, "km_tratta", None) is not None
+        )
+        km_anno += km_giornata * n_giorni
+        qualcosa_calcolato = True
+
+    return km_anno if qualcosa_calcolato else None
 
 
 async def _next_numero_rientro_sede(session: AsyncSession) -> str:
@@ -296,11 +347,18 @@ async def _persisti_blocchi_giornata(
                 ora_inizio=cat_pos.vuoto_testa.ora_partenza,
                 ora_fine=cat_pos.vuoto_testa.ora_arrivo,
                 descrizione=(
-                    f"Vuoto testa: {cat_pos.vuoto_testa.codice_origine} "
+                    f"Vuoto testa{' (uscita serale K-1)' if cat_pos.vuoto_testa.cross_notte_giorno_precedente else ''}: "
+                    f"{cat_pos.vuoto_testa.codice_origine} "
                     f"→ {cat_pos.vuoto_testa.codice_destinazione}"
                 ),
                 is_validato_utente=True,
-                metadata_json={"motivo": cat_pos.vuoto_testa.motivo},
+                metadata_json={
+                    "motivo": cat_pos.vuoto_testa.motivo,
+                    # Sprint 5.6 R2: il vuoto è materializzato la sera prima
+                    # (es. parte 23:30 di K-1) per essere pronto a inizio
+                    # servizio di K. Solo per vuoti di USCITA dal deposito.
+                    "cross_notte_giorno_precedente": cat_pos.vuoto_testa.cross_notte_giorno_precedente,
+                },
             )
         )
         seq_blocco += 1
@@ -405,6 +463,9 @@ async def _persisti_un_giro(
     session: AsyncSession,
     programma_id: int,
     azienda_id: int,
+    *,
+    periodo_valido_da: date | None = None,
+    periodo_valido_a: date | None = None,
 ) -> int:
     """Persiste un singolo giro: GiroMateriale + giornate + varianti + blocchi.
 
@@ -423,6 +484,15 @@ async def _persisti_un_giro(
     km_totali = _km_totali_giro(entry.giro)
     km_media_giornaliera = round(km_totali / n_giornate, 2) if n_giornate > 0 else 0.0
 
+    # Sprint 5.6 R3: km_media_annua = intersezione `valido_in_date_json`
+    # delle prime corse di ogni giornata × km giornaliera. Richiede il
+    # periodo del programma (fornito dal builder.py orchestrator).
+    km_media_annua: float | None = None
+    if periodo_valido_da is not None and periodo_valido_a is not None:
+        km_media_annua = _km_media_annua_giro(
+            entry.giro, periodo_valido_da, periodo_valido_a
+        )
+
     gm = GiroMateriale(
         azienda_id=azienda_id,
         numero_turno=entry.numero_turno,
@@ -432,7 +502,7 @@ async def _persisti_un_giro(
         materiale_tipo_codice=materiale_tipo,
         numero_giornate=n_giornate,
         km_media_giornaliera=km_media_giornaliera,
-        km_media_annua=None,  # calcolo annuo preciso (calendario × applicabilità) — futuro
+        km_media_annua=km_media_annua,
         posti_1cl=0,
         posti_2cl=0,
         localita_manutenzione_partenza_id=loc.id,
@@ -574,6 +644,9 @@ async def persisti_giri(
     session: AsyncSession,
     programma_id: int,
     azienda_id: int,
+    *,
+    periodo_valido_da: date | None = None,
+    periodo_valido_a: date | None = None,
 ) -> list[int]:
     """Persiste una lista di giri assegnati nel DB. Ritorna i loro ``id``.
 
@@ -607,6 +680,13 @@ async def persisti_giri(
 
     giro_ids: list[int] = []
     for entry in giri_da_persistere:
-        gid = await _persisti_un_giro(entry, session, programma_id, azienda_id)
+        gid = await _persisti_un_giro(
+            entry,
+            session,
+            programma_id,
+            azienda_id,
+            periodo_valido_da=periodo_valido_da,
+            periodo_valido_a=periodo_valido_a,
+        )
         giro_ids.append(gid)
     return giro_ids

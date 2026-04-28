@@ -187,12 +187,20 @@ def test_catena_cross_notte_no_vuoto_coda_e_non_chiusa() -> None:
     assert res.chiusa_a_localita is False
 
 
-def test_vuoto_testa_pre_mezzanotte_raises() -> None:
-    """Prima corsa alle 00:10 con durata stimata 30' + gap 5' → impossibile."""
+def test_vuoto_testa_pre_mezzanotte_cross_notte_k_minus_1() -> None:
+    """Sprint 5.6 R2: prima corsa alle 00:10 → vuoto USCITA cross-notte K-1
+    (parte la sera prima alle 23:35, arriva 00:05). Niente errore."""
     a = _c("MI_CADORNA", "BG", (0, 10), (1, 0))
     cat = Catena(corse=(a,))
-    with pytest.raises(PosizionamentoImpossibileError, match="00:00"):
-        posiziona_su_localita(cat, LOC_FIORENZA, _WL)
+    res = posiziona_su_localita(cat, LOC_FIORENZA, _WL)
+    assert res.vuoto_testa is not None
+    assert res.vuoto_testa.cross_notte_giorno_precedente is True
+    # Vuoto: arrivo = 00:10 - 5' = 00:05; partenza = 00:05 - 30' = 23:35
+    # In rappresentazione modulo-24 → 23:35 e 00:05
+    assert res.vuoto_testa.ora_partenza == time(23, 35)
+    assert res.vuoto_testa.ora_arrivo == time(0, 5)
+    assert res.vuoto_testa.codice_origine == "MI_FIO"
+    assert res.vuoto_testa.codice_destinazione == "MI_CADORNA"
 
 
 def test_vuoto_coda_post_mezzanotte_no_vuoto_e_non_chiusa() -> None:

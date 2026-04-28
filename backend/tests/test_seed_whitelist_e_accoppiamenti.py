@@ -36,22 +36,10 @@ from seed_whitelist_e_accoppiamenti import (
     seed_all,
 )
 
-pytestmark = [
-    pytest.mark.skipif(
-        os.getenv("SKIP_DB_TESTS") == "1",
-        reason="DB not configured for tests",
-    ),
-    pytest.mark.skipif(
-        os.getenv("ALLOW_SEED_TESTS") != "1",
-        reason=(
-            "test seed conflitta con materiale_tipo PK globale (codice). "
-            "Se i materiali ETR421/425/526/204 esistono già nel DB per "
-            "qualunque azienda (smoke 5.6), il test fallisce. "
-            "Per eseguirlo: ALLOW_SEED_TESTS=1 + DB pulito (no PdE importato). "
-            "Residuo Sprint 6: spostare test integration su DB template separato."
-        ),
-    ),
-]
+pytestmark = pytest.mark.skipif(
+    os.getenv("SKIP_DB_TESTS") == "1",
+    reason="DB not configured for tests",
+)
 
 # =====================================================================
 # Setup isolato
@@ -115,18 +103,52 @@ _TEST_WHITELIST: dict[str, list[str]] = {
 # ATR125+ATR125 perché ATR115/ATR125 sono pezzi del seed 0002 (azienda
 # trenord reale, vincolo UNIQUE globale su codice — non riproducibili
 # nell'azienda mock `trenord_test_seed`).
-_EXPECTED_MATERIALI = 16
+_EXPECTED_MATERIALI = 4  # = len(_TEST_MATERIALI), MOCK_* per Sprint 5.6 R4
 _EXPECTED_WHITELIST = 13
-_EXPECTED_ACCOPPIAMENTI = 6
+_EXPECTED_ACCOPPIAMENTI = 4  # = len(_TEST_ACCOPPIAMENTI), tutti MOCK_*
 
-# Accoppiamenti testabili in isolamento (escludono ATR115/ATR125).
+# Sprint 5.6 R4: codici materiali con prefix `MOCK_` per evitare conflitti
+# con la PK globale `materiale_tipo.codice`. I codici reali ETR421/425/526/204
+# possono essere già occupati da altre aziende (es. trenord vera con smoke
+# 5.6 importato). I MOCK_* sono creati solo per l'azienda mock di test.
+_TEST_MATERIALI: list[_MaterialeFamiglia] = [
+    _MaterialeFamiglia(
+        codice="MOCK_ETR421",
+        nome_commerciale="MOCK ETR421",
+        famiglia="MOCK Caravaggio",
+        n_casse=4,
+        pezzi_inventario=[],
+    ),
+    _MaterialeFamiglia(
+        codice="MOCK_ETR425",
+        nome_commerciale="MOCK ETR425",
+        famiglia="MOCK Coradia Meridian",
+        n_casse=5,
+        pezzi_inventario=[],
+    ),
+    _MaterialeFamiglia(
+        codice="MOCK_ETR526",
+        nome_commerciale="MOCK ETR526",
+        famiglia="MOCK Coradia Meridian",
+        n_casse=6,
+        pezzi_inventario=[],
+    ),
+    _MaterialeFamiglia(
+        codice="MOCK_ETR204",
+        nome_commerciale="MOCK ETR204",
+        famiglia="MOCK Donizetti",
+        n_casse=4,
+        pezzi_inventario=[],
+    ),
+]
+_TEST_MATERIALI_COUNT = len(_TEST_MATERIALI)
+
+# Accoppiamenti testabili in isolamento (con prefix MOCK_*).
 _TEST_ACCOPPIAMENTI: list[tuple[str, str]] = [
-    ("ETR421", "ETR421"),
-    ("ETR425", "ETR526"),
-    ("ETR526", "ETR526"),
-    ("ETR204", "ETR204"),
-    ("E464", "MD"),
-    ("E464", "Vivalto"),
+    ("MOCK_ETR421", "MOCK_ETR421"),
+    ("MOCK_ETR425", "MOCK_ETR526"),  # 425 < 526 lex
+    ("MOCK_ETR526", "MOCK_ETR526"),
+    ("MOCK_ETR204", "MOCK_ETR204"),
 ]
 
 
@@ -253,6 +275,7 @@ async def test_seed_happy_path() -> None:
         report = await seed_all(
             session,
             _TEST_AZIENDA_CODICE,
+            materiali=_TEST_MATERIALI,
             whitelist=_TEST_WHITELIST,
             accoppiamenti=_TEST_ACCOPPIAMENTI,
         )
@@ -306,6 +329,7 @@ async def test_seed_etr521_non_in_accoppiamenti() -> None:
         await seed_all(
             session,
             _TEST_AZIENDA_CODICE,
+            materiali=_TEST_MATERIALI,
             whitelist=_TEST_WHITELIST,
             accoppiamenti=_TEST_ACCOPPIAMENTI,
         )
@@ -336,6 +360,7 @@ async def test_seed_idempotente_seconda_run_zero_inserts() -> None:
         await seed_all(
             session,
             _TEST_AZIENDA_CODICE,
+            materiali=_TEST_MATERIALI,
             whitelist=_TEST_WHITELIST,
             accoppiamenti=_TEST_ACCOPPIAMENTI,
         )
@@ -344,6 +369,7 @@ async def test_seed_idempotente_seconda_run_zero_inserts() -> None:
         report = await seed_all(
             session,
             _TEST_AZIENDA_CODICE,
+            materiali=_TEST_MATERIALI,
             whitelist=_TEST_WHITELIST,
             accoppiamenti=_TEST_ACCOPPIAMENTI,
         )
@@ -467,6 +493,7 @@ async def test_seed_dry_run_non_scrive() -> None:
         report = await seed_all(
             session,
             _TEST_AZIENDA_CODICE,
+            materiali=_TEST_MATERIALI,
             whitelist=_TEST_WHITELIST,
             accoppiamenti=_TEST_ACCOPPIAMENTI,
             dry_run=True,

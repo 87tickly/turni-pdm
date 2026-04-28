@@ -70,7 +70,38 @@ TURNO PdC                         ← lo COSTRUIAMO noi (algoritmo)
 ASSEGNAZIONE PERSONE              ← anagrafica + indisponibilità
 ```
 
-### 7. Sviluppa per ruoli — 5 dashboard separate
+### 7. NIENTE PIGRIZIA — chiudere bene quello che si comincia
+
+Quando l'utente dice "chiudi bene X", **chiudi davvero**. Niente:
+
+- "lo rimando a Sprint successivo perché è più frontend che backend"
+  (decisione di scope mia, non sua)
+- "è edge case, non impatta il programma corrente" (il programma futuro
+  ne soffrirà)
+- "calcolo stimato approssimativo, vero calcolo in futuro" (se la
+  formula esatta è scrivibile in 1h, scrivila adesso)
+- "feature implementata a metà: ho fatto la validazione ma non lo
+  spostamento" (= half-job)
+
+**Il principio**: lascio aperti residui SOLO se hanno motivazione
+**oggettiva** dichiarata (= "questo schema PK richiede migration
+invasiva, da progettare separatamente") O se l'utente lo ha
+**esplicitamente** chiesto/concordato. Mai per scope-cutting silente
+mio.
+
+**Test del residuo**: prima di marcarlo aperto in TN-UPDATE/commit,
+mi chiedo:
+1. Il fix è scrivibile ora in <2h? Se sì → CHIUDILO
+2. Il fix richiede una decisione utente che non ho? Se sì → chiedi
+3. Il fix è una migration grande / decisione architetturale? Solo
+   allora → marca residuo, ma DOCUMENTA perché è grande
+
+Origine: Sprint 5.6 chiusura, ho lasciato 3 residui per pigrizia
+(API read-side, vuoto cross-notte K-1, km_media_annua). L'utente
+ha chiesto perché. Risposta sincera: nessuno dei tre era davvero
+impossibile, era solo che mi accontentavo del risultato dimostrativo.
+
+### 8. Sviluppa per ruoli — 5 dashboard separate
 
 Il programma serve **persone con ruoli diversi**:
 1. Pianificatore Giro Materiale

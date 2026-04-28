@@ -319,3 +319,71 @@ async def test_response_shape_completa(client: TestClient) -> None:
     assert body["n_giri_chiusi"] == 1
     assert isinstance(body["giri_ids"], list)
     assert len(body["giri_ids"]) == 1
+
+
+# =====================================================================
+# Sprint 5.6 R1 — read-side endpoints
+# =====================================================================
+
+
+async def test_get_giri_programma_dopo_genera(client: TestClient) -> None:
+    """GET /api/programmi/{id}/giri ritorna i giri persistiti."""
+    prog_id = await _setup_db_completo()
+    token = _login(client, "pianificatore_giro_demo", "demo12345")
+    # Prima genera 1 giro
+    res_gen = client.post(
+        f"/api/programmi/{prog_id}/genera-giri",
+        params=_PARAMS_OK,
+        headers=_auth(token),
+    )
+    assert res_gen.status_code == 200
+    # Poi GET la lista
+    res = client.get(f"/api/programmi/{prog_id}/giri", headers=_auth(token))
+    assert res.status_code == 200
+    body = res.json()
+    assert isinstance(body, list)
+    assert len(body) == 1
+    item = body[0]
+    assert item["numero_turno"].startswith("G-")
+    assert "km_media_giornaliera" in item
+    assert "motivo_chiusura" in item
+    assert "chiuso" in item
+
+
+async def test_get_giro_dettaglio(client: TestClient) -> None:
+    """GET /api/giri/{id} ritorna giornate + varianti + blocchi."""
+    prog_id = await _setup_db_completo()
+    token = _login(client, "pianificatore_giro_demo", "demo12345")
+    res_gen = client.post(
+        f"/api/programmi/{prog_id}/genera-giri",
+        params=_PARAMS_OK,
+        headers=_auth(token),
+    )
+    giro_id = res_gen.json()["giri_ids"][0]
+    res = client.get(f"/api/giri/{giro_id}", headers=_auth(token))
+    assert res.status_code == 200
+    body = res.json()
+    assert body["id"] == giro_id
+    assert body["numero_giornate"] == 1
+    assert "giornate" in body
+    assert len(body["giornate"]) == 1
+    g0 = body["giornate"][0]
+    assert g0["numero_giornata"] == 1
+    assert "varianti" in g0
+    assert len(g0["varianti"]) >= 1
+    v0 = g0["varianti"][0]
+    assert "blocchi" in v0
+    # Almeno 2 blocchi corsa (setup ha 2 corse)
+    blocchi_corsa = [b for b in v0["blocchi"] if b["tipo_blocco"] == "corsa_commerciale"]
+    assert len(blocchi_corsa) == 2
+
+
+async def test_get_giro_404_se_inesistente(client: TestClient) -> None:
+    token = _login(client, "pianificatore_giro_demo", "demo12345")
+    res = client.get("/api/giri/999999999", headers=_auth(token))
+    assert res.status_code == 404
+
+
+async def test_get_giri_programma_401_senza_token(client: TestClient) -> None:
+    res = client.get("/api/programmi/1/giri")
+    assert res.status_code == 401

@@ -964,6 +964,57 @@ async def test_persister_popola_km_media_giornaliera(azienda_id: int) -> None:
         assert gm.km_media_giornaliera == 100.0
 
 
+async def test_persister_popola_km_media_annua(azienda_id: int) -> None:
+    """Sprint 5.6 R3: km_media_annua = km_giornaliera * n_giorni_validi
+    nel periodo del programma. Calcolato intersecando `valido_in_date_json`
+    della prima corsa di ogni giornata con [periodo_valido_da, ..._a]."""
+    await _crea_stazione("S99001", azienda_id)
+    await _crea_stazione("S99002", azienda_id)
+    await _crea_localita("TEST_LOC_FIO", "S99001", azienda_id)
+    c1 = await _crea_corsa("TEST_AN_001", "S99001", "S99002", (8, 0), (9, 0), azienda_id)
+
+    # Inietto km_tratta + valido_in_date_json (5 lunedì)
+    async with session_scope() as session:
+        await session.execute(
+            text(
+                "UPDATE corsa_commerciale SET km_tratta = 100, "
+                "valido_in_date_json = '[\"2026-01-05\",\"2026-01-12\",\"2026-01-19\","
+                "\"2026-01-26\",\"2026-02-02\"]'::jsonb "
+                "WHERE id = :c1"
+            ),
+            {"c1": c1},
+        )
+
+    async with session_scope() as session:
+        c1_orm = (
+            await session.execute(select(CorsaCommerciale).where(CorsaCommerciale.id == c1))
+        ).scalar_one()
+        prog_id = await _crea_programma_minimo(session, azienda_id)
+        giro = _giro_assegnato_singolo(
+            localita_codice="TEST_LOC_FIO",
+            corse_orm=(c1_orm,),
+            chiusa=True,
+        )
+        await persisti_giri(
+            [GiroDaPersistere(numero_turno="G-TST-AN", giro=giro)],
+            session,
+            prog_id,
+            azienda_id,
+            periodo_valido_da=date(2026, 1, 1),
+            periodo_valido_a=date(2026, 12, 31),
+        )
+        await session.commit()
+
+    async with session_scope() as session:
+        gm = (
+            await session.execute(
+                select(GiroMateriale).where(GiroMateriale.numero_turno == "G-TST-AN")
+            )
+        ).scalar_one()
+        # 100 km/giornata × 5 giorni applicabili = 500 km/anno
+        assert gm.km_media_annua == 500.0
+
+
 async def test_persister_corsa_rientro_9xxxx_se_genera_rientro_sede(azienda_id: int) -> None:
     """Sprint 5.6 Feature 4: con genera_rientro_sede=True e ultima dest !=
     stazione_collegata sede, viene creato un blocco materiale_vuoto 9NNNN."""

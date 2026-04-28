@@ -76,12 +76,13 @@ class LocalitaSenzaStazioneError(ValueError):
 
 
 class PosizionamentoImpossibileError(ValueError):
-    """Vuoto di testa partirebbe prima delle 00:00 (prima corsa troppo
-    presto rispetto a ``durata_vuoto_default_min + gap_min``).
+    """Vuoto di testa cade dentro la finestra vietata 01:00-03:00 di
+    uscita deposito (decisione utente Sprint 5.6).
 
-    In single-day non possiamo materializzare un vuoto che inizia "il
-    giorno prima". 4.4.3 gestirà giri multi-giornata che ereditano la
-    chiusura dalla giornata precedente.
+    Sprint 5.6 R2: il caso "vuoto pre-mezzanotte" (`partenza_min < 0`)
+    NON è più un errore — il builder lo sposta a cross-notte K-1
+    (uscita serale dal deposito). L'errore resta solo per il caso in
+    cui il vuoto cadrebbe dentro la finestra notturna vietata.
     """
 
 
@@ -140,6 +141,14 @@ class BloccoMaterialeVuoto:
 
     Si traduce poi in ``CorsaMaterialeVuoto`` ORM (Sprint 4.4.5
     persistenza), con ``origine='generato_da_giro_materiale'``.
+
+    Sprint 5.6 R2: ``cross_notte_giorno_precedente`` indica che il
+    vuoto è materializzato come **uscita serale dal deposito il giorno
+    K-1**, ossia parte alle 22:00-23:59 di K-1 per essere pronto
+    all'inizio servizio di giornata K (caso prima corsa che parte
+    nelle prime ore di K, es. 00:22). Vincolo applicabile **solo al
+    vuoto di USCITA** (`motivo='testa'`); il rientro in deposito è
+    sempre libero.
     """
 
     codice_origine: str
@@ -147,6 +156,7 @@ class BloccoMaterialeVuoto:
     ora_partenza: time
     ora_arrivo: time
     motivo: str  # 'testa' | 'coda' — per tracciabilità in metadata_json
+    cross_notte_giorno_precedente: bool = False
 
 
 @dataclass(frozen=True)
@@ -270,19 +280,29 @@ def posiziona_su_localita(
     if prima.codice_origine != s and prima.codice_origine in whitelist_stazioni:
         arrivo_min = _time_to_min(prima.ora_partenza) - params.gap_min
         partenza_min = arrivo_min - params.durata_vuoto_default_min
+
+        cross_notte_K_minus_1 = False
         if partenza_min < 0:
-            raise PosizionamentoImpossibileError(
-                f"Vuoto di testa per catena che inizia alle "
-                f"{prima.ora_partenza.isoformat()} partirebbe prima delle "
-                f"00:00 (durata stimata {params.durata_vuoto_default_min}' + "
-                f"gap {params.gap_min}'). Riduci durata stimata o "
-                "rimanda la chiusura a multi_giornata."
-            )
-        # Sprint 5.6 Feature 3: finestra vietata uscita deposito 01:00-03:00.
-        # Se attiva e il vuoto cade dentro, scarta la catena (futuro:
-        # spostamento cross-notte K-1 in scope successivo).
+            # Sprint 5.6 R2: vuoto di USCITA cross-notte K-1.
+            # Il treno esce dal deposito la sera prima (es. 23:35) per
+            # essere a destinazione all'inizio della giornata K (es. 00:05).
+            # Solo la PARTENZA va spostata indietro (= notte K-1); l'ARRIVO
+            # resta nelle prime ore di K (es. 00:05) come da arrivo_min
+            # già calcolato. Decisione utente 2026-04-28: vuoti di USCITA
+            # hanno questo trattamento; vuoti di INGRESSO (rientro deposito)
+            # NON hanno mai vincoli orari.
+            cross_notte_K_minus_1 = True
+            partenza_min += 24 * 60
+            # arrivo_min resta invariato (può essere 0..arrivo_corsa).
+            # Vincolo finestra vietata 01:00-03:00 NON applicabile qui:
+            # l'orario serale (es. 23:35) è fuori dalla finestra notturna
+            # vietata.
+
+        # Vincolo finestra vietata uscita deposito 01:00-03:00 (solo se
+        # NON cross-notte K-1: in cross-notte siamo già la sera prima).
         if (
-            params.finestra_uscita_vietata_attiva
+            not cross_notte_K_minus_1
+            and params.finestra_uscita_vietata_attiva
             and params.finestra_uscita_vietata_inizio_min
             <= partenza_min
             < params.finestra_uscita_vietata_fine_min
@@ -301,6 +321,7 @@ def posiziona_su_localita(
             ora_partenza=_min_to_time(partenza_min),
             ora_arrivo=_min_to_time(arrivo_min),
             motivo="testa",
+            cross_notte_giorno_precedente=cross_notte_K_minus_1,
         )
 
     # ---- Vuoto di coda: solo se ultima.dest ∈ whitelist e ≠ sede ----

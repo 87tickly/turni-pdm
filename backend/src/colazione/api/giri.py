@@ -21,10 +21,12 @@ Modalità di generazione (decisione utente):
   obbligatorio. Per N località il pianificatore lancia N chiamate.
 """
 
-from datetime import date
+from datetime import date, datetime, time
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import BigInteger, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.auth import require_role
@@ -39,6 +41,7 @@ from colazione.domain.builder_giro.builder import (
 )
 from colazione.domain.builder_giro.persister import LocalitaNonTrovataError
 from colazione.domain.builder_giro.risolvi_corsa import RegolaAmbiguaError
+from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
 from colazione.schemas.security import CurrentUser
 
 router = APIRouter(prefix="/api/programmi", tags=["giri"])
@@ -144,3 +147,227 @@ async def genera_giri_endpoint(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return _to_response(result)
+
+
+# =====================================================================
+# Read-side endpoints (Sprint 5.6 R1) — alimentano il frontend Pianificatore
+# =====================================================================
+
+
+class GiroMaterialeListItem(BaseModel):
+    """Item della lista giri di un programma (compatto, per tabella UI)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    numero_turno: str
+    tipo_materiale: str
+    materiale_tipo_codice: str | None
+    numero_giornate: int
+    km_media_giornaliera: float | None
+    km_media_annua: float | None
+    motivo_chiusura: str | None
+    chiuso: bool
+    stato: str
+    created_at: datetime
+
+
+class GiroBloccoRead(BaseModel):
+    """Singolo blocco di un giro (corsa, vuoto, evento)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    seq: int
+    tipo_blocco: str
+    corsa_commerciale_id: int | None
+    corsa_materiale_vuoto_id: int | None
+    stazione_da_codice: str | None
+    stazione_a_codice: str | None
+    ora_inizio: time | None
+    ora_fine: time | None
+    descrizione: str | None
+    is_validato_utente: bool
+    metadata_json: dict[str, Any]
+
+
+class GiroVarianteRead(BaseModel):
+    """Variante calendario di una giornata (Sprint 5.6: 1 variante 1:1)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    variant_index: int
+    validita_testo: str | None
+    validita_dates_apply_json: list[Any]
+    validita_dates_skip_json: list[Any]
+    blocchi: list[GiroBloccoRead]
+
+
+class GiroGiornataRead(BaseModel):
+    """Giornata di un giro (1..numero_giornate)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    numero_giornata: int
+    varianti: list[GiroVarianteRead]
+
+
+class GiroMaterialeDettaglioRead(BaseModel):
+    """Dettaglio completo di un giro per visualizzatore Gantt."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    numero_turno: str
+    tipo_materiale: str
+    materiale_tipo_codice: str | None
+    numero_giornate: int
+    km_media_giornaliera: float | None
+    km_media_annua: float | None
+    localita_manutenzione_partenza_id: int | None
+    localita_manutenzione_arrivo_id: int | None
+    stato: str
+    generation_metadata_json: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+    giornate: list[GiroGiornataRead]
+
+
+@router.get(
+    "/{programma_id}/giri",
+    response_model=list[GiroMaterialeListItem],
+    summary="Lista giri persistiti del programma",
+)
+async def list_giri_programma(
+    programma_id: int,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> list[GiroMaterialeListItem]:
+    """Ritorna i giri persistiti per il programma. Filtro per
+    `generation_metadata_json->>'programma_id'` (no FK diretta).
+    """
+    stmt = (
+        select(GiroMateriale)
+        .where(
+            GiroMateriale.azienda_id == user.azienda_id,
+            cast(
+                GiroMateriale.generation_metadata_json["programma_id"].astext,
+                BigInteger,
+            )
+            == programma_id,
+        )
+        .order_by(GiroMateriale.numero_turno)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    out: list[GiroMaterialeListItem] = []
+    for g in rows:
+        meta = g.generation_metadata_json or {}
+        out.append(
+            GiroMaterialeListItem(
+                id=g.id,
+                numero_turno=g.numero_turno,
+                tipo_materiale=g.tipo_materiale,
+                materiale_tipo_codice=g.materiale_tipo_codice,
+                numero_giornate=g.numero_giornate,
+                km_media_giornaliera=float(g.km_media_giornaliera) if g.km_media_giornaliera is not None else None,
+                km_media_annua=float(g.km_media_annua) if g.km_media_annua is not None else None,
+                motivo_chiusura=meta.get("motivo_chiusura"),
+                chiuso=bool(meta.get("chiuso", False)),
+                stato=g.stato,
+                created_at=g.created_at,
+            )
+        )
+    return out
+
+
+# Router separato (radice /api) per il dettaglio singolo: il prefix
+# `/api/programmi/{id}/giri` è del router principale, ma il dettaglio
+# di un giro si lookup-pa via `/api/giri/{id}` indipendentemente dal
+# programma.
+giri_dettaglio_router = APIRouter(prefix="/api/giri", tags=["giri"])
+
+
+@giri_dettaglio_router.get(
+    "/{giro_id}",
+    response_model=GiroMaterialeDettaglioRead,
+    summary="Dettaglio giro materiale (per visualizzatore Gantt)",
+)
+async def get_giro_dettaglio(
+    giro_id: int,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> GiroMaterialeDettaglioRead:
+    """Ritorna giro + giornate + varianti + blocchi (sequenza
+    cronologica). Usato dal frontend per renderizzare la timeline Gantt.
+    """
+    stmt = select(GiroMateriale).where(
+        GiroMateriale.id == giro_id,
+        GiroMateriale.azienda_id == user.azienda_id,
+    )
+    g = (await session.execute(stmt)).scalar_one_or_none()
+    if g is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Giro non trovato")
+
+    # Giornate ordinate per numero
+    gg_stmt = (
+        select(GiroGiornata)
+        .where(GiroGiornata.giro_materiale_id == giro_id)
+        .order_by(GiroGiornata.numero_giornata)
+    )
+    giornate_orm = (await session.execute(gg_stmt)).scalars().all()
+
+    giornate_out: list[GiroGiornataRead] = []
+    for gg in giornate_orm:
+        gv_stmt = (
+            select(GiroVariante)
+            .where(GiroVariante.giro_giornata_id == gg.id)
+            .order_by(GiroVariante.variant_index)
+        )
+        varianti_orm = (await session.execute(gv_stmt)).scalars().all()
+
+        varianti_out: list[GiroVarianteRead] = []
+        for gv in varianti_orm:
+            gb_stmt = (
+                select(GiroBlocco)
+                .where(GiroBlocco.giro_variante_id == gv.id)
+                .order_by(GiroBlocco.seq)
+            )
+            blocchi_orm = (await session.execute(gb_stmt)).scalars().all()
+            blocchi_out = [GiroBloccoRead.model_validate(b) for b in blocchi_orm]
+            varianti_out.append(
+                GiroVarianteRead(
+                    id=gv.id,
+                    variant_index=gv.variant_index,
+                    validita_testo=gv.validita_testo,
+                    validita_dates_apply_json=list(gv.validita_dates_apply_json or []),
+                    validita_dates_skip_json=list(gv.validita_dates_skip_json or []),
+                    blocchi=blocchi_out,
+                )
+            )
+
+        giornate_out.append(
+            GiroGiornataRead(
+                id=gg.id,
+                numero_giornata=gg.numero_giornata,
+                varianti=varianti_out,
+            )
+        )
+
+    return GiroMaterialeDettaglioRead(
+        id=g.id,
+        numero_turno=g.numero_turno,
+        tipo_materiale=g.tipo_materiale,
+        materiale_tipo_codice=g.materiale_tipo_codice,
+        numero_giornate=g.numero_giornate,
+        km_media_giornaliera=float(g.km_media_giornaliera) if g.km_media_giornaliera is not None else None,
+        km_media_annua=float(g.km_media_annua) if g.km_media_annua is not None else None,
+        localita_manutenzione_partenza_id=g.localita_manutenzione_partenza_id,
+        localita_manutenzione_arrivo_id=g.localita_manutenzione_arrivo_id,
+        stato=g.stato,
+        generation_metadata_json=dict(g.generation_metadata_json or {}),
+        created_at=g.created_at,
+        updated_at=g.updated_at,
+        giornate=giornate_out,
+    )

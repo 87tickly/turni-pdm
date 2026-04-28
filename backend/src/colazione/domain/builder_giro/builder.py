@@ -504,7 +504,14 @@ async def genera_giri(
         )
         for idx, giro in enumerate(giri_assegnati, start=1)
     ]
-    giro_ids = await persisti_giri(giri_da_persistere, session, programma_id, azienda_id)
+    giro_ids = await persisti_giri(
+        giri_da_persistere,
+        session,
+        programma_id,
+        azienda_id,
+        periodo_valido_da=programma.valido_da,
+        periodo_valido_a=programma.valido_a,
+    )
     await session.commit()
 
     # 8. Stats

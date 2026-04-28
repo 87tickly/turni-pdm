@@ -10,6 +10,144 @@
 
 ---
 
+## 2026-04-28 (34) — Sprint 5.6 chiusura definitiva: R1-R5 + CLAUDE.md regola anti-pigrizia
+
+### Contesto
+
+L'utente ha contestato i 5 residui che avevo lasciato aperti nel commit
+b847919 (Sprint 5.6 entry 33). Riconosciuto onestamente che 3 dei 5
+erano scelte di scope-cutting mio, non motivate. Aggiunta regola 7 a
+``CLAUDE.md`` ("NIENTE PIGRIZIA — chiudere bene quello che si comincia")
+e chiusi tutti e 5 i residui in questa sessione.
+
+### Modifiche
+
+**CLAUDE.md regola 7 — NIENTE PIGRIZIA**: stabilisce il "test del
+residuo" (fix in <2h → chiudilo; richiede decisione utente → chiedi;
+solo migration grande/architetturale → marca con motivazione oggettiva).
+Origine dichiarata: i 3 residui di scope-cutting di entry 33.
+
+**R1 — 6 API read-side** (nuove):
+
+- ``GET /api/programmi/{id}/giri`` — lista giri persistiti del programma
+  con stats (km, n_giornate, motivo). Filtra via
+  ``generation_metadata_json->>'programma_id'`` (no FK diretta).
+- ``GET /api/giri/{id}`` — dettaglio completo: giornate + varianti +
+  blocchi (sequenza cronologica). Per visualizzatore Gantt.
+- ``GET /api/stazioni`` — lista stazioni PdE per filtri/menu.
+- ``GET /api/materiali`` — lista ``materiale_tipo`` per composizione.
+- ``GET /api/depots`` — 25 depot PdC + ``stazione_principale_codice``.
+- ``GET /api/direttrici`` — distinct delle direttrici dal PdE.
+- ``GET /api/localita-manutenzione`` — sedi (codice, codice_breve,
+  ``stazione_collegata_codice``).
+
+Nuovo modulo ``api/anagrafiche.py``. Estensione ``api/giri.py`` con 2
+endpoint read. Pydantic schemas: ``GiroMaterialeListItem``,
+``GiroMaterialeDettaglioRead``, ``GiroGiornataRead``, ``GiroVarianteRead``,
+``GiroBloccoRead``, ``StazioneRead``, ``MaterialeRead``, ``DepotRead``,
+``LocalitaManutenzioneRead``. Auth ``PIANIFICATORE_GIRO`` (admin
+bypassa) + multi-tenant via ``user.azienda_id``.
+
+10 nuovi test integration: ``test_anagrafiche_api.py`` (6 endpoint) +
+4 test in ``test_genera_giri_api.py`` (lista + dettaglio + 404 + 401).
+
+**R2 — vuoto pre-mezzanotte cross-notte K-1**:
+
+Implementato spostamento del vuoto di USCITA che cadrebbe prima delle
+00:00 al giorno K-1 (= "uscita serale dal deposito"). Caso reale del
+PdE: corsa che parte alle 00:22 → vuoto testa partirebbe alle 23:47 di
+K-1 → ora rappresentato come tale, niente più "catena scartata".
+
+- ``BloccoMaterialeVuoto`` aggiunge ``cross_notte_giorno_precedente:
+  bool = False``. Per i vuoti USCITA con ``partenza_min < 0``, il flag è
+  True; ``ora_partenza`` rappresenta l'ora serale K-1 (es. 23:47),
+  ``ora_arrivo`` resta nelle prime ore di K (es. 00:17).
+- ``PosizionamentoImpossibileError`` ora si solleva SOLO per la finestra
+  vietata 01:00-03:00 (il caso pre-mezzanotte è gestito).
+- Persister scrive il flag in ``metadata_json`` del ``GiroBlocco``
+  ("cross_notte_giorno_precedente": true) per consumo UI.
+- Test: aggiornato ``test_vuoto_testa_pre_mezzanotte_cross_notte_k_minus_1``
+  (sostituisce il vecchio ``_raises``).
+
+**Decisione utente confermata 2026-04-28**: vincolo orario solo per
+USCITA dal deposito (vuoto testa, corsa virtuale di uscita); il
+RIENTRO (vuoto coda, 9NNNN) NON ha mai vincoli orari.
+
+**R3 — ``km_media_annua`` calcolato**:
+
+Nuovo helper ``_km_media_annua_giro(giro, valido_da, valido_a)`` nel
+persister: per ogni giornata K, intersezione del ``valido_in_date_json``
+della prima corsa con il periodo del programma → ``n_giorni_K``;
+``km_anno = sum(km_giornata_K * n_giorni_K)``. Stima approssimata
+(prima corsa rappresentativa della giornata) ma significativa.
+
+Signature ``persisti_giri`` estesa con keyword-only ``periodo_valido_da``
+e ``periodo_valido_a``. ``builder.genera_giri`` li passa dal
+``programma.valido_da/valido_a``. Test specifico ``test_persister_popola_km_media_annua``.
+
+**R4 — test seed senza migration grande**:
+
+Risolto il conflitto PK ``materiale_tipo.codice`` globale usando
+codici ``MOCK_*`` nei test (es. ``MOCK_ETR421`` invece di ``ETR421``).
+Il pattern ``materiali=`` di ``seed_all`` (già presente) accetta
+override. Tolto lo ``ALLOW_SEED_TESTS=1`` skip — i 10 test seed ora
+girano sempre. La migration ``materiale_tipo (codice, azienda_id)``
+UNIQUE resta come decisione architetturale aperta (Sprint 7+:
+multi-tenant data isolation completo).
+
+**R5 — dimostrazione Cremona ATR803**:
+
+Nuovo script ``scripts/smoke_56_cremona.py``. Programma "Trenord
+2025-2026 invernale Cremona ATR803", direttrice
+``MANTOVA-CREMONA-LODI-MILANO`` (35 corse uniche), composizione
+``[ATR803]`` singola, sede ``IMPMAN_CREMONA``, ``km_max_ciclo=5000``.
+
+**Risultati**: 35 giri creati, 490 corse processate (= tutte quelle
+direttrice valide nei 14 giorni), 0 corse residue, 0 warnings. Mix
+multi-giornata da 6 a 57 corse/giro. km_media_giornaliera 314-503,
+km_media_annua stima fino a 1.16M km.
+
+**Conferma operativa**: lo stesso algoritmo gestisce 2 programmi
+completamente diversi (Tirano ETR526+ETR425 con whitelist FIO + sosta
+extra Tirano/Sondrio/Lecco/Colico/Chiavenna; Cremona ATR803 con
+whitelist CRE = solo Cremona, no sosta extra) cambiando **solo dato**.
+Il principio "regole = logica base, mai hardcoded" è rispettato.
+
+### Verifiche
+
+- ``pytest``: **394 verdi**, **0 skippati**. Era 372/11 al commit b847919.
+- ``ruff``: clean (78 file)
+- ``mypy --strict``: no issues, 48 source files
+
+### Stato
+
+**Sprint 5 chiuso definitivamente**. Tutti i residui R1-R5 chiusi:
+- R1: 6 API read-side + 10 test
+- R2: cross-notte K-1 reale (uscita serale K-1)
+- R3: km_media_annua calcolato
+- R4: seed test passano senza skip (codici MOCK_*)
+- R5: Cremona ATR803 dimostrato
+
+Memoria persistente CLAUDE.md regola 7 (anti-pigrizia) attiva per le
+sessioni future.
+
+### Prossimo step
+
+**Sprint 6 — Frontend Pianificatore Giro Materiale**:
+- Sub 6.1: layout + auth flow + router (React Router 6)
+- Sub 6.2: pagina Lista programmi (consuma GET /api/programmi)
+- Sub 6.3: pagina Dettaglio programma + editor regole (menu a tendina
+  da GET /api/stazioni, /materiali, /direttrici, /localita-manutenzione,
+  /depots)
+- Sub 6.4: pagina Lista giri del programma (GET /api/programmi/{id}/giri)
+- Sub 6.5: ⭐ **Visualizzatore Gantt** giro singolo (GET /api/giri/{id})
+  che replica il PDF Trenord turno 1132
+
+Stack già scaffoldato: React 18 + TS + Vite + Tailwind + Radix UI
+(shadcn-style) + React Query + React Router.
+
+---
+
 ## 2026-04-28 (33) — Sprint 5.6: smoke reale Mi.Centrale↔Tirano + refactor builder modello polivalente
 
 ### Contesto

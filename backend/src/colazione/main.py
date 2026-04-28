@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from colazione import __version__
+from colazione.api import anagrafiche as anagrafiche_routes
 from colazione.api import auth as auth_routes
 from colazione.api import giri as giri_routes
 from colazione.api import programmi as programmi_routes
@@ -51,6 +52,8 @@ def create_app() -> FastAPI:
     app.include_router(auth_routes.router)
     app.include_router(programmi_routes.router)
     app.include_router(giri_routes.router)
+    app.include_router(giri_routes.giri_dettaglio_router)
+    app.include_router(anagrafiche_routes.router)
 
     return app
 
