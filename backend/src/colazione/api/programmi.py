@@ -140,9 +140,11 @@ async def create_programma(
         valido_a=payload.valido_a,
         stato="bozza",
         km_max_giornaliero=payload.km_max_giornaliero,
+        km_max_ciclo=payload.km_max_ciclo,
         n_giornate_default=payload.n_giornate_default,
         fascia_oraria_tolerance_min=payload.fascia_oraria_tolerance_min,
         strict_options_json=payload.strict_options_json.model_dump(),
+        stazioni_sosta_extra_json=payload.stazioni_sosta_extra_json,
         created_by_user_id=user.user_id,
     )
     session.add(programma)

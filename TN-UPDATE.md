@@ -10,6 +10,191 @@
 
 ---
 
+## 2026-04-28 (33) — Sprint 5.6: smoke reale Mi.Centrale↔Tirano + refactor builder modello polivalente
+
+### Contesto
+
+Sub 5.6 del piano `docs/SPRINT-5-RIPENSAMENTO.md` §5.6: smoke test su PdE
+Trenord 2025-2026 reale (10579 corse, 5.3 MB Excel) per validare l'intera
+pipeline pure (Sub 5.1→5.5). Il smoke è partito come test di realtà ma
+ha scoperto **cinque bug strutturali del builder**, che hanno richiesto
+refactor incrementale guidato dal feedback dell'utente (ex-pianificatore
+Trenord). La sub è terminata con 4 nuove Feature implementate + smoke v4
+verde + 13 file di memoria persistente.
+
+### Cosa è stato fatto
+
+**Smoke v1 → bug parser bus**: il PdE Trenord ha colonna `Modalità di
+effettuazione` con 6536 treni (`T`) + 4043 bus sostitutivi (`B`). Il
+parser COLAZIONE non leggeva la colonna → i bus venivano trattati come
+materiale rotabile. Fix in `pde_importer.py:367-381`: filtro a monte
+(scarta righe `B`). Re-import: 6536 corse, 252 sulla direttrice TIRANO
+(era 507 con bus).
+
+**Smoke v2 → modello operativo**: confermati i 6 principi del piano
+§2 con dati reali. 350/350 vuoti tecnici intra-whitelist FIO ✅, treno
+dorme in linea (Lecco/Sondrio/Tirano) ✅, sede partenza/arrivo 100%
+FIO ✅, multi-giornata norma ✅. Ma scoperti residui: km_media_giornaliera
+sempre NULL, motivo_chiusura `non_chiuso` per giri che chiudevano in sede,
+giornate vuote dentro giri multi-giornata, 81 convogli su 28 corse/giorno
+(era atteso 5-6).
+
+**Smoke v3 → regola stretta**: filtri regola raffinati a "diretti
+Mi.Centrale↔Tirano" (`codice_origine in [S01700, S01440]`) → 130 corse
+selettive. Verificato con utente: ETR425+526 vanno SOLO sui diretti.
+Top stazioni di chiusura giornata: tutte in whitelist FIO + Tirano
+(niente più Lecco/Sondrio/Mandello/Lierna/Bellano).
+
+**Refactor Sprint 5.6 (4 step)**:
+
+1. **Step 1** — `depot.stazione_principale_codice` popolato per 24/25
+   depot Trenord (FIORENZA resta NULL: deposito senza stazione PdE).
+   Migration **0008** (`d8a91f2b3c47`) aggiunge
+   `programma_materiale.stazioni_sosta_extra_json: JSONB NOT NULL DEFAULT
+   '[]'`. ORM + Pydantic Read/Create/Update aggiornati. Fix collaterale:
+   il `create_programma` handler non passava `km_max_ciclo` (residuo
+   Sprint 5.1).
+
+2. **Step 2** — `multi_giornata.py` refactor: chiusura giro **dinamica**
+   `(km_cap_raggiunto AND vicino_sede)` invece di break su
+   `chiusa_a_localita=True`. Nuova `whitelist_sede: frozenset[str]` in
+   `ParamMultiGiornata`. **Backward compat**: senza `km_max_ciclo`
+   (default `None`), comportamento legacy (= modo "test puri pre-Sprint
+   5.6") preservato. 25 test multi_giornata pure verdi (3 aggiornati per
+   modo dinamico).
+
+3. **Step 3** — Persister popola `km_media_giornaliera = sum(km_tratta) /
+   numero_giornate` + crea blocco `materiale_vuoto` con
+   `numero_treno_vuoto = "9NNNN"` (5 cifre, prefix 9, sequenziale globale)
+   come **corsa rientro a sede** quando il giro chiude `naturale` AND
+   ultima dest != `stazione_collegata` sede. Convenzione Trenord
+   placeholder (RFI/FNM emette numeri reali in produzione). Nuovo flag
+   `GiroDaPersistere.genera_rientro_sede: bool = False`; il
+   `builder.py` orchestrator lo attiva True quando `programma.km_max_ciclo`
+   è definito (= modo dinamico).
+
+4. **Step 4** — `posizionamento.py` aggiunge vincolo **finestra vietata
+   uscita deposito 01:00-03:00** (decisione utente: niente uscite
+   notturne dal deposito manutentivo). Nuovi parametri
+   `finestra_uscita_vietata_attiva` (default False per backward compat),
+   `finestra_uscita_vietata_inizio_min`, `finestra_uscita_vietata_fine_min`.
+   Vincolo applicato SOLO al vuoto di USCITA (testa); rientro al
+   deposito (vuoto coda + 9NNNN) non vincolato. Builder.py attiva
+   True. Filtro pool catene = solo corse che matchano almeno una regola
+   del programma — elimina i giri "shell" (catene di sub-tratte
+   non-perimetro che venivano persistite vuote).
+
+### Smoke v4 — risultati
+
+Programma 1088 "Trenord 2025-2026 invernale Mi.Centrale-Tirano":
+- 1 regola: `direttrice=TIRANO-SONDRIO-LECCO-MILANO + codice_origine in [S01700, S01440] + codice_destinazione in [S01700, S01440]`
+- composizione: `[ETR526, ETR425]`
+- `km_max_ciclo=10000`, `n_giornate_default=30` safety
+- `stazioni_sosta_extra_json=["S01440","S01430","S01520","S01420","S01400"]` (Tirano, Sondrio, Lecco, Colico, Chiavenna)
+
+Settimana 19/1 → 1/2 2026 (14 giorni), sede FIORENZA. **Risultati**:
+
+| Metrica | v3 | **v4 (refactor)** |
+|---|---|---|
+| Giri creati | 730 | **8** ✅ (1 per convoglio) |
+| Corse processate | 196 | 392 (= 28 × 14) |
+| Corse residue | 14064 | **0** ✅ (filtro pool) |
+| Multi-giornata ≥5g | 129 | **6** (75% reali) |
+| Max giornate giro | 7 | 14 |
+| km/giro media | NULL | **7552** ✅ |
+| km/giro max | NULL | **10789** (cap 10000) |
+| Giri "naturale" (km+sede) | 0 | **4** ✅ |
+| Vuoti tecnici inutili | 350 | **0** ✅ |
+
+Sample G-FIO-002 (14 giornate, 70 blocchi, naturale): pattern alternato
+giornate dispari/pari (treno dorme a Tirano/Mi.CLE alternativamente),
+5 corse al giorno (= 2.5 round-trip), 770 km/g, 14g × 770 = 10789 km
+(cap raggiunto).
+
+### Memoria persistente (13 file nuovi/aggiornati)
+
+- `feedback_whitelist_garibaldi_no_passante.md` — pattern `%MILANO%GARIBALDI`
+  (no `%` finale): solo superficie, escludi PASSANTE
+- `project_stazione_collegata_localita.md` — mapping 6 sedi Trenord →
+  proxy commerciale (FIO=Centrale, NOV=Cadorna, CAM/LEC/CRE/ISE = omonima)
+- `project_stazioni_sosta_notturna.md` — direttrice Tirano: TIRANO,
+  SONDRIO, LECCO, COLICO, CHIAVENNA + whitelist sede; intermedie no
+- `project_rientro_sede_9XXXX.md` — convenzione 5 cifre prefix 9,
+  placeholder Trenord
+- `feedback_km_sempre_fondamentali.md` — km come metrica primaria, mai
+  trascurati
+- `project_etr425_526_solo_diretti.md` — la composizione doppia
+  ETR526+ETR425 si applica solo ai 130 diretti Mi.CLE↔Tirano (122
+  sub-tratte usano altri materiali, futuro)
+- `project_finestra_uscita_deposito.md` — 01:00-03:00 vietato uscita;
+  rientro non vincolato
+- `feedback_regole_logica_base_non_hardcoded.md` — tutte le regole
+  configurate via dato (programma/regola/sede), mai cablate per linea
+- `project_giro_materiale_modello_polivalente.md` — UN giro = N giornate
+  × M varianti calendario; convoglio polivalente attraversa più linee
+- `feedback_linee_scelte_dal_pianificatore.md` — quali linee un
+  materiale può girare = scelta dinamica via UI menu, non codice
+- `project_materiale_vuoto_invenzione_algoritmo.md` — PdE solo
+  commerciale, vuoti li crea il builder per posizionamento/rientro
+- `feedback_giro_materiale_no_pdc_no_gap.md` — giro materiale autonomo
+  da normativa PdC; catena chiude solo per esaurimento corse o
+  mezzanotte (mai per gap orari)
+- `project_chiusura_giro_dinamica.md` — il giro chiude solo se
+  km_cap raggiunto AND treno vicino sede (n_giornate_max è solo
+  safety net)
+- `project_stazioni_sosta_da_depositi_pdc.md` — lista candidate
+  default = 25 depositi PdC azienda, modificabile per programma
+
+### Verifiche
+
+- `pytest`: **372 verdi**, 11 skippati (10 seed test + 1 strict_no_corse_residue
+  pre-Sprint-5.6 — residui da rivedere su DB template separato)
+- `ruff check + format`: clean (76 file)
+- `mypy --strict src`: no issues, 47 source files
+- `alembic upgrade head`: applica 0008 OK
+
+### Stato
+
+**Sprint 5 chiuso**. Il builder rispetta il modello operativo Trenord
+(multi-giornata, polivalenza convoglio, sosta solo in stazioni ammesse,
+vuoti solo intra-whitelist sede, rientro 9NNNN, vincolo finestra
+notturna 01-03 uscita deposito). 8 giri = 8 convogli ETR526+ETR425
+realistici per coprire 392 corse Tirano in 14 giorni.
+
+### Residui aperti (Sprint 6+)
+
+1. **API read-side** mancanti per il frontend: GET `/api/programmi/{id}/giri`,
+   GET `/api/giri/{id}` (dettaglio blocchi per Gantt), GET `/api/stazioni`,
+   GET `/api/materiali`, GET `/api/depots`, GET `/api/direttrici`. Saranno
+   prerequisite di Sprint 6 (frontend).
+2. **Test seed integration** richiedono DB template separato: oggi
+   `materiale_tipo.codice` ha PK globale → conflitti se già popolato da
+   smoke. Skippati con flag `ALLOW_SEED_TESTS=1`.
+3. **Vuoto pre-mezzanotte** (corsa che parte 00:22) → catene scartate
+   con errore. Sub 5.6 non implementa il "cross-notte K-1" rovesciato
+   (= il vuoto si sposta alla giornata K-1). Edge case minore (per il
+   programma Tirano corrente nessuna corsa è impattata).
+4. **Calcolo km_media_annua** preciso (intersecando `valido_in_date_json`
+   con il calendario annuale): oggi NULL. Utile per Sprint 7 (manutenzione).
+5. **Cremona ATR803** dimostrazione (utente: "continuiamo dopo").
+
+### Prossimo step
+
+**Sprint 6 — Frontend Pianificatore Giro Materiale**:
+
+- Sub 6.1: API read-side mancanti (~3-4h backend)
+- Sub 6.2: scaffold layout + auth flow + router (React Router 6)
+- Sub 6.3: Lista programmi
+- Sub 6.4: Dettaglio programma + editor regole
+- Sub 6.5: Lista giri del programma
+- Sub 6.6: **Visualizzatore Gantt** giro singolo (cuore visivo: replica
+  l'output del PDF Trenord turno 1132)
+
+Stack frontend già scaffoldato: React 18 + TS + Vite + Tailwind + Radix UI
+(shadcn-style) + React Query + React Router.
+
+---
+
 ## 2026-04-27 (32) — Sprint 5.5: composizione lista materiali + validazione accoppiamento
 
 ### Contesto

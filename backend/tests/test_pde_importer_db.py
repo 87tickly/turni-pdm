@@ -48,7 +48,29 @@ FIXTURE_N_ROWS = 38  # righe nella fixture (ground truth)
 
 
 async def _wipe_corse(session: AsyncSession) -> None:
-    """Cancella corse + composizioni + run + stazioni."""
+    """Cancella corse + composizioni + run + stazioni.
+
+    Sprint 5.6: ordine esteso per gestire FK aggiunte (whitelist sede,
+    accoppiamenti materiali, depot.stazione_principale_codice). Le
+    tabelle figlie vanno svuotate prima delle stazioni.
+    """
+    # Wipe entità che dipendono da giri (se eventualmente presenti).
+    await session.execute(text("DELETE FROM corsa_materiale_vuoto"))
+    await session.execute(text("DELETE FROM giro_blocco"))
+    await session.execute(text("DELETE FROM giro_variante"))
+    await session.execute(text("DELETE FROM giro_giornata"))
+    await session.execute(text("DELETE FROM giro_materiale"))
+    # Wipe filtri/composizioni dei programmi (riferiscono materiale_tipo).
+    await session.execute(text("DELETE FROM programma_regola_assegnazione"))
+    await session.execute(text("DELETE FROM programma_materiale"))
+    # Wipe whitelist sede + accoppiamenti (fk a stazione/materiale_tipo).
+    await session.execute(text("DELETE FROM localita_stazione_vicina"))
+    await session.execute(text("DELETE FROM materiale_accoppiamento_ammesso"))
+    # Sgancia depot.stazione_principale_codice prima di cancellare stazioni.
+    await session.execute(text("UPDATE depot SET stazione_principale_codice = NULL"))
+    # Sgancia materiale_tipo.localita_manutenzione_default_id prima di
+    # cancellare località (non serve qui ma per coerenza wipe).
+    # Wipe corse + run + stazioni (ordine FK-safe).
     await session.execute(text("DELETE FROM corsa_composizione"))
     await session.execute(text("DELETE FROM corsa_commerciale"))
     await session.execute(text("DELETE FROM corsa_import_run"))

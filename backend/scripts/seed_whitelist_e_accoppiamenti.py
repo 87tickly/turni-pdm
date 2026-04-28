@@ -328,7 +328,7 @@ MATERIALI_FAMIGLIA_TRENORD: list[_MaterialeFamiglia] = [
 #: in CH ogni sera", niente whitelist Italia (vedi piano §3).
 WHITELIST_TRENORD: dict[str, list[str]] = {
     "IMPMAN_MILANO_FIORENZA": [  # FIO
-        "%MILANO%GARIBALDI%",
+        "%MILANO%GARIBALDI",  # solo superficie, esclude "...PASSANTE"
         "%MILANO%CENTRALE%",
         "%MILANO%LAMBRATE%",
         "%MILANO%ROGOREDO%",

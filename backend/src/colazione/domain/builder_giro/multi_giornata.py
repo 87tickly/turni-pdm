@@ -54,7 +54,7 @@ Il modulo è **DB-agnostic**.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, time, timedelta
 from typing import Literal
 
@@ -72,19 +72,27 @@ MotivoChiusura = Literal["naturale", "max_giornate", "km_cap", "non_chiuso"]
 class ParamMultiGiornata:
     """Parametri per la concatenazione multi-giornata.
 
+    Sprint 5.6 (refactor algoritmo): la chiusura del giro è dinamica.
+    Il loop estende cross-notte FINCHÉ NON valgono ENTRAMBE le
+    condizioni "km_cap_raggiunto AND vicino_sede" — `chiusa_a_localita`
+    di una singola giornata NON ferma il loop (resta come info).
+
     Attributi:
-        n_giornate_max: numero massimo di giornate per giro (forza
-            chiusura). Default 5 (allineato a ciclo Trenord 5+2).
-            Il programma materiale ha ``n_giornate_default``: il
-            chiamante lo passa qui.
+        n_giornate_max: safety net per evitare loop infiniti pathologici
+            (es. dato corrupto, calendario ciclico). Default 30. Il
+            vero termine del giro sono ``km_max_ciclo + vicino_sede``.
         km_max_ciclo: km cumulati massimi sul ciclo intero. ``None``
-            = nessun cap (default). Quando il giro raggiunge questo
-            valore, viene chiuso con ``motivo_chiusura='km_cap'``.
-            Tipici 5000-10000 (decisione utente per programma).
+            = nessun cap (allora il giro chiude solo per safety o
+            assenza di continuazione). Tipici 5000-10000.
+        whitelist_sede: codici stazione "vicine alla sede manutentiva"
+            del programma. Quando l'ultima corsa di una giornata arriva
+            in una di queste, il treno è "vicino sede" (criterio per
+            chiusura naturale completa).
     """
 
     n_giornate_max: int = 5
     km_max_ciclo: float | None = None
+    whitelist_sede: frozenset[str] = field(default_factory=frozenset)
 
 
 _DEFAULT_PARAM = ParamMultiGiornata()
@@ -256,22 +264,44 @@ def costruisci_giri_multigiornata(
             visitate.add(id(cat_pos))
             km_cumulati = _km_giornata(cat_pos)
 
-            # Loop di estensione cross-notte
+            # Loop di estensione cross-notte. Sprint 5.6: due semantiche
+            # selezionate da `km_max_ciclo`:
+            #
+            # - **Modo dinamico** (`km_max_ciclo` definito): estende
+            #   SEMPRE finché km_cap raggiunto AND vicino_sede (chiusura
+            #   ideale). `chiusa_a_localita` di una giornata NON ferma
+            #   il loop (resta come metadato per persister/Feature 4).
+            #
+            # - **Modo legacy** (`km_max_ciclo` None): backward compat
+            #   per test puri pre-Sprint 5.6 — break su
+            #   `chiusa_a_localita=True`. In produzione i programmi
+            #   COLAZIONE settano sempre `km_max_ciclo` → modo dinamico.
+            modo_dinamico = params.km_max_ciclo is not None
+
             while True:
                 ultima_g = giornate[-1]
-                if ultima_g.catena_posizionata.chiusa_a_localita:
-                    break
+                ultima_corsa = ultima_g.catena_posizionata.catena.corse[-1]
+                staz_arrivo = ultima_corsa.codice_destinazione
+
+                if modo_dinamico:
+                    km_cap_raggiunto = km_cumulati >= float(params.km_max_ciclo or 0.0)
+                    vicino_sede = staz_arrivo in params.whitelist_sede
+                    # Chiusura ideale: entrambe le condizioni
+                    if km_cap_raggiunto and vicino_sede:
+                        break
+                else:
+                    # Modo legacy: break su chiusa_a_localita
+                    if ultima_g.catena_posizionata.chiusa_a_localita:
+                        break
+
+                # Safety net per loop infiniti pathologici (vale per
+                # entrambi i modi)
                 if len(giornate) >= params.n_giornate_max:
-                    break
-                if params.km_max_ciclo is not None and km_cumulati >= params.km_max_ciclo:
                     break
 
                 d_prossima = d_inizio + timedelta(days=len(giornate))
                 if d_prossima not in catene_per_data:
                     break
-
-                ultima_corsa = ultima_g.catena_posizionata.catena.corse[-1]
-                staz_arrivo = ultima_corsa.codice_destinazione
 
                 prossima = _trova_continuazione(
                     catene_per_data[d_prossima],
@@ -287,21 +317,42 @@ def costruisci_giri_multigiornata(
                 km_cumulati += _km_giornata(prossima)
 
             # Determina motivo chiusura.
-            # Priorità: naturale > km_cap > max_giornate > non_chiuso.
-            # km_cap batte max_giornate per onestà al pianificatore: se il
-            # giro ha 5 giornate E ha già fatto 8000 km > 5000 cap, il
-            # vero motivo di chiusura è il km cap (sarebbe stato chiuso
-            # comunque al primo trigger).
-            chiuso = giornate[-1].catena_posizionata.chiusa_a_localita
+            #
+            # Modo dinamico (km_max_ciclo definito):
+            # - naturale     = km_cap raggiunto AND vicino_sede (ideale)
+            # - km_cap       = km_cap raggiunto MA fuori sede (sub-ottimale)
+            # - max_giornate = safety net hit
+            # - non_chiuso   = no continuazione disponibile pre-cap
+            #
+            # Modo legacy (km_max_ciclo=None):
+            # - naturale     = ultima giornata chiude geograficamente a sede
+            # - max_giornate = safety net hit
+            # - non_chiuso   = no continuazione disponibile
+            ultima_corsa_finale = giornate[-1].catena_posizionata.catena.corse[-1]
+            staz_arrivo_finale = ultima_corsa_finale.codice_destinazione
+
             motivo: MotivoChiusura
-            if chiuso:
-                motivo = "naturale"
-            elif params.km_max_ciclo is not None and km_cumulati >= params.km_max_ciclo:
-                motivo = "km_cap"
-            elif len(giornate) >= params.n_giornate_max:
-                motivo = "max_giornate"
+            if modo_dinamico:
+                km_cap_raggiunto = km_cumulati >= float(params.km_max_ciclo or 0.0)
+                vicino_sede = staz_arrivo_finale in params.whitelist_sede
+                if km_cap_raggiunto and vicino_sede:
+                    motivo = "naturale"
+                elif km_cap_raggiunto:
+                    motivo = "km_cap"
+                elif len(giornate) >= params.n_giornate_max:
+                    motivo = "max_giornate"
+                else:
+                    motivo = "non_chiuso"
             else:
-                motivo = "non_chiuso"
+                # Modo legacy
+                chiusa_geo = giornate[-1].catena_posizionata.chiusa_a_localita
+                if chiusa_geo:
+                    motivo = "naturale"
+                elif len(giornate) >= params.n_giornate_max:
+                    motivo = "max_giornate"
+                else:
+                    motivo = "non_chiuso"
+            chiuso = motivo == "naturale"
 
             giri.append(
                 Giro(

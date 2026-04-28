@@ -366,6 +366,20 @@ async def importa_pde(
         # File mai visto (o force) → ora leggo
         raw_rows = read_pde_file(file_path)
 
+        # Filtro BUS sostitutivi: il PdE Trenord ha colonna `Modalità di
+        # effettuazione` con valori 'T' (treno) e 'B' (bus). I bus non
+        # sono materiale rotabile e non rilevano per il modulo Giro
+        # Materiale. Li scartiamo a monte per non inquinare le catene.
+        n_letti = len(raw_rows)
+        raw_rows = [r for r in raw_rows if r.get("Modalità di effettuazione") != "B"]
+        n_bus_scartati = n_letti - len(raw_rows)
+        if n_bus_scartati:
+            logger.info(
+                "BUS sostitutivi scartati: %d/%d righe (Modalità di effettuazione='B')",
+                n_bus_scartati,
+                n_letti,
+            )
+
         # Step 1 — parse + compute row_hash per ogni riga
         # NB: il PdE Trenord può avere righe completamente identiche
         # (8 coppie osservate sul file 2025-2026). NON le deduplichiamo:

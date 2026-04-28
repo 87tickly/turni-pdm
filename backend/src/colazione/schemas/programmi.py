@@ -248,6 +248,7 @@ class ProgrammaMaterialeRead(BaseModel):
     n_giornate_default: int
     fascia_oraria_tolerance_min: int
     strict_options_json: dict[str, Any]
+    stazioni_sosta_extra_json: list[str] = Field(default_factory=list)
     created_by_user_id: int | None = None
     created_at: datetime
     updated_at: datetime
@@ -291,6 +292,7 @@ class ProgrammaMaterialeCreate(BaseModel):
     n_giornate_default: int = Field(default=1, ge=1)
     fascia_oraria_tolerance_min: int = Field(default=30, ge=0, le=120)
     strict_options_json: StrictOptions = Field(default_factory=StrictOptions)
+    stazioni_sosta_extra_json: list[str] = Field(default_factory=list)
     regole: list[ProgrammaRegolaAssegnazioneCreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -315,3 +317,4 @@ class ProgrammaMaterialeUpdate(BaseModel):
     n_giornate_default: int | None = Field(default=None, ge=1)
     fascia_oraria_tolerance_min: int | None = Field(default=None, ge=0, le=120)
     strict_options_json: StrictOptions | None = None
+    stazioni_sosta_extra_json: list[str] | None = None

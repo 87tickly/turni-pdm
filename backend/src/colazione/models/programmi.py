@@ -63,6 +63,14 @@ class ProgrammaMateriale(Base):
     # Strict mode granulare (vedi PROGRAMMA-MATERIALE.md §2.7)
     strict_options_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 
+    # Sprint 5.6 (migration 0008): codici stazione PdE che il pianificatore
+    # ammette come SOSTA NOTTURNA del materiale di questo programma, oltre
+    # alla whitelist sede e ai depot PdC. La lista finale del builder è
+    # whitelist sede ∪ depot PdC ∪ stazioni_sosta_extra. Default `[]`.
+    stazioni_sosta_extra_json: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default="[]"
+    )
+
     # Tracking
     created_by_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("app_user.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

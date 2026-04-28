@@ -21,11 +21,13 @@ Coverage:
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from datetime import date, time
 
 import pytest
 from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.db import dispose_engine, session_scope
 from colazione.domain.builder_giro import (
@@ -89,9 +91,24 @@ async def _wipe_test_data() -> None:
         await session.execute(text("DELETE FROM giro_giornata"))
         await session.execute(text("DELETE FROM corsa_materiale_vuoto"))
         await session.execute(text("DELETE FROM giro_materiale"))
-        # Dati di test (prefisso TEST_)
+        # Programmi/regole di test (Sprint 5.6: aggiunti per i test
+        # km_media e 9XXXX rientro)
         await session.execute(
-            text("DELETE FROM corsa_commerciale WHERE numero_treno LIKE 'TEST_%'")
+            text(
+                "DELETE FROM programma_regola_assegnazione WHERE programma_id IN ("
+                "  SELECT id FROM programma_materiale WHERE nome LIKE 'TEST_%'"
+                ")"
+            )
+        )
+        await session.execute(text("DELETE FROM programma_materiale WHERE nome LIKE 'TEST_%'"))
+        # Corse di test: TEST_* o che usano stazioni S99*
+        await session.execute(
+            text(
+                "DELETE FROM corsa_commerciale "
+                "WHERE numero_treno LIKE 'TEST_%' "
+                "   OR codice_origine LIKE 'S99%' "
+                "   OR codice_destinazione LIKE 'S99%'"
+            )
         )
         await session.execute(text("DELETE FROM localita_manutenzione WHERE codice LIKE 'TEST_%'"))
         # Stazioni test: codici S99NNN (formato `^S\d+$` valido)
@@ -851,3 +868,150 @@ async def test_giro_da_persistere_dataclass_smoke() -> None:
     entry = GiroDaPersistere(numero_turno="G-X-001", giro=giro)
     assert entry.numero_turno == "G-X-001"
     assert entry.giro is giro
+    assert entry.genera_rientro_sede is False  # default Sprint 5.6
+
+
+# =====================================================================
+# Sprint 5.6 — km_media_giornaliera + corsa rientro 9XXXX
+# =====================================================================
+
+
+async def _crea_programma_minimo(session: AsyncSession, azienda_id: int) -> int:
+    """Helper: crea ProgrammaMateriale minimo + 1 regola (matcha tutto).
+    Ritorna programma_id.
+    """
+    from colazione.models.programmi import (
+        ProgrammaMateriale,
+        ProgrammaRegolaAssegnazione,
+    )
+
+    prog = ProgrammaMateriale(
+        azienda_id=azienda_id,
+        nome="TEST_persister_min",
+        valido_da=date(2026, 1, 1),
+        valido_a=date(2026, 12, 31),
+        stato="bozza",
+        n_giornate_default=1,
+        fascia_oraria_tolerance_min=30,
+        strict_options_json={
+            "no_corse_residue": False,
+            "no_overcapacity": False,
+            "no_aggancio_non_validato": False,
+            "no_orphan_blocks": False,
+            "no_giro_appeso": False,
+            "no_km_eccesso": False,
+        },
+    )
+    session.add(prog)
+    await session.flush()
+    session.add(
+        ProgrammaRegolaAssegnazione(
+            programma_id=prog.id,
+            filtri_json=[],
+            composizione_json=[{"materiale_tipo_codice": MATERIALE_TIPO, "n_pezzi": 3}],
+            materiale_tipo_codice=MATERIALE_TIPO,
+            numero_pezzi=3,
+            priorita=10,
+        )
+    )
+    await session.flush()
+    return int(prog.id)
+
+
+async def test_persister_popola_km_media_giornaliera(azienda_id: int) -> None:
+    """Sprint 5.6 Feature 2: km_media_giornaliera = sum(km_tratta) / numero_giornate."""
+    await _crea_stazione("S99001", azienda_id)
+    await _crea_stazione("S99002", azienda_id)
+    await _crea_localita("TEST_LOC_FIO", "S99001", azienda_id)
+    c1 = await _crea_corsa("TEST_KM_001", "S99001", "S99002", (8, 0), (9, 0), azienda_id)
+    c2 = await _crea_corsa("TEST_KM_002", "S99002", "S99001", (10, 0), (11, 0), azienda_id)
+
+    # Inietto km_tratta sulle corse direttamente nel DB
+    async with session_scope() as session:
+        await session.execute(
+            text("UPDATE corsa_commerciale SET km_tratta = 50 WHERE id IN (:c1, :c2)"),
+            {"c1": c1, "c2": c2},
+        )
+
+    async with session_scope() as session:
+        c1_orm = (
+            await session.execute(select(CorsaCommerciale).where(CorsaCommerciale.id == c1))
+        ).scalar_one()
+        c2_orm = (
+            await session.execute(select(CorsaCommerciale).where(CorsaCommerciale.id == c2))
+        ).scalar_one()
+        prog_id = await _crea_programma_minimo(session, azienda_id)
+        giro = _giro_assegnato_singolo(
+            localita_codice="TEST_LOC_FIO",
+            corse_orm=(c1_orm, c2_orm),
+            chiusa=True,
+        )
+        await persisti_giri(
+            [GiroDaPersistere(numero_turno="G-TST-001", giro=giro)],
+            session,
+            prog_id,
+            azienda_id,
+        )
+        await session.commit()
+
+    async with session_scope() as session:
+        gm = (
+            await session.execute(
+                select(GiroMateriale).where(GiroMateriale.numero_turno == "G-TST-001")
+            )
+        ).scalar_one()
+        # Totale 50+50 = 100 km su 1 giornata
+        assert gm.km_media_giornaliera == 100.0
+
+
+async def test_persister_corsa_rientro_9xxxx_se_genera_rientro_sede(azienda_id: int) -> None:
+    """Sprint 5.6 Feature 4: con genera_rientro_sede=True e ultima dest !=
+    stazione_collegata sede, viene creato un blocco materiale_vuoto 9NNNN."""
+    await _crea_stazione("S99001", azienda_id)  # sede
+    await _crea_stazione("S99002", azienda_id)  # whitelist
+    await _crea_localita("TEST_LOC_FIO", "S99001", azienda_id)
+    c1 = await _crea_corsa("TEST_R9_001", "S99002", "S99002", (8, 0), (9, 0), azienda_id)
+
+    async with session_scope() as session:
+        c1_orm = (
+            await session.execute(select(CorsaCommerciale).where(CorsaCommerciale.id == c1))
+        ).scalar_one()
+        prog_id = await _crea_programma_minimo(session, azienda_id)
+        giro = _giro_assegnato_singolo(
+            localita_codice="TEST_LOC_FIO",
+            corse_orm=(c1_orm,),
+            chiusa=True,
+        )
+        # Forzo motivo='naturale' (Sprint 5.6: chiusura ideale completa)
+        giro = dataclasses.replace(giro, motivo_chiusura="naturale")
+        await persisti_giri(
+            [
+                GiroDaPersistere(
+                    numero_turno="G-TST-R9",
+                    giro=giro,
+                    genera_rientro_sede=True,
+                )
+            ],
+            session,
+            prog_id,
+            azienda_id,
+        )
+        await session.commit()
+
+    async with session_scope() as session:
+        # Verifica creato un CorsaMaterialeVuoto con prefix '9'
+        cmv = (
+            await session.execute(
+                text(
+                    "SELECT numero_treno_vuoto, codice_origine, codice_destinazione "
+                    "FROM corsa_materiale_vuoto "
+                    "WHERE numero_treno_vuoto ~ '^9[0-9]{4}$' "
+                    "ORDER BY id DESC LIMIT 1"
+                )
+            )
+        ).first()
+        assert cmv is not None
+        assert cmv.numero_treno_vuoto.startswith("9")
+        assert len(cmv.numero_treno_vuoto) == 5
+        assert cmv.codice_origine == "S99002"  # ultima dest
+        assert cmv.codice_destinazione == "S99001"  # stazione_collegata sede

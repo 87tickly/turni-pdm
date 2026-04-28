@@ -45,6 +45,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from typing import Any
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,6 +67,7 @@ from colazione.domain.builder_giro.persister import (
 from colazione.domain.builder_giro.posizionamento import (
     CatenaPosizionata,
     LocalitaSenzaStazioneError,
+    ParamPosizionamento,
     PosizionamentoImpossibileError,
     posiziona_su_localita,
 )
@@ -438,27 +440,47 @@ async def genera_giri(
     date_range = [data_inizio + timedelta(days=i) for i in range(n_giornate)]
     corse = await _carica_corse(session, azienda_id, date_range[0], date_range[-1])
 
+    # Sprint 5.6: filtro pool catene = corse che matchano almeno una
+    # regola del programma. Evita giri "shell" generati da catene di
+    # corse fuori-perimetro che il programma non assegna comunque.
+    # Il giorno_tipo è euristico (`feriale`) — ai fini del filtro pool
+    # è sufficiente; l'assegnazione finale userà il giorno_tipo reale.
+    from colazione.domain.builder_giro.risolvi_corsa import matches_all
+
+    def _corsa_in_perimetro_programma(c: Any) -> bool:
+        return any(matches_all(r.filtri_json, c, "feriale") for r in regole)
+
+    corse_perimetro = [c for c in corse if _corsa_in_perimetro_programma(c)]
+
     warnings: list[str] = []
+    # Sprint 5.6 Feature 3: attiva il vincolo finestra uscita deposito
+    # 01:00-03:00 per programmi reali (non per test puri legacy).
+    param_pos = ParamPosizionamento(finestra_uscita_vietata_attiva=True)
     catene_per_data: dict[date, list[CatenaPosizionata]] = {}
     for d in date_range:
-        corse_giorno = [c for c in corse if _corsa_vale_in_data(c, d)]
+        corse_giorno = [c for c in corse_perimetro if _corsa_vale_in_data(c, d)]
         if not corse_giorno:
             continue
         catene = costruisci_catene(corse_giorno)
         catene_pos: list[CatenaPosizionata] = []
         for cat in catene:
             try:
-                cat_pos = posiziona_su_localita(cat, localita, whitelist)
+                cat_pos = posiziona_su_localita(cat, localita, whitelist, param_pos)
             except (LocalitaSenzaStazioneError, PosizionamentoImpossibileError) as exc:
                 warnings.append(f"Catena del {d.isoformat()} scartata: {exc}")
                 continue
             catene_pos.append(cat_pos)
         catene_per_data[d] = catene_pos
 
-    # 4. Multi-giornata (cross-notte) con cumulo km e cap dal programma
+    # 4. Multi-giornata (cross-notte) con cumulo km e chiusura dinamica.
+    # Sprint 5.6: il giro chiude solo se km_cap raggiunto AND treno in
+    # whitelist sede ("vicino_sede"). `n_giornate_default` del programma
+    # diventa SAFETY NET (non più termine attivo): default 30 se non
+    # configurato, comunque protegge da loop pathologici.
     param_mg = ParamMultiGiornata(
-        n_giornate_max=programma.n_giornate_default,
+        n_giornate_max=max(programma.n_giornate_default, 30),
         km_max_ciclo=float(programma.km_max_ciclo) if programma.km_max_ciclo else None,
+        whitelist_sede=whitelist,
     )
     giri_dom = costruisci_giri_multigiornata(catene_per_data, param_mg)
 
@@ -469,11 +491,16 @@ async def genera_giri(
     # 6. Strict mode pre-persistenza
     _check_strict_mode(programma, giri_assegnati)
 
-    # 7. Genera numero_turno + persisti
+    # 7. Genera numero_turno + persisti.
+    # Sprint 5.6: in modo dinamico (km_max_ciclo configurato) attiva la
+    # creazione automatica della corsa rientro 9XXXX a fine giro
+    # "naturale" (Feature 4).
+    modo_dinamico = programma.km_max_ciclo is not None
     giri_da_persistere = [
         GiroDaPersistere(
             numero_turno=f"G-{localita.codice_breve}-{idx:03d}",
             giro=giro,
+            genera_rientro_sede=modo_dinamico,
         )
         for idx, giro in enumerate(giri_assegnati, start=1)
     ]

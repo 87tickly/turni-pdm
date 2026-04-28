@@ -112,10 +112,23 @@ class ParamPosizionamento:
             quando avremo matrice km/velocità.
         gap_min: gap minimo tra vuoto e prima/ultima corsa (minuti).
             Default 5'. Stessa semantica di ``catena.ParamCatena.gap_min``.
+        finestra_uscita_vietata_attiva: se True, applica il vincolo
+            "uscita deposito vietata 01:00-03:00" (decisione utente
+            Sprint 5.6). Default False per backward compat con test
+            puri che non lo richiedono. Il builder.py attiva True per
+            programmi reali.
+        finestra_uscita_vietata_inizio_min: minuto (dall'inizio
+            giornata) di inizio della finestra vietata. Default 60
+            = 01:00.
+        finestra_uscita_vietata_fine_min: minuto (esclusivo) di fine
+            della finestra vietata. Default 180 = 03:00.
     """
 
     durata_vuoto_default_min: int = 30
     gap_min: int = 5
+    finestra_uscita_vietata_attiva: bool = False
+    finestra_uscita_vietata_inizio_min: int = 60
+    finestra_uscita_vietata_fine_min: int = 180
 
 
 _DEFAULT_PARAM = ParamPosizionamento()
@@ -264,6 +277,23 @@ def posiziona_su_localita(
                 f"00:00 (durata stimata {params.durata_vuoto_default_min}' + "
                 f"gap {params.gap_min}'). Riduci durata stimata o "
                 "rimanda la chiusura a multi_giornata."
+            )
+        # Sprint 5.6 Feature 3: finestra vietata uscita deposito 01:00-03:00.
+        # Se attiva e il vuoto cade dentro, scarta la catena (futuro:
+        # spostamento cross-notte K-1 in scope successivo).
+        if (
+            params.finestra_uscita_vietata_attiva
+            and params.finestra_uscita_vietata_inizio_min
+            <= partenza_min
+            < params.finestra_uscita_vietata_fine_min
+        ):
+            raise PosizionamentoImpossibileError(
+                f"Vuoto di testa partirebbe alle "
+                f"{_min_to_time(partenza_min).isoformat()} (catena inizia "
+                f"alle {prima.ora_partenza.isoformat()}), dentro la finestra "
+                f"vietata uscita deposito {_min_to_time(params.finestra_uscita_vietata_inizio_min).isoformat()}–"
+                f"{_min_to_time(params.finestra_uscita_vietata_fine_min).isoformat()} "
+                "(decisione utente Sprint 5.6)."
             )
         vuoto_testa = BloccoMaterialeVuoto(
             codice_origine=s,

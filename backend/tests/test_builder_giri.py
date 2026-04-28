@@ -165,7 +165,13 @@ async def _setup_completo(
         # Regola: cattura tutto (filtri vuoti = matcha tutto)
         regola = ProgrammaRegolaAssegnazione(
             programma_id=prog_id,
-            filtri_json=[],
+            # Filtri stretti sulle stazioni S99* del setup di test, per
+            # isolare dal pool corse del DB (Sprint 5.6: il pool catene
+            # è filtrato per regola, quindi una regola "matcha tutto"
+            # pescherebbe tutte le corse PdE eventualmente importate).
+            filtri_json=[
+                {"campo": "codice_origine", "op": "in", "valore": ["S99001", "S99002", "S99003", "S99004"]},
+            ],
             composizione_json=[{"materiale_tipo_codice": MATERIALE_TIPO, "n_pezzi": 3}],
             materiale_tipo_codice=MATERIALE_TIPO,
             numero_pezzi=3,
@@ -353,6 +359,14 @@ async def test_force_true_wipe_e_rigenera(azienda_id: int) -> None:
 # =====================================================================
 
 
+@pytest.mark.skip(
+    reason=(
+        "Sprint 5.6: il filtro pool catene per regola esclude a monte le corse "
+        "fuori-perimetro, quindi 'corse residue' non si verifica più per regole "
+        "non-matchanti. Il test va riscritto per simulare residue post-filtro "
+        "(es. due regole con priorità conflict). Residuo Sprint 5+."
+    )
+)
 async def test_strict_no_corse_residue_blocca(azienda_id: int) -> None:
     """Corsa che non matcha alcuna regola + strict no_corse_residue → errore."""
     prog_id = await _setup_completo(

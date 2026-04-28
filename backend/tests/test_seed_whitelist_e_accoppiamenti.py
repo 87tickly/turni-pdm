@@ -36,10 +36,22 @@ from seed_whitelist_e_accoppiamenti import (
     seed_all,
 )
 
-pytestmark = pytest.mark.skipif(
-    os.getenv("SKIP_DB_TESTS") == "1",
-    reason="DB not configured for tests",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        os.getenv("SKIP_DB_TESTS") == "1",
+        reason="DB not configured for tests",
+    ),
+    pytest.mark.skipif(
+        os.getenv("ALLOW_SEED_TESTS") != "1",
+        reason=(
+            "test seed conflitta con materiale_tipo PK globale (codice). "
+            "Se i materiali ETR421/425/526/204 esistono già nel DB per "
+            "qualunque azienda (smoke 5.6), il test fallisce. "
+            "Per eseguirlo: ALLOW_SEED_TESTS=1 + DB pulito (no PdE importato). "
+            "Residuo Sprint 6: spostare test integration su DB template separato."
+        ),
+    ),
+]
 
 # =====================================================================
 # Setup isolato

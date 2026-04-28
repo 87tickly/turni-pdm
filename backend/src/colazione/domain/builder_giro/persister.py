@@ -93,10 +93,17 @@ class GiroDaPersistere:
     Il caller (4.4.5b loader) genera il ``numero_turno`` con la
     convenzione ``G-{LOC_BREVE}-{SEQ:03d}``. Il persister lo accetta
     come opaco.
+
+    Sprint 5.6 Feature 4: ``genera_rientro_sede`` (default False) attiva
+    la creazione automatica della corsa virtuale 9XXXX a fine giro
+    quando ``motivo_chiusura='naturale'`` e l'ultima dest != stazione
+    collegata sede. Settato a True dal builder.py orchestrator nel
+    "modo dinamico" (programma con km_max_ciclo configurato).
     """
 
     numero_turno: str
     giro: GiroAssegnato
+    genera_rientro_sede: bool = False
 
 
 # =====================================================================
@@ -119,6 +126,41 @@ async def _carica_localita(
     if loc is None:
         raise LocalitaNonTrovataError(codice, azienda_id)
     return loc
+
+
+def _km_totali_giro(giro: GiroAssegnato) -> float:
+    """Somma ``km_tratta`` di tutte le corse di tutte le giornate del giro.
+
+    Sprint 5.6 (km fondamentali): popola ``GiroMateriale.km_media_giornaliera``.
+    Conta SOLO le corse commerciali (i vuoti tecnici non hanno km del PdE).
+    Corse senza ``km_tratta`` contribuiscono 0 (duck-typed).
+    """
+    total = 0.0
+    for giornata in giro.giornate:
+        for c in giornata.catena_posizionata.catena.corse:
+            km = getattr(c, "km_tratta", None)
+            if km is not None:
+                total += float(km)
+    return total
+
+
+async def _next_numero_rientro_sede(session: AsyncSession) -> str:
+    """Prossimo `numero_treno_vuoto` per la corsa rientro a sede.
+
+    Sprint 5.6 Feature 4: convenzione **5 cifre, prefisso 9** (placeholder
+    Trenord; in produzione RFI/FNM emette i numeri reali). Sequenziale
+    globale su `corsa_materiale_vuoto` (lookup MAX numero_treno_vuoto
+    matching ``9NNNN``).
+    """
+    from sqlalchemy import text
+
+    stmt = text(
+        "SELECT COALESCE(MAX(SUBSTRING(numero_treno_vuoto FROM 2)::int), 0) "
+        "FROM corsa_materiale_vuoto "
+        "WHERE numero_treno_vuoto ~ '^9[0-9]{4}$'"
+    )
+    last = (await session.execute(stmt)).scalar_one()
+    return f"9{(int(last) + 1):04d}"
 
 
 def _primo_tipo_materiale(giro: GiroAssegnato) -> str | None:
@@ -216,15 +258,16 @@ async def _persisti_blocchi_giornata(
     numero_turno: str,
     seq_vuoto_giro_inizio: int,
     session: AsyncSession,
-) -> int:
+) -> tuple[int, int]:
     """Persiste i blocchi della giornata in ordine sequenziale.
 
     Sequenza: ``vuoto_testa? → [evento? → corsa]* → vuoto_coda?``.
 
     Returns:
-        ``seq_vuoto_giro`` aggiornato (incrementa di 0/1/2 a seconda
-        dei vuoti generati). Serve al caller per nominare i vuoti
-        successivi senza collisioni.
+        ``(seq_vuoto_giro, seq_blocco_next)``. ``seq_vuoto_giro``
+        aggiornato (incrementa di 0/1/2 a seconda dei vuoti generati).
+        ``seq_blocco_next`` è il prossimo seq libero dentro la variante
+        (utile per inserire blocchi extra come il rientro 9XXXX dopo).
     """
     seq_blocco = 1  # progressivo dentro la giro_variante (CHECK seq >= 1)
     seq_vuoto = seq_vuoto_giro_inizio  # progressivo per CorsaMaterialeVuoto del giro
@@ -354,7 +397,7 @@ async def _persisti_blocchi_giornata(
         seq_blocco += 1
 
     await session.flush()
-    return seq_vuoto
+    return seq_vuoto, seq_blocco
 
 
 async def _persisti_un_giro(
@@ -363,24 +406,33 @@ async def _persisti_un_giro(
     programma_id: int,
     azienda_id: int,
 ) -> int:
-    """Persiste un singolo giro: GiroMateriale + giornate + varianti + blocchi."""
+    """Persiste un singolo giro: GiroMateriale + giornate + varianti + blocchi.
+
+    Sprint 5.6:
+    - Popola ``km_media_giornaliera`` (Feature 2): somma km_tratta /
+      numero_giornate.
+    - Se ``motivo_chiusura='naturale'`` E l'ultima corsa NON arriva alla
+      ``stazione_collegata`` della sede, aggiunge un blocco
+      ``materiale_vuoto`` con numero ``9NNNN`` (placeholder rientro
+      manutentivo, Feature 4).
+    """
     loc = await _carica_localita(session, entry.giro.localita_codice, azienda_id)
     materiale_tipo = _primo_tipo_materiale(entry.giro)
+
+    n_giornate = len(entry.giro.giornate)
+    km_totali = _km_totali_giro(entry.giro)
+    km_media_giornaliera = round(km_totali / n_giornate, 2) if n_giornate > 0 else 0.0
 
     gm = GiroMateriale(
         azienda_id=azienda_id,
         numero_turno=entry.numero_turno,
         validita_codice=None,
-        # `tipo_materiale` (TEXT obbligatorio) è denormalizzazione
-        # leggibile (es. "ALe711") usata per UI/report. La FK reale è
-        # `materiale_tipo_codice`. Se nessun blocco è assegnato (giro
-        # tutto in residue) usiamo il placeholder "MISTO".
         tipo_materiale=materiale_tipo if materiale_tipo is not None else "MISTO",
         descrizione_materiale=None,
         materiale_tipo_codice=materiale_tipo,
-        numero_giornate=len(entry.giro.giornate),
-        km_media_giornaliera=None,  # calcolo km è scope 4.4.5b/futuro
-        km_media_annua=None,
+        numero_giornate=n_giornate,
+        km_media_giornaliera=km_media_giornaliera,
+        km_media_annua=None,  # calcolo annuo preciso (calendario × applicabilità) — futuro
         posti_1cl=0,
         posti_2cl=0,
         localita_manutenzione_partenza_id=loc.id,
@@ -393,6 +445,8 @@ async def _persisti_un_giro(
     gm_id: int = gm.id
 
     seq_vuoto_giro = 0  # progressivo per CorsaMaterialeVuoto del giro intero
+    last_gv_id: int | None = None
+    last_seq_blocco: int = 1
     for idx, giornata in enumerate(entry.giro.giornate, start=1):
         gg = GiroGiornata(giro_materiale_id=gm_id, numero_giornata=idx)
         session.add(gg)
@@ -407,8 +461,9 @@ async def _persisti_un_giro(
         )
         session.add(gv)
         await session.flush()
+        last_gv_id = gv.id
 
-        seq_vuoto_giro = await _persisti_blocchi_giornata(
+        seq_vuoto_giro, last_seq_blocco = await _persisti_blocchi_giornata(
             giornata,
             gv.id,
             gm_id,
@@ -418,7 +473,95 @@ async def _persisti_un_giro(
             session,
         )
 
+    # Sprint 5.6 Feature 4: corsa rientro a sede 9XXXX. Si attiva solo se
+    # il caller ha richiesto esplicitamente (`genera_rientro_sede=True`,
+    # tipico modo dinamico) e la chiusura è naturale e non si è già a
+    # destinazione sede.
+    if (
+        entry.genera_rientro_sede
+        and entry.giro.motivo_chiusura == "naturale"
+        and last_gv_id is not None
+        and loc.stazione_collegata_codice is not None
+    ):
+        ultima_giornata = entry.giro.giornate[-1]
+        ultima_corsa = ultima_giornata.catena_posizionata.catena.corse[-1]
+        ultima_dest = ultima_corsa.codice_destinazione
+        if ultima_dest != loc.stazione_collegata_codice:
+            await _crea_blocco_rientro_sede(
+                session=session,
+                giro_variante_id=last_gv_id,
+                giro_materiale_id=gm_id,
+                azienda_id=azienda_id,
+                seq=last_seq_blocco,
+                stazione_da=ultima_dest,
+                stazione_a=loc.stazione_collegata_codice,
+                ora_inizio=ultima_corsa.ora_arrivo,
+            )
+
     return gm_id
+
+
+async def _crea_blocco_rientro_sede(
+    *,
+    session: AsyncSession,
+    giro_variante_id: int,
+    giro_materiale_id: int,
+    azienda_id: int,
+    seq: int,
+    stazione_da: str,
+    stazione_a: str,
+    ora_inizio: Any,
+) -> None:
+    """Crea CorsaMaterialeVuoto + GiroBlocco per il rientro 9XXXX a sede.
+
+    Sprint 5.6 Feature 4: convenzione Trenord placeholder
+    (5 cifre, prefisso 9). Si appoggia all'ultima variante dell'ultima
+    giornata come blocco aggiuntivo dopo la coda commerciale.
+    """
+    from datetime import time as _time
+
+    numero = await _next_numero_rientro_sede(session)
+    # Per `ora_arrivo` non abbiamo stima: usiamo ora_inizio + 30' come
+    # default (sostituibile dal pianificatore in editor giro).
+    h, m = ora_inizio.hour, ora_inizio.minute
+    arrivo_min = (h * 60 + m + 30) % (24 * 60)
+    ora_fine = _time(arrivo_min // 60, arrivo_min % 60)
+
+    cmv = CorsaMaterialeVuoto(
+        azienda_id=azienda_id,
+        numero_treno_vuoto=numero,
+        codice_origine=stazione_da,
+        codice_destinazione=stazione_a,
+        ora_partenza=ora_inizio,
+        ora_arrivo=ora_fine,
+        min_tratta=30,
+        km_tratta=None,
+        origine="generato_da_giro_materiale",
+        giro_materiale_id=giro_materiale_id,
+        valido_in_date_json=[],
+        valido_da=None,
+        valido_a=None,
+    )
+    session.add(cmv)
+    await session.flush()
+
+    session.add(
+        GiroBlocco(
+            giro_variante_id=giro_variante_id,
+            seq=seq,
+            tipo_blocco="materiale_vuoto",
+            corsa_commerciale_id=None,
+            corsa_materiale_vuoto_id=cmv.id,
+            stazione_da_codice=stazione_da,
+            stazione_a_codice=stazione_a,
+            ora_inizio=ora_inizio,
+            ora_fine=ora_fine,
+            descrizione=f"Rientro sede {numero}: {stazione_da} → {stazione_a}",
+            is_validato_utente=False,  # placeholder, RFI/FNM emette numero reale
+            metadata_json={"motivo": "rientro_sede", "numero_treno_placeholder": numero},
+        )
+    )
+    await session.flush()
 
 
 # =====================================================================

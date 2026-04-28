@@ -544,40 +544,37 @@ def test_km_max_ciclo_none_no_trigger() -> None:
 
 
 def test_km_cap_chiude_giro_e_motivo_km_cap() -> None:
-    """km_cumulati >= km_max_ciclo dopo G1 → niente estensione, motivo km_cap.
-
-    Anche se G2 esisterebbe geograficamente, il cap blocca."""
+    """Modo dinamico Sprint 5.6: km_cap raggiunto + vicino_sede=True →
+    chiusura naturale completa; senza whitelist_sede e con cap superato,
+    se non c'è continuazione il giro chiude con motivo km_cap."""
     g1 = _cat_pos(
         localita="FIO",
         stazione="MI_FIO",
         corse=(_c("MI_FIO", "BG", (8, 0), (9, 0), km=6000.0),),
-        chiusa=False,  # geograficamente non chiuso
+        chiusa=False,
     )
-    g2 = _cat_pos(
-        localita="FIO",
-        stazione="MI_FIO",
-        corse=(_c("BG", "MI_FIO", (8, 0), (9, 0), km=80.0),),
-        chiusa=True,
-    )
+    # In modo dinamico (km_max_ciclo definito) il loop estende anche oltre
+    # il cap finché non trova vicino_sede. Senza D_MAR e senza whitelist
+    # sede, G1 chiude per assenza di continuazione, motivo km_cap.
     giri = costruisci_giri_multigiornata(
-        {D_LUN: [g1], D_MAR: [g2]},
+        {D_LUN: [g1]},
         ParamMultiGiornata(km_max_ciclo=5000.0),
     )
-    # Solo 1 giro (con G1), G2 non legata. G1 ha km cap → motivo km_cap
-    assert len(giri) == 2  # G1 + G2 isolata (orphan, nuovo giro)
+    assert len(giri) == 1
     primo = giri[0]
     assert len(primo.giornate) == 1
     assert primo.km_cumulati == 6000.0
     assert primo.motivo_chiusura == "km_cap"
-    assert primo.chiuso is False  # km_cap NON è chiusura geografica
+    assert primo.chiuso is False  # km_cap senza vicino_sede NON è chiusura ideale
 
 
 def test_km_cap_priorita_su_max_giornate() -> None:
-    """Se km_cap E max_giornate scattano insieme, motivo='km_cap' (più
-    informativo per il pianificatore)."""
-    # 3 giornate, km cap a 100, n_giornate_max=3
-    # Giornata 1: 60km (totale 60, sotto cap)
-    # Giornata 2: 60km (totale 120, sopra cap → trigger)
+    """Se cap raggiunto E poi treno arriva in whitelist_sede su giornata
+    successiva, motivo=naturale (chiusura ideale completa Sprint 5.6)."""
+    # 3 giornate, km cap a 100, whitelist_sede={MI_FIO}
+    # Giornata 1: 60km (totale 60, sotto cap, dest BG fuori sede)
+    # Giornata 2: 60km (totale 120, sopra cap, dest BS fuori sede → continua)
+    # Giornata 3: 10km (totale 130, dest MI_FIO in sede → naturale)
     g1 = _cat_pos(
         localita="FIO",
         stazione="MI_FIO",
@@ -598,27 +595,35 @@ def test_km_cap_priorita_su_max_giornate() -> None:
     )
     giri = costruisci_giri_multigiornata(
         {D_LUN: [g1], D_MAR: [g2], D_MER: [g3]},
-        ParamMultiGiornata(n_giornate_max=3, km_max_ciclo=100.0),
+        ParamMultiGiornata(
+            n_giornate_max=5,
+            km_max_ciclo=100.0,
+            whitelist_sede=frozenset({"MI_FIO"}),
+        ),
     )
-    # Estensione: G1 (60km, sotto cap) → G2 (120km, sopra cap → break dopo G2)
     primo = giri[0]
-    assert len(primo.giornate) == 2
-    assert primo.km_cumulati == 120.0
-    assert primo.motivo_chiusura == "km_cap"
+    assert len(primo.giornate) == 3
+    assert primo.km_cumulati == 130.0
+    assert primo.motivo_chiusura == "naturale"
+    assert primo.chiuso is True
 
 
 def test_km_cap_non_blocca_chiusura_naturale() -> None:
-    """Se la giornata corrente chiude naturalmente, il giro chiude
-    'naturale' anche se km_cumulati > cap (priorità: naturale > km_cap)."""
+    """Modo dinamico Sprint 5.6: se km_cap raggiunto E ultima dest è in
+    whitelist_sede → chiusura naturale completa (= km_cap NON è
+    sub-ottimale, è ideale)."""
     g1 = _cat_pos(
         localita="FIO",
         stazione="MI_FIO",
         corse=(_c("MI_FIO", "MI_FIO", (8, 0), (9, 0), km=10000.0),),
-        chiusa=True,  # geograficamente chiuso
+        chiusa=True,
     )
     giri = costruisci_giri_multigiornata(
         {D_LUN: [g1]},
-        ParamMultiGiornata(km_max_ciclo=5000.0),
+        ParamMultiGiornata(
+            km_max_ciclo=5000.0,
+            whitelist_sede=frozenset({"MI_FIO"}),
+        ),
     )
     assert giri[0].motivo_chiusura == "naturale"
     assert giri[0].chiuso is True

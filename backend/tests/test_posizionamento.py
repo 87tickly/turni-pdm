@@ -415,3 +415,86 @@ def test_smoke_realistico_tirano_multi_giornata() -> None:
     # Ultima arriva a TIRANO (fuori whitelist) → no vuoto coda
     assert r1.vuoto_coda is None
     assert r1.chiusa_a_localita is False, "Il treno dorme a Tirano"
+
+
+# =====================================================================
+# Sprint 5.6 — finestra vietata uscita deposito 01:00–03:00
+# =====================================================================
+
+
+def test_finestra_uscita_default_disattivata() -> None:
+    """Default: finestra non attiva → comportamento legacy."""
+    p = ParamPosizionamento()
+    assert p.finestra_uscita_vietata_attiva is False
+    assert p.finestra_uscita_vietata_inizio_min == 60  # 01:00
+    assert p.finestra_uscita_vietata_fine_min == 180  # 03:00
+
+
+def test_finestra_uscita_attiva_blocca_vuoto_in_finestra() -> None:
+    """Se la prima corsa parte alle 03:00, il vuoto testa partirebbe alle
+    02:25 — dentro la finestra vietata 01:00-03:00 → errore."""
+    cat = Catena(
+        corse=(
+            _c("MI_CADORNA", "BG", (3, 0), (4, 0)),  # parte alle 03:00
+        )
+    )
+    params = ParamPosizionamento(finestra_uscita_vietata_attiva=True)
+    with pytest.raises(PosizionamentoImpossibileError) as exc_info:
+        posiziona_su_localita(cat, LOC_FIORENZA, _WL, params)
+    assert "finestra vietata" in str(exc_info.value).lower()
+
+
+def test_finestra_uscita_attiva_ok_fuori_finestra() -> None:
+    """Se la prima corsa parte alle 04:00, il vuoto testa partirebbe alle
+    03:25 — FUORI dalla finestra (>= 03:00) → OK."""
+    cat = Catena(
+        corse=(
+            _c("MI_CADORNA", "BG", (4, 0), (5, 0)),  # vuoto 03:25-03:55
+        )
+    )
+    params = ParamPosizionamento(finestra_uscita_vietata_attiva=True)
+    res = posiziona_su_localita(cat, LOC_FIORENZA, _WL, params)
+    assert res.vuoto_testa is not None
+    assert res.vuoto_testa.ora_partenza == time(3, 25)
+
+
+def test_finestra_uscita_disattiva_permette_vuoto_in_finestra() -> None:
+    """Se la finestra non è attiva (test legacy), il vuoto in 01-03 passa
+    senza errore."""
+    cat = Catena(
+        corse=(
+            _c("MI_CADORNA", "BG", (3, 0), (4, 0)),
+        )
+    )
+    # Default attiva=False
+    res = posiziona_su_localita(cat, LOC_FIORENZA, _WL)
+    assert res.vuoto_testa is not None
+    # Vuoto cade alle 02:25, ma il vincolo non è attivo → permette
+
+
+def test_finestra_uscita_attiva_non_blocca_rientro_a_sede() -> None:
+    """Il vincolo si applica SOLO al vuoto USCITA dal deposito (testa).
+    Il vuoto coda (rientro a sede) NON è soggetto al vincolo, anche se
+    cade in finestra 01:00-03:00 (decisione utente 2026-04-28)."""
+    # Una catena che inizia alle 12:00 e finisce alle 23:50 in stazione
+    # whitelist → vuoto coda cade alle 23:55-00:25 (NB: questa catena
+    # ha cross-notte sull'arrivo, quindi vuoto coda non viene generato)
+    # Per testare specificamente il rientro: prendo una catena che
+    # finisce alle 22:00 in BG (whitelist), vuoto coda 22:05-22:35.
+    cat = Catena(
+        corse=(
+            _c("MI_CADORNA", "BG", (12, 0), (13, 0)),
+            _c("BG", "BG", (15, 0), (16, 0)),  # placeholder
+        )
+    )
+    # Riformulo con catena semplice: 1 corsa 12:00-22:00 MI_CADORNA→BG
+    cat = Catena(
+        corse=(
+            _c("MI_CADORNA", "BG", (12, 0), (22, 0)),
+        )
+    )
+    params = ParamPosizionamento(finestra_uscita_vietata_attiva=True)
+    res = posiziona_su_localita(cat, LOC_FIORENZA, _WL, params)
+    # Vuoto coda 22:05-22:35: non in finestra vietata, OK.
+    assert res.vuoto_coda is not None
+    assert res.vuoto_coda.ora_partenza == time(22, 5)
