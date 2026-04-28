@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertCircle, Archive, ArrowLeft, ListOrdered, Plus, Send } from "lucide-react";
+import { AlertCircle, Archive, ArrowLeft, ListOrdered, Play, Plus, Send } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -10,6 +10,7 @@ import { useArchiviaProgramma, useProgramma, usePubblicaProgramma } from "@/hook
 import { ApiError } from "@/lib/api/client";
 import type { ProgrammaDettaglioRead } from "@/lib/api/programmi";
 import { formatDateIt, formatNumber, formatPeriodo } from "@/lib/format";
+import { GeneraGiriDialog } from "@/routes/pianificatore-giro/GeneraGiriDialog";
 import { RegolaCard } from "@/routes/pianificatore-giro/regola/RegolaCard";
 import { RegolaEditor } from "@/routes/pianificatore-giro/regola/RegolaEditor";
 
@@ -20,6 +21,7 @@ export function ProgrammaDettaglioRoute() {
 
   const query = useProgramma(programmaId);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [generaOpen, setGeneraOpen] = useState(false);
 
   if (programmaId === undefined || Number.isNaN(programmaId)) {
     return <ErrorBlock message="ID programma non valido nell'URL." />;
@@ -45,6 +47,7 @@ export function ProgrammaDettaglioRoute() {
 
   const programma = query.data;
   const editable = programma.stato === "bozza";
+  const canGenerate = programma.stato === "attivo" && programma.regole.length > 0;
 
   return (
     <div className="flex flex-col gap-5">
@@ -68,6 +71,19 @@ export function ProgrammaDettaglioRoute() {
         </div>
         <div className="flex flex-wrap gap-2">
           <ButtonAzioneStato programma={programma} onMutated={() => void query.refetch()} />
+          {programma.stato === "attivo" && (
+            <Button
+              onClick={() => setGeneraOpen(true)}
+              disabled={!canGenerate}
+              title={
+                canGenerate
+                  ? "Lancia il builder per costruire i giri"
+                  : "Aggiungi almeno una regola e pubblica il programma per generare"
+              }
+            >
+              <Play className="mr-2 h-4 w-4" aria-hidden /> Genera giri
+            </Button>
+          )}
           <Button
             variant="outline"
             onClick={() => navigate(`/pianificatore-giro/programmi/${programma.id}/giri`)}
@@ -116,6 +132,12 @@ export function ProgrammaDettaglioRoute() {
       </section>
 
       <RegolaEditor programmaId={programma.id} open={editorOpen} onOpenChange={setEditorOpen} />
+      <GeneraGiriDialog
+        programmaId={programma.id}
+        open={generaOpen}
+        onOpenChange={setGeneraOpen}
+        onCompleted={() => navigate(`/pianificatore-giro/programmi/${programma.id}/giri`)}
+      />
     </div>
   );
 }

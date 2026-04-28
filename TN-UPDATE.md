@@ -10,6 +10,161 @@
 
 ---
 
+## 2026-04-28 (39) — Sprint 6.4 — Genera giri + lista giri + dashboard usabile
+
+### Contesto
+
+L'utente ha fatto notare (giustamente) che dopo Sub 6.3 il software
+"non genera niente, è solo un'interfaccia". Aveva ragione: la pipeline
+backend (`POST /api/programmi/{id}/genera-giri`) era pronta dallo
+Sprint 4.4.5b ma non era esposta in UI. Sub 6.4 chiude il gap:
+bottone "Genera giri" + lista giri persistiti + dashboard utile.
+
+In parallelo, popolato il DB con i materiali Trenord mancanti (5 nuovi
+codici + 2 famiglie corrette) ed estratti dal PDF "Turno Materiale
+Trenord dal 2/3/26" (353 pp, 50+ composizioni distinte). Creato il
+programma reale `#1289 Trenord 2025-2026` (no stagione) con 1 regola
+Tirano confermata, e nuova memoria persistente
+`project_direttrici_materiali_trenord.md` per registrare
+incrementalmente le associazioni direttrice→composizione confermate
+dall'utente nelle sessioni future (apprendimento incrementale, no
+hardcoded).
+
+### Modifiche
+
+**Frontend — API + hooks giri**:
+
+- `frontend/src/lib/api/giri.ts`: client per i 3 endpoint giri
+  (`generaGiri`, `listGiriProgramma`, `getGiroDettaglio`). Tipi
+  `BuilderResult`, `GiroListItem`, `GiroDettaglio`,
+  `GiroGiornata/Variante/Blocco` allineati a
+  `colazione.api.giri.*Response`.
+- `frontend/src/hooks/useGiri.ts`: 3 hook React Query (`useGeneraGiri`
+  mutation con invalidate, `useGiriProgramma` query, `useGiroDettaglio`
+  query).
+
+**Frontend — GeneraGiriDialog**
+(`routes/pianificatore-giro/GeneraGiriDialog.tsx`):
+
+Dialog 2-stati (form / risultato). Form: data_inizio, n_giornate
+(1-180 con default 14), località (Select da
+`useLocalitaManutenzione()`). Submit → chiamata POST. Gestione 409
+intelligente: se backend rifiuta perché il programma ha già giri,
+appare un banner amber con checkbox "Sovrascrivi giri esistenti";
+spuntandolo e re-submittando si invia `force=true`. Risultato: card con
+stats (giri creati, corse processate, residue, eventi composizione,
+warnings dettagliati).
+
+**Frontend — Bottone "Genera giri"** in
+`ProgrammaDettaglioRoute.tsx`:
+
+Visibile solo quando `programma.stato === "attivo"`, disabled se 0
+regole, con tooltip che spiega le condizioni. `onCompleted` post-build
+naviga a `/programmi/:id/giri` per vedere subito l'output.
+
+**Frontend — ProgrammaGiriRoute** (route reale, non più placeholder):
+
+Header con link "← Dettaglio programma", titolo "Giri generati ·
+{nome}". StatsBar 4-colonne (totale, chiusi naturalmente, km/giorno
+cumulati, km/anno cumulati con `Intl.NumberFormat('it-IT')`).
+GiriTable con: ID, Turno (G-FIO-001 ecc.), Tipo materiale, Giornate,
+km/giorno, km/anno, Chiusura (Badge `naturale` success / `non chiuso`
+warning / altro outline), Creato. Click riga → `/giri/:id`
+(visualizzatore Sub 6.5, ancora placeholder). Empty state guidato:
+"Per generare torna al dettaglio programma".
+
+**Frontend — DashboardRoute** ricostruita:
+
+Rimosse le 4 card "Sub 6.x in arrivo" obsolete (Sub 6.2 / 6.3 / 6.4
+ora reali). Sostituite con:
+- Card "Programmi materiale" come Link interattivo (hover effect, CTA
+  "Apri lista programmi" con freccia)
+- Card "Genera giri" che spiega il workflow
+- Card "Giri persistiti" che indica dove vederli
+- Card "Visualizzatore Gantt" segnata "In arrivo (Sub 6.5)"
+
+**Backend — DB seed materiali Trenord**:
+
+Tramite SQL diretto (no migrations, le anagrafiche cambiano di rado):
+- INSERT 5 nuovi codici macro: `ETR524 (Flirt 524 TILO)` famiglia
+  "Flirt (TILO)"; `Ale524`, `Le524` (pezzi atomici); `ETR245
+  (Coradia 245)` famiglia "Coradia Meridian"; `R_TAF (Ale760+Ale761
+  +Le990)` famiglia "TAF".
+- UPDATE famiglia errata: `ETR103`/`ETR104` da `Donizetti` → `POP`
+  (sono Hitachi POP, non CAF Donizetti — solo `ETR204` è Donizetti).
+
+Risultato: **19 macro selezionabili** (era 16) raggruppati in 12
+famiglie commerciali, allineati al PDF Turno Materiale Trenord.
+
+**Programma reale creato — #1289 "Trenord 2025-2026"**:
+
+Periodo 2025-12-14 → 2026-12-12, no stagione (vale tutto l'anno),
+km_max_ciclo=10000, n_giornate_default=30, stato `bozza` (l'utente
+poi pubblicato in chat: ora `attivo`). 1 regola pre-creata: direttrice
+`TIRANO-SONDRIO-LECCO-MILANO` → `ETR526 × 1 + ETR425 × 1`. Le altre
+38 direttrici PdE saranno aggiunte on-demand dall'utente via UI.
+
+**Memoria persistente nuova**:
+
+`project_direttrici_materiali_trenord.md` tracciamento incrementale
+delle associazioni direttrice→composizione. Indicizzato in MEMORY.md.
+Workflow: quando l'utente conferma in chat una scelta, la registriamo;
+prima di proporne nuove, leggiamo questa memoria. Supersede al hardcoding
+(coerente con `feedback_no_vincoli_hardcoded.md`).
+
+### Verifiche
+
+- `pnpm typecheck`: clean
+- `pnpm test`: 31/31 verdi (no test rotti, ma Sub 6.4 non ha nuovi
+  test perché è UI sopra hooks già coperti — coverage da estendere
+  in seguito quando l'algoritmo è in produzione)
+- `pnpm format`: clean
+- `pnpm lint`: 0 errori, 1 warning fast-refresh AuthContext
+  (preesistente)
+- `pnpm build`: clean, **330 KB JS / 101 KB gzip / 19 KB CSS** (+13
+  KB JS per GeneraGiriDialog + ProgrammaGiriRoute + DashboardRoute,
+  accettabile)
+
+**Preview live con backend reale**:
+
+- Apertura programma `#1289 Trenord 2025-2026` (attivo): header con
+  bottone blu "Genera giri" + outline "Giri generati"
+- Click su "Genera giri" → dialog "Genera giri materiale" con form
+  funzionante. Dropdown località popolato con 7 sedi reali (CAM, CRE,
+  FIO, ISE, LEC, NOV, POOL_TILO_SVIZZERA)
+- Submit con FIO + 19/01/2026 + 14 giornate → backend ritorna 409
+  (programma ha già 34 giri persistiti dallo smoke 5.6 R5)
+- Banner amber appare con checkbox "Sovrascrivi giri esistenti" +
+  banner rosso col dettaglio errore
+- Apertura `/programmi/1289/giri` → tabella mostra 34 giri reali con
+  stats: 11.487 km/giorno cumulati, 13.470.108 km/anno. Tutti i giri
+  sono `non chiuso` (warning) perché il regola è in `bozza` mode senza
+  `genera_rientro_sede=True` per quel batch — il dato è coerente.
+
+### Stato
+
+Sub 6.4 chiusa (regola 7: niente residui artificiali — il bottone
+genera funziona end-to-end, la lista giri carica i dati reali,
+gestione errori 409/altri funziona, dashboard usabile). Per la prima
+volta dall'inizio dello Sprint 6 il pianificatore può **fare qualcosa
+di concreto** dalla UI: configurare regole → pubblicare → generare
+giri → vederli in tabella.
+
+**Sprint 6 al 80%**: mancano solo Sub 6.5 (visualizzatore Gantt del
+singolo giro) per chiudere il frontend del Pianificatore Giro
+Materiale. Dopo, **Sprint 7** sul turno PdC (zero codice scritto).
+
+### Prossimo step
+
+**Sub 6.5 — Visualizzatore Gantt giro**: pagina
+`/pianificatore-giro/giri/:id` consuma `GET /api/giri/{id}` (giornate
++ varianti + blocchi). Replica il PDF Trenord (header con turno + tipo
+materiale + km, body con timeline ore 1-23, righe per giornata, blocchi
+commerciali colorati, vuoti, eventi composizione, rientro 9NNNN). Fine
+Sprint 6 = pianificatore giro materiale completo end-to-end.
+
+---
+
 ## 2026-04-28 (38) — Sprint 6.3 — Dettaglio programma + editor regole
 
 ### Contesto
