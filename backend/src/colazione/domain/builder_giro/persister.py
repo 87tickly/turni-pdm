@@ -144,6 +144,65 @@ def _km_totali_giro(giro: GiroAssegnato) -> float:
     return total
 
 
+def _estrai_validita_giornata(
+    giornata: GiornataAssegnata,
+) -> tuple[str, list[str]]:
+    """Estrae validità testuale + date concrete applicabili a una giornata.
+
+    **Testo** (``validita_testo``): ``periodicita_breve`` della prima
+    corsa della giornata che ne abbia una valorizzata, oppure ``"GG"``
+    fallback. Coerente con feedback utente "PdE testo Periodicità =
+    verità letterale" (memoria persistente
+    ``feedback_pde_periodicita_verita.md``): mostriamo letteralmente
+    quello che il PdE dice, niente parser DSL.
+
+    **Date** (``validita_dates_apply_json``): intersezione di
+    ``valido_in_date_json`` di TUTTE le corse della giornata. Esprime
+    "in queste date concrete del calendario, la sequenza di blocchi di
+    questa giornata è interamente valida". Per il giro istanza la lista
+    è ovviamente almeno ``[giornata.data]``; le altre date sono i giorni
+    "gemelli" in cui lo stesso pattern ricorre senza modifiche.
+
+    Returns:
+        Coppia ``(testo, dates_iso)``. ``testo`` è String/Text
+        compatibile con ``GiroVariante.validita_testo``. ``dates_iso``
+        è lista ordinata di stringhe ``YYYY-MM-DD``.
+    """
+    corse = giornata.catena_posizionata.catena.corse
+    if not corse:
+        return ("GG", [giornata.data.isoformat()])
+
+    testo = "GG"
+    for c in corse:
+        p = getattr(c, "periodicita_breve", None)
+        if p is not None and str(p).strip():
+            testo = str(p).strip()
+            break
+
+    sets_dates: list[set[str]] = []
+    for c in corse:
+        d = getattr(c, "valido_in_date_json", None) or []
+        if d:
+            sets_dates.append({str(x) for x in d})
+
+    if not sets_dates:
+        return (testo, [giornata.data.isoformat()])
+
+    inter = sets_dates[0]
+    for s in sets_dates[1:]:
+        inter = inter & s
+    if not inter:
+        return (testo, [giornata.data.isoformat()])
+
+    # La data della giornata DEVE cadere nell'intersezione (altrimenti
+    # il filtro `_corsa_vale_in_data` del builder ha lasciato passare
+    # una corsa che non doveva — anomalia da segnalare); fallback safe.
+    iso_d = giornata.data.isoformat()
+    if iso_d not in inter:
+        inter.add(iso_d)
+    return (testo, sorted(inter))
+
+
 def _km_media_annua_giro(
     giro: GiroAssegnato,
     valido_da: date,
@@ -523,11 +582,18 @@ async def _persisti_un_giro(
         session.add(gg)
         await session.flush()
 
+        # Sprint 7.3 fix periodicità: estrai validità dalla prima corsa
+        # della giornata e dall'intersezione di `valido_in_date_json`.
+        # Il testo è la `periodicita_breve` (verità letterale del PdE,
+        # niente parser DSL); le date sono il set di giorni calendario
+        # in cui questa stessa sequenza di blocchi è effettivamente
+        # valida (intersezione di tutte le corse della giornata).
+        testo_val, dates_val = _estrai_validita_giornata(giornata)
         gv = GiroVariante(
             giro_giornata_id=gg.id,
             variant_index=0,
-            validita_testo="GG",  # placeholder; pattern in scope futuro
-            validita_dates_apply_json=[giornata.data.isoformat()],
+            validita_testo=testo_val,
+            validita_dates_apply_json=dates_val,
             validita_dates_skip_json=[],
         )
         session.add(gv)
