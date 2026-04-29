@@ -37,6 +37,13 @@ class GiroMateriale(Base):
     azienda_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("azienda.id", ondelete="RESTRICT")
     )
+    # Migration 0010: il programma_id è ora colonna esplicita (prima
+    # era solo dentro generation_metadata_json). UNIQUE su
+    # (azienda_id, programma_id, numero_turno) — due programmi diversi
+    # possono avere ognuno il proprio G-FIO-001.
+    programma_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("programma_materiale.id", ondelete="CASCADE")
+    )
     numero_turno: Mapped[str] = mapped_column(String(20))
     validita_codice: Mapped[str | None] = mapped_column(String(10))
     tipo_materiale: Mapped[str] = mapped_column(Text)

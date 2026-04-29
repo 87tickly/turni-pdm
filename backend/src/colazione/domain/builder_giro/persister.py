@@ -495,6 +495,7 @@ async def _persisti_un_giro(
 
     gm = GiroMateriale(
         azienda_id=azienda_id,
+        programma_id=programma_id,
         numero_turno=entry.numero_turno,
         validita_codice=None,
         tipo_materiale=materiale_tipo if materiale_tipo is not None else "MISTO",

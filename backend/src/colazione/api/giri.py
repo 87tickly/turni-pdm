@@ -26,7 +26,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import BigInteger, cast, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.auth import require_role
@@ -257,15 +257,14 @@ async def list_giri_programma(
     """Ritorna i giri persistiti per il programma. Filtro per
     `generation_metadata_json->>'programma_id'` (no FK diretta).
     """
+    # Sprint 7.3 fix: usa la colonna esplicita programma_id (migration
+    # 0010) invece del cast da generation_metadata_json. Più veloce
+    # (indicizzato) e più leggibile.
     stmt = (
         select(GiroMateriale)
         .where(
             GiroMateriale.azienda_id == user.azienda_id,
-            cast(
-                GiroMateriale.generation_metadata_json["programma_id"].astext,
-                BigInteger,
-            )
-            == programma_id,
+            GiroMateriale.programma_id == programma_id,
         )
         .order_by(GiroMateriale.numero_turno)
     )
