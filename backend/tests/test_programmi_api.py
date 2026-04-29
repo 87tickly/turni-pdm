@@ -372,11 +372,13 @@ def test_pubblica_gia_attivo_400(client: TestClient) -> None:
 
 
 def test_pubblica_sovrapposizione_409(client: TestClient) -> None:
-    """Due programmi attivi nella stessa azienda+stagione che si sovrappongono → 409."""
+    """Due programmi attivi nella stessa azienda con finestre che si
+    sovrappongono → 409. Sprint 7.3: il check non confronta più la
+    stagione (campo rimosso), solo la finestra temporale.
+    """
     token = _login(client, "admin", "admin12345")
     payload = {
         **_PAYLOAD_MIN,
-        "stagione": "invernale",
         "valido_da": "2026-01-01",
         "valido_a": "2026-06-30",
         "regole": [_REGOLA_MIN],

@@ -32,7 +32,6 @@ function makeProgramma(over: Partial<ProgrammaDettaglioRead> = {}): ProgrammaDet
     id: 1287,
     azienda_id: 2,
     nome: "Test Trenord 2026",
-    stagione: "invernale",
     valido_da: "2026-01-01",
     valido_a: "2026-12-31",
     stato: "bozza",

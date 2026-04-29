@@ -12,11 +12,10 @@ import {
 } from "@/components/ui/Dialog";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
-import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
 import { useCreateProgramma } from "@/hooks/useProgrammi";
 import { ApiError } from "@/lib/api/client";
-import type { ProgrammaMaterialeRead, Stagione } from "@/lib/api/programmi";
+import type { ProgrammaMaterialeRead } from "@/lib/api/programmi";
 
 interface CreaProgrammaDialogProps {
   open: boolean;
@@ -26,7 +25,6 @@ interface CreaProgrammaDialogProps {
 
 interface FormState {
   nome: string;
-  stagione: Stagione | "";
   valido_da: string;
   valido_a: string;
   km_max_ciclo: string;
@@ -35,7 +33,6 @@ interface FormState {
 
 const INITIAL: FormState = {
   nome: "",
-  stagione: "",
   valido_da: "",
   valido_a: "",
   km_max_ciclo: "",
@@ -79,7 +76,6 @@ export function CreaProgrammaDialog({ open, onOpenChange, onCreated }: CreaProgr
     try {
       const created = await createMutation.mutateAsync({
         nome: form.nome.trim(),
-        stagione: form.stagione === "" ? null : form.stagione,
         valido_da: form.valido_da,
         valido_a: form.valido_a,
         km_max_ciclo: kmCiclo === "" ? null : Number(kmCiclo),
@@ -127,32 +123,16 @@ export function CreaProgrammaDialog({ open, onOpenChange, onCreated }: CreaProgr
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="stagione">Stagione</Label>
-              <Select
-                id="stagione"
-                value={form.stagione}
-                onChange={(e) => update("stagione", e.target.value as Stagione | "")}
-                disabled={createMutation.isPending}
-              >
-                <option value="">— non specificata —</option>
-                <option value="invernale">Invernale</option>
-                <option value="estiva">Estiva</option>
-                <option value="agosto">Agosto</option>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="n_giornate_default">N. giornate (safety)</Label>
-              <Input
-                id="n_giornate_default"
-                type="number"
-                min={1}
-                value={form.n_giornate_default}
-                onChange={(e) => update("n_giornate_default", e.target.value)}
-                disabled={createMutation.isPending}
-              />
-            </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="n_giornate_default">N. giornate (safety)</Label>
+            <Input
+              id="n_giornate_default"
+              type="number"
+              min={1}
+              value={form.n_giornate_default}
+              onChange={(e) => update("n_giornate_default", e.target.value)}
+              disabled={createMutation.isPending}
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">

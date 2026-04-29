@@ -35,10 +35,9 @@ describe("api/programmi", () => {
       }),
     );
 
-    await listProgrammi({ stato: "bozza", stagione: "invernale" });
+    await listProgrammi({ stato: "bozza" });
     const url = fetchSpy.mock.calls[0]?.[0] as string;
     expect(url).toContain("stato=bozza");
-    expect(url).toContain("stagione=invernale");
   });
 
   it("createProgramma manda POST con body JSON", async () => {

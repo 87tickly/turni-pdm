@@ -76,7 +76,7 @@ async def _validate_pubblicabile(session: AsyncSession, programma: ProgrammaMate
     1. Stato corrente = 'bozza' (idempotente: già attivo → no-op? No, errore.)
     2. Almeno 1 regola.
     3. Tutti i `materiale_tipo` referenziati esistono.
-    4. Nessun programma attivo della stessa azienda+stagione si sovrappone
+    4. Nessun programma attivo della stessa azienda si sovrappone
        sulla finestra `[valido_da, valido_a]`.
     """
     if programma.stato != "bozza":
@@ -96,7 +96,10 @@ async def _validate_pubblicabile(session: AsyncSession, programma: ProgrammaMate
             detail="nessuna regola: aggiungi almeno una regola prima di pubblicare",
         )
 
-    # 4. Sovrapposizione con altri programmi attivi (azienda + stagione)
+    # 4. Sovrapposizione con altri programmi attivi (stessa azienda).
+    # Sprint 7.3: il campo `stagione` è stato rimosso, l'overlap check
+    # ora confronta solo le finestre temporali. Due programmi
+    # cronologicamente disgiunti possono coesistere; sovrapposti no.
     stmt_overlap = select(ProgrammaMateriale.id, ProgrammaMateriale.nome).where(
         ProgrammaMateriale.azienda_id == programma.azienda_id,
         ProgrammaMateriale.stato == "attivo",
@@ -104,8 +107,6 @@ async def _validate_pubblicabile(session: AsyncSession, programma: ProgrammaMate
         ProgrammaMateriale.valido_da <= programma.valido_a,
         ProgrammaMateriale.valido_a >= programma.valido_da,
     )
-    if programma.stagione is not None:
-        stmt_overlap = stmt_overlap.where(ProgrammaMateriale.stagione == programma.stagione)
 
     overlap = (await session.execute(stmt_overlap)).all()
     if overlap:
@@ -135,7 +136,6 @@ async def create_programma(
     programma = ProgrammaMateriale(
         azienda_id=user.azienda_id,
         nome=payload.nome,
-        stagione=payload.stagione,
         valido_da=payload.valido_da,
         valido_a=payload.valido_a,
         stato="bozza",
@@ -177,14 +177,11 @@ async def list_programmi(
     user: CurrentUser = _authz,
     session: AsyncSession = Depends(get_session),
     stato: str | None = Query(default=None, description="filtro per stato"),
-    stagione: str | None = Query(default=None, description="filtro per stagione"),
 ) -> list[ProgrammaMateriale]:
     """Lista programmi dell'azienda corrente. Ordinati `valido_da DESC`."""
     stmt = select(ProgrammaMateriale).where(ProgrammaMateriale.azienda_id == user.azienda_id)
     if stato is not None:
         stmt = stmt.where(ProgrammaMateriale.stato == stato)
-    if stagione is not None:
-        stmt = stmt.where(ProgrammaMateriale.stagione == stagione)
     stmt = stmt.order_by(ProgrammaMateriale.valido_da.desc())
     return list((await session.execute(stmt)).scalars().all())
 

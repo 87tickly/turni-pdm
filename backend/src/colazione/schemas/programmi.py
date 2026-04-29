@@ -239,7 +239,6 @@ class ProgrammaMaterialeRead(BaseModel):
     id: int
     azienda_id: int
     nome: str
-    stagione: str | None = None
     valido_da: date
     valido_a: date
     stato: str
@@ -284,7 +283,6 @@ class ProgrammaMaterialeCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     nome: str = Field(min_length=1)
-    stagione: Literal["invernale", "estiva", "agosto"] | None = None
     valido_da: date
     valido_a: date
     km_max_giornaliero: int | None = Field(default=None, ge=1)
@@ -308,7 +306,6 @@ class ProgrammaMaterialeUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     nome: str | None = Field(default=None, min_length=1)
-    stagione: Literal["invernale", "estiva", "agosto"] | None = None
     valido_da: date | None = None
     valido_a: date | None = None
     stato: Literal["bozza", "attivo", "archiviato"] | None = None

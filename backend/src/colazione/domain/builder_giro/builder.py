@@ -116,6 +116,16 @@ class ProgrammaNonTrovatoError(LookupError):
         self.azienda_id = azienda_id
 
 
+class PeriodoFuoriProgrammaError(ValueError):
+    """Il range richiesto sfora il periodo di validità del programma.
+    Sprint 7.3 fix data validità.
+    """
+
+    def __init__(self, motivo: str) -> None:
+        super().__init__(motivo)
+        self.motivo = motivo
+
+
 class StrictModeViolation(ValueError):
     """Uno o più flag strict del programma sono violati dal builder output."""
 
@@ -316,6 +326,26 @@ async def _wipe_giri_programma(session: AsyncSession, programma_id: int) -> None
 # =====================================================================
 
 
+def _valida_periodo_programma(
+    programma: ProgrammaMateriale, data_inizio: date, n_giornate: int
+) -> None:
+    """Valida che il range richiesto sia contenuto nel periodo del
+    programma ``[valido_da, valido_a]``. Sprint 7.3 fix data validità.
+
+    Raises:
+        PeriodoFuoriProgrammaError: quando il range API sfora il
+            periodo del programma.
+    """
+    data_fine_richiesta = data_inizio + timedelta(days=n_giornate - 1)
+    if data_inizio < programma.valido_da or data_fine_richiesta > programma.valido_a:
+        raise PeriodoFuoriProgrammaError(
+            f"Range richiesto {data_inizio.isoformat()} → "
+            f"{data_fine_richiesta.isoformat()} fuori dal periodo del "
+            f"programma [{programma.valido_da.isoformat()} → "
+            f"{programma.valido_a.isoformat()}]."
+        )
+
+
 def _corsa_vale_in_data(corsa: CorsaCommerciale, d: date) -> bool:
     """``True`` se ``corsa.valido_in_date_json`` contiene la data come
     stringa ISO (``YYYY-MM-DD``).
@@ -418,6 +448,12 @@ async def genera_giri(
     programma = await _carica_programma(session, programma_id, azienda_id)
     if programma.stato != "attivo":
         raise ProgrammaNonAttivoError(programma_id, programma.stato)
+
+    # Sprint 7.3 fix: vincolo HARD su valido_da/valido_a + stagione del
+    # programma. Prima il builder ignorava entrambi e generava giri
+    # anche per date fuori dal periodo o stagione dichiarata. Adesso:
+    # 422 prima di toccare la pipeline.
+    _valida_periodo_programma(programma, data_inizio, n_giornate)
 
     regole = await _carica_regole(session, programma_id)
     localita = await _carica_localita(session, localita_codice, azienda_id)

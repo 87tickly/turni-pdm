@@ -13,7 +13,6 @@
 import { apiJson } from "@/lib/api/client";
 
 export type ProgrammaStato = "bozza" | "attivo" | "archiviato";
-export type Stagione = "invernale" | "estiva" | "agosto";
 
 export interface StrictOptions {
   no_corse_residue: boolean;
@@ -28,7 +27,6 @@ export interface ProgrammaMaterialeRead {
   id: number;
   azienda_id: number;
   nome: string;
-  stagione: Stagione | null;
   valido_da: string;
   valido_a: string;
   stato: ProgrammaStato;
@@ -81,7 +79,6 @@ export interface ProgrammaRegolaAssegnazioneCreate {
 
 export interface ProgrammaMaterialeCreate {
   nome: string;
-  stagione?: Stagione | null;
   valido_da: string;
   valido_a: string;
   km_max_giornaliero?: number | null;
@@ -95,7 +92,6 @@ export interface ProgrammaMaterialeCreate {
 
 export interface ProgrammaMaterialeUpdate {
   nome?: string;
-  stagione?: Stagione | null;
   valido_da?: string;
   valido_a?: string;
   km_max_giornaliero?: number | null;
@@ -108,13 +104,11 @@ export interface ProgrammaMaterialeUpdate {
 
 export interface ListProgrammiParams {
   stato?: ProgrammaStato;
-  stagione?: Stagione;
 }
 
 function buildQuery(params: ListProgrammiParams): string {
   const search = new URLSearchParams();
   if (params.stato !== undefined) search.set("stato", params.stato);
-  if (params.stagione !== undefined) search.set("stagione", params.stagione);
   const qs = search.toString();
   return qs.length > 0 ? `?${qs}` : "";
 }

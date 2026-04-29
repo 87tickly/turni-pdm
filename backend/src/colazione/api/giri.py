@@ -34,6 +34,7 @@ from colazione.db import get_session
 from colazione.domain.builder_giro.builder import (
     BuilderResult,
     GiriEsistentiError,
+    PeriodoFuoriProgrammaError,
     ProgrammaNonAttivoError,
     ProgrammaNonTrovatoError,
     StrictModeViolation,
@@ -141,6 +142,10 @@ async def genera_giri_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProgrammaNonAttivoError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except PeriodoFuoriProgrammaError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
     except GiriEsistentiError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except StrictModeViolation as exc:

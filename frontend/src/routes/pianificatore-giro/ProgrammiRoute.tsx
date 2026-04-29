@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Send, Archive, AlertCircle } from "lucide-react";
 
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Label } from "@/components/ui/Label";
 import { Select } from "@/components/ui/Select";
@@ -22,7 +21,6 @@ import type {
   ListProgrammiParams,
   ProgrammaMaterialeRead,
   ProgrammaStato,
-  Stagione,
 } from "@/lib/api/programmi";
 import { formatDateIt, formatNumber, formatPeriodo } from "@/lib/format";
 import { CreaProgrammaDialog } from "@/routes/pianificatore-giro/CreaProgrammaDialog";
@@ -34,29 +32,20 @@ const STATI: ReadonlyArray<{ value: "" | ProgrammaStato; label: string }> = [
   { value: "archiviato", label: "Archiviato" },
 ];
 
-const STAGIONI: ReadonlyArray<{ value: "" | Stagione; label: string }> = [
-  { value: "", label: "Tutte le stagioni" },
-  { value: "invernale", label: "Invernale" },
-  { value: "estiva", label: "Estiva" },
-  { value: "agosto", label: "Agosto" },
-];
-
 export function ProgrammiRoute() {
   const [statoFilter, setStatoFilter] = useState<"" | ProgrammaStato>("");
-  const [stagioneFilter, setStagioneFilter] = useState<"" | Stagione>("");
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const params = useMemo<ListProgrammiParams>(() => {
     const p: ListProgrammiParams = {};
     if (statoFilter !== "") p.stato = statoFilter;
-    if (stagioneFilter !== "") p.stagione = stagioneFilter;
     return p;
-  }, [statoFilter, stagioneFilter]);
+  }, [statoFilter]);
 
   const programmiQuery = useProgrammi(params);
   const navigate = useNavigate();
 
-  const hasFilters = statoFilter !== "" || stagioneFilter !== "";
+  const hasFilters = statoFilter !== "";
 
   return (
     <div className="flex flex-col gap-4">
@@ -88,27 +77,12 @@ export function ProgrammiRoute() {
             ))}
           </Select>
         </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="filtro-stagione">Stagione</Label>
-          <Select
-            id="filtro-stagione"
-            value={stagioneFilter}
-            onChange={(e) => setStagioneFilter(e.target.value as "" | Stagione)}
-          >
-            {STAGIONI.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </Select>
-        </div>
         {hasFilters && (
           <Button
             variant="ghost"
             size="sm"
             onClick={() => {
               setStatoFilter("");
-              setStagioneFilter("");
             }}
           >
             Azzera filtri
@@ -136,7 +110,6 @@ export function ProgrammiRoute() {
           onCreate={() => setDialogOpen(true)}
           onClearFilters={() => {
             setStatoFilter("");
-            setStagioneFilter("");
           }}
         />
       ) : Array.isArray(programmiQuery.data) ? (
@@ -167,7 +140,6 @@ function ProgrammiTable({ programmi, onOpen }: ProgrammiTableProps) {
         <TableRow>
           <TableHead className="w-12">ID</TableHead>
           <TableHead>Nome</TableHead>
-          <TableHead className="w-24">Stagione</TableHead>
           <TableHead className="w-44">Periodo</TableHead>
           <TableHead className="w-24">Stato</TableHead>
           <TableHead className="w-20 text-right">Giornate</TableHead>
@@ -225,13 +197,6 @@ function ProgrammaRow({ programma, onOpen }: ProgrammaRowProps) {
     >
       <TableCell className="font-mono text-xs text-muted-foreground">#{programma.id}</TableCell>
       <TableCell className="font-medium">{programma.nome}</TableCell>
-      <TableCell>
-        {programma.stagione !== null ? (
-          <Badge variant="outline">{programma.stagione}</Badge>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
-        )}
-      </TableCell>
       <TableCell className="whitespace-nowrap text-sm">
         {formatPeriodo(programma.valido_da, programma.valido_a)}
       </TableCell>

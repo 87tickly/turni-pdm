@@ -10,6 +10,150 @@
 
 ---
 
+## 2026-04-29 (43) — PdE bug fixes: collision G-FIO, periodicità GG, stagione cosmetica
+
+### Contesto
+
+Sessione mattina. L'utente ha aperto 4 bug del PdE in ordine di
+attacco prioritario, partendo dalla generazione che dava
+*"Failed to fetch"* sul programma 1318. Il quarto bug ("doppioni
+numero_treno") resta da verificare. Gli altri 3 chiusi in cascata
+con 4 commit.
+
+Punto di stile concordato in sessione: protocollo "diagnosi → 1
+proposta → OK utente → fix → commit", un bug alla volta, niente
+batch confusi. Aggiunto profilo senior in `CLAUDE.md` come
+direttiva trasversale.
+
+### Modifiche
+
+**Bug 1 — Collision `G-FIO-001` cross-programma** (commit `dae23b7`):
+
+Il vincolo UNIQUE su `(azienda_id, numero_turno)` impediva a due
+programmi diversi della stessa azienda di avere ognuno il proprio
+`G-FIO-001` (il persister numera `G-{LOC}-{NNN}` ripartendo da 001
+per programma). Migration 0010: aggiunge colonna esplicita
+`giro_materiale.programma_id` (FK + indice), backfilla dai
+`generation_metadata_json`, sostituisce vincolo UNIQUE in
+`(azienda_id, programma_id, numero_turno)`. Persister popola la
+colonna esplicita; `list_giri_programma` usa la colonna invece del
+cast da JSON.
+
+**Bug 2 — `validita_testo` hardcoded a "GG"** (commit `e5f39d0`):
+
+Il persister scriveva `validita_testo='GG'` hardcoded e
+`validita_dates_apply_json=[data_giornata]` singola, ignorando il
+PdE. Risultato UI: l'utente vedeva sempre "Validità: GG"
+indipendentemente dal pattern reale ("Circola di domenica",
+"Soppresso nel corso di dicembre", ecc.).
+
+Fix in `persister.py`:
+- nuova helper `_estrai_validita_giornata(giornata) → (testo, dates)`
+- testo: `periodicita_breve` della prima corsa con valore non vuoto
+  (verità letterale del PdE, niente parser DSL — coerente con
+  feedback utente memoria persistente)
+- dates: intersezione di `valido_in_date_json` di TUTTE le corse
+  della giornata = giorni calendario in cui la sequenza di blocchi
+  è effettivamente valida
+- fallback safe a `('GG', [data_giornata])` se manca la periodicità
+
+Verificato: programma 1289 rigenerato → giornate ora mostrano testi
+reali e date applicabili 96-144 invece di 1.
+
+**Bug 3 — Stagione del programma rimossa** (commit `XXXX`):
+
+Discussione approfondita con utente sui dati reali del PdE
+(14/12/2025 → 31/12/2026, ~6500 corse). Risultato:
+
+- Le 3 etichette `invernale/estiva/agosto` esistono nel PdE solo a
+  livello di `corsa_composizione.stagione` (composizione-tipo del
+  materiale per stagione). NON esistono come tagging delle corse.
+- I confini delle stagioni che avevo proposto inizialmente
+  (14/12-31/05, 01/06-30/11, 01/08-31/08) erano miei senza
+  fondamento — l'utente ha richiesto di prenderli dai dati,
+  segnalando giustamente l'errore "regola 1 CLAUDE.md violata:
+  diagnosi prima di azione, niente ipotesi".
+- Dai dati: 3426 corse vivono solo in 14/12-31/05; 71 estive incl
+  agosto (3/6-30/9); 30 estive escl agosto (15/6-31/7); 3009 corse
+  "tutto l'anno". Quindi i confini esistono come *finestre* nei
+  dati, non come *partizioni*.
+- Decisione utente: il filtro temporale è già sufficiente con
+  `programma.valido_da/valido_a` + `corsa.valido_in_date_json`.
+  Le stagioni come vincolo sono ridondanti. Cancelliamo il campo
+  `stagione` da `programma_materiale`.
+
+Modifiche:
+
+- **Migration 0011**: `DROP COLUMN programma_materiale.stagione`.
+- **Backend**:
+  - `models/programmi.py`: rimosso campo `stagione`
+  - `schemas/programmi.py`: rimosso da `Read/Create/Update`
+  - `api/programmi.py`: rimosso filtro `stagione` su list,
+    rimosso payload, rimosso check overlap su stagione
+    (l'overlap di pubblicazione confronta solo finestre temporali)
+  - `domain/builder_giro/builder.py`: rimosso filtro stagione
+    sulle corse, rimosso `_valida_periodo_programma` parte
+    stagione (resta solo vincolo `valido_da/valido_a` HARD)
+  - **DELETED** `domain/stagioni.py` + `tests/test_stagioni.py`
+    (era lavoro fatto poche ore prima ma reso obsoleto dalla
+    decisione data-driven dell'utente — meglio cancellare che
+    tenere codice "in caso serva")
+- **Frontend**:
+  - `lib/api/programmi.ts`: rimosso `Stagione` type, campo da
+    `Read/Create/Update`, query param `stagione`
+  - `CreaProgrammaDialog.tsx`: rimosso select stagione
+  - `ProgrammiRoute.tsx`: rimosso filtro stagione, colonna
+    Stagione, componente Badge
+  - `ProgrammaDettaglioRoute.tsx`: rimossa Field stagione + label
+  - test frontend allineati (3 file)
+- **Vincolo `valido_da/valido_a` rimane HARD**: range richiesto
+  fuori → HTTP 422 con messaggio chiaro
+  (`PeriodoFuoriProgrammaError`).
+
+NB: il campo `corsa_composizione.stagione` (`invernale/estiva/agosto`
+sulla tabella delle composizioni del materiale) NON è stato
+toccato. È strutturale al modello, descrive le 3 composizioni-tipo
+del materiale per ogni corsa, è un dato del PdE.
+
+### Verifiche
+
+- `pnpm typecheck`: clean
+- `pnpm test`: 31/31 verdi
+- `pnpm build`: 360.48 KB JS / 107.04 KB gzip / 21.81 KB CSS (-1.4 KB)
+- `pytest test_programmi.py test_programmi_api.py`: 65/65 verdi
+- Migration 0010 + 0011 applicate
+- Smoke API live:
+  - `GET /api/programmi/1341` → JSON senza chiave `stagione` ✓
+  - `POST .../genera-giri` con range OK → 200 + giri ✓
+  - `POST .../genera-giri` fuori periodo → 422 con messaggio chiaro ✓
+- Verificato T1-T5 prima di togliere il filtro: 5/5 scenari
+  (range OK, fuori periodo, mismatch stagione, estiva coerente,
+  invernale coerente) tutti coerenti
+
+### Stato
+
+3 bug PdE chiusi su 4. Bug residuo: doppioni `numero_treno` da
+verificare (memo per la prossima sessione).
+
+Stato del PdE come modellazione:
+- Filtro temporale: data-driven via
+  `corsa.valido_in_date_json ∩ [programma.valido_da, programma.valido_a]`
+- Niente etichetta stagione ridondante sul programma
+- Periodicità: visibile letteralmente nelle giornate del giro
+
+### Prossimo step
+
+Bug 4 (doppioni `numero_treno`): verifica se ci sono `numero_treno`
+duplicati nel PdE e capire se è anomalia o sintassi attesa
+(varianti). Diagnosi-only fino a OK utente.
+
+In parallelo, dovremmo affrontare la ridondanza UI di `data_inizio`
++ `n_giornate` nel dialog Genera giri (l'utente aveva colto il
+punto: "tanto è già impostato a monte"). Step A del piano
+precedente, da fare dopo la conferma del bug 4.
+
+---
+
 ## 2026-04-28 (42) — Sprint 7.2 — Builder turno PdC MVP + flusso Genera→Lista→Gantt
 
 ### Contesto

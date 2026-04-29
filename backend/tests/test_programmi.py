@@ -172,7 +172,6 @@ def test_programma_create_minimo_valido() -> None:
         valido_a=date(2026, 12, 31),
     )
     assert p.nome == "Test"
-    assert p.stagione is None
     assert p.n_giornate_default == 1
     assert p.fascia_oraria_tolerance_min == 30
     assert p.regole == []
@@ -187,23 +186,10 @@ def test_programma_create_validita_invertita_raises() -> None:
         )
 
 
-def test_programma_create_stagione_invalida_raises() -> None:
-    with pytest.raises(ValidationError):
-        ProgrammaMaterialeCreate.model_validate(
-            {
-                "nome": "X",
-                "stagione": "primavera",
-                "valido_da": "2026-01-01",
-                "valido_a": "2026-12-31",
-            }
-        )
-
-
 def test_programma_create_con_regole_nested() -> None:
     """Una regola annidata viene validata in cascata."""
     p = ProgrammaMaterialeCreate(
         nome="Trenord 2025-2026",
-        stagione="invernale",
         valido_da=date(2025, 12, 14),
         valido_a=date(2026, 4, 30),
         km_max_giornaliero=800,
@@ -308,7 +294,6 @@ def test_programma_materiale_columns_attese() -> None:
         "id",
         "azienda_id",
         "nome",
-        "stagione",
         "valido_da",
         "valido_a",
         "stato",

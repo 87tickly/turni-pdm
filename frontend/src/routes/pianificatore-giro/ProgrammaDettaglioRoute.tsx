@@ -66,7 +66,6 @@ export function ProgrammaDettaglioRoute() {
           </div>
           <p className="text-sm text-muted-foreground">
             #{programma.id} · {formatPeriodo(programma.valido_da, programma.valido_a)}
-            {programma.stagione !== null && ` · ${programma.stagione}`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -204,7 +203,6 @@ function ConfigurazioneCard({ programma }: { programma: ProgrammaDettaglioRead }
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm md:grid-cols-4">
         <Field label="Periodo" value={formatPeriodo(programma.valido_da, programma.valido_a)} />
-        <Field label="Stagione" value={programma.stagione ?? "—"} />
         <Field label="N. giornate (safety)" value={programma.n_giornate_default.toString()} />
         <Field
           label="Tolleranza fascia oraria"

@@ -6,9 +6,15 @@ programmazione del pianificatore: per ogni gruppo di corse PdE
 (filtrate per linea/direttrice/categoria/orario/giorno_tipo/...),
 quale rotabile usare e in quante quantità.
 
-Multi-tenant: ogni `azienda` può avere più programmi (per stagione,
-periodo, ecc.). Solo i programmi `attivo` sono usati dall'algoritmo
+Multi-tenant: ogni `azienda` può avere più programmi (per periodo,
+linea, ecc.). Solo i programmi `attivo` sono usati dall'algoritmo
 A (PdE → Giro Materiale).
+
+Sprint 7.3: il campo `stagione` è stato rimosso. Il filtro temporale
+delle corse è data-driven via `valido_in_date_json` di ogni corsa
+(verità del PdE) intersecato con `[valido_da, valido_a]` del programma.
+Le 3 stagioni (`invernale/estiva/agosto`) restano solo a livello di
+`corsa_composizione.stagione` (composizione-tipo del materiale).
 """
 
 from datetime import date, datetime
@@ -46,7 +52,6 @@ class ProgrammaMateriale(Base):
     )
 
     nome: Mapped[str] = mapped_column(Text)
-    stagione: Mapped[str | None] = mapped_column(String(20))
     valido_da: Mapped[date] = mapped_column(Date)
     valido_a: Mapped[date] = mapped_column(Date)
     stato: Mapped[str] = mapped_column(String(20), default="bozza")

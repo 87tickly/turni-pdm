@@ -10,7 +10,6 @@ function makeProgramma(over: Partial<ProgrammaMaterialeRead> = {}): ProgrammaMat
     id: 1,
     azienda_id: 42,
     nome: "Trenord 2025-2026 invernale Tirano",
-    stagione: "invernale",
     valido_da: "2025-12-14",
     valido_a: "2026-12-12",
     stato: "bozza",
@@ -57,7 +56,7 @@ describe("ProgrammiRoute", () => {
     fetchSpy.mockResolvedValueOnce(
       jsonResponse([
         makeProgramma({ id: 1 }),
-        makeProgramma({ id: 2, nome: "Cremona ATR803", stato: "attivo", stagione: null }),
+        makeProgramma({ id: 2, nome: "Cremona ATR803", stato: "attivo" }),
       ]),
     );
 
@@ -109,13 +108,11 @@ describe("ProgrammiRoute", () => {
     });
 
     fireEvent.change(screen.getByLabelText(/Stato/i), { target: { value: "attivo" } });
-    fireEvent.change(screen.getByLabelText(/Stagione/i), { target: { value: "invernale" } });
 
     await waitFor(() => {
       const lastCall = fetchSpy.mock.calls.at(-1)?.[0];
       const url = typeof lastCall === "string" ? lastCall : (lastCall as Request).url;
       expect(url).toMatch(/stato=attivo/);
-      expect(url).toMatch(/stagione=invernale/);
     });
   });
 
