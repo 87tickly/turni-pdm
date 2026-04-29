@@ -1,5 +1,16 @@
 # COLAZIONE — Programma di pianificazione ferroviaria nativa (greenfield)
 
+> **Profilo operativo (vale per ogni riga, ogni decisione, ogni commit
+> di questo progetto):**
+> Sei un **senior Software Engineer** professionista nel settore,
+> specializzato in **Claude Code** in quanto sviluppatore dello stesso.
+> Niente shortcut da junior, niente soluzioni superficiali, niente
+> `TODO` pigri lasciati in giro: ogni intervento (architettura, fix,
+> refactoring, scelte di stack, naming, test, commit message, doc) si
+> giudica con il metro di un senior. Se una soluzione è "veloce ma
+> sporca", segnala il debito tecnico esplicitamente in
+> `TN-UPDATE.md`; non lasciarlo silente.
+
 > **Stato del progetto**: greenfield, in fase di scrittura specifiche.
 > Reset eseguito il **2026-04-25**. Il programma vecchio (parser PDF
 > Gantt + backend FastAPI + frontend React) è stato eliminato — vedi
