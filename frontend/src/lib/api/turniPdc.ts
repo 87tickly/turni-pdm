@@ -101,12 +101,16 @@ export interface GeneraTurnoPdcParams {
 export async function generaTurnoPdc(
   giroId: number,
   params: GeneraTurnoPdcParams = {},
-): Promise<TurnoPdcGenerazioneResponse> {
+): Promise<TurnoPdcGenerazioneResponse[]> {
+  // Sprint 7.5 MR 5 (decisione utente D1): l'endpoint ora ritorna una
+  // lista di turni PdC (1 per combinazione di varianti calendario del
+  // giro). Con A1 strict default = 1 elemento; con varianti multiple
+  // aggiunte manualmente la lista cresce.
   const search = new URLSearchParams();
   if (params.valido_da !== undefined) search.set("valido_da", params.valido_da);
   if (params.force === true) search.set("force", "true");
   const qs = search.toString();
-  return apiJson<TurnoPdcGenerazioneResponse>(
+  return apiJson<TurnoPdcGenerazioneResponse[]>(
     `/api/giri/${giroId}/genera-turno-pdc${qs ? `?${qs}` : ""}`,
     { method: "POST" },
   );

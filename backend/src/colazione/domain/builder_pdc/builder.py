@@ -25,6 +25,7 @@ ciclo settimanale, S.COMP, assegnazione persone.
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -408,12 +409,35 @@ async def genera_turno_pdc(
     giro_id: int,
     valido_da: date | None = None,
     force: bool = False,
-) -> BuilderTurnoPdcResult:
-    """Genera (e persiste) UN `TurnoPdc` per il giro indicato.
+) -> list[BuilderTurnoPdcResult]:
+    """Genera (e persiste) i `TurnoPdc` per il giro indicato — uno per
+    ogni combinazione di varianti calendario delle giornate-tipo.
 
-    Se esiste già un turno PdC per questo giro e `force=False`, alza
-    `GiriEsistentiError`. Con `force=True` cancella i precedenti e
-    ricrea.
+    Sprint 7.5 MR 5 (decisione utente D1): un giro con N giornate-tipo,
+    ognuna con M_k varianti, genera Π(M_k) turni PdC distinti. Codice:
+    ``T-{giro.numero_turno}`` se 1 sola combinazione; con N>1
+    combinazioni il suffisso `-V{idx:02d}` discrimina i turni
+    (1-based: V01, V02, ...).
+
+    Pre-MR 5 (Sprint 7.2 MVP): la funzione ritornava un `BuilderTurnoPdcResult`
+    singolo, prendendo arbitrariamente la prima variante per giornata e
+    ignorando le altre. MR 5 chiude il bug 5 lato PdC: ogni variante
+    genera il proprio turno con il proprio calendario.
+
+    A1 strict (MR 1) → di default ogni giornata-tipo ha 1 sola variante,
+    quindi 1 sola combinazione → 1 solo turno (invariante di
+    comportamento per i giri generati dal builder MR 4).
+
+    Se esiste già un turno PdC per questo giro e ``force=False``, alza
+    ``GiriEsistentiError``. Con ``force=True`` cancella tutti i turni
+    PdC precedenti del giro e ricrea da zero.
+
+    Returns:
+        ``list[BuilderTurnoPdcResult]`` ordinata per indice combinazione
+        (deterministica). Sempre almeno 1 elemento se il giro è valido.
+
+    Raises:
+        GiroNonTrovatoError, GiroVuotoError, GiriEsistentiError.
     """
     giro = (
         await session.execute(
@@ -441,7 +465,7 @@ async def genera_turno_pdc(
 
     giornata_ids = [gg.id for gg in giornate_giro]
 
-    # Per ogni giornata prendi la prima variante (MVP: 1 variante)
+    # Sprint 7.5 MR 5: carica TUTTE le varianti, raggruppate per giornata.
     varianti = list(
         (
             await session.execute(
@@ -451,11 +475,14 @@ async def genera_turno_pdc(
             )
         ).scalars()
     )
-    prima_variante_per_giornata: dict[int, GiroVariante] = {}
+    varianti_per_giornata: dict[int, list[GiroVariante]] = {}
     for v in varianti:
-        prima_variante_per_giornata.setdefault(v.giro_giornata_id, v)
+        varianti_per_giornata.setdefault(v.giro_giornata_id, []).append(v)
+    for gv_list in varianti_per_giornata.values():
+        gv_list.sort(key=lambda v: v.variant_index)
 
-    variante_ids = [v.id for v in prima_variante_per_giornata.values()]
+    # Carica blocchi di TUTTE le varianti in una query.
+    variante_ids = [v.id for v in varianti]
     blocchi_per_variante: dict[int, list[GiroBlocco]] = {}
     if variante_ids:
         for b in (
@@ -467,10 +494,118 @@ async def genera_turno_pdc(
         ).scalars():
             blocchi_per_variante.setdefault(b.giro_variante_id, []).append(b)
 
-    # Costruisci i draft di tutte le giornate PdC
+    # Stazione sede del PdC: collegata alla località di manutenzione di
+    # partenza del giro. Calcolata una volta per tutto il loop.
+    stazione_sede: str | None = None
+    if giro.localita_manutenzione_partenza_id is not None:
+        loc = (
+            await session.execute(
+                select(LocalitaManutenzione).where(
+                    LocalitaManutenzione.id == giro.localita_manutenzione_partenza_id
+                )
+            )
+        ).scalar_one_or_none()
+        if loc is not None and loc.stazione_collegata_codice is not None:
+            stazione_sede = loc.stazione_collegata_codice
+
+    # Anti-rigenerazione: cancella tutti i turni PdC del giro se force,
+    # altrimenti errore se anche solo uno esiste.
+    existing = list(
+        (
+            await session.execute(
+                select(TurnoPdc).where(TurnoPdc.azienda_id == azienda_id)
+            )
+        ).scalars()
+    )
+    legati = [
+        t for t in existing if (t.generation_metadata_json or {}).get("giro_materiale_id") == giro_id
+    ]
+    if legati and not force:
+        raise GiriEsistentiError(
+            f"Esistono già {len(legati)} turno/i PdC per giro {giro_id}: "
+            f"{legati[0].codice}"
+            + (f" ... +{len(legati)-1} altri" if len(legati) > 1 else "")
+        )
+    for t in legati:
+        await session.delete(t)
+    if legati:
+        await session.flush()
+
+    # Sprint 7.5 MR 5: enumera le combinazioni di varianti via prodotto
+    # cartesiano. Per ogni giornata prendiamo la lista delle sue varianti
+    # ordinate per variant_index; il prodotto restituisce tuple
+    # `(v_g1, v_g2, ..., v_gN)` di lunghezza len(giornate_giro).
+    liste_varianti_ordinate = [varianti_per_giornata.get(gg.id, []) for gg in giornate_giro]
+    if any(not lst for lst in liste_varianti_ordinate):
+        # Almeno una giornata non ha varianti → giro corrotto. Non
+        # generiamo nulla per quel giro (raise GiroVuoto).
+        raise GiroVuotoError(
+            f"Giro {giro_id} ha giornate senza varianti: niente da generare"
+        )
+    combinazioni = list(itertools.product(*liste_varianti_ordinate))
+
+    valido_da_eff = valido_da or date.today()
+    multi_combo = len(combinazioni) > 1
+
+    risultati: list[BuilderTurnoPdcResult] = []
+    for idx_combo, combo in enumerate(combinazioni, start=1):
+        # `combo` è una tupla `(GiroVariante, ...)` lunga len(giornate_giro).
+        # variante_per_giornata: id_giornata → variante scelta in questa combo
+        variante_per_giornata = {gg.id: combo[i] for i, gg in enumerate(giornate_giro)}
+
+        risultato = await _genera_un_turno_pdc(
+            session=session,
+            azienda_id=azienda_id,
+            giro=giro,
+            giornate_giro=giornate_giro,
+            variante_per_giornata=variante_per_giornata,
+            blocchi_per_variante=blocchi_per_variante,
+            stazione_sede=stazione_sede,
+            valido_da_eff=valido_da_eff,
+            indice_combinazione=idx_combo if multi_combo else None,
+        )
+        if risultato is not None:
+            risultati.append(risultato)
+
+    if not risultati:
+        raise GiroVuotoError(
+            f"Giro {giro_id} non ha blocchi validi in nessuna combinazione"
+        )
+
+    await session.commit()
+    return risultati
+
+
+async def _genera_un_turno_pdc(
+    *,
+    session: AsyncSession,
+    azienda_id: int,
+    giro: GiroMateriale,
+    giornate_giro: list[GiroGiornata],
+    variante_per_giornata: dict[int, GiroVariante],
+    blocchi_per_variante: dict[int, list[GiroBlocco]],
+    stazione_sede: str | None,
+    valido_da_eff: date,
+    indice_combinazione: int | None,
+) -> BuilderTurnoPdcResult | None:
+    """Persiste un singolo `TurnoPdc` per la combinazione di varianti
+    indicata (Sprint 7.5 MR 5).
+
+    Args:
+        indice_combinazione: 1-based; se ``None`` significa "1 sola
+            combinazione possibile", il codice usa il pattern compat
+            `T-{numero_turno}` (no suffisso). Con valore esplicito,
+            il suffisso `-V{idx:02d}` discrimina i turni multipli.
+
+    Returns:
+        ``BuilderTurnoPdcResult`` con id + stats, oppure ``None`` se la
+        combinazione non produce alcuna giornata draft valida (skip
+        silente: caso teoricamente raro, evitiamo di propagare l'errore
+        per non rompere altre combinazioni del loop chiamante).
+    """
     drafts: list[_GiornataPdcDraft] = []
     for gg in giornate_giro:
-        v = prima_variante_per_giornata.get(gg.id)
+        v = variante_per_giornata.get(gg.id)
         if v is None:
             continue
         blocchi = blocchi_per_variante.get(v.id, [])
@@ -483,60 +618,27 @@ async def genera_turno_pdc(
             drafts.append(d)
 
     if not drafts:
-        raise GiroVuotoError(
-            f"Giro {giro_id} non ha blocchi validi: niente da generare"
-        )
+        return None
 
-    # Stazione sede del PdC: collegata alla località di manutenzione di
-    # partenza del giro (es. FIO → S01700 Mi.Centrale). Se la località
-    # non ha stazione collegata (es. NOV/CAM/LEC senza mapping), usa la
-    # stazione di inizio del primo blocco della prima giornata come
-    # proxy "casa".
-    stazione_sede: str | None = None
-    if giro.localita_manutenzione_partenza_id is not None:
-        loc = (
-            await session.execute(
-                select(LocalitaManutenzione).where(
-                    LocalitaManutenzione.id == giro.localita_manutenzione_partenza_id
-                )
-            )
-        ).scalar_one_or_none()
-        if loc is not None and loc.stazione_collegata_codice is not None:
-            stazione_sede = loc.stazione_collegata_codice
-    if stazione_sede is None and drafts:
-        stazione_sede = drafts[0].stazione_inizio
+    stazione_sede_eff = stazione_sede if stazione_sede is not None else drafts[0].stazione_inizio
 
-    fr_giornate = _aggiungi_dormite_fr(drafts, stazione_sede)
+    fr_giornate = _aggiungi_dormite_fr(drafts, stazione_sede_eff)
 
-    # Cancella turni precedenti se force, altrimenti errore
-    existing = list(
-        (
-            await session.execute(
-                select(TurnoPdc).where(
-                    TurnoPdc.azienda_id == azienda_id,
-                )
-            )
-        ).scalars()
-    )
-    legati = [
-        t for t in existing if (t.generation_metadata_json or {}).get("giro_materiale_id") == giro_id
-    ]
-    if legati and not force:
-        raise GiriEsistentiError(
-            f"Esiste già un turno PdC per giro {giro_id}: {legati[0].codice}"
-        )
-    for t in legati:
-        await session.delete(t)
-    if legati:
-        await session.flush()
+    base_codice = _genera_codice_turno(giro)
+    if indice_combinazione is None:
+        codice = base_codice
+    else:
+        codice = f"{base_codice}-V{indice_combinazione:02d}"
 
-    # Persisti TurnoPdc
-    valido_da_eff = valido_da or date.today()
-    codice = _genera_codice_turno(giro)
     violazioni_globali: list[str] = []
     for d in drafts:
-        for v in d.violazioni:
-            violazioni_globali.append(f"giornata{d.numero_giornata}:{v}")
+        for v_str in d.violazioni:
+            violazioni_globali.append(f"giornata{d.numero_giornata}:{v_str}")
+
+    # Sprint 7.5 MR 5: traccia gli id delle varianti scelte per questa
+    # combinazione (utile per debug + UI: collegare un turno PdC alla
+    # variante calendario specifica del giro materiale).
+    varianti_ids_combo = [variante_per_giornata[gg.id].id for gg in giornate_giro]
 
     turno = TurnoPdc(
         azienda_id=azienda_id,
@@ -548,20 +650,21 @@ async def genera_turno_pdc(
         valido_a=None,
         source_file=None,
         generation_metadata_json={
-            "giro_materiale_id": giro_id,
+            "giro_materiale_id": giro.id,
             "giro_numero_turno": giro.numero_turno,
             "violazioni": violazioni_globali,
             "fr_giornate": fr_giornate,
-            "stazione_sede": stazione_sede,
+            "stazione_sede": stazione_sede_eff,
             "generato_at": datetime.utcnow().isoformat(),
-            "builder_version": "mvp-7.2",
+            "builder_version": "mvp-7.5",
+            "indice_combinazione": indice_combinazione,
+            "varianti_ids": varianti_ids_combo,
         },
         stato="bozza",
     )
     session.add(turno)
     await session.flush()
 
-    # Persisti giornate + blocchi
     prestazione_totale = 0
     condotta_totale = 0
     for d in drafts:
@@ -607,8 +710,6 @@ async def genera_turno_pdc(
                     fonte_orario="builder",
                 )
             )
-
-    await session.commit()
 
     return BuilderTurnoPdcResult(
         turno_pdc_id=turno.id,

@@ -41,7 +41,10 @@ export function GeneraTurnoPdcDialog({
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [needsForce, setNeedsForce] = useState(false);
-  const [result, setResult] = useState<TurnoPdcGenerazioneResponse | null>(null);
+  // Sprint 7.5 MR 5: la mutation ritorna `TurnoPdcGenerazioneResponse[]`
+  // (1 elemento per variante calendario del giro). Con A1 strict default
+  // = 1 elemento, con varianti multiple cresce.
+  const [results, setResults] = useState<TurnoPdcGenerazioneResponse[] | null>(null);
 
   const generaMutation = useGeneraTurnoPdc();
 
@@ -49,7 +52,7 @@ export function GeneraTurnoPdcDialog({
     if (!next) {
       setError(null);
       setNeedsForce(false);
-      setResult(null);
+      setResults(null);
     }
     onOpenChange(next);
   };
@@ -61,7 +64,7 @@ export function GeneraTurnoPdcDialog({
         giroId,
         params: { force: forceFlag },
       });
-      setResult(r);
+      setResults(r);
       setNeedsForce(false);
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
@@ -75,8 +78,8 @@ export function GeneraTurnoPdcDialog({
   };
 
   const running = generaMutation.isPending;
-  const showForm = result === null;
-  const showResult = result !== null;
+  const showForm = results === null;
+  const showResult = results !== null;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -126,7 +129,7 @@ export function GeneraTurnoPdcDialog({
           </div>
         )}
 
-        {showResult && result !== null && <ResultCard result={result} />}
+        {showResult && results !== null && <ResultsCard results={results} />}
 
         <DialogFooter>
           {showForm && !needsForce && (
@@ -153,7 +156,7 @@ export function GeneraTurnoPdcDialog({
               </Button>
             </>
           )}
-          {showResult && result !== null && (
+          {showResult && results !== null && results.length > 0 && (
             <>
               <Button variant="outline" onClick={() => handleClose(false)}>
                 Chiudi
@@ -161,16 +164,40 @@ export function GeneraTurnoPdcDialog({
               <Button
                 onClick={() => {
                   handleClose(false);
-                  navigate(`/pianificatore-giro/turni-pdc/${result.turno_pdc_id}`);
+                  navigate(
+                    `/pianificatore-giro/turni-pdc/${results[0].turno_pdc_id}`,
+                  );
                 }}
               >
-                Apri turno PdC
+                {results.length === 1
+                  ? "Apri turno PdC"
+                  : `Apri primo turno (${results.length} totali)`}
               </Button>
             </>
           )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ResultsCard({ results }: { results: TurnoPdcGenerazioneResponse[] }) {
+  // Sprint 7.5 MR 5: render lista di turni generati. Per A1 strict
+  // (default) la lista ha 1 elemento; con varianti calendario multiple
+  // cresce — ogni turno ha codice `T-{numero_turno}-V{NN}`.
+  if (results.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      {results.length > 1 && (
+        <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+          Generati {results.length} turni PdC, uno per ogni variante calendario
+          delle giornate del giro.
+        </p>
+      )}
+      {results.map((r) => (
+        <ResultCard key={r.turno_pdc_id} result={r} />
+      ))}
+    </div>
   );
 }
 

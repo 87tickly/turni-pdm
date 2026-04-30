@@ -50,10 +50,13 @@ interface GeneraTurnoPdcArgs {
 }
 
 export function useGeneraTurnoPdc(): UseMutationResult<
-  TurnoPdcGenerazioneResponse,
+  TurnoPdcGenerazioneResponse[],
   Error,
   GeneraTurnoPdcArgs
 > {
+  // Sprint 7.5 MR 5 (decisione utente D1): la mutation ora ritorna una
+  // lista di turni PdC (1 per combinazione di varianti calendario del
+  // giro). Con A1 strict default = 1 elemento.
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ giroId, params }) => generaTurnoPdc(giroId, params ?? {}),

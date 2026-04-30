@@ -145,8 +145,8 @@ class TurnoPdcDettaglioRead(BaseModel):
 
 @router.post(
     "/{giro_id}/genera-turno-pdc",
-    response_model=TurnoPdcGenerazioneResponse,
-    summary="Genera turno PdC dal giro materiale (MVP builder)",
+    response_model=list[TurnoPdcGenerazioneResponse],
+    summary="Genera turni PdC dal giro materiale (1 per variante calendario)",
 )
 async def genera_turno_pdc_endpoint(
     giro_id: int,
@@ -154,9 +154,14 @@ async def genera_turno_pdc_endpoint(
     force: bool = Query(default=False, description="Sovrascrive turni precedenti"),
     user: CurrentUser = _authz,
     session: AsyncSession = Depends(get_session),
-) -> TurnoPdcGenerazioneResponse:
+) -> list[TurnoPdcGenerazioneResponse]:
+    """Sprint 7.5 MR 5 (decisione utente D1): ritorna **lista** di turni
+    PdC, uno per ogni combinazione di varianti calendario delle giornate
+    del giro. Con A1 strict (default oggi) la lista contiene 1 elemento;
+    con varianti multiple aggiunte manualmente la lista cresce.
+    """
     try:
-        result: BuilderTurnoPdcResult = await genera_turno_pdc(
+        results: list[BuilderTurnoPdcResult] = await genera_turno_pdc(
             session=session,
             azienda_id=user.azienda_id,
             giro_id=giro_id,
@@ -170,15 +175,18 @@ async def genera_turno_pdc_endpoint(
     except GiriEsistentiError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
 
-    return TurnoPdcGenerazioneResponse(
-        turno_pdc_id=result.turno_pdc_id,
-        codice=result.codice,
-        n_giornate=result.n_giornate,
-        prestazione_totale_min=result.prestazione_totale_min,
-        condotta_totale_min=result.condotta_totale_min,
-        violazioni=result.violazioni,
-        warnings=result.warnings,
-    )
+    return [
+        TurnoPdcGenerazioneResponse(
+            turno_pdc_id=r.turno_pdc_id,
+            codice=r.codice,
+            n_giornate=r.n_giornate,
+            prestazione_totale_min=r.prestazione_totale_min,
+            condotta_totale_min=r.condotta_totale_min,
+            violazioni=r.violazioni,
+            warnings=r.warnings,
+        )
+        for r in results
+    ]
 
 
 # =====================================================================

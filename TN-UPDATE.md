@@ -10,6 +10,107 @@
 
 ---
 
+## 2026-04-30 (50) — Bug 5 refactor MR 5/7: Builder PdC 1 turno per variante
+
+### Contesto
+
+MR 5/7 del refactor bug 5. Implementa la decisione utente D1: per ogni
+combinazione di varianti calendario delle giornate-tipo del giro
+materiale, il builder PdC genera un turno PdC distinto. Codice
+discriminato col suffisso `-V{idx:02d}` quando ci sono più
+combinazioni; senza suffisso quando 1 sola (compat A1 strict default).
+
+In A1 strict (MR 1) ogni giornata-tipo ha 1 sola variante → 1 sola
+combinazione → 1 turno per giro. **Comportamento osservabile
+invariante** per tutti i giri attualmente in DB. Il MR predispone
+l'infrastruttura per il caso M>1 (varianti aggiunte manualmente in
+editor giro, scope futuro).
+
+### Modifiche
+
+**Backend** (`backend/src/colazione/domain/builder_pdc/builder.py`):
+
+- `genera_turno_pdc()` riscritta: ora ritorna
+  `list[BuilderTurnoPdcResult]` invece di singolo. Carica TUTTE le
+  varianti del giro raggruppate per giornata, calcola prodotto
+  cartesiano via `itertools.product`, per ogni combinazione chiama
+  l'helper interno `_genera_un_turno_pdc()`.
+- Nuovo helper interno `_genera_un_turno_pdc()`: estratto dal corpo
+  della vecchia funzione, riceve già la mappa
+  `variante_per_giornata: dict[id, GiroVariante]` (= 1 combinazione
+  scelta). Persiste un `TurnoPdc` con codice `T-{numero}` (1 combo) o
+  `T-{numero}-V{NN}` (multi combo).
+- `generation_metadata_json` esteso con `indice_combinazione` e
+  `varianti_ids` (lista degli id delle varianti scelte per questa
+  combinazione, utile per debug + UI futura).
+- `force=True`: cancella TUTTI i turni del giro all'inizio del loop
+  (era già così, semantica preservata).
+- `builder_version` bumpato da `mvp-7.2` a `mvp-7.5`.
+
+**Backend endpoint**
+(`backend/src/colazione/api/turni_pdc.py`):
+
+- `POST /api/giri/{id}/genera-turno-pdc`: response_model cambia da
+  `TurnoPdcGenerazioneResponse` a `list[TurnoPdcGenerazioneResponse]`.
+  Implementazione mappa la lista del builder. Docstring aggiornato.
+
+**Frontend** (3 file, allineati alla nuova lista):
+
+- `frontend/src/lib/api/turniPdc.ts::generaTurnoPdc()`: ritorna
+  `Promise<TurnoPdcGenerazioneResponse[]>` invece di singolo.
+- `frontend/src/hooks/useTurniPdc.ts::useGeneraTurnoPdc()`:
+  `UseMutationResult<TurnoPdcGenerazioneResponse[], ...>`.
+- `frontend/src/routes/pianificatore-giro/GeneraTurnoPdcDialog.tsx`:
+  state `results: TurnoPdcGenerazioneResponse[] | null`. Nuovo
+  componente `ResultsCard` che renderizza la lista (1 card per
+  turno). Pulsante "Apri turno PdC" naviga al primo turno; etichetta
+  `"Apri primo turno (N totali)"` quando `results.length > 1`.
+
+### Verifiche
+
+- `backend pytest`: **397 passed, 1 skipped, 0 fail** (invariante
+  rispetto a MR 4).
+- `frontend pnpm typecheck`: clean.
+- `frontend pnpm test`: **31/31 verde**.
+- `mypy src/colazione/domain/builder_pdc/builder.py`: clean.
+- `mypy src/colazione/api/turni_pdc.py`: 3 errori PRE-ESISTENTI su
+  `dict(Sequence[Row[...]])` in `list_turni_pdc_giro` /
+  `get_turno_pdc_dettaglio` (line 324, 338, 394). Stesso pattern dei
+  3 errori in `api/giri.py` notati in MR 4. Pre-MR5, non in scope —
+  candidati a pulizia separata.
+
+**Verifica preview**: differita a MR 7 (smoke programma 1341). Il MR 5
+con A1 strict produce 1 turno per giro = comportamento osservabile
+identico al pre-MR. La differenza emergerà solo quando il pianificatore
+aggiungerà manualmente varianti calendario (scope futuro), o nello
+smoke MR 7 sui giri reali.
+
+### Stato
+
+**MR 5/7 chiuso.** Backend + frontend allineati al nuovo contratto
+"lista di turni". L'API è ora coerente con il modello canonico
+`MODELLO-DATI.md §LIV 3a`: ogni variante calendario del giro
+materiale ha il proprio turno PdC.
+
+Restano 2 MR:
+- MR 6 — Frontend tab/select varianti su detail route
+  (`GiroDettaglioRoute.tsx`, `TurnoPdcDettaglioRoute.tsx`).
+- MR 7 — Migrazione dati programma 1341 + smoke completo che dimostra
+  il bug 5 chiuso con numeri reali (più giornate-tipo distinte +
+  `validita_dates_apply_json` corretto).
+
+### Prossimo step
+
+MR 6: tab varianti nei detail route del frontend. Quando una giornata
+del giro ha M>1 varianti (futuro), l'utente può navigare tra di loro;
+quando M=1 (oggi), il tab è invisibile o mostra solo "GG/standard".
+Cosmetico ma chiude il modello di dominio lato UI.
+
+Pulizia residua (post-MR 7): 6 errori mypy totali su
+`dict(Sequence[Row[...]])` in `api/giri.py` + `api/turni_pdc.py`.
+
+---
+
 ## 2026-04-30 (49) — Bug 5 refactor MR 4/7: API + orchestrator parametri opzionali
 
 ### Contesto
