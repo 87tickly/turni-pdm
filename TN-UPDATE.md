@@ -10,6 +10,80 @@
 
 ---
 
+## 2026-04-30 (47) — Bug 5 refactor MR 2/7: dates_apply pass-through composizione
+
+### Contesto
+
+MR 2/7 del refactor bug 5. Dopo MR 1 (clustering A1 in
+`multi_giornata.py` popola `GiornataGiro.dates_apply`), serve un
+pass-through trasparente attraverso lo strato `composizione.py` in modo
+che il persister (MR 3) lo trovi nelle `GiornataAssegnata`.
+
+Cambio meccanico, no logica nuova: lo strato di assegnazione regole è
+agnostico rispetto alla cardinalità calendario, gli basta inoltrare
+il campo.
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_giro/composizione.py`**:
+
+- `GiornataAssegnata`: aggiunto campo
+  `dates_apply: tuple[date, ...] = ()` + property `dates_apply_or_data`
+  (specchio identico di `GiornataGiro`).
+- `assegna_materiali()`: pass-through esplicito
+  `dates_apply=giornata.dates_apply` nella costruzione del nuovo
+  `GiornataAssegnata`.
+- `rileva_eventi_composizione()`: nessuna modifica — usa
+  `dataclasses.replace` che preserva automaticamente `dates_apply`
+  (verificato con test).
+
+**`backend/tests/test_composizione.py`**:
+
+- 3 nuovi test in sezione "Sprint 7.5 — Pass-through dates_apply":
+  - `test_dates_apply_default_vuoto_pre_cluster`: senza clustering,
+    `dates_apply==()`, fallback ritorna `(data,)`.
+  - `test_dates_apply_propagato_da_giornata_giro`: con
+    `GiornataGiro.dates_apply=(D_LUN, D_LUN_2)`,
+    `GiornataAssegnata.dates_apply` riflette la stessa tupla.
+  - `test_rileva_eventi_preserva_dates_apply`: dopo
+    `rileva_eventi_composizione()` su un giro con eventi aggancio,
+    `dates_apply` resta intatto (test del `dataclasses.replace`).
+
+### Verifiche
+
+- `pytest tests/test_composizione.py`: **29/29** (26 vecchi + 3 nuovi).
+- `pytest`: **390 passed, 1 skipped, 0 fail** (vs 387 pre-MR2). +3
+  nuovi, niente regressione.
+- `mypy src/colazione/domain/builder_giro/composizione.py`: clean.
+
+### Stato
+
+**MR 2/7 chiuso.** Lo strato `composizione.py` è ora trasparente al
+clustering: `assegna_materiali()` propaga `dates_apply` invariato dal
+suo input (`GiornataGiro`) al suo output (`GiornataAssegnata`). Il
+persister (MR 3) potrà leggere il dato reale invece di calcolare
+intersezioni-menzogna.
+
+Restano 5 MR:
+- MR 3 — `persister.py`: usa `dates_apply` reali per popolare
+  `GiroVariante.validita_dates_apply_json`.
+- MR 4 — `builder.py` orchestrator + API: periodo intero default,
+  parametri opzionali.
+- MR 5 — Builder PdC: 1 turno per variante.
+- MR 6 — Frontend: tab/select varianti.
+- MR 7 — Migrazione dati + smoke programma 1341.
+
+### Prossimo step
+
+MR 3: in `persister.py::_estrai_validita_giornata` sostituire
+l'intersezione `valido_in_date_json` con la lettura diretta di
+`giornata.dates_apply` (post-MR 2 disponibile come campo del
+`GiornataAssegnata`). È il cambio che chiude letteralmente la metà
+del bug 5: la `validita_dates_apply_json` smette di "mentire" e
+contiene le date reali in cui la giornata-tipo si applica.
+
+---
+
 ## 2026-04-30 (46) — Fix test integration: wipe FK-safe + programma_test_id
 
 ### Contesto

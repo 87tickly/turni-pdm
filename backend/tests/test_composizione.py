@@ -707,3 +707,124 @@ def test_giornata_doppia_no_incompatibilita_se_unione_consistente() -> None:
     out = assegna_materiali(giro, [r])
     assert out.giornate[0].materiali_tipo_giornata == frozenset({"ETR526", "ETR425"})
     assert len(out.incompatibilita_materiale) == 1
+
+
+# =====================================================================
+# Sprint 7.5 — Pass-through dates_apply (refactor bug 5 MR 2)
+# =====================================================================
+
+
+D_LUN_2 = date(2026, 5, 4)  # lunedì settimana successiva
+
+
+def test_dates_apply_default_vuoto_pre_cluster() -> None:
+    """Senza clustering, `GiornataAssegnata.dates_apply` è `()` e il
+    fallback `dates_apply_or_data` ritorna `(data,)`.
+    """
+    c = FakeCorsa(numero_treno="A", codice_linea="L1")
+    r = FakeRegola(
+        id=1,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "L1"}],
+        composizione_json=[{"materiale_tipo_codice": "ETR526", "n_pezzi": 1}],
+    )
+    giro = _giro_singolo((c,), D_LUN)
+    out = assegna_materiali(giro, [r])
+    g0 = out.giornate[0]
+    assert g0.dates_apply == ()
+    assert g0.dates_apply_or_data == (D_LUN,)
+
+
+def test_dates_apply_propagato_da_giornata_giro() -> None:
+    """Se `GiornataGiro.dates_apply` è popolato (post-cluster A1),
+    `GiornataAssegnata.dates_apply` lo riflette esattamente.
+    """
+    c = FakeCorsa(numero_treno="A", codice_linea="L1")
+    r = FakeRegola(
+        id=1,
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "L1"}],
+        composizione_json=[{"materiale_tipo_codice": "ETR526", "n_pezzi": 1}],
+    )
+    cat_pos = CatenaPosizionata(
+        localita_codice="FIO",
+        stazione_collegata="MI_FIO",
+        vuoto_testa=None,
+        catena=Catena(corse=(c,)),
+        vuoto_coda=None,
+        chiusa_a_localita=True,
+    )
+    # Simula output post-cluster: dates_apply con 2 date diverse
+    giro = Giro(
+        localita_codice="FIO",
+        giornate=(
+            GiornataGiro(
+                data=D_LUN,
+                catena_posizionata=cat_pos,
+                dates_apply=(D_LUN, D_LUN_2),
+            ),
+        ),
+        chiuso=True,
+        motivo_chiusura="naturale",
+    )
+    out = assegna_materiali(giro, [r])
+    g0 = out.giornate[0]
+    assert g0.dates_apply == (D_LUN, D_LUN_2)
+    assert g0.dates_apply_or_data == (D_LUN, D_LUN_2)
+
+
+def test_rileva_eventi_preserva_dates_apply() -> None:
+    """`rileva_eventi_composizione` usa `dataclasses.replace` per
+    aggiornare solo `eventi_composizione`, lasciando `dates_apply`
+    intatto.
+    """
+    c1 = FakeCorsa(numero_treno="A", codice_linea="L1")
+    c2 = FakeCorsa(
+        numero_treno="B",
+        codice_linea="L1",
+        codice_origine="BG",
+        codice_destinazione="MI_FIO",
+    )
+    # Due regole sulla stessa linea ma con n_pezzi diversi (3 → 6) per
+    # forzare un evento aggancio
+    r1 = FakeRegola(
+        id=1,
+        filtri_json=[
+            {"campo": "codice_linea", "op": "eq", "valore": "L1"},
+            {"campo": "numero_treno", "op": "eq", "valore": "A"},
+        ],
+        composizione_json=[{"materiale_tipo_codice": "ETR526", "n_pezzi": 3}],
+        priorita=10,
+    )
+    r2 = FakeRegola(
+        id=2,
+        filtri_json=[
+            {"campo": "codice_linea", "op": "eq", "valore": "L1"},
+            {"campo": "numero_treno", "op": "eq", "valore": "B"},
+        ],
+        composizione_json=[{"materiale_tipo_codice": "ETR526", "n_pezzi": 6}],
+        priorita=10,
+    )
+    cat_pos = CatenaPosizionata(
+        localita_codice="FIO",
+        stazione_collegata="MI_FIO",
+        vuoto_testa=None,
+        catena=Catena(corse=(c1, c2)),
+        vuoto_coda=None,
+        chiusa_a_localita=True,
+    )
+    giro = Giro(
+        localita_codice="FIO",
+        giornate=(
+            GiornataGiro(
+                data=D_LUN,
+                catena_posizionata=cat_pos,
+                dates_apply=(D_LUN, D_LUN_2),
+            ),
+        ),
+        chiuso=True,
+        motivo_chiusura="naturale",
+    )
+    out = rileva_eventi_composizione(assegna_materiali(giro, [r1, r2]))
+    g0 = out.giornate[0]
+    # Eventi popolati MA dates_apply preservato dal pass-through
+    assert len(g0.eventi_composizione) == 1
+    assert g0.dates_apply == (D_LUN, D_LUN_2)

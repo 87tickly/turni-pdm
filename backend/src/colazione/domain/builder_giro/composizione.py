@@ -153,13 +153,31 @@ class IncompatibilitaMateriale:
 
 @dataclass(frozen=True)
 class GiornataAssegnata:
-    """Una giornata: catena posizionata + blocchi assegnati + eventi."""
+    """Una giornata: catena posizionata + blocchi assegnati + eventi.
+
+    Sprint 7.5 (refactor bug 5 MR 2): aggiunto ``dates_apply`` come
+    pass-through di ``GiornataGiro.dates_apply``. Rappresenta tutte le
+    date in cui la giornata-tipo del ciclo si applica nel calendario.
+    Default ``()`` per backward-compatibility con costruzioni dirette
+    nei test pre-cluster (consumer usa ``dates_apply_or_data``).
+    """
 
     data: date
     catena_posizionata: CatenaPosizionata
     blocchi_assegnati: tuple[BloccoAssegnato, ...]
     eventi_composizione: tuple[EventoComposizione, ...] = field(default_factory=tuple)
     materiali_tipo_giornata: frozenset[str] = field(default_factory=frozenset)
+    dates_apply: tuple[date, ...] = ()
+
+    @property
+    def dates_apply_or_data(self) -> tuple[date, ...]:
+        """Date applicabili, fallback a ``(data,)`` se non popolato.
+
+        Specchio di ``GiornataGiro.dates_apply_or_data``: pre-cluster
+        torna ``(data,)`` (singola data calendaristica), post-cluster
+        torna l'intero set di date in cui la giornata-tipo si applica.
+        """
+        return self.dates_apply if self.dates_apply else (self.data,)
 
 
 @dataclass(frozen=True)
@@ -258,6 +276,11 @@ def assegna_materiali(
                 blocchi_assegnati=tuple(blocchi),
                 eventi_composizione=(),
                 materiali_tipo_giornata=frozenset(tipi_materiale),
+                # Sprint 7.5 (bug 5 MR 2): pass-through del clustering A1.
+                # Pre-cluster `giornata.dates_apply == ()`, post-cluster
+                # contiene tutte le date in cui questa giornata-tipo si
+                # applica.
+                dates_apply=giornata.dates_apply,
             )
         )
 
