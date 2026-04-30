@@ -143,23 +143,67 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function GiornataPanel({ giornata }: { giornata: GiroDettaglio["giornate"][number] }) {
+  // Sprint 7.5 MR 6 (refactor bug 5): se la giornata ha N>1 varianti
+  // calendario, mostra una row di tab per scegliere quale visualizzare.
+  // Con A1 strict (default) ogni giornata ha 1 sola variante → niente
+  // tab, comportamento legacy invariato.
+  const [activeVariantIdx, setActiveVariantIdx] = useState(0);
+  const varianti = giornata.varianti;
+  const hasMultipleVarianti = varianti.length > 1;
+  const activeVariante = varianti[activeVariantIdx] ?? varianti[0];
+
   return (
     <div className="overflow-hidden rounded-md border border-border bg-white">
       <div className="flex items-center justify-between border-b border-border bg-secondary/40 px-4 py-2">
         <span className="text-sm font-semibold">Giornata {giornata.numero_giornata}</span>
         <span className="text-xs text-muted-foreground">
-          {giornata.varianti.length === 1
+          {varianti.length === 1
             ? "1 variante"
-            : `${giornata.varianti.length} varianti calendario`}
+            : `${varianti.length} varianti calendario`}
         </span>
       </div>
+      {hasMultipleVarianti && (
+        <div
+          className="flex flex-wrap gap-1 border-b border-border bg-secondary/20 px-3 py-1.5"
+          role="tablist"
+          aria-label={`Varianti calendario giornata ${giornata.numero_giornata}`}
+        >
+          {varianti.map((v, idx) => {
+            const isActive = idx === activeVariantIdx;
+            const label = truncateLabel(v.validita_testo, idx);
+            return (
+              <button
+                key={v.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => setActiveVariantIdx(idx)}
+                title={v.validita_testo ?? `Variante ${idx + 1}`}
+                className={
+                  "rounded px-2 py-1 text-[11px] font-medium transition-colors " +
+                  (isActive
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-white text-muted-foreground hover:bg-secondary")
+                }
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className="flex flex-col gap-2 p-3">
-        {giornata.varianti.map((v) => (
-          <VariantePanel key={v.id} variante={v} />
-        ))}
+        {activeVariante !== undefined && <VariantePanel variante={activeVariante} />}
       </div>
     </div>
   );
+}
+
+function truncateLabel(testo: string | null, idx: number): string {
+  const fallback = `Variante ${idx + 1}`;
+  if (testo === null || testo.length === 0) return fallback;
+  const MAX = 32;
+  return testo.length <= MAX ? testo : testo.substring(0, MAX - 1) + "…";
 }
 
 function VariantePanel({

@@ -10,6 +10,73 @@
 
 ---
 
+## 2026-04-30 (52) — Bug 5 refactor MR 6/7: Frontend tab varianti GiroDettaglio
+
+### Contesto
+
+MR 6/7 del refactor bug 5. Espone nella UI il modello canonico
+"giornata-tipo + N varianti calendario": quando una giornata del giro
+ha M>1 varianti, il pianificatore può scegliere quale visualizzare
+via tab. Con M=1 (default A1 strict di oggi) il tab non appare e
+l'UI è strettamente invariante rispetto al pre-MR.
+
+### Modifiche
+
+**`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`**:
+
+- `GiornataPanel` ora ha state locale `activeVariantIdx` (default 0).
+- Renderizza una row di tab buttons (`role="tablist"`,
+  `aria-selected`) **solo se `varianti.length > 1`**. Con M=1 il
+  pannello mostra direttamente la singola variante come prima
+  (zero regressione visiva).
+- Tab label = `validita_testo` troncato a 32 char (helper
+  `truncateLabel`), con tooltip = testo intero. Fallback
+  `Variante {idx+1}` se testo vuoto.
+- La variante visualizzata è `varianti[activeVariantIdx]`; tab
+  attiva ha highlight `bg-primary text-primary-foreground`.
+- `TurnoPdcDettaglioRoute.tsx`: NESSUNA modifica. Il turno PdC
+  rappresenta una specifica combinazione di varianti (decisione
+  D1 = 1 turno per variante), quindi non ha varianti interne da
+  selezionare. Il selettore "altri turni dello stesso giro" è
+  funzione di navigazione, scope futuro se servirà.
+
+### Verifiche
+
+- `pnpm typecheck`: clean.
+- `pnpm test`: **31/31** verde (invariante).
+- Preview console: nessun errore (sanity check).
+- **Verifica visuale completa**: differita a MR 7. La tabella
+  `giro_materiale` è attualmente vuota (i test integration di
+  entry 46 fanno wipe completo a fine test). Con M=1 strutturale
+  per ogni giornata, il branch nuovo (tab buttons) non si
+  attiverebbe comunque. La verifica concreta del flusso multi-
+  variante richiede dati creati manualmente (revisione provvisoria
+  o aggiunta manuale di varianti), out-of-scope per MR 6/7.
+
+### Stato
+
+**MR 6/7 chiuso.** Frontend pronto per accogliere visivamente
+varianti multiple quando esisteranno (futuro o smoke MR 7 se
+costruiamo dati ad hoc).
+
+Resta 1 MR:
+- MR 7 — Migrazione dati programma 1341 + smoke che dimostra
+  numericamente il bug 5 chiuso.
+
+### Prossimo step
+
+MR 7: rigenero il programma 1341 con `genera_giri()` default
+(periodo intero, decisione C3 di MR 4) e raccolgo i numeri DB:
+- N giri creati post-cluster vs pre (era 10)
+- max(varianti per giornata) atteso 1 (A1 strict canonico, ma il
+  numero di giornate-tipo per giro dovrebbe essere significativamente
+  diverso da prima)
+- `validita_dates_apply_json` per giornata: ora date reali (più
+  date contigue/ricorrenti), non più "intersezione menzogna" da
+  342-365 date di una corsa.
+
+---
+
 ## 2026-04-30 (51) — Setup MCP Grok (alias FAUSTO) + regola 9 CLAUDE.md
 
 ### Contesto
