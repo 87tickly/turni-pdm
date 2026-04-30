@@ -10,6 +10,93 @@
 
 ---
 
+## 2026-04-30 (57) — Sprint 7.4 MR 2/4: builder integration + cardinalità split
+
+### Contesto
+
+MR 2/4 dello Sprint 7.4. Integra lo splitter MR 1 nel builder turno
+PdC e applica la decisione utente di cardinalità: ogni ramo di una
+giornata splittata diventa un **TurnoPdc separato**, le giornate
+non-split restano dentro un TurnoPdc "principale" per variante
+calendario.
+
+Decisione utente confermata via AskUserQuestion: *"1 TurnoPdc
+separato per ogni ramo split"* (le giornate non splittate restano nel
+TurnoPdc principale).
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_pdc/builder.py`** (refactor
+strutturale):
+
+- `genera_turno_pdc()` carica una sola volta `stazioni_cv` via
+  `lista_stazioni_cv_ammesse()` e la passa a `_genera_un_turno_pdc()`.
+  Cambia `risultati.append()` in `risultati.extend()` perché ora il
+  callee può ritornare 1..N elementi.
+- `_genera_un_turno_pdc()` ora ritorna `list[BuilderTurnoPdcResult]`
+  invece di `BuilderTurnoPdcResult | None`. Logica:
+  1. Per ogni giornata-giro chiama `split_e_build_giornata()` (MR 1)
+     ottenendo `list[_GiornataPdcDraft]`.
+  2. Separa giornate non-split (1 ramo) da giornate split (N rami).
+  3. Persiste **TurnoPdc principale** se almeno 1 giornata non-split,
+     codice `T-{base}[-V{idx:02d}]`. Include FR fra giornate
+     consecutive del principale.
+  4. Per ogni ramo di ogni giornata splittata: persiste un
+     **TurnoPdc-ramo** distinto, codice
+     `T-{base}[-V{idx:02d}]-G{n_giornata:02d}-R{idx_ramo}`. Niente FR
+     (i rami sono frazioni dello stesso giorno calendario).
+- Helper estratto **`_persisti_un_turno_pdc()`**: persiste 1 TurnoPdc
+  + N TurnoPdcGiornata + blocchi. Riusato sia per il principale sia
+  per ogni ramo. Riduce duplicazione e isola la logica ORM.
+- `generation_metadata_json` arricchito:
+  - `is_ramo_split: bool` su tutti i turni (False = principale).
+  - Per i rami: `split_origine_giornata`, `split_ramo`,
+    `split_totale_rami`, `split_parent_codice`.
+  - `fr_giornate` resta sul principale, lista vuota sui rami.
+  - `builder_version` bump a `mvp-7.4`.
+- Import `lista_stazioni_cv_ammesse` e `split_e_build_giornata`
+  fatti **deferred dentro le funzioni** per rompere il ciclo
+  `split_cv` ↔ `builder` (split_cv importa `_build_giornata_pdc` e
+  costanti normative dal builder).
+
+### Verifiche
+
+- `uv run mypy --strict src`: **51 source files clean** (invariato).
+- `uv run pytest --tb=no`: **414 passed, 1 skipped** (invariato vs
+  MR 1 — zero regressioni). I test esistenti operano su giri corti
+  che non triggerano split, quindi continuano a osservare 1 TurnoPdc
+  per variante.
+- Coverage del comportamento split puro: 17 unit test in
+  `test_split_cv.py` (MR 1).
+- Validazione end-to-end del comportamento split via builder
+  integration: rinviata a **MR 4 smoke con dati reali** (giro lungo
+  Trenord). Test integration unitari su builder PdC sarebbero
+  ridondanti col smoke + costosi da setup (richiedono fixture giro
+  con 5+ blocchi orari, programma, sede, materiale).
+
+### Stato
+
+**MR 2/4 chiuso.** Il builder è ora capace di produrre
+`list[BuilderTurnoPdcResult]` con 1 elemento (giro corto, no split)
+o più (giornate splittate). API endpoint
+`POST /api/giri/{giro_id}/genera-turno-pdc` già ritorna `list[...]`
+da MR 5 bug 5, quindi la cardinalità più alta non rompe il
+contratto API.
+
+### Prossimo step
+
+MR 3/4: API + UI per esporre la nuova cardinalità.
+
+- Verificare/arricchire schema `TurnoPdcGenerazioneResponse` con
+  campi `is_ramo_split`, `ramo_label` ("R1 di 3"),
+  `split_origine_giornata` per consumo frontend.
+- Frontend `TurniPdcGiroRoute.tsx`: badge "Ramo X di N" sui turni
+  split, link a turno principale via `split_parent_codice`.
+- `GeneraTurnoPdcDialog.tsx`: risultato post-generazione mostra
+  N turni con etichette differenziate.
+
+---
+
 ## 2026-04-30 (56) — Sprint 7.4 MR 1/4: splitter CV puro + helper stazioni
 
 ### Contesto
