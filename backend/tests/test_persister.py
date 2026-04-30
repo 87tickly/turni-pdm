@@ -1120,3 +1120,127 @@ async def test_persister_corsa_rientro_9xxxx_se_genera_rientro_sede(azienda_id: 
         assert len(cmv.numero_treno_vuoto) == 5
         assert cmv.codice_origine == "S99002"  # ultima dest
         assert cmv.codice_destinazione == "S99001"  # stazione_collegata sede
+
+
+# =====================================================================
+# Sprint 7.5 — dates_apply post-cluster (refactor bug 5 MR 3)
+# =====================================================================
+
+
+async def test_dates_apply_post_cluster_persistito_in_validita_dates_apply_json(
+    azienda_id: int, programma_test_id: int
+) -> None:
+    """Sprint 7.5 MR 3: se `GiornataAssegnata.dates_apply` è popolato
+    (output del clustering A1), il persister salva `validita_dates_apply_json`
+    con quelle date REALI invece dell'intersezione menzogna sulle
+    `valido_in_date_json` delle corse.
+    """
+    await _crea_stazione("S99100", azienda_id)
+    await _crea_stazione("S99101", azienda_id)
+    await _crea_localita("TEST_LOC_DA", "S99100", azienda_id)
+    corsa_id = await _crea_corsa("TEST_DA", "S99100", "S99101", (8, 0), (9, 0), azienda_id)
+
+    d1 = date(2026, 4, 27)  # lunedì 1
+    d2 = date(2026, 5, 4)  # lunedì 2
+    d3 = date(2026, 5, 11)  # lunedì 3
+
+    async with session_scope() as session:
+        corsa = (
+            await session.execute(select(CorsaCommerciale).where(CorsaCommerciale.id == corsa_id))
+        ).scalar_one()
+
+        # Costruisci GiornataAssegnata simulando output post-cluster:
+        # tre date "gemelle" che condividono lo stesso pattern A1.
+        cat_pos = CatenaPosizionata(
+            localita_codice="TEST_LOC_DA",
+            stazione_collegata="S99100",
+            vuoto_testa=None,
+            catena=Catena(corse=(corsa,)),
+            vuoto_coda=None,
+            chiusa_a_localita=True,
+        )
+        giornata = GiornataAssegnata(
+            data=d1,
+            catena_posizionata=cat_pos,
+            blocchi_assegnati=(
+                BloccoAssegnato(
+                    corsa=corsa,
+                    assegnazione=AssegnazioneRisolta(
+                        regola_id=1,
+                        composizione=(ComposizioneItem(MATERIALE_TIPO, 3),),
+                    ),
+                ),
+            ),
+            eventi_composizione=(),
+            materiali_tipo_giornata=frozenset({MATERIALE_TIPO}),
+            dates_apply=(d1, d2, d3),
+        )
+        giro = GiroAssegnato(
+            localita_codice="TEST_LOC_DA",
+            giornate=(giornata,),
+            chiuso=True,
+            motivo_chiusura="naturale",
+        )
+
+        ids = await persisti_giri(
+            [GiroDaPersistere(numero_turno="G-DA-001", giro=giro)],
+            session,
+            programma_id=programma_test_id,
+            azienda_id=azienda_id,
+        )
+        gm_id = ids[0]
+
+    async with session_scope() as session:
+        gv = (
+            await session.execute(
+                select(GiroVariante)
+                .join(GiroGiornata, GiroVariante.giro_giornata_id == GiroGiornata.id)
+                .where(GiroGiornata.giro_materiale_id == gm_id)
+            )
+        ).scalar_one()
+        assert gv.validita_dates_apply_json == [
+            "2026-04-27",
+            "2026-05-04",
+            "2026-05-11",
+        ]
+
+
+async def test_dates_apply_vuoto_pre_cluster_fallback_a_data_giorno(
+    azienda_id: int, programma_test_id: int
+) -> None:
+    """Sprint 7.5 MR 3: senza clustering (`dates_apply==()`), il
+    persister salva `[giornata.data]` come fallback. Comportamento
+    legacy preservato per test diretti del persister.
+    """
+    await _crea_stazione("S99110", azienda_id)
+    await _crea_stazione("S99111", azienda_id)
+    await _crea_localita("TEST_LOC_DB", "S99110", azienda_id)
+    corsa_id = await _crea_corsa("TEST_DB", "S99110", "S99111", (8, 0), (9, 0), azienda_id)
+
+    async with session_scope() as session:
+        corsa = (
+            await session.execute(select(CorsaCommerciale).where(CorsaCommerciale.id == corsa_id))
+        ).scalar_one()
+        # _giro_assegnato_singolo NON popola dates_apply → resta `()`
+        giro = _giro_assegnato_singolo(
+            localita_codice="TEST_LOC_DB",
+            corse_orm=(corsa,),
+            data_giorno=date(2026, 6, 1),
+        )
+        ids = await persisti_giri(
+            [GiroDaPersistere(numero_turno="G-DB-001", giro=giro)],
+            session,
+            programma_id=programma_test_id,
+            azienda_id=azienda_id,
+        )
+        gm_id = ids[0]
+
+    async with session_scope() as session:
+        gv = (
+            await session.execute(
+                select(GiroVariante)
+                .join(GiroGiornata, GiroVariante.giro_giornata_id == GiroGiornata.id)
+                .where(GiroGiornata.giro_materiale_id == gm_id)
+            )
+        ).scalar_one()
+        assert gv.validita_dates_apply_json == ["2026-06-01"]

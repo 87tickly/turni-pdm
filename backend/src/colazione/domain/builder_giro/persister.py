@@ -156,12 +156,26 @@ def _estrai_validita_giornata(
     ``feedback_pde_periodicita_verita.md``): mostriamo letteralmente
     quello che il PdE dice, niente parser DSL.
 
-    **Date** (``validita_dates_apply_json``): intersezione di
-    ``valido_in_date_json`` di TUTTE le corse della giornata. Esprime
-    "in queste date concrete del calendario, la sequenza di blocchi di
-    questa giornata è interamente valida". Per il giro istanza la lista
-    è ovviamente almeno ``[giornata.data]``; le altre date sono i giorni
-    "gemelli" in cui lo stesso pattern ricorre senza modifiche.
+    **Date** (``validita_dates_apply_json``): Sprint 7.5 (refactor bug 5
+    MR 3) — usa ``giornata.dates_apply_or_data``, che dopo il
+    clustering A1 (MR 1) contiene le date REALI in cui la giornata-
+    tipo si applica (= date di partenza dei filoni del cluster).
+    Pre-cluster fallback a ``(giornata.data,)`` via property.
+
+    Vecchia logica (pre-MR 3) calcolava l'intersezione di
+    ``valido_in_date_json`` di tutte le corse della giornata,
+    "menzogna" perché:
+
+    1. Le corse possono essere valide in date in cui la SEQUENZA
+       (con la specifica cross-notte) non lo è.
+    2. Non considera che giornata k+1 può essere valida in un
+       sottoinsieme delle date di giornata k.
+    3. Una corsa valida in 365 giorni non implica che la giornata
+       in cui appare sia valida in 365 giorni.
+
+    Il dato post-cluster è **per costruzione** corretto: contiene
+    tutte e sole le date in cui il pattern intero del giro
+    (sequenza A1-strict di catene cross-notte) è realizzato.
 
     Returns:
         Coppia ``(testo, dates_iso)``. ``testo`` è String/Text
@@ -179,28 +193,14 @@ def _estrai_validita_giornata(
             testo = str(p).strip()
             break
 
-    sets_dates: list[set[str]] = []
-    for c in corse:
-        d = getattr(c, "valido_in_date_json", None) or []
-        if d:
-            sets_dates.append({str(x) for x in d})
-
-    if not sets_dates:
-        return (testo, [giornata.data.isoformat()])
-
-    inter = sets_dates[0]
-    for s in sets_dates[1:]:
-        inter = inter & s
-    if not inter:
-        return (testo, [giornata.data.isoformat()])
-
-    # La data della giornata DEVE cadere nell'intersezione (altrimenti
-    # il filtro `_corsa_vale_in_data` del builder ha lasciato passare
-    # una corsa che non doveva — anomalia da segnalare); fallback safe.
-    iso_d = giornata.data.isoformat()
-    if iso_d not in inter:
-        inter.add(iso_d)
-    return (testo, sorted(inter))
+    # Sprint 7.5 (MR 3): leggi le date dal pass-through del clustering A1
+    # invece di calcolare un'intersezione "menzogna" sulle valido_in_date
+    # delle singole corse. `dates_apply_or_data` torna `(giornata.data,)`
+    # se il clustering non è stato applicato (es. test diretti del
+    # persister con GiornataAssegnata costruita a mano), preservando il
+    # comportamento legacy con singola data.
+    dates_iso = [d.isoformat() for d in giornata.dates_apply_or_data]
+    return (testo, sorted(set(dates_iso)))
 
 
 def _km_media_annua_giro(

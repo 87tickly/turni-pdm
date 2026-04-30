@@ -10,6 +10,90 @@
 
 ---
 
+## 2026-04-30 (48) — Bug 5 refactor MR 3/7: persister usa dates_apply reali
+
+### Contesto
+
+MR 3/7 del refactor bug 5. Con MR 1 (clustering A1) + MR 2 (pass-through
+composizione), `GiornataAssegnata.dates_apply` arriva al persister con
+le date REALI in cui la giornata-tipo si applica nel calendario.
+Questo MR fa il salto di paradigma: il persister smette di calcolare
+l'intersezione "menzogna" su `valido_in_date_json` delle corse e usa
+invece il dato reale.
+
+**È il MR che chiude metà del bug 5**: dopo questo, la
+`GiroVariante.validita_dates_apply_json` smette di mentire e contiene
+le date concrete in cui la sequenza di blocchi della giornata è
+realmente applicabile (= date di partenza dei filoni del cluster A1).
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_giro/persister.py`**:
+
+`_estrai_validita_giornata` riscritta:
+
+- **Prima**: calcolava `inter = ∩ corsa.valido_in_date_json` poi
+  aggiungeva `giornata.data` se mancante. Risultato: 342-365 date
+  applicabili per giornata, ma molte di quelle date producevano in
+  realtà sequenze diverse (varianti calendario non riconosciute → bug 5).
+- **Ora**: legge `giornata.dates_apply_or_data` (property pass-through
+  da `GiornataAssegnata` → `GiornataGiro`). Post-cluster: tutte e sole
+  le date reali. Pre-cluster (test diretti del persister): fallback a
+  `(giornata.data,)`. Comportamento test legacy preservato.
+
+Il "testo" (`validita_testo`) resta invariato: prima
+`periodicita_breve` non vuota delle corse, fallback `"GG"`.
+
+**`backend/tests/test_persister.py`**:
+
+- 2 nuovi test in sezione "Sprint 7.5 — dates_apply post-cluster":
+  - `test_dates_apply_post_cluster_persistito_in_validita_dates_apply_json`:
+    `GiornataAssegnata(dates_apply=(d1, d2, d3))` → variante salvata
+    con `validita_dates_apply_json == [d1, d2, d3]` ISO-formatted.
+  - `test_dates_apply_vuoto_pre_cluster_fallback_a_data_giorno`:
+    `_giro_assegnato_singolo` (no dates_apply) → fallback `[data_giorno]`
+    (compat legacy).
+
+### Verifiche
+
+- `pytest tests/test_persister.py`: **17/17** (15 vecchi + 2 nuovi).
+- `pytest`: **392 passed, 1 skipped, 0 fail** (vs 390 pre-MR3, +2
+  nuovi, niente regressione).
+- `mypy src/colazione/domain/builder_giro/persister.py`: clean.
+- I 3 test esistenti che asserivano `validita_dates_apply_json ==
+  ["2026-04-27"]` (singola data) restano verdi: pre-cluster il
+  fallback ritorna esattamente `[data_giorno]`.
+
+### Stato
+
+**MR 3/7 chiuso.** La pipeline pure (multi_giornata → composizione →
+persister) ora è coerente: `dates_apply` viaggia trasparentemente dal
+clustering A1 fino al DB. La `GiroVariante.validita_dates_apply_json`
+conterrà le date reali al prossimo `genera_giri()`.
+
+Ma il bug 5 non è ancora visibile in DB: l'orchestrator `builder.py`
+chiama il pure layer con `data_inizio + n_giornate` (finestra ridotta),
+quindi il clustering trova al massimo 1 filone per pattern. Per
+sbloccare la moltiplicazione cluster servirebbe il periodo intero del
+programma, che è scope di MR 4.
+
+Restano 4 MR:
+- MR 4 — `builder.py` orchestrator + API (parametri opzionali, periodo
+  intero default).
+- MR 5 — Builder PdC: 1 turno per variante.
+- MR 6 — Frontend.
+- MR 7 — Migrazione + smoke programma 1341.
+
+### Prossimo step
+
+MR 4: `builder.py::genera_giri` + `api/giri.py`. La firma diventa
+`data_inizio: date | None = None`, `n_giornate: int | None = None`
+(decisione utente C3). Il default expand a
+`[programma.valido_da, programma.valido_a]`. È il MR che attiva
+concretamente il clustering A1 sui dati reali.
+
+---
+
 ## 2026-04-30 (47) — Bug 5 refactor MR 2/7: dates_apply pass-through composizione
 
 ### Contesto
