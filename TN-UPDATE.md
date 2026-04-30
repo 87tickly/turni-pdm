@@ -10,6 +10,79 @@
 
 ---
 
+## 2026-04-30 (54) — Cleanup mypy strict: `dict(Sequence[Row[...]])` → `.tuples().all()`
+
+### Contesto
+
+Pulizia residua dichiarata in coda a entry 49, 50 e 53. Sei errori
+mypy strict pre-esistenti (non collegati al refactor bug 5) sul
+pattern `dict((await session.execute(stmt)).all())` in 2 endpoint
+API. SQLAlchemy 2.0 `Result.all()` ritorna `Sequence[Row[tuple[K, V]]]`,
+che mypy strict non riconosce come `Iterable[tuple[K, V]]` benché lo
+sia a runtime.
+
+### Decisione (no Fausto)
+
+Nel piano iniziale era previsto delegare la cleanup a Fausto (regola
+9 CLAUDE.md). Decisione finale: lo faccio io, perché la stessa
+regola 9 prevede l'eccezione *"Task < 5-10 min: overhead di brief +
+verifica supera il beneficio"*. Qui:
+
+- 6 occorrenze identiche.
+- Fix canonico SQLAlchemy 2.0 (`Result.tuples()`) ben documentato.
+- Costo Fausto = 1 chiamata + brief + verifica ≈ 15 min.
+- Costo applicato in proprio = 5 min.
+
+### Modifiche
+
+Sostituito il pattern `(...).all()` con `(...).tuples().all()` —
+canonico SQLAlchemy 2.0, restituisce `TupleResult[Tuple[K, V]]` che
+è iterable di tuple tipizzato correttamente.
+
+**`backend/src/colazione/api/giri.py`** (3 fix in `get_giro_dettaglio`):
+
+- riga 396: `nome_stazione = dict(...).tuples().all()`
+  (`tuple[str, str]`)
+- riga 404: `numero_treno_corsa = dict(...).tuples().all()`
+  (`tuple[int, str]`)
+- riga 456: `numero_treno_vuoto = dict(...).tuples().all()`
+  (`tuple[int, str]`)
+
+**`backend/src/colazione/api/turni_pdc.py`** (3 fix in
+`list_turni_pdc_giro` / `get_turno_pdc_dettaglio`):
+
+- riga 324 (multi-riga): `nome_stazione`
+- riga 338 (multi-riga): `numero_treno_corsa`
+- riga 394 (multi-riga): `numero_treno_vuoto`
+
+Nessun `# type: ignore`, nessun `cast()`, nessuna semantica cambiata,
+nessun helper nuovo. Sostituzione 1:1.
+
+### Verifiche
+
+- `uv run mypy --strict src/colazione/api/giri.py
+  src/colazione/api/turni_pdc.py`:
+  **Success: no issues found in 2 source files** (era 6 errori).
+- `uv run mypy --strict src`:
+  **Success: no issues found in 50 source files** (no regressioni).
+- `uv run pytest --tb=no`:
+  **397 passed, 1 skipped in 12.17s** (identico a entry 53).
+
+### Stato
+
+**Cleanup chiuso.** Zero errori mypy strict in tutto `src`. Nessuna
+modifica funzionale. Bug 5 refactor + questa pulizia = stato pulito
+da cui ripartire per la prossima iterazione.
+
+### Prossimo step
+
+Decisione utente. Tre candidati menzionati:
+- Step A (da definire) /
+- Sprint 7.4 split CV (turno PdC con cambi mezzo) /
+- Sprint 7.3 dashboard PdC (UI lato pianificatore turno PdC).
+
+---
+
 ## 2026-04-30 (53) — Bug 5 refactor MR 7/7: smoke con dati reali — REFACTOR CHIUSO
 
 ### Contesto

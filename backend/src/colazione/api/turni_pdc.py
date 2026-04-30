@@ -328,7 +328,9 @@ async def get_turno_pdc_dettaglio(
                         Stazione.azienda_id == user.azienda_id,
                     )
                 )
-            ).all()
+            )
+            .tuples()
+            .all()
         )
 
     corsa_ids = {b.corsa_commerciale_id for b in blocchi_orm if b.corsa_commerciale_id is not None}
@@ -341,7 +343,9 @@ async def get_turno_pdc_dettaglio(
                         CorsaCommerciale.id.in_(corsa_ids)
                     )
                 )
-            ).all()
+            )
+            .tuples()
+            .all()
         )
 
     # Sprint 7.3: trasparenza varianti numero_treno (vedi
@@ -397,7 +401,9 @@ async def get_turno_pdc_dettaglio(
                         CorsaMaterialeVuoto.id.in_(vuoto_ids)
                     )
                 )
-            ).all()
+            )
+            .tuples()
+            .all()
         )
 
     blocchi_per_giornata: dict[int, list[TurnoPdcBloccoRead]] = {}

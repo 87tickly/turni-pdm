@@ -393,7 +393,7 @@ async def get_giro_dettaglio(
             Stazione.codice.in_(codici_stazione),
             Stazione.azienda_id == user.azienda_id,
         )
-        nome_stazione = dict((await session.execute(st_stmt)).all())
+        nome_stazione = dict((await session.execute(st_stmt)).tuples().all())
 
     corsa_ids = {b.corsa_commerciale_id for b in blocchi_orm if b.corsa_commerciale_id is not None}
     numero_treno_corsa: dict[int, str] = {}
@@ -401,7 +401,7 @@ async def get_giro_dettaglio(
         cc_stmt = select(CorsaCommerciale.id, CorsaCommerciale.numero_treno).where(
             CorsaCommerciale.id.in_(corsa_ids)
         )
-        numero_treno_corsa = dict((await session.execute(cc_stmt)).all())
+        numero_treno_corsa = dict((await session.execute(cc_stmt)).tuples().all())
 
     # Sprint 7.3: trasparenza varianti. Per i numero_treno coinvolti nei
     # blocchi del giro, calcola (totale_varianti, indice_variante) di
@@ -453,7 +453,7 @@ async def get_giro_dettaglio(
         cv_stmt = select(
             CorsaMaterialeVuoto.id, CorsaMaterialeVuoto.numero_treno_vuoto
         ).where(CorsaMaterialeVuoto.id.in_(vuoto_ids))
-        numero_treno_vuoto = dict((await session.execute(cv_stmt)).all())
+        numero_treno_vuoto = dict((await session.execute(cv_stmt)).tuples().all())
 
     def _to_blocco_read(b: GiroBlocco) -> GiroBloccoRead:
         num: str | None = None
