@@ -20,7 +20,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import BigInteger, cast, select
+from sqlalchemy import BigInteger, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.auth import require_role
@@ -93,6 +93,8 @@ class TurnoPdcBloccoRead(BaseModel):
     stazione_da_nome: str | None
     stazione_a_nome: str | None
     numero_treno: str | None
+    numero_treno_variante_indice: int | None
+    numero_treno_variante_totale: int | None
     ora_inizio: time | None
     ora_fine: time | None
     durata_min: int | None
@@ -334,6 +336,47 @@ async def get_turno_pdc_dettaglio(
             ).all()
         )
 
+    # Sprint 7.3: trasparenza varianti numero_treno (vedi
+    # `api/giri.py` per la stessa logica). Stessi `numero_treno`
+    # → contiamo varianti totali per azienda + indice 1-based per
+    # `valido_da` di ciascuna corsa.
+    varianti_per_corsa: dict[int, tuple[int, int]] = {}
+    if numero_treno_corsa:
+        numeri_treno = set(numero_treno_corsa.values())
+        cnt_subq = (
+            select(
+                CorsaCommerciale.numero_treno,
+                func.count().label("totale"),
+            )
+            .where(
+                CorsaCommerciale.azienda_id == user.azienda_id,
+                CorsaCommerciale.numero_treno.in_(numeri_treno),
+            )
+            .group_by(CorsaCommerciale.numero_treno)
+            .subquery()
+        )
+        var_stmt = (
+            select(
+                CorsaCommerciale.id,
+                cnt_subq.c.totale,
+                func.row_number()
+                .over(
+                    partition_by=CorsaCommerciale.numero_treno,
+                    order_by=(CorsaCommerciale.valido_da, CorsaCommerciale.id),
+                )
+                .label("indice"),
+            )
+            .join(cnt_subq, cnt_subq.c.numero_treno == CorsaCommerciale.numero_treno)
+            .where(
+                CorsaCommerciale.azienda_id == user.azienda_id,
+                CorsaCommerciale.numero_treno.in_(numeri_treno),
+            )
+        )
+        for row in (await session.execute(var_stmt)).all():
+            cid, tot, idx = row
+            if cid in corsa_ids:
+                varianti_per_corsa[cid] = (int(idx), int(tot))
+
     vuoto_ids = {
         b.corsa_materiale_vuoto_id for b in blocchi_orm if b.corsa_materiale_vuoto_id is not None
     }
@@ -352,8 +395,13 @@ async def get_turno_pdc_dettaglio(
     blocchi_per_giornata: dict[int, list[TurnoPdcBloccoRead]] = {}
     for b in blocchi_orm:
         num: str | None = None
+        idx_var: int | None = None
+        tot_var: int | None = None
         if b.corsa_commerciale_id is not None:
             num = numero_treno_corsa.get(b.corsa_commerciale_id)
+            par = varianti_per_corsa.get(b.corsa_commerciale_id)
+            if par is not None:
+                idx_var, tot_var = par
         elif b.corsa_materiale_vuoto_id is not None:
             num = numero_treno_vuoto.get(b.corsa_materiale_vuoto_id)
         blocchi_per_giornata.setdefault(b.turno_pdc_giornata_id, []).append(
@@ -373,6 +421,8 @@ async def get_turno_pdc_dettaglio(
                     nome_stazione.get(b.stazione_a_codice) if b.stazione_a_codice else None
                 ),
                 numero_treno=num,
+                numero_treno_variante_indice=idx_var,
+                numero_treno_variante_totale=tot_var,
                 ora_inizio=b.ora_inizio,
                 ora_fine=b.ora_fine,
                 durata_min=b.durata_min,

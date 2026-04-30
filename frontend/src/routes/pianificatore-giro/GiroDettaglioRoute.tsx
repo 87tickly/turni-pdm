@@ -239,7 +239,11 @@ function GanttBlocco({ blocco }: { blocco: GiroBlocco }) {
   const da = stazioneLabel(blocco.stazione_da_nome, blocco.stazione_da_codice);
   const a = stazioneLabel(blocco.stazione_a_nome, blocco.stazione_a_codice);
   const tipoLabel = tipoBloccoLabel(blocco.tipo_blocco);
-  const tooltip = `${tipoLabel} · ${blocco.ora_inizio ?? "?"}→${blocco.ora_fine ?? "?"}\n${da} → ${a}${blocco.numero_treno !== null ? `\nTreno ${blocco.numero_treno}` : ""}`;
+  const trenoLine =
+    blocco.numero_treno !== null
+      ? `\nTreno ${blocco.numero_treno}${varianteSuffix(blocco)}`
+      : "";
+  const tooltip = `${tipoLabel} · ${blocco.ora_inizio ?? "?"}→${blocco.ora_fine ?? "?"}\n${da} → ${a}${trenoLine}`;
   return (
     <div
       className={`absolute top-1 flex h-7 items-center overflow-hidden rounded px-1.5 text-[10px] font-medium ${colorForTipo(blocco.tipo_blocco)}`}
@@ -261,6 +265,13 @@ function bloccoLabel(b: GiroBlocco): string {
   const da = b.stazione_da_nome ?? b.stazione_da_codice ?? "?";
   const a = b.stazione_a_nome ?? b.stazione_a_codice ?? "?";
   return `${da}→${a}`;
+}
+
+function varianteSuffix(b: GiroBlocco): string {
+  const idx = b.numero_treno_variante_indice;
+  const tot = b.numero_treno_variante_totale;
+  if (idx === null || tot === null || tot <= 1) return "";
+  return ` · variante ${idx}/${tot}`;
 }
 
 function stazioneLabel(nome: string | null, codice: string | null): string {
@@ -319,7 +330,9 @@ function BlocchiList({ blocchi }: { blocchi: GiroBlocco[] }) {
               <td className="px-2 py-1">
                 <BloccoTipoBadge tipo={b.tipo_blocco} />
               </td>
-              <td className="px-2 py-1 font-mono font-medium">{b.numero_treno ?? "—"}</td>
+              <td className="px-2 py-1">
+                <TrenoCell blocco={b} />
+              </td>
               <td className="px-2 py-1">
                 <StazioneCell nome={b.stazione_da_nome} codice={b.stazione_da_codice} />
               </td>
@@ -333,6 +346,26 @@ function BlocchiList({ blocchi }: { blocchi: GiroBlocco[] }) {
         </tbody>
       </table>
     </details>
+  );
+}
+
+function TrenoCell({ blocco }: { blocco: GiroBlocco }) {
+  if (blocco.numero_treno === null) return <span>—</span>;
+  const idx = blocco.numero_treno_variante_indice;
+  const tot = blocco.numero_treno_variante_totale;
+  const showVariante = idx !== null && tot !== null && tot > 1;
+  return (
+    <div className="flex flex-col leading-tight">
+      <span className="font-mono font-medium">{blocco.numero_treno}</span>
+      {showVariante && (
+        <span
+          className="text-[10px] text-muted-foreground"
+          title={`Questa corsa ha ${tot} varianti (origini/orari/periodi diversi)`}
+        >
+          variante {idx}/{tot}
+        </span>
+      )}
+    </div>
   );
 }
 

@@ -350,7 +350,9 @@ function BlocchiList({ blocchi }: { blocchi: TurnoPdcBlocco[] }) {
               <td className="px-2 py-1">
                 <BloccoTipoBadge tipo={b.tipo_evento} />
               </td>
-              <td className="px-2 py-1 font-mono font-medium">{b.numero_treno ?? "—"}</td>
+              <td className="px-2 py-1">
+                <TrenoCell blocco={b} />
+              </td>
               <td className="px-2 py-1">
                 <StazioneCell nome={b.stazione_da_nome} codice={b.stazione_da_codice} />
               </td>
@@ -365,6 +367,26 @@ function BlocchiList({ blocchi }: { blocchi: TurnoPdcBlocco[] }) {
         </tbody>
       </table>
     </details>
+  );
+}
+
+function TrenoCell({ blocco }: { blocco: TurnoPdcBlocco }) {
+  if (blocco.numero_treno === null) return <span>—</span>;
+  const idx = blocco.numero_treno_variante_indice;
+  const tot = blocco.numero_treno_variante_totale;
+  const showVariante = idx !== null && tot !== null && tot > 1;
+  return (
+    <div className="flex flex-col leading-tight">
+      <span className="font-mono font-medium">{blocco.numero_treno}</span>
+      {showVariante && (
+        <span
+          className="text-[10px] text-muted-foreground"
+          title={`Questa corsa ha ${tot} varianti (origini/orari/periodi diversi)`}
+        >
+          variante {idx}/{tot}
+        </span>
+      )}
+    </div>
   );
 }
 

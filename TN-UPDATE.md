@@ -10,6 +10,91 @@
 
 ---
 
+## 2026-04-30 (44) — UI trasparenza varianti numero_treno + chiusura bug 4 PdE
+
+### Contesto
+
+Diagnosi del bug 4 ("doppioni numero_treno"): non è un bug. 41% dei
+`numero_treno` ha più varianti perché Trenord usa la stessa
+"etichetta servizio" per N corse con origini/orari/periodi diversi
+(es. treno 2413 = 16 varianti tutte legittime). 0 coppie con date
+concrete in comune verificato via `valido_in_date_json`. Il filtro
+del builder già seleziona la variante giusta per ogni giornata.
+
+L'utente ha richiesto la UI "questa corsa ha N varianti" per dare
+trasparenza al pianificatore, anche se il sistema la gestisce
+automaticamente. Realizzato sia per giro materiale sia per turno
+PdC, per coerenza.
+
+### Modifiche
+
+**Backend** (`api/giri.py` + `api/turni_pdc.py`):
+
+- Aggiunto a `GiroBloccoRead` e `TurnoPdcBloccoRead`:
+  - `numero_treno_variante_indice: int | None`
+  - `numero_treno_variante_totale: int | None`
+- Nuovo lookup batch in entrambi gli endpoint dettaglio: window
+  function SQL che, per ogni `numero_treno` coinvolto nei blocchi,
+  conta totale varianti per azienda + assegna indice 1-based
+  ordinato per `(valido_da, id)`. Subquery `cnt_subq` per il totale,
+  `ROW_NUMBER() OVER (PARTITION BY numero_treno ORDER BY
+  valido_da, id)` per l'indice. Mappa risultato `corsa_id →
+  (indice, totale)`.
+
+**Frontend**:
+
+- `lib/api/giri.ts` + `lib/api/turniPdc.ts`: aggiunti i 2 campi al
+  type `GiroBlocco` e `TurnoPdcBlocco`.
+- `GiroDettaglioRoute.tsx` + `TurnoPdcDettaglioRoute.tsx`:
+  - Nuova `<TrenoCell blocco={b} />`: mostra `numero_treno` in font
+    mono, e SOLO se `tot > 1` aggiunge sotto in muted-10px:
+    `variante {idx}/{tot}` con tooltip "Questa corsa ha N varianti
+    (origini/orari/periodi diversi)".
+  - Tooltip Gantt blocco: aggiunta riga `Treno NNNN · variante
+    idx/tot` quando applicabile.
+- I treni con 1 sola variante (`tot === 1`) NON mostrano il badge:
+  l'utente lo vede solo quando l'informazione è rilevante, niente
+  rumore visuale.
+
+### Verifiche
+
+- `pnpm typecheck`: clean
+- `pnpm test`: 31/31 verdi
+- `pnpm build`: 361.60 KB JS / 107.32 KB gzip / 21.81 KB CSS
+- Smoke API giro 13515 (programma 1341 rigenerato): treno 24520
+  → 1/3, treno 24560 → 1/4, treno 24513 → 1/1 (no badge)
+- Preview live `/pianificatore-giro/giri/13515`: 7 celle con badge
+  "variante N/M" visibile, console pulita
+
+### Stato
+
+**Bug 4 chiuso** (no-op confermato + UI trasparenza varianti).
+
+Tutti e 4 i bug PdE individuati ieri dall'utente risolti:
+
+| # | Bug | Stato | Commit |
+|---|-----|-------|--------|
+| 1 | Generazione "Failed to fetch" | ✅ | `dae23b7` |
+| 2 | Periodicità ignorata (sempre "GG") | ✅ | `e5f39d0` |
+| 3 | Stagione ridondante rimossa | ✅ | `c3b917c` |
+| 4 | Varianti numero_treno (UI trasparenza) | ✅ | _questo commit_ |
+
+### Prossimo step
+
+Sessione PdE chiusa. Opzioni per la prossima sessione:
+- **Step A semplificazione builder**: rendere `data_inizio`/
+  `n_giornate` opzionali nell'API (default = periodo programma
+  intero). Toggle UI "Limita a sotto-finestra" se l'utente vuole
+  un range parziale.
+- **Sprint 7.4 split CV**: chiudere le violazioni
+  prestazione/condotta del builder PdC con CV intermedio (le
+  giornate del giro 17h sforano 8h30 PdC).
+- **Sprint 7.3 dashboard PdC**: scheda dedicata Pianificatore
+  Turno PdC con lista globale turni e ruolo separato.
+- Bug nuovi che l'utente noterà testando con i fix attuali.
+
+---
+
 ## 2026-04-29 (43) — PdE bug fixes: collision G-FIO, periodicità GG, stagione cosmetica
 
 ### Contesto

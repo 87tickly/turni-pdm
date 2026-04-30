@@ -26,7 +26,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.auth import require_role
@@ -198,6 +198,12 @@ class GiroBloccoRead(BaseModel):
     stazione_da_nome: str | None
     stazione_a_nome: str | None
     numero_treno: str | None
+    # Sprint 7.3: trasparenza varianti. Trenord usa lo stesso numero_treno
+    # per N corse "varianti" (origini/orari/periodi diversi). Qui esponiamo
+    # quale variante è questa (1-based per `valido_da`) e il totale, così
+    # la UI può mostrare "treno 2413 · variante 5/16".
+    numero_treno_variante_indice: int | None
+    numero_treno_variante_totale: int | None
     ora_inizio: time | None
     ora_fine: time | None
     descrizione: str | None
@@ -376,6 +382,48 @@ async def get_giro_dettaglio(
         )
         numero_treno_corsa = dict((await session.execute(cc_stmt)).all())
 
+    # Sprint 7.3: trasparenza varianti. Per i numero_treno coinvolti nei
+    # blocchi del giro, calcola (totale_varianti, indice_variante) di
+    # ogni corsa via window function. Lo stesso `numero_treno` può
+    # avere N corse con origine/orario/periodo diversi (Trenord); qui
+    # ordiniamo per (valido_da, id) e numeriamo 1-based.
+    varianti_per_corsa: dict[int, tuple[int, int]] = {}
+    if numero_treno_corsa:
+        numeri_treno = set(numero_treno_corsa.values())
+        cnt_subq = (
+            select(
+                CorsaCommerciale.numero_treno,
+                func.count().label("totale"),
+            )
+            .where(
+                CorsaCommerciale.azienda_id == user.azienda_id,
+                CorsaCommerciale.numero_treno.in_(numeri_treno),
+            )
+            .group_by(CorsaCommerciale.numero_treno)
+            .subquery()
+        )
+        var_stmt = (
+            select(
+                CorsaCommerciale.id,
+                cnt_subq.c.totale,
+                func.row_number()
+                .over(
+                    partition_by=CorsaCommerciale.numero_treno,
+                    order_by=(CorsaCommerciale.valido_da, CorsaCommerciale.id),
+                )
+                .label("indice"),
+            )
+            .join(cnt_subq, cnt_subq.c.numero_treno == CorsaCommerciale.numero_treno)
+            .where(
+                CorsaCommerciale.azienda_id == user.azienda_id,
+                CorsaCommerciale.numero_treno.in_(numeri_treno),
+            )
+        )
+        for row in (await session.execute(var_stmt)).all():
+            cid, tot, idx = row
+            if cid in corsa_ids:
+                varianti_per_corsa[cid] = (int(idx), int(tot))
+
     vuoto_ids = {
         b.corsa_materiale_vuoto_id for b in blocchi_orm if b.corsa_materiale_vuoto_id is not None
     }
@@ -388,8 +436,13 @@ async def get_giro_dettaglio(
 
     def _to_blocco_read(b: GiroBlocco) -> GiroBloccoRead:
         num: str | None = None
+        idx_var: int | None = None
+        tot_var: int | None = None
         if b.corsa_commerciale_id is not None:
             num = numero_treno_corsa.get(b.corsa_commerciale_id)
+            par = varianti_per_corsa.get(b.corsa_commerciale_id)
+            if par is not None:
+                idx_var, tot_var = par
         elif b.corsa_materiale_vuoto_id is not None:
             num = numero_treno_vuoto.get(b.corsa_materiale_vuoto_id)
         return GiroBloccoRead(
@@ -407,6 +460,8 @@ async def get_giro_dettaglio(
                 nome_stazione.get(b.stazione_a_codice) if b.stazione_a_codice else None
             ),
             numero_treno=num,
+            numero_treno_variante_indice=idx_var,
+            numero_treno_variante_totale=tot_var,
             ora_inizio=b.ora_inizio,
             ora_fine=b.ora_fine,
             descrizione=b.descrizione,

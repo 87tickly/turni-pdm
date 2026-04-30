@@ -57,6 +57,8 @@ export interface GiroBlocco {
   stazione_da_nome: string | null;
   stazione_a_nome: string | null;
   numero_treno: string | null;
+  numero_treno_variante_indice: number | null;
+  numero_treno_variante_totale: number | null;
   ora_inizio: string | null;
   ora_fine: string | null;
   descrizione: string | null;
