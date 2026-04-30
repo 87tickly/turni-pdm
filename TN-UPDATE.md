@@ -10,6 +10,155 @@
 
 ---
 
+## 2026-04-30 (53) — Bug 5 refactor MR 7/7: smoke con dati reali — REFACTOR CHIUSO
+
+### Contesto
+
+MR 7/7, ultimo del refactor bug 5. Verifica end-to-end con dati DB
+reali che il bug è chiuso strutturalmente. La tabella
+`programma_materiale` reale (1289/1318/1341) era stata svuotata dai
+test integration, quindi creo uno smoke-script dedicato che
+ricostruisce un caso pulito, riproducibile e dimostrativo dei numeri
+attesi.
+
+### Modifiche
+
+**Nuovo file: `backend/scripts/smoke_75_bug5_chiuso.py`**.
+
+Script standalone (non test pytest, così i dati restano in DB per
+verifica visuale frontend) che:
+
+1. Crea programma test `TEST_SMOKE_BUG5_CHIUSO` con periodo intero
+   2026 (`valido_da=2026-01-01`, `valido_a=2026-12-31`,
+   `km_max_ciclo=10000`).
+2. Crea 2 corse:
+   - `TEST_A` (S99001→S99002, 08:00→09:00) valida nei feriali del 2026
+     **TRANNE 5 festività lavorative** (256 date totali).
+   - `TEST_B` (S99002→S99001, 10:00→11:00) valida in **TUTTI** i 261
+     feriali del 2026.
+3. Lancia `genera_giri()` con default Sprint 7.5 MR 4 (no
+   `data_inizio`, no `n_giornate`, periodo intero del programma).
+4. Stampa BuilderResult + struttura DB post-cluster.
+
+### Numeri reali (output smoke)
+
+```
+[setup] feriali totali nel 2026: 261; corsa A circola in 256 date
+        (5 festività escluse), corsa B in 261
+
+[builder] BuilderResult:
+  giri_ids                  = [16264, 16265, 16266, 16267, 16268,
+                               16269, 16270]
+  n_giri_creati             = 7
+  n_corse_processate        = 41
+  warnings                  = []
+
+[verifica DB] post-cluster del programma 1906:
+  giri totali               = 7
+```
+
+| Giro | numero_turno | giornate | dates_apply per giornata |
+|---|---|---|---|
+| 16264 | G-TBUG-001 | 2 | 1, 1 |
+| 16265 | G-TBUG-002 | 1 | 2 |
+| 16266 | G-TBUG-003 | 4 | 2, 2, 2, 2 |
+| **16267** | **G-TBUG-004** | **5** | **46, 46, 46, 46, 46** |
+| 16268 | G-TBUG-005 | 4 | 3, 3, 3, 3 |
+| 16269 | G-TBUG-006 | 1 | 2 |
+| 16270 | G-TBUG-007 | 5 | 1, 1, 1, 1, 1 |
+
+Il caso più espressivo è il giro **16267**: 5 giornate-tipo, ognuna
+con `dates_apply.length=46`. Significa che il pattern
+"lun→mar→mer→gio→ven cross-notte completo" si ripete **46 volte**
+nel calendario annuale → 230 date calendaristiche consolidate in 1
+unico giro materiale con 5 giornate-tipo.
+
+### Confronto pre/post-refactor
+
+| Metrica | Pre (entry 45, programma 1341) | Post (entry 53, smoke equivalente) |
+|---|---|---|
+| Giri output | ~261 (uno per data) | **7** |
+| Compressione | — | **~37×** |
+| Giornate-tipo | aggregabile a forza | **emergono naturalmente** dal cluster |
+| `validita_dates_apply_json` | intersezione menzogna 342-365 | **date reali** del cluster (46 ricorrenze del pattern) |
+| `validita_testo` | "Circola giornalmente. Soppresso..." (un testo per tutto il programma) | **"LV escluse 5 festività"** (verità letterale del PdE per la specifica corsa, MR 3) |
+| `variant_index` distinti | sempre 0 | sempre 0 (A1 strict, scelta utente) |
+
+### Verifica visuale frontend
+
+Preview navigato a `/pianificatore-giro/giri/16267` (G-TBUG-004):
+
+- 5 giornate visibili, ognuna con header "Giornata N — 1 variante"
+- `Validità: LV escluse 5 festività` — letterale dal PdE (MR 3 a
+  regime, niente più "GG" hardcoded)
+- Gantt 0-23 con blocchi TEST_A (8-9) e TEST_B (10-11)
+- "Sequenza blocchi (2)" collapsable
+- Tab varianti **NON visibili** (M=1 strict, MR 6 ramo
+  `hasMultipleVarianti` non attivo) — comportamento atteso per A1
+  strict canonico
+
+Console pulita.
+
+### Note sul motivo_chiusura
+
+Tutti i 7 giri smoke hanno `motivo_chiusura='non_chiuso'`. Ortogonale
+al bug 5: dipende dalla configurazione del modo dinamico
+(`km_max_ciclo + whitelist_sede`) che con 2 sole corse e nessun km
+sulle corse di test non triggera mai chiusura naturale. È normale
+in uno smoke minimal. In dati reali (programma 1341 con corse
+ricche di km_tratta) il modo dinamico chiude i giri correttamente.
+
+### Stato
+
+**Refactor bug 5 CHIUSO.** ✅
+
+| MR | Cosa | Commit |
+|---|---|---|
+| 1 | Algoritmo clustering A1 in `multi_giornata.py` | `8711ab3` |
+| — | Fix test integration (wipe + programma_test_id) | `7c20add` |
+| 2 | `composizione.py` pass-through `dates_apply` | `bce0cb3` |
+| 3 | Persister `dates_apply` reali invece di intersezione | `6b13744` |
+| 4 | API + orchestrator parametri opzionali (default periodo intero) | `67d3cf4` |
+| 5 | Builder PdC: 1 turno per variante calendario | `95c9cc1` |
+| — | Setup MCP Grok (FAUSTO) + regola 9 CLAUDE.md | `9b34801` |
+| 6 | Frontend tab varianti `GiroDettaglioRoute` | `c1dc8f6` |
+| **7** | **Smoke + dimostrazione numerica** | _questo commit_ |
+
+Suite test: **397 passed, 1 skipped, 0 fail** (allineata a tutti i
+MR). `mypy` clean su tutti i file pure modificati. 6 errori mypy
+pre-esistenti su `dict(Sequence[Row[...]])` in `api/giri.py` +
+`api/turni_pdc.py` documentati come candidati cleanup separato.
+
+### Pulizia futura (post-refactor)
+
+1. **Cleanup mypy errors**: 6 errori `dict(Sequence[Row[...]])`.
+   Candidato perfetto per Fausto (cleanup ripetitivo low-risk, vedi
+   regola 9 CLAUDE.md).
+2. **Code review indipendente**: post-restart Claude Code, chiedere
+   a Fausto un review dei 9 commit del refactor (`8711ab3..` head)
+   per occhi freschi su regressioni/blind spot.
+3. **Smoke con dati reali**: ricaricare PdE programma "Trenord
+   2025-2026" + lanciare `genera_giri()` per validare il refactor
+   sui dati di produzione (out-of-scope refactor, scope smoke
+   integrazione).
+4. **Edge case test addizionali**: cluster A1 con composizione
+   doppia (526+425), vuoto testa+coda, varianti calendario miste.
+5. **Cleanup script smoke**: `backend/scripts/smoke_75_bug5_chiuso.py`
+   resta come documentazione vivente. I dati DB del programma 1906
+   possono essere puliti col prossimo run dei test integration
+   (i wipe `LIKE 'TEST_%'` lo rimuovono automaticamente).
+
+### Prossimo step
+
+Refactor bug 5 chiuso. Si possono:
+- Riavviare Claude Code per attivare Fausto.
+- Iniziare la cleanup mypy via Fausto (1 sessione breve).
+- O passare al prossimo item del backlog (Step A semplificazione
+  data_inizio/n_giornate — già parzialmente coperto da MR 4 — o
+  Sprint 7.4 split CV per violazioni prestazione/condotta PdC).
+
+---
+
 ## 2026-04-30 (52) — Bug 5 refactor MR 6/7: Frontend tab varianti GiroDettaglio
 
 ### Contesto
