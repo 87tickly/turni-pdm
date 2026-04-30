@@ -10,6 +10,98 @@
 
 ---
 
+## 2026-04-30 (56) — Sprint 7.4 MR 1/4: splitter CV puro + helper stazioni
+
+### Contesto
+
+MR 1/4 dello Sprint 7.4 (split CV intermedio nel builder turno PdC).
+Obiettivo dello sprint: chiudere il debito normativo dichiarato in
+entry 42 — oggi una giornata di giro materiale di ~17h produce un
+turno PdC con prestazione 1193 min (cap 420 notturno) e condotta
+oltre 600 min (cap 330). Il MVP marca la violazione ma non splitta.
+
+MR 1 introduce **solo lo splitter puro** + helper stazioni CV. Niente
+integrazione col builder ancora (MR 2). Niente API/UI (MR 3). Niente
+smoke (MR 4). Funzione testabile a unit-level.
+
+### Decisioni utente (3 radio AskUserQuestion)
+
+1. **Granularità**: ricorsivo, max 5 livelli per safety (cap
+   `MAX_LIVELLI_SPLIT=5`).
+2. **Stazioni CV**: `Depot` PdC azienda + deroghe hardcoded
+   `{MORTARA, TIRANO}` (`STAZIONI_CV_DEROGA`).
+3. **Cardinalità output**: 1 giornata splittata → N
+   `_GiornataPdcDraft` distinti (in MR 2 diventeranno N TurnoPdc).
+
+### Modifiche
+
+**Nuovo
+`backend/src/colazione/domain/builder_pdc/split_cv.py`** (~140 righe):
+
+- `lista_stazioni_cv_ammesse(session, azienda_id)` — query async
+  su `Depot.stazione_principale_codice` per `tipi_personale_ammessi
+  == 'PdC'` e `is_attivo`, unione con `STAZIONI_CV_DEROGA`.
+- `split_e_build_giornata(...)` — entrypoint puro che ricostruisce
+  ogni ramo richiamando `_build_giornata_pdc()` su sotto-liste dei
+  blocchi giro originali. Strategia ricorsiva con cap 5 livelli.
+- `_eccede_limiti(draft)` — predicato di trigger split (prestazione
+  > 510/420, condotta > 330). Refezione mancante NON è motivo di
+  split.
+- `_trova_punto_split(...)` — greedy "primo punto valido": itera
+  blocchi giro 0..N-2, considera `stazione_a_codice` come candidato,
+  ritorna il primo indice in cui il ramo A risulta entro limiti.
+
+**Limitazione MVP dichiarata**: ogni ramo paga il costo accessori
+standard (40' ACCa + 40' ACCp). Pattern CV no-overhead (gap < 65' →
+CVa/CVp che sostituiscono ACCa/ACCp risparmiando 80') NON applicato.
+Refinement futuro se l'utente lo chiede.
+
+**Nuovo `backend/tests/test_split_cv.py`** (~280 righe, 17 test):
+
+- 4 test su `_eccede_limiti` (standard / notturno / condotta /
+  entro-limiti) con `_DraftStub` minimale.
+- 6 test su `split_e_build_giornata` (giornata corta no-split,
+  split in 2 rami, costruzione accessori per ramo, no stazione CV
+  → violazione resta, 1 solo blocco non-splittabile, blocchi vuoti
+  → lista vuota, ricorsivo 3 rami).
+- 3 test su `_trova_punto_split` (primo valido greedy, no stazione
+  CV, meno di 2 blocchi).
+- 2 test su costanti.
+- 1 test integration DB su `lista_stazioni_cv_ammesse` (seed Depot
+  + stazione minimale, verifica unione con deroghe). Salta se
+  `SKIP_DB_TESTS=1`.
+
+Codici test allineati ai vincoli DB scoperti: `azienda.codice ~
+'^[a-z0-9_]+$'`, `stazione.codice ~ '^[A-Z]+$' OR '^S[0-9]+$'`,
+`stazione.codice` max 20 char.
+
+### Verifiche
+
+- `uv run mypy --strict src/colazione/domain/builder_pdc/split_cv.py`:
+  no issues.
+- `uv run mypy --strict src`: **51 source files clean** (era 50,
+  +1 split_cv).
+- `uv run pytest tests/test_split_cv.py -v`: **17 passed**.
+- `uv run pytest --tb=no`: **414 passed, 1 skipped** (era 397+1,
+  +17 nuovi test, no regressioni).
+
+### Stato
+
+**MR 1/4 chiuso.** Funzione pura testabile a unit-level. Il modulo
+non è ancora invocato da `_build_giornata_pdc()` — quello succede in
+MR 2.
+
+### Prossimo step
+
+MR 2/4: integrazione builder. `_build_giornata_pdc()` cambia firma a
+`-> list[_GiornataPdcDraft]` (1 elemento se no-split, N se split).
+`_genera_un_turno_pdc()` aggiorna il loop sulle giornate per
+produrre N TurnoPdc distinti per giornata-giro splittata. Codice
+TurnoPdc dei rami: `T-{...}-R{n}`. Test integration su builder con
+fixture giro lungo.
+
+---
+
 ## 2026-04-30 (55) — Step A: UI radio modalità periodo su Genera Giri
 
 ### Contesto
