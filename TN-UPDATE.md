@@ -10,6 +10,81 @@
 
 ---
 
+## 2026-04-30 (58) — Sprint 7.4 MR 3/4: API + UI badge "Ramo X di N"
+
+### Contesto
+
+MR 3/4 dello Sprint 7.4. Espone i campi split CV introdotti in MR 2
+attraverso lo strato API (Pydantic schemas) e la UI frontend (badge,
+labels).
+
+### Modifiche
+
+**Backend**:
+
+- `backend/src/colazione/domain/builder_pdc/builder.py` —
+  `BuilderTurnoPdcResult` aggiunge 4 campi:
+  `is_ramo_split: bool` (default False),
+  `split_origine_giornata: int | None`, `split_ramo: int | None`,
+  `split_totale_rami: int | None`. `_persisti_un_turno_pdc()` li
+  popola da `extra_metadata`.
+- `backend/src/colazione/api/turni_pdc.py` —
+  `TurnoPdcGenerazioneResponse` (response del POST
+  `genera-turno-pdc`) e `TurnoPdcListItem` (response del GET
+  `turni-pdc`) hanno gli stessi 4 campi. `list_turni_pdc_giro` legge
+  da `generation_metadata_json` per popolarli. Endpoint genera passa
+  i campi 1:1 dal builder result.
+
+**Frontend**:
+
+- `frontend/src/lib/api/turniPdc.ts` — nuova interface
+  `SplitCvFields` condivisa fra `TurnoPdcGenerazioneResponse` e
+  `TurnoPdcListItem` (DRY).
+- `frontend/src/routes/pianificatore-giro/TurniPdcGiroRoute.tsx` —
+  badge `<Split>R{n}/{N}</Split>` accanto al codice nei turni split,
+  tooltip con messaggio completo "Ramo X di N della giornata Y
+  (split CV intermedio)". Header description aggiornato con
+  conteggio rami (es. *"7 turni PdC associati ... (4 rami da split
+  CV intermedio)"*).
+- `frontend/src/routes/pianificatore-giro/GeneraTurnoPdcDialog.tsx`
+  — `ResultsCard` info-banner blu menziona quanti dei turni
+  generati sono rami split. `ResultCard` mostra label "Ramo X di Y
+  (giornata Z split CV)" sotto il codice del turno.
+
+### Verifiche
+
+- `uv run mypy --strict src`: **51 source files clean** (invariato).
+- `uv run pytest --tb=no`: **414 passed, 1 skipped** (invariato).
+- `pnpm typecheck`: clean.
+- `pnpm test --run`: **31 passed, 8 file** (invariato — i test
+  esistenti operano sulla home/lista programmi/dettaglio programma,
+  non sui turni PdC).
+- Verifica visuale runtime: differita a MR 4. Richiede un giro
+  lungo che triggeri lo split per vedere effettivamente i badge
+  "R1/3, R2/3, R3/3" e l'info-banner blu sui rami.
+
+### Stato
+
+**MR 3/4 chiuso.** API contract esteso; UI rifinita con badge e
+labels. Niente migrazioni schema DB richieste — i campi split sono
+letti da `generation_metadata_json` (JSONB).
+
+### Prossimo step
+
+MR 4/4 (ultimo): smoke con dati reali.
+- `backend/scripts/smoke_74_split_cv.py` analogo a
+  `smoke_75_bug5_chiuso.py`.
+- Costruisce un giro test con giornate lunghe (>17h con stazione CV
+  intermedia ammessa).
+- Lancia `genera_turno_pdc()`: verifica numericamente che produca
+  N TurnoPdc post-split, ognuno entro i limiti normativi
+  (prestazione ≤ 510/420 min, condotta ≤ 330 min).
+- Confronto **prima/dopo** Sprint 7.4: violazioni residue → 0 (o
+  documentate se la tratta non ha stazione CV ammessa).
+- TN-UPDATE entry conclusiva di chiusura sprint.
+
+---
+
 ## 2026-04-30 (57) — Sprint 7.4 MR 2/4: builder integration + cardinalità split
 
 ### Contesto

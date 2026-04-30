@@ -1,5 +1,5 @@
 import { Link, useParams } from "react-router-dom";
-import { AlertCircle, ArrowLeft, AlertTriangle, Bed } from "lucide-react";
+import { AlertCircle, ArrowLeft, AlertTriangle, Bed, Split } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -37,6 +37,7 @@ export function TurniPdcGiroRoute() {
 
   const giro = giroQuery.data;
   const turni = turniQuery.data ?? [];
+  const nRamiSplit = turni.filter((t) => t.is_ramo_split).length;
 
   return (
     <div className="flex flex-col gap-5">
@@ -53,7 +54,15 @@ export function TurniPdcGiroRoute() {
         </h1>
         <p className="text-sm text-muted-foreground">
           {turni.length} turn{turni.length === 1 ? "o" : "i"} PdC associat
-          {turni.length === 1 ? "o" : "i"} a questo giro materiale.
+          {turni.length === 1 ? "o" : "i"} a questo giro materiale
+          {nRamiSplit > 0 && (
+            <>
+              {" "}
+              ({nRamiSplit} ram{nRamiSplit === 1 ? "o" : "i"} da split CV
+              intermedio).
+            </>
+          )}
+          {nRamiSplit === 0 && "."}
         </p>
       </header>
 
@@ -89,12 +98,27 @@ function TurniTable({ turni }: { turni: TurnoPdcListItem[] }) {
           {turni.map((t) => (
             <tr key={t.id} className="hover:bg-secondary/20">
               <td className="px-3 py-2 font-mono">
-                <Link
-                  to={`/pianificatore-giro/turni-pdc/${t.id}`}
-                  className="text-primary hover:underline"
-                >
-                  {t.codice}
-                </Link>
+                <div className="flex items-center gap-2">
+                  <Link
+                    to={`/pianificatore-giro/turni-pdc/${t.id}`}
+                    className="text-primary hover:underline"
+                  >
+                    {t.codice}
+                  </Link>
+                  {t.is_ramo_split &&
+                    t.split_ramo !== null &&
+                    t.split_totale_rami !== null &&
+                    t.split_origine_giornata !== null && (
+                      <Badge
+                        variant="secondary"
+                        className="gap-1 font-sans text-[10px]"
+                        title={`Ramo ${t.split_ramo} di ${t.split_totale_rami} della giornata ${t.split_origine_giornata} (split CV intermedio)`}
+                      >
+                        <Split className="h-3 w-3" aria-hidden />
+                        R{t.split_ramo}/{t.split_totale_rami}
+                      </Badge>
+                    )}
+                </div>
               </td>
               <td className="px-3 py-2">{t.impianto}</td>
               <td className="px-3 py-2">{t.profilo}</td>

@@ -1,6 +1,22 @@
 import { apiJson } from "@/lib/api/client";
 
-export interface TurnoPdcGenerazioneResponse {
+/**
+ * Sprint 7.4 MR 3: campi split CV intermedio condivisi fra
+ * `TurnoPdcGenerazioneResponse` e `TurnoPdcListItem`.
+ *
+ * `is_ramo_split` è `true` quando il TurnoPdc è il ramo di una
+ * giornata-giro splittata in più rami; quando true, gli altri 3
+ * campi sono valorizzati. `false` per il TurnoPdc principale (o per
+ * giri/giornate che non richiedono split CV).
+ */
+export interface SplitCvFields {
+  is_ramo_split: boolean;
+  split_origine_giornata: number | null;
+  split_ramo: number | null;
+  split_totale_rami: number | null;
+}
+
+export interface TurnoPdcGenerazioneResponse extends SplitCvFields {
   turno_pdc_id: number;
   codice: string;
   n_giornate: number;
@@ -10,7 +26,7 @@ export interface TurnoPdcGenerazioneResponse {
   warnings: string[];
 }
 
-export interface TurnoPdcListItem {
+export interface TurnoPdcListItem extends SplitCvFields {
   id: number;
   codice: string;
   impianto: string;

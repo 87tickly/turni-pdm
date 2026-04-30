@@ -185,13 +185,24 @@ function ResultsCard({ results }: { results: TurnoPdcGenerazioneResponse[] }) {
   // Sprint 7.5 MR 5: render lista di turni generati. Per A1 strict
   // (default) la lista ha 1 elemento; con varianti calendario multiple
   // cresce — ogni turno ha codice `T-{numero_turno}-V{NN}`.
+  // Sprint 7.4 MR 3: la lista può contenere anche turni "ramo split"
+  // (giornate di giro lunghe spezzate in più turni PdC con CV
+  // intermedio).
   if (results.length === 0) return null;
+  const nRamiSplit = results.filter((r) => r.is_ramo_split).length;
   return (
     <div className="flex flex-col gap-3 text-sm">
       {results.length > 1 && (
         <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
-          Generati {results.length} turni PdC, uno per ogni variante calendario
-          delle giornate del giro.
+          Generati {results.length} turni PdC
+          {nRamiSplit > 0 && (
+            <>
+              , di cui {nRamiSplit} ram{nRamiSplit === 1 ? "o" : "i"} da
+              split CV intermedio (giornate eccedenti i limiti
+              prestazione/condotta divise in più turni)
+            </>
+          )}
+          .
         </p>
       )}
       {results.map((r) => (
@@ -203,12 +214,22 @@ function ResultsCard({ results }: { results: TurnoPdcGenerazioneResponse[] }) {
 
 function ResultCard({ result }: { result: TurnoPdcGenerazioneResponse }) {
   const violazioni = result.violazioni;
+  const ramoLabel =
+    result.is_ramo_split &&
+    result.split_ramo !== null &&
+    result.split_totale_rami !== null &&
+    result.split_origine_giornata !== null
+      ? `Ramo ${result.split_ramo} di ${result.split_totale_rami} (giornata ${result.split_origine_giornata} split CV)`
+      : null;
   return (
     <div className="flex flex-col gap-3 text-sm">
       <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-900">
         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
         <div className="flex flex-col gap-0.5">
           <span className="font-medium">{result.codice} creato</span>
+          {ramoLabel !== null && (
+            <span className="text-xs text-emerald-700">{ramoLabel}</span>
+          )}
           <span className="text-xs text-emerald-800">
             {result.n_giornate} giornate · {formatHM(result.prestazione_totale_min)} prestazione
             totale · {formatHM(result.condotta_totale_min)} condotta totale

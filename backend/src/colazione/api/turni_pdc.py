@@ -59,6 +59,15 @@ class TurnoPdcGenerazioneResponse(BaseModel):
     condotta_totale_min: int
     violazioni: list[str]
     warnings: list[str]
+    # Sprint 7.4 MR 3: campi split CV intermedio. `is_ramo_split=True`
+    # quando il TurnoPdc è il ramo di una giornata-giro splittata in
+    # più rami; `split_origine_giornata` è il numero della giornata-
+    # giro originale, `split_ramo` è 1-based, `split_totale_rami`
+    # quanti rami in totale per quella giornata.
+    is_ramo_split: bool = False
+    split_origine_giornata: int | None = None
+    split_ramo: int | None = None
+    split_totale_rami: int | None = None
 
 
 class TurnoPdcListItem(BaseModel):
@@ -77,6 +86,12 @@ class TurnoPdcListItem(BaseModel):
     condotta_totale_min: int
     n_violazioni: int
     n_dormite_fr: int
+    # Sprint 7.4 MR 3: stessi campi split di TurnoPdcGenerazioneResponse,
+    # popolati a partire da `generation_metadata_json` per la lista turni.
+    is_ramo_split: bool = False
+    split_origine_giornata: int | None = None
+    split_ramo: int | None = None
+    split_totale_rami: int | None = None
 
 
 class TurnoPdcBloccoRead(BaseModel):
@@ -184,6 +199,10 @@ async def genera_turno_pdc_endpoint(
             condotta_totale_min=r.condotta_totale_min,
             violazioni=r.violazioni,
             warnings=r.warnings,
+            is_ramo_split=r.is_ramo_split,
+            split_origine_giornata=r.split_origine_giornata,
+            split_ramo=r.split_ramo,
+            split_totale_rami=r.split_totale_rami,
         )
         for r in results
     ]
@@ -251,6 +270,10 @@ async def list_turni_pdc_giro(
                 condotta_totale_min=sum(g.condotta_min for g in gg),
                 n_violazioni=len(meta.get("violazioni", []) or []),
                 n_dormite_fr=len(meta.get("fr_giornate", []) or []),
+                is_ramo_split=bool(meta.get("is_ramo_split", False)),
+                split_origine_giornata=meta.get("split_origine_giornata"),
+                split_ramo=meta.get("split_ramo"),
+                split_totale_rami=meta.get("split_totale_rami"),
             )
         )
     return out

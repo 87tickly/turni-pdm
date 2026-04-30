@@ -81,6 +81,15 @@ class BuilderTurnoPdcResult:
     condotta_totale_min: int
     violazioni: list[str]
     warnings: list[str] = field(default_factory=list)
+    # Sprint 7.4 MR 3: campi split CV intermedio.
+    # `is_ramo_split=True` se il TurnoPdc è il ramo di una giornata-giro
+    # splittata; `False` per il TurnoPdc principale (o per giri/giornate
+    # che non richiedono split). Quando True, gli altri 3 campi sono
+    # sempre valorizzati.
+    is_ramo_split: bool = False
+    split_origine_giornata: int | None = None
+    split_ramo: int | None = None
+    split_totale_rami: int | None = None
 
 
 # --- Helper temporali -----------------------------------------------------
@@ -860,6 +869,10 @@ async def _persisti_un_turno_pdc(
         prestazione_totale_min=prestazione_totale,
         condotta_totale_min=condotta_totale,
         violazioni=violazioni,
+        is_ramo_split=bool(extra_metadata.get("is_ramo_split", False)),
+        split_origine_giornata=extra_metadata.get("split_origine_giornata"),
+        split_ramo=extra_metadata.get("split_ramo"),
+        split_totale_rami=extra_metadata.get("split_totale_rami"),
     )
 
 
