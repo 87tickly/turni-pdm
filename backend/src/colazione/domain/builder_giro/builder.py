@@ -403,8 +403,8 @@ def _check_strict_mode(programma: ProgrammaMateriale, giri: list[GiroAssegnato])
 async def genera_giri(
     *,
     programma_id: int,
-    data_inizio: date,
-    n_giornate: int,
+    data_inizio: date | None = None,
+    n_giornate: int | None = None,
     localita_codice: str,
     session: AsyncSession,
     azienda_id: int,
@@ -415,17 +415,23 @@ async def genera_giri(
     Pipeline:
     1. Carica programma + regole + località.
     2. Verifica programma ``stato='attivo'``.
-    3. Verifica niente giri esistenti (o ``force=True`` → wipe).
-    4. Carica corse del periodo, filtra per data, costruisci catene,
+    3. Risolve ``data_inizio`` / ``n_giornate`` (default Sprint 7.5
+       MR 4 = periodo intero del programma, decisione utente C3).
+    4. Verifica niente giri esistenti (o ``force=True`` → wipe).
+    5. Carica corse del periodo, filtra per data, costruisci catene,
        posiziona su località, multi-giornata, assegnazione regole +
        eventi.
-    5. Strict mode check.
-    6. Genera ``numero_turno = "G-{LOC_BREVE}-{NNN}"``, persisti.
+    6. Strict mode check.
+    7. Genera ``numero_turno = "G-{LOC_BREVE}-{NNN}"``, persisti.
 
     Args:
         programma_id: id ``ProgrammaMateriale``.
-        data_inizio: prima data del range.
-        n_giornate: numero giornate (>= 1).
+        data_inizio: prima data del range. ``None`` = ``programma.valido_da``
+            (Sprint 7.5 MR 4 default).
+        n_giornate: numero giornate (>= 1). ``None`` = giornate fino a
+            ``programma.valido_a`` inclusa (Sprint 7.5 MR 4 default,
+            attiva il clustering A1 su tutto il calendario del
+            programma).
         localita_codice: codice località manutenzione (es.
             ``IMPMAN_MILANO_FIORENZA``).
         session: ``AsyncSession``.
@@ -441,7 +447,7 @@ async def genera_giri(
         LocalitaNonTrovataError, GiriEsistentiError, StrictModeViolation,
         RegolaAmbiguaError (da ``risolvi_corsa``).
     """
-    if n_giornate < 1:
+    if n_giornate is not None and n_giornate < 1:
         raise ValueError(f"n_giornate deve essere >= 1, ricevuto {n_giornate}")
 
     # 1. Carica programma + regole + località
@@ -449,11 +455,25 @@ async def genera_giri(
     if programma.stato != "attivo":
         raise ProgrammaNonAttivoError(programma_id, programma.stato)
 
-    # Sprint 7.3 fix: vincolo HARD su valido_da/valido_a + stagione del
-    # programma. Prima il builder ignorava entrambi e generava giri
-    # anche per date fuori dal periodo o stagione dichiarata. Adesso:
-    # 422 prima di toccare la pipeline.
-    _valida_periodo_programma(programma, data_inizio, n_giornate)
+    # Sprint 7.5 MR 4 (decisione utente C3): se i parametri non sono
+    # specificati, default al periodo intero del programma. Il
+    # clustering A1 (MR 1) emerge naturalmente solo con osservazione
+    # sufficientemente ampia — periodo intero è la scelta canonica.
+    data_inizio_eff: date = data_inizio if data_inizio is not None else programma.valido_da
+    if n_giornate is None:
+        n_giornate_eff = (programma.valido_a - data_inizio_eff).days + 1
+        if n_giornate_eff < 1:
+            raise PeriodoFuoriProgrammaError(
+                f"data_inizio {data_inizio_eff.isoformat()} è oltre "
+                f"programma.valido_a {programma.valido_a.isoformat()}."
+            )
+    else:
+        n_giornate_eff = n_giornate
+
+    # Sprint 7.3 fix: vincolo HARD su valido_da/valido_a del programma.
+    # Quando i parametri vengono dal default (Sprint 7.5 MR 4), la
+    # validazione passa banalmente (per costruzione coincidono).
+    _valida_periodo_programma(programma, data_inizio_eff, n_giornate_eff)
 
     regole = await _carica_regole(session, programma_id)
     localita = await _carica_localita(session, localita_codice, azienda_id)
@@ -473,7 +493,7 @@ async def genera_giri(
         await _wipe_giri_programma(session, programma_id)
 
     # 3. Pipeline: carica corse + costruisci catene per data
-    date_range = [data_inizio + timedelta(days=i) for i in range(n_giornate)]
+    date_range = [data_inizio_eff + timedelta(days=i) for i in range(n_giornate_eff)]
     corse = await _carica_corse(session, azienda_id, date_range[0], date_range[-1])
 
     # Sprint 5.6: filtro pool catene = corse che matchano almeno una

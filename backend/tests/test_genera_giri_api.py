@@ -395,3 +395,46 @@ async def test_get_giro_404_se_inesistente(client: TestClient) -> None:
 async def test_get_giri_programma_401_senza_token(client: TestClient) -> None:
     res = client.get("/api/programmi/1/giri")
     assert res.status_code == 401
+
+
+# =====================================================================
+# Sprint 7.5 MR 4 — parametri opzionali, default periodo intero
+# =====================================================================
+
+
+async def test_genera_senza_data_inizio_e_n_giornate_usa_default(
+    client: TestClient,
+) -> None:
+    """Sprint 7.5 MR 4 (decisione utente C3): omettendo `data_inizio` e
+    `n_giornate`, il backend usa il periodo intero del programma.
+    """
+    prog_id = await _setup_db_completo()
+    token = _login(client, "admin", "admin12345")
+    res = client.post(
+        f"/api/programmi/{prog_id}/genera-giri",
+        params={"localita_codice": LOC_CODICE},  # solo localita_codice
+        headers=_auth(token),
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    # Setup ha corse il 2026-04-27, dentro [valido_da, valido_a] del programma
+    assert body["n_giri_creati"] >= 1
+
+
+async def test_genera_solo_data_inizio_estende_a_valido_a(
+    client: TestClient,
+) -> None:
+    """Specificare solo `data_inizio` estende fino a `programma.valido_a`."""
+    prog_id = await _setup_db_completo()
+    token = _login(client, "admin", "admin12345")
+    res = client.post(
+        f"/api/programmi/{prog_id}/genera-giri",
+        params={
+            "data_inizio": "2026-04-27",
+            "localita_codice": LOC_CODICE,
+        },
+        headers=_auth(token),
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["n_giri_creati"] >= 1

@@ -10,6 +10,103 @@
 
 ---
 
+## 2026-04-30 (49) — Bug 5 refactor MR 4/7: API + orchestrator parametri opzionali
+
+### Contesto
+
+MR 4/7 del refactor bug 5. Implementa la decisione utente C3:
+``data_inizio`` e ``n_giornate`` diventano opzionali nell'API e
+nell'orchestrator. Default = periodo intero del programma. È il MR
+che attiva concretamente il clustering A1 (MR 1) sul calendario reale:
+con osservazione ampia, i pattern ricorrenti emergono come cluster
+distinti invece di Giri data-bound singoli.
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_giro/builder.py`**:
+
+- `genera_giri()` firma: `data_inizio: date | None = None`,
+  `n_giornate: int | None = None` (entrambi default `None`).
+- Nuova logica di risoluzione default subito dopo aver caricato il
+  programma:
+  - `data_inizio_eff = data_inizio or programma.valido_da`
+  - `n_giornate_eff = n_giornate or (programma.valido_a -
+    data_inizio_eff).days + 1`
+  - Se `n_giornate_eff < 1` (es. `data_inizio` oltre `valido_a`) →
+    `PeriodoFuoriProgrammaError` con messaggio chiaro.
+- Validazione `_valida_periodo_programma` ora chiamata sui valori
+  effettivi (passa banalmente quando si usa il default).
+- Costruzione `date_range` usa `data_inizio_eff`/`n_giornate_eff`.
+- Docstring aggiornato.
+
+**`backend/src/colazione/api/giri.py`**:
+
+- `genera_giri_endpoint`: parametri `data_inizio` e `n_giornate`
+  diventano `Query(None, ...)` con descrizione chiara del default.
+- `n_giornate` upper bound elevato a 400 (era 180) per accomodare
+  programmi annuali.
+- Docstring endpoint aggiornato.
+
+**`backend/tests/test_builder_giri.py`**:
+
+- 3 nuovi test in sezione "Sprint 7.5 MR 4":
+  - `test_default_data_inizio_e_n_giornate_periodo_intero`: chiamata
+    senza parametri funziona, copre tutto il programma.
+  - `test_default_solo_n_giornate_omesso`: 2 corse in date diverse
+    (apr e dic) → 2 giri post-cluster.
+  - `test_data_inizio_oltre_valido_a_raises`:
+    `PeriodoFuoriProgrammaError` con `data_inizio` post-`valido_a`.
+
+**`backend/tests/test_genera_giri_api.py`**:
+
+- 2 nuovi test API:
+  - `test_genera_senza_data_inizio_e_n_giornate_usa_default`:
+    `POST` con solo `localita_codice` → 200 OK.
+  - `test_genera_solo_data_inizio_estende_a_valido_a`:
+    `POST` con solo `data_inizio` + `localita_codice` → 200 OK.
+
+### Verifiche
+
+- `pytest tests/test_builder_giri.py tests/test_genera_giri_api.py`:
+  **28/28** verde + 1 skipped (skip pre-esistente).
+- `pytest`: **397 passed, 1 skipped, 0 fail** (vs 392 pre-MR4, +5
+  nuovi test).
+- `mypy src/colazione/domain/builder_giro/builder.py`: clean.
+- `mypy src/colazione/api/giri.py`: 3 errori PRE-ESISTENTI su
+  `dict(Sequence[Row[...]])` in `get_giro_dettaglio` (line 396, 404,
+  456). Verificati via `git stash` come pre-MR4 (line 375, 383, 435
+  pre-diff). Non in scope MR 4 — candidati a pulizia separata.
+
+### Stato
+
+**MR 4/7 chiuso.** Il backend è ora pronto per generare con il default
+"periodo intero", che è la modalità in cui il clustering A1 produce
+risultati concreti. Resta da:
+- testare lo smoke con un programma reale (programma 1341),
+- aggiornare il builder PdC per gestire N varianti per giornata-tipo
+  (MR 5),
+- esporre le varianti nella UI (MR 6),
+- confermare numericamente che il bug 5 è risolto via DB query (MR 7).
+
+Restano 3 MR:
+- MR 5 — Builder PdC.
+- MR 6 — Frontend tab/select varianti.
+- MR 7 — Migrazione dati + smoke programma 1341.
+
+### Prossimo step
+
+MR 5: `builder_pdc/builder.py`. Decisione utente D1 = 1 turno PdC per
+ogni variante calendario del giro materiale. Per un giro con G2 che
+ha varianti LV/S/D, generare 3 turni PdC distinti
+`T-G-FIO-001-LV`, `T-G-FIO-001-S`, `T-G-FIO-001-D` invece di 1 con
+"prima variante". Schema turno_pdc invariato.
+
+Pulizia residua (post-MR 7): 3 errori mypy in
+`api/giri.py::get_giro_dettaglio` su `dict(...)` da SQLAlchemy Row
+sequences.
+
+---
+
 ## 2026-04-30 (48) — Bug 5 refactor MR 3/7: persister usa dates_apply reali
 
 ### Contesto

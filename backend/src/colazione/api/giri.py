@@ -100,8 +100,23 @@ def _to_response(result: BuilderResult) -> BuilderResultResponse:
 )
 async def genera_giri_endpoint(
     programma_id: int,
-    data_inizio: date = Query(..., description="Prima data del range (YYYY-MM-DD)."),
-    n_giornate: int = Query(7, ge=1, le=180, description="Numero giornate (1-180)."),
+    data_inizio: date | None = Query(
+        None,
+        description=(
+            "Prima data del range (YYYY-MM-DD). Default: programma.valido_da. "
+            "Sprint 7.5 MR 4: parametro opzionale (decisione utente C3)."
+        ),
+    ),
+    n_giornate: int | None = Query(
+        None,
+        ge=1,
+        le=400,
+        description=(
+            "Numero giornate (1-400). Default: dalla data_inizio fino a "
+            "programma.valido_a inclusa (periodo intero). Specificare "
+            "esplicitamente solo per limitare il range a una sotto-finestra."
+        ),
+    ),
     localita_codice: str = Query(
         ..., description="Codice località manutenzione (es. IMPMAN_MILANO_FIORENZA)."
     ),
@@ -115,6 +130,11 @@ async def genera_giri_endpoint(
     """Lancia il builder end-to-end (pipeline 4.4.1→4.4.5a) per il
     programma + finestra + località indicati.
 
+    Sprint 7.5 MR 4 (decisione utente C3): ``data_inizio`` e
+    ``n_giornate`` sono opzionali. Se omessi, il default è il periodo
+    intero del programma — è la scelta che attiva il clustering A1
+    sul calendario completo (vedi `multi_giornata.py` Sprint 7.5 MR 1).
+
     Errori HTTP:
 
     - **404**: programma o località non trovati per l'azienda corrente.
@@ -122,6 +142,7 @@ async def genera_giri_endpoint(
       o regole ambigue, o strict mode violato.
     - **409**: il programma ha già giri persistiti — passa
       ``?force=true`` per cancellare e rigenerare.
+    - **422**: ``data_inizio`` fuori dal periodo del programma.
 
     Risposta 200: ``BuilderResultResponse`` con ``giri_ids`` (id dei
     `GiroMateriale` creati) + statistiche per il pianificatore.

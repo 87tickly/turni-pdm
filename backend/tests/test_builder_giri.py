@@ -489,3 +489,79 @@ async def test_corse_fuori_finestra_zero_giri(azienda_id: int) -> None:
         )
     assert result.n_giri_creati == 0
     assert result.giri_ids == []
+
+
+# =====================================================================
+# Sprint 7.5 MR 4 — parametri opzionali, default periodo intero
+# =====================================================================
+
+
+async def test_default_data_inizio_e_n_giornate_periodo_intero(azienda_id: int) -> None:
+    """Senza `data_inizio` e `n_giornate`, il builder usa il periodo
+    intero del programma (decisione utente C3).
+
+    Setup: programma valido 2026-01-01 → 2026-12-31, una sola corsa
+    valida il 2026-04-27. Senza il default a periodo intero, una
+    chiamata senza parametri fallirebbe; con il default funziona.
+    """
+    prog_id = await _setup_completo(
+        azienda_id,
+        corse_def=[
+            ("TEST_DEF", "S99001", "S99002", (8, 0), (9, 0), ["2026-04-27"]),
+        ],
+    )
+    async with session_scope() as session:
+        # Nessun data_inizio, nessun n_giornate → default = periodo programma
+        result = await genera_giri(
+            programma_id=prog_id,
+            localita_codice=LOC_CODICE,
+            session=session,
+            azienda_id=azienda_id,
+        )
+    # La corsa del 2026-04-27 cade nel periodo programma (1 gen → 31 dic)
+    # → 1 giro creato. Conferma che il default ha esteso la finestra.
+    assert result.n_giri_creati == 1
+
+
+async def test_default_solo_n_giornate_omesso(azienda_id: int) -> None:
+    """Specificare solo `data_inizio` estende fino a `programma.valido_a`."""
+    prog_id = await _setup_completo(
+        azienda_id,
+        corse_def=[
+            # 1 corsa il 27/4 + 1 corsa il 15/12 (dopo data_inizio del test)
+            ("TEST_OK1", "S99001", "S99002", (8, 0), (9, 0), ["2026-04-27"]),
+            ("TEST_OK2", "S99003", "S99004", (10, 0), (11, 0), ["2026-12-15"]),
+        ],
+    )
+    async with session_scope() as session:
+        result = await genera_giri(
+            programma_id=prog_id,
+            data_inizio=date(2026, 4, 27),
+            # n_giornate omesso → estende fino a 2026-12-31
+            localita_codice=LOC_CODICE,
+            session=session,
+            azienda_id=azienda_id,
+        )
+    # Entrambe le corse cadono in [2026-04-27, 2026-12-31] → 2 giri
+    # (uno per pattern, A1-strict).
+    assert result.n_giri_creati == 2
+
+
+async def test_data_inizio_oltre_valido_a_raises(azienda_id: int) -> None:
+    """`data_inizio` esplicita oltre `programma.valido_a` con
+    `n_giornate=None` → `PeriodoFuoriProgrammaError` (n_giornate
+    calcolato sarebbe ≤ 0).
+    """
+    from colazione.domain.builder_giro.builder import PeriodoFuoriProgrammaError
+
+    prog_id = await _setup_completo(azienda_id)
+    async with session_scope() as session:
+        with pytest.raises(PeriodoFuoriProgrammaError):
+            await genera_giri(
+                programma_id=prog_id,
+                data_inizio=date(2027, 6, 1),  # oltre valido_a (2026-12-31)
+                # n_giornate omesso
+                localita_codice=LOC_CODICE,
+                session=session,
+                azienda_id=azienda_id,
+            )
