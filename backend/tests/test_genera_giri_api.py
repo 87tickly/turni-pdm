@@ -47,7 +47,15 @@ def client() -> TestClient:
 
 
 async def _wipe() -> None:
+    """Wipe FK-safe.
+
+    `turno_pdc_blocco.corsa_materiale_vuoto_id` e
+    `turno_pdc_blocco.corsa_commerciale_id` sono FK RESTRICT: senza
+    cancellare prima i turni PdC, il `DELETE FROM corsa_materiale_vuoto`
+    fallisce. CASCADE su `turno_pdc` libera tutta la catena PdC.
+    """
     async with session_scope() as session:
+        await session.execute(text("DELETE FROM turno_pdc"))
         await session.execute(text("DELETE FROM giro_materiale"))
         await session.execute(text("DELETE FROM corsa_materiale_vuoto"))
         await session.execute(

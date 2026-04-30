@@ -47,6 +47,7 @@ from colazione.domain.builder_giro import (
 from colazione.models.anagrafica import LocalitaManutenzione, Stazione
 from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
 from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
+from colazione.models.programmi import ProgrammaMateriale
 
 pytestmark = pytest.mark.skipif(
     os.getenv("SKIP_DB_TESTS") == "1",
@@ -81,10 +82,18 @@ async def azienda_id() -> int:
 async def _wipe_test_data() -> None:
     """Pulisce i dati di test (prefisso TEST_) + tutti i giri.
 
-    Ordine FK-safe: blocchi → varianti → giornate → vuoti → giri →
-    corse test → località test → stazioni test.
+    Ordine FK-safe: turni PdC → blocchi → varianti → giornate → vuoti →
+    giri → corse test → località test → stazioni test.
+
+    `turno_pdc_blocco.corsa_materiale_vuoto_id` e
+    `turno_pdc_blocco.corsa_commerciale_id` sono FK RESTRICT: senza
+    cancellare prima i turni PdC, il `DELETE FROM corsa_materiale_vuoto`
+    fallisce con `ForeignKeyViolation`. CASCADE su `turno_pdc` →
+    `turno_pdc_giornata` → `turno_pdc_blocco` libera tutto.
     """
     async with session_scope() as session:
+        # FK RESTRICT su turno_pdc_blocco → corse: pulire i turni PRIMA.
+        await session.execute(text("DELETE FROM turno_pdc"))
         # Tutti i giri (sono tutti di test in dev: nessuno in produzione)
         await session.execute(text("DELETE FROM giro_blocco"))
         await session.execute(text("DELETE FROM giro_variante"))
@@ -137,6 +146,33 @@ async def cleanup_engine() -> None:
 async def _crea_stazione(codice: str, az_id: int) -> None:
     async with session_scope() as session:
         session.add(Stazione(codice=codice, nome=codice, azienda_id=az_id))
+
+
+async def _crea_programma_test(az_id: int, nome: str = "TEST_PROG_PERSISTER") -> int:
+    """Crea un `ProgrammaMateriale` di test, ritorna id.
+
+    Migration 0010 (Sprint 7.3): `giro_materiale.programma_id` è NOT
+    NULL + FK; ogni `persisti_giri()` richiede un programma esistente.
+    Il fixture `clean_state` cancella i programmi `LIKE 'TEST_%'` a
+    fine test.
+    """
+    async with session_scope() as session:
+        p = ProgrammaMateriale(
+            azienda_id=az_id,
+            nome=nome,
+            valido_da=date(2026, 1, 1),
+            valido_a=date(2026, 12, 31),
+            stato="bozza",
+        )
+        session.add(p)
+        await session.flush()
+        return int(p.id)
+
+
+@pytest.fixture
+async def programma_test_id(azienda_id: int) -> int:
+    """Fixture: crea programma di test, ritorna id. Wipe lo cancella a fine test."""
+    return await _crea_programma_test(azienda_id)
 
 
 async def _crea_localita(codice: str, stazione: str, az_id: int) -> int:
@@ -270,7 +306,9 @@ async def test_lista_vuota_ritorna_lista_vuota(azienda_id: int) -> None:
         assert ids == []
 
 
-async def test_un_giro_una_corsa_ORM_creati(azienda_id: int) -> None:
+async def test_un_giro_una_corsa_ORM_creati(
+    azienda_id: int, programma_test_id: int
+) -> None:
     """Verifica che GiroMateriale + GiroGiornata + GiroVariante + GiroBlocco siano creati."""
     await _crea_stazione("S99001", azienda_id)
     await _crea_stazione("S99002", azienda_id)
@@ -288,7 +326,7 @@ async def test_un_giro_una_corsa_ORM_creati(azienda_id: int) -> None:
         ids = await persisti_giri(
             [GiroDaPersistere(numero_turno="G-FIO-001", giro=giro)],
             session,
-            programma_id=1,
+            programma_id=programma_test_id,
             azienda_id=azienda_id,
         )
         assert len(ids) == 1
@@ -354,7 +392,9 @@ async def test_un_giro_una_corsa_ORM_creati(azienda_id: int) -> None:
         assert blocchi[0].is_validato_utente is True
 
 
-async def test_localita_non_trovata_raises(azienda_id: int) -> None:
+async def test_localita_non_trovata_raises(
+    azienda_id: int, programma_test_id: int
+) -> None:
     giro = GiroAssegnato(
         localita_codice="INESISTENTE",
         giornate=(),
@@ -366,7 +406,7 @@ async def test_localita_non_trovata_raises(azienda_id: int) -> None:
             await persisti_giri(
                 [GiroDaPersistere(numero_turno="G-X-001", giro=giro)],
                 session,
-                programma_id=1,
+                programma_id=programma_test_id,
                 azienda_id=azienda_id,
             )
         assert exc_info.value.codice == "INESISTENTE"
@@ -378,7 +418,9 @@ async def test_localita_non_trovata_raises(azienda_id: int) -> None:
 # =====================================================================
 
 
-async def test_vuoto_testa_genera_corsa_materiale_vuoto_e_blocco(azienda_id: int) -> None:
+async def test_vuoto_testa_genera_corsa_materiale_vuoto_e_blocco(
+    azienda_id: int, programma_test_id: int
+) -> None:
     await _crea_stazione("S99001", azienda_id)
     await _crea_stazione("S99002", azienda_id)
     await _crea_stazione("S99005", azienda_id)
@@ -405,7 +447,7 @@ async def test_vuoto_testa_genera_corsa_materiale_vuoto_e_blocco(azienda_id: int
         ids = await persisti_giri(
             [GiroDaPersistere(numero_turno="G-FIO-002", giro=giro)],
             session,
-            programma_id=1,
+            programma_id=programma_test_id,
             azienda_id=azienda_id,
         )
         gm_id = ids[0]
@@ -450,7 +492,9 @@ async def test_vuoto_testa_genera_corsa_materiale_vuoto_e_blocco(azienda_id: int
         assert blocchi[1].tipo_blocco == "corsa_commerciale"
 
 
-async def test_vuoto_coda_genera_corsa_materiale_vuoto_e_blocco(azienda_id: int) -> None:
+async def test_vuoto_coda_genera_corsa_materiale_vuoto_e_blocco(
+    azienda_id: int, programma_test_id: int
+) -> None:
     await _crea_stazione("S99001", azienda_id)
     await _crea_stazione("S99002", azienda_id)
     await _crea_localita("TEST_LOC_FIO", "S99001", azienda_id)
@@ -476,7 +520,7 @@ async def test_vuoto_coda_genera_corsa_materiale_vuoto_e_blocco(azienda_id: int)
         ids = await persisti_giri(
             [GiroDaPersistere(numero_turno="G-FIO-003", giro=giro)],
             session,
-            programma_id=1,
+            programma_id=programma_test_id,
             azienda_id=azienda_id,
         )
         gm_id = ids[0]
@@ -506,7 +550,9 @@ async def test_vuoto_coda_genera_corsa_materiale_vuoto_e_blocco(azienda_id: int)
 # =====================================================================
 
 
-async def test_evento_aggancio_3_a_6_inserito_tra_blocchi(azienda_id: int) -> None:
+async def test_evento_aggancio_3_a_6_inserito_tra_blocchi(
+    azienda_id: int, programma_test_id: int
+) -> None:
     """3 → 6 pezzi: blocco 'aggancio' tra le due corse, is_validato_utente=False."""
     await _crea_stazione("S99001", azienda_id)
     await _crea_stazione("S99002", azienda_id)
@@ -535,7 +581,7 @@ async def test_evento_aggancio_3_a_6_inserito_tra_blocchi(azienda_id: int) -> No
         ids = await persisti_giri(
             [GiroDaPersistere(numero_turno="G-FIO-004", giro=giro)],
             session,
-            programma_id=1,
+            programma_id=programma_test_id,
             azienda_id=azienda_id,
         )
         gm_id = ids[0]
@@ -565,7 +611,9 @@ async def test_evento_aggancio_3_a_6_inserito_tra_blocchi(azienda_id: int) -> No
         assert blocchi[2].tipo_blocco == "corsa_commerciale"
 
 
-async def test_sequenza_3_6_3_genera_aggancio_e_sgancio(azienda_id: int) -> None:
+async def test_sequenza_3_6_3_genera_aggancio_e_sgancio(
+    azienda_id: int, programma_test_id: int
+) -> None:
     await _crea_stazione("S99001", azienda_id)
     await _crea_stazione("S99002", azienda_id)
     await _crea_stazione("S99003", azienda_id)
@@ -595,7 +643,7 @@ async def test_sequenza_3_6_3_genera_aggancio_e_sgancio(azienda_id: int) -> None
         ids = await persisti_giri(
             [GiroDaPersistere(numero_turno="G-FIO-005", giro=giro)],
             session,
-            programma_id=1,
+            programma_id=programma_test_id,
             azienda_id=azienda_id,
         )
         gm_id = ids[0]
@@ -631,7 +679,9 @@ async def test_sequenza_3_6_3_genera_aggancio_e_sgancio(azienda_id: int) -> None
 # =====================================================================
 
 
-async def test_due_giornate_due_GiroGiornata_due_GiroVariante(azienda_id: int) -> None:
+async def test_due_giornate_due_GiroGiornata_due_GiroVariante(
+    azienda_id: int, programma_test_id: int
+) -> None:
     await _crea_stazione("S99001", azienda_id)
     await _crea_stazione("S99002", azienda_id)
     await _crea_localita("TEST_LOC_FIO", "S99001", azienda_id)
@@ -705,7 +755,7 @@ async def test_due_giornate_due_GiroGiornata_due_GiroVariante(azienda_id: int) -
         ids = await persisti_giri(
             [GiroDaPersistere(numero_turno="G-FIO-006", giro=giro)],
             session,
-            programma_id=1,
+            programma_id=programma_test_id,
             azienda_id=azienda_id,
         )
         gm_id = ids[0]
@@ -751,7 +801,9 @@ async def test_due_giornate_due_GiroGiornata_due_GiroVariante(azienda_id: int) -
 # =====================================================================
 
 
-async def test_due_giri_due_id_in_ordine(azienda_id: int) -> None:
+async def test_due_giri_due_id_in_ordine(
+    azienda_id: int, programma_test_id: int
+) -> None:
     await _crea_stazione("S99001", azienda_id)
     await _crea_stazione("S99002", azienda_id)
     await _crea_localita("TEST_LOC_FIO", "S99001", azienda_id)
@@ -784,7 +836,7 @@ async def test_due_giri_due_id_in_ordine(azienda_id: int) -> None:
                 GiroDaPersistere(numero_turno="G-FIO-008", giro=giro2),
             ],
             session,
-            programma_id=1,
+            programma_id=programma_test_id,
             azienda_id=azienda_id,
         )
         assert len(ids) == 2
@@ -806,7 +858,9 @@ async def test_due_giri_due_id_in_ordine(azienda_id: int) -> None:
         assert sorted(rows) == ["G-FIO-007", "G-FIO-008"]
 
 
-async def test_giro_senza_blocchi_assegnati_tipo_materiale_misto(azienda_id: int) -> None:
+async def test_giro_senza_blocchi_assegnati_tipo_materiale_misto(
+    azienda_id: int, programma_test_id: int
+) -> None:
     """Edge case: giro tutto in corse_residue → tipo_materiale='MISTO' placeholder."""
     await _crea_stazione("S99001", azienda_id)
     await _crea_localita("TEST_LOC_FIO", "S99001", azienda_id)
@@ -833,7 +887,7 @@ async def test_giro_senza_blocchi_assegnati_tipo_materiale_misto(azienda_id: int
         ids = await persisti_giri(
             [GiroDaPersistere(numero_turno="G-FIO-009", giro=giro)],
             session,
-            programma_id=1,
+            programma_id=programma_test_id,
             azienda_id=azienda_id,
         )
         gm_id = ids[0]

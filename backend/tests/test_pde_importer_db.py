@@ -53,7 +53,14 @@ async def _wipe_corse(session: AsyncSession) -> None:
     Sprint 5.6: ordine esteso per gestire FK aggiunte (whitelist sede,
     accoppiamenti materiali, depot.stazione_principale_codice). Le
     tabelle figlie vanno svuotate prima delle stazioni.
+
+    Sprint 7.5 fix: aggiunto `DELETE FROM turno_pdc` come prima
+    istruzione. `turno_pdc_blocco.{corsa_commerciale_id,
+    corsa_materiale_vuoto_id}` sono FK RESTRICT — senza pulire i
+    turni PdC, il wipe corse fallisce con `ForeignKeyViolation`.
     """
+    # FK RESTRICT su turno_pdc_blocco → corse: pulire i turni PRIMA.
+    await session.execute(text("DELETE FROM turno_pdc"))
     # Wipe entità che dipendono da giri (se eventualmente presenti).
     await session.execute(text("DELETE FROM corsa_materiale_vuoto"))
     await session.execute(text("DELETE FROM giro_blocco"))

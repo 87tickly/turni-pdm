@@ -52,11 +52,15 @@ async def _wipe_test_data() -> None:
     """Pulisce: giri (tutti, dev only) + dati test (TEST_*, S99*).
 
     Ordine FK-safe:
+    - turno_pdc (CASCADE → giornate → blocchi; libera FK RESTRICT su
+      `turno_pdc_blocco.corsa_materiale_vuoto_id` e
+      `turno_pdc_blocco.corsa_commerciale_id`)
     - giro_materiale (CASCADE su giornate/varianti/blocchi)
     - corsa_materiale_vuoto (orfana dopo cancellazione giri,
       ON DELETE SET NULL non basta per cancellare la riga)
     """
     async with session_scope() as session:
+        await session.execute(text("DELETE FROM turno_pdc"))
         await session.execute(text("DELETE FROM giro_materiale"))
         await session.execute(text("DELETE FROM corsa_materiale_vuoto"))
         await session.execute(

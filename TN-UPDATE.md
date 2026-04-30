@@ -10,6 +10,81 @@
 
 ---
 
+## 2026-04-30 (46) — Fix test integration: wipe FK-safe + programma_test_id
+
+### Contesto
+
+Dopo il commit del MR 1 (entry 45), pulizia tecnica: indagare e
+chiudere i 49 errori test integration documentati come "pre-esistenti
+rispetto al refactor". Utente: "vorrei capire, risolvere ed
+eventualmente eliminare". Decisione corretta da senior.
+
+Diagnosi: due bug latenti concatenati che il MR 1 ha solo fatto
+emergere (non causato).
+
+**Bug A — wipe fixture FK RESTRICT** (38/49 errori):
+
+Il builder PdC (Sprint 7.2) crea `turno_pdc_blocco` con FK RESTRICT su
+`corsa_materiale_vuoto.id` e `corsa_commerciale.id`. I 4 fixture
+`_wipe_test_data` / `_wipe` / `_wipe_corse` cancellano `corsa_*` ma
+NON i `turno_pdc` → `ForeignKeyViolation` ad ogni run su DB locale
+con turni residui (sessioni precedenti smoke 5.6 / Sprint 7.2).
+
+**Bug B — `programma_id` hardcoded** (11/49 errori):
+
+Migration 0010 (commit `dae23b7`, sessione precedente) ha aggiunto
+`giro_materiale.programma_id` NOT NULL + FK. I test `test_persister.py`
+chiamano `persisti_giri(programma_id=1)` hardcoded ma non creano un
+programma corrispondente in DB. La causa era mascherata dal bug A:
+i test non arrivavano nemmeno ad eseguire perché il setup falliva
+prima.
+
+### Modifiche
+
+**`backend/tests/test_persister.py`**:
+- Nuovo helper `_crea_programma_test(az_id, nome) → int` che crea un
+  `ProgrammaMateriale` di test (cancellato dal wipe `LIKE 'TEST_%'`).
+- Nuova fixture `programma_test_id` che inietta l'id ai test.
+- Aggiunto `DELETE FROM turno_pdc` come prima istruzione di
+  `_wipe_test_data` (CASCADE → giornate → blocchi libera FK
+  RESTRICT).
+- Aggiornate 9 firme test (`test_un_giro_una_corsa_ORM_creati`,
+  `test_localita_non_trovata_raises`, `test_vuoto_testa/coda...`,
+  `test_evento_aggancio...`, `test_sequenza_3_6_3...`,
+  `test_due_giornate...`, `test_due_giri...`,
+  `test_giro_senza_blocchi...`) per accettare `programma_test_id` +
+  9 occorrenze `programma_id=1` → `programma_id=programma_test_id`.
+
+**`backend/tests/test_builder_giri.py`**, **`test_genera_giri_api.py`**,
+**`test_pde_importer_db.py`**:
+- Aggiunto `DELETE FROM turno_pdc` come prima istruzione del rispettivo
+  fixture wipe + docstring aggiornato.
+
+Niente cambiamenti su codice produzione (modelli, migration, persister).
+
+### Verifiche
+
+- `pytest`: **387 passed, 1 skipped, 0 fail** (vs pre-fix: 338/49err
+  → post fix wipe: 376/11fail → post fix programma_test_id: 387/0).
+- Lo skip residuo è il test `Sprint 5.6 corse residue post-filtro pool`
+  marcato esplicitamente come "da riscrivere" (residuo Sprint 5+, non
+  causato da MR 1).
+
+### Stato
+
+Suite test integration **completamente verde**. La regola 5 METODO
+("verifica prima del commit, build deve passare") ora soddisfatta
+senza note residue. MR 2 può partire con base pulita.
+
+### Prossimo step
+
+Riprendo MR 2/7 del refactor bug 5: `composizione.py` propaga
+`dates_apply` da `GiornataGiro` (output di multi_giornata) a
+`GiornataAssegnata` (input del persister). Cambio meccanico, no
+logica nuova; test `test_composizione.py` da estendere.
+
+---
+
 ## 2026-04-30 (45) — Bug 5 refactor MR 1/7: clustering A1 catene → giornate-tipo
 
 ### Contesto
