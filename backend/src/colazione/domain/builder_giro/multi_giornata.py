@@ -1,9 +1,11 @@
 """Multi-giornata cross-notte (Sprint 4.4.3 → esteso Sprint 5.4 con
-cumulo km + trigger km_max_ciclo).
+cumulo km + trigger km_max_ciclo → esteso Sprint 7.5 con clustering A1).
 
 Funzione **pura** che concatena `CatenaPosizionata` di giornate
 consecutive in `Giro` multi-giornata, gestendo i giri che
-attraversano la mezzanotte senza tornare in deposito.
+attraversano la mezzanotte senza tornare in deposito; e applica un
+clustering A1-strict per fondere Giri con sequenza identica in 1 unico
+giro canonico con ``dates_apply`` unito (refactor bug 5).
 
 Spec:
 
@@ -11,6 +13,9 @@ Spec:
   decisione utente "B subito").
 - ``docs/LOGICA-COSTRUZIONE.md`` §3.4 (ciclo multi-giornata).
 - ``docs/SPRINT-5-RIPENSAMENTO.md`` §5.4 (km cumulati + trigger).
+- ``docs/MODELLO-DATI.md`` §LIV 2 (giornata-tipo astratta + varianti
+  per pattern calendario; bug 5 chiude la divergenza tra
+  "giornata=data" e "giornata-tipo del ciclo").
 
 Logica cross-notte:
 
@@ -39,6 +44,18 @@ totale del giro. La logica è duck-typed: se la corsa non ha l'attributo
 ``km_tratta`` o vale ``None``, contribuisce 0. Coerente con il dato
 PdE: ``CorsaCommerciale.km_tratta: Decimal | None``.
 
+Clustering A1 (Sprint 7.5, refactor bug 5):
+
+Dopo il building cross-notte, l'output viene clusterizzato per chiave
+A1-strict — due Giri con stessa località e stessa sequenza di
+``(numero_treno, ora_partenza, ora_arrivo, codice_origine,
+codice_destinazione)`` per ogni corsa di ogni giornata (più
+``vuoto_testa``/``vuoto_coda`` identici) sono lo stesso pattern e si
+fondono in 1 Giro canonico. Il campo ``GiornataGiro.dates_apply``
+contiene tutte le date in cui la giornata-tipo si applica (= unione
+delle date dei filoni del cluster). Risolve il bug 5 (giornata-data
+collassata su giornata-tipo del ciclo).
+
 Limiti residui:
 
 - **Niente identificazione corsa di rientro programmata**: quando si
@@ -56,7 +73,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, time, timedelta
-from typing import Literal
+from typing import Any, Literal
 
 from colazione.domain.builder_giro.posizionamento import CatenaPosizionata
 
@@ -100,10 +117,43 @@ _DEFAULT_PARAM = ParamMultiGiornata()
 
 @dataclass(frozen=True)
 class GiornataGiro:
-    """Una giornata di un `Giro`: data calendaristica + catena posizionata."""
+    """Una giornata di un `Giro`: data canonica + catena posizionata + dates_apply.
+
+    Sprint 7.5 (refactor bug 5): aggiunto ``dates_apply`` per
+    rappresentare tutte le date in cui questa giornata-tipo del ciclo
+    si applica. Il clustering A1 fonde Giri-tentativo con sequenza
+    identica e popola ``dates_apply`` con l'unione delle date dei
+    filoni del cluster.
+
+    Attributi:
+        data: data canonica della giornata. Per i Giri prodotti dal
+            clustering è la prima data del cluster (deterministica);
+            per i Giri-tentativo pre-cluster è la data calendaristica
+            singola.
+        catena_posizionata: la catena (corse + vuoti) della giornata.
+            Per i Giri post-cluster è la catena del filone canonico —
+            in A1-strict tutti i filoni del cluster hanno catene
+            identiche, quindi la scelta è inessenziale.
+        dates_apply: tupla ordinata di date in cui la giornata-tipo si
+            applica. Vuota = non popolata (consumer usa
+            ``dates_apply_or_data``). Popolata dal clustering con la
+            lista completa.
+    """
 
     data: date
     catena_posizionata: CatenaPosizionata
+    dates_apply: tuple[date, ...] = ()
+
+    @property
+    def dates_apply_or_data(self) -> tuple[date, ...]:
+        """Date applicabili, fallback a ``(data,)`` se non popolato.
+
+        Pre-clustering (output di ``_costruisci_giri_per_data``) il
+        campo è vuoto e il consumer ottiene la singola ``data``
+        calendaristica. Post-clustering il campo contiene tutte le
+        date del cluster ordinate.
+        """
+        return self.dates_apply if self.dates_apply else (self.data,)
 
 
 @dataclass(frozen=True)
@@ -194,52 +244,156 @@ def _trova_continuazione(
 
 
 # =====================================================================
+# Helpers chiave A1 — Sprint 7.5 (refactor bug 5)
+# =====================================================================
+
+
+def _corsa_key(c: Any) -> tuple[Any, ...]:
+    """Chiave A1-strict di una corsa commerciale.
+
+    Include i 5 campi che identificano univocamente la corsa nella
+    sequenza del giro: ``numero_treno``, ``codice_origine``,
+    ``codice_destinazione``, ``ora_partenza``, ``ora_arrivo``. Due
+    corse con la stessa chiave sono considerate "la stessa fase" del
+    pattern del giro.
+
+    Decisione utente A1 (vedi TN-UPDATE 2026-04-30): criterio strict —
+    una corsa di differenza fra due Giri li mantiene distinti.
+    """
+    return (
+        str(getattr(c, "numero_treno", "") or ""),
+        c.codice_origine,
+        c.codice_destinazione,
+        _time_to_min(c.ora_partenza),
+        _time_to_min(c.ora_arrivo),
+    )
+
+
+def _vuoto_key(v: Any) -> tuple[Any, ...] | None:
+    """Chiave A1-strict di un vuoto tecnico testa/coda (o None).
+
+    Inclusi: stazioni, orari, motivo, flag ``cross_notte_giorno_precedente``.
+    Due vuoti diversi mantengono i Giri distinti — coerente con
+    ``A1`` strict (i vuoti sono inferenze del builder, ma la differenza
+    di motivo/orario indica una decisione operativa diversa).
+    """
+    if v is None:
+        return None
+    return (
+        v.codice_origine,
+        v.codice_destinazione,
+        _time_to_min(v.ora_partenza),
+        _time_to_min(v.ora_arrivo),
+        getattr(v, "motivo", None),
+        getattr(v, "cross_notte_giorno_precedente", False),
+    )
+
+
+def _giornata_key(gg: GiornataGiro) -> tuple[Any, ...]:
+    """Chiave A1-strict di una giornata: vuoto_testa + corse + vuoto_coda."""
+    cat = gg.catena_posizionata
+    return (
+        _vuoto_key(cat.vuoto_testa),
+        tuple(_corsa_key(c) for c in cat.catena.corse),
+        _vuoto_key(cat.vuoto_coda),
+    )
+
+
+def _chiave_a1_giro(g: Giro) -> tuple[Any, ...]:
+    """Chiave A1-strict di un Giro: località + sequenza canonica per giornata.
+
+    Due Giri con la stessa chiave hanno **identica** sequenza di corse
+    e vuoti per **ogni** giornata. ``_cluster_giri_a1`` li fonde in 1
+    Giro canonico con ``dates_apply`` unito.
+    """
+    return (
+        g.localita_codice,
+        tuple(_giornata_key(gg) for gg in g.giornate),
+    )
+
+
+# =====================================================================
+# Clustering A1 — Sprint 7.5 (refactor bug 5)
+# =====================================================================
+
+
+def _cluster_giri_a1(giri_tentativi: list[Giro]) -> list[Giro]:
+    """Cluster A1: fonde Giri-tentativo con sequenza identica.
+
+    Per ogni gruppo di Giri con la stessa ``_chiave_a1_giro``:
+
+    1. Sceglie come canonico il giro con la data di partenza minima
+       (deterministico).
+    2. Costruisce un nuovo ``Giro`` con le stesse giornate del canonico,
+       ma popolando ``GiornataGiro.dates_apply`` con l'unione ordinata
+       delle date che cadono in posizione k nei filoni del cluster.
+
+    In A1 strict tutti i filoni del cluster hanno catene identiche
+    posizione per posizione, quindi:
+
+    - ``catena_posizionata`` del canonico è rappresentativa di tutti
+    - ``chiuso``, ``motivo_chiusura``, ``km_cumulati`` sono uguali
+
+    Output ordinato per data della prima giornata del giro (determinismo).
+    """
+    if not giri_tentativi:
+        return []
+
+    cluster_map: dict[tuple[Any, ...], list[Giro]] = {}
+    for g in giri_tentativi:
+        k = _chiave_a1_giro(g)
+        cluster_map.setdefault(k, []).append(g)
+
+    out: list[Giro] = []
+    for _chiave, giri_cluster in cluster_map.items():
+        canonico = min(giri_cluster, key=lambda g: g.giornate[0].data)
+        n_g = len(canonico.giornate)
+
+        nuove_giornate: list[GiornataGiro] = []
+        for k_idx in range(n_g):
+            dates_apply_k = tuple(
+                sorted({g.giornate[k_idx].data for g in giri_cluster})
+            )
+            gg_canonico = canonico.giornate[k_idx]
+            nuove_giornate.append(
+                GiornataGiro(
+                    data=gg_canonico.data,
+                    catena_posizionata=gg_canonico.catena_posizionata,
+                    dates_apply=dates_apply_k,
+                )
+            )
+
+        out.append(
+            Giro(
+                localita_codice=canonico.localita_codice,
+                giornate=tuple(nuove_giornate),
+                chiuso=canonico.chiuso,
+                motivo_chiusura=canonico.motivo_chiusura,
+                km_cumulati=canonico.km_cumulati,
+            )
+        )
+
+    out.sort(key=lambda g: g.giornate[0].data)
+    return out
+
+
+# =====================================================================
 # Algoritmo top-level
 # =====================================================================
 
 
-def costruisci_giri_multigiornata(
+def _costruisci_giri_per_data(
     catene_per_data: dict[date, list[CatenaPosizionata]],
-    params: ParamMultiGiornata = _DEFAULT_PARAM,
+    params: ParamMultiGiornata,
 ) -> list[Giro]:
-    """Concatena catene posizionate in giri multi-giornata.
+    """Pre-cluster: costruisce un ``Giro`` per ogni data di partenza.
 
-    Algoritmo:
+    Produce **Giri-tentativo** ognuno con ``GiornataGiro.dates_apply=()``
+    (la data canonica è la singola data calendaristica). Il clustering
+    A1 in `_cluster_giri_a1` fonde i Giri equivalenti.
 
-    1. Itera sulle date in ordine cronologico.
-    2. Per ogni catena non già usata, inizia un nuovo giro.
-       ``km_cumulati`` parte dalla giornata 1.
-    3. Estende il giro alla data successiva se TUTTE:
-       - la giornata corrente NON chiude a località
-         (``chiusa_a_localita=False``)
-       - ``len(giornate) < n_giornate_max``
-       - ``km_cumulati < km_max_ciclo`` (se ``km_max_ciclo`` definito,
-         Sprint 5.4)
-       - esiste una catena nella data successiva con stessa località
-         e prima corsa che parte dalla stazione di arrivo dell'ultima
-         corsa
-    4. Determina ``motivo_chiusura`` finale (priorità in caso di
-       trigger multipli: naturale > km_cap > max_giornate > non_chiuso):
-       - ``'naturale'`` se l'ultima giornata chiude a località
-       - ``'km_cap'`` se ``km_cumulati >= km_max_ciclo`` (Sprint 5.4)
-       - ``'max_giornate'`` se si è forzata chiusura per cap giornate
-       - ``'non_chiuso'`` se mancava continuazione (giro appeso)
-
-    Args:
-        catene_per_data: mappa ``data → lista catene posizionate``.
-            Le catene di una stessa data sono indipendenti tra loro
-            (rappresentano convogli diversi).
-        params: ``ParamMultiGiornata``.
-
-    Returns:
-        Lista di ``Giro``. L'ordine segue la data di inizio + l'ora
-        della prima corsa (determinismo).
-
-    Esempi:
-        Mappa vuota → nessun giro:
-
-        >>> costruisci_giri_multigiornata({})
-        []
+    Algoritmo invariato dal Sprint 5.6 (cross-notte + km_cap dinamico
+    + safety net).
     """
     if not catene_per_data:
         return []
@@ -365,3 +519,47 @@ def costruisci_giri_multigiornata(
             )
 
     return giri
+
+
+def costruisci_giri_multigiornata(
+    catene_per_data: dict[date, list[CatenaPosizionata]],
+    params: ParamMultiGiornata = _DEFAULT_PARAM,
+) -> list[Giro]:
+    """Concatena catene posizionate in giri multi-giornata + clustering A1.
+
+    Pipeline (Sprint 7.5, refactor bug 5):
+
+    1. ``_costruisci_giri_per_data``: produce un ``Giro`` per ogni data
+       di partenza, concatenando cross-notte (logica Sprint 5.6
+       invariata: km_cap dinamico, whitelist sede, safety net).
+    2. ``_cluster_giri_a1``: fonde i Giri-tentativo con chiave A1
+       identica in 1 ``Giro`` canonico per cluster, con
+       ``GiornataGiro.dates_apply`` popolato dall'unione delle date
+       dei filoni del cluster.
+
+    Conseguenza per il bug 5: dove il vecchio algoritmo produceva N
+    Giri uno per data calendaristica (ognuno con 1 sola variante con
+    ``validita_dates_apply_json`` "intersezione menzogna"), ora produce
+    M ≤ N Giri canonici, ciascuno rappresentativo di un pattern unico
+    di sequenza, con ``dates_apply`` reali ottenuti per costruzione.
+
+    Args:
+        catene_per_data: mappa ``data → lista catene posizionate``.
+            Le catene di una stessa data sono indipendenti tra loro
+            (rappresentano convogli diversi).
+        params: ``ParamMultiGiornata``.
+
+    Returns:
+        Lista di ``Giro`` post-cluster, ordinata per data della prima
+        giornata. Ogni ``GiornataGiro.dates_apply`` è popolato (≥ 1
+        elemento). Equivalenza A1: due Giri di output non hanno mai la
+        stessa ``_chiave_a1_giro``.
+
+    Esempi:
+        Mappa vuota → nessun giro:
+
+        >>> costruisci_giri_multigiornata({})
+        []
+    """
+    giri_tentativi = _costruisci_giri_per_data(catene_per_data, params)
+    return _cluster_giri_a1(giri_tentativi)

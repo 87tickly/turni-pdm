@@ -635,3 +635,185 @@ def test_param_multi_giornata_km_max_ciclo_default_none() -> None:
     p = ParamMultiGiornata()
     assert p.km_max_ciclo is None
     assert p.n_giornate_max == 5
+
+
+# =====================================================================
+# Sprint 7.5 — Clustering A1 (refactor bug 5)
+# =====================================================================
+
+
+D_LUN_2 = date(2026, 5, 4)  # lunedì settimana successiva
+D_MAR_2 = date(2026, 5, 5)
+
+
+def test_cluster_a1_due_date_stessa_sequenza_un_giro() -> None:
+    """Due date con sequenza A1 identica → 1 giro post-cluster con
+    `dates_apply` che contiene entrambe le date."""
+    a = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (8, 0), (9, 0)), _c("BG", "MI_FIO", (10, 0), (11, 0))),
+        chiusa=True,
+    )
+    b = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (8, 0), (9, 0)), _c("BG", "MI_FIO", (10, 0), (11, 0))),
+        chiusa=True,
+    )
+    giri = costruisci_giri_multigiornata({D_LUN: [a], D_LUN_2: [b]})
+    assert len(giri) == 1
+    primo = giri[0]
+    assert len(primo.giornate) == 1
+    assert primo.giornate[0].dates_apply == (D_LUN, D_LUN_2)
+
+
+def test_cluster_a1_orari_diversi_due_giri() -> None:
+    """Due date con stesse stazioni ma orari diversi → giri separati
+    (chiave A1 strict include orari minuto-per-minuto)."""
+    a = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (8, 0), (9, 0)),),
+        chiusa=False,
+    )
+    b = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (10, 0), (11, 0)),),
+        chiusa=False,
+    )
+    giri = costruisci_giri_multigiornata({D_LUN: [a], D_LUN_2: [b]})
+    assert len(giri) == 2
+
+
+def test_cluster_a1_localita_diverse_due_giri() -> None:
+    """Stessa sequenza ma località diverse → giri separati (chiave A1
+    include `localita_codice`)."""
+    a = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (8, 0), (9, 0)),),
+        chiusa=True,
+    )
+    b = _cat_pos(
+        localita="NOV",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (8, 0), (9, 0)),),
+        chiusa=True,
+    )
+    giri = costruisci_giri_multigiornata({D_LUN: [a], D_LUN_2: [b]})
+    assert len(giri) == 2
+
+
+def test_giornata_giro_dates_apply_or_data_fallback() -> None:
+    """Se `dates_apply` non popolato, `dates_apply_or_data` ritorna `(data,)`."""
+    cat = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (8, 0), (9, 0)),),
+        chiusa=True,
+    )
+    gg_no_apply = GiornataGiro(data=D_LUN, catena_posizionata=cat)
+    assert gg_no_apply.dates_apply == ()
+    assert gg_no_apply.dates_apply_or_data == (D_LUN,)
+
+    gg_with_apply = GiornataGiro(
+        data=D_LUN, catena_posizionata=cat, dates_apply=(D_LUN, D_LUN_2)
+    )
+    assert gg_with_apply.dates_apply_or_data == (D_LUN, D_LUN_2)
+
+
+def test_cluster_a1_cross_notte_due_settimane_un_giro() -> None:
+    """Due settimane consecutive con stesso pattern 2-giornate cross-notte
+    → 1 giro con 2 giornate; ogni giornata ha `dates_apply` con 2 date
+    (una per settimana)."""
+    g1_w1 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (20, 0), (21, 0)),),
+        chiusa=False,
+    )
+    g2_w1 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("BG", "MI_FIO", (6, 0), (7, 0)),),
+        chiusa=True,
+    )
+    g1_w2 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (20, 0), (21, 0)),),
+        chiusa=False,
+    )
+    g2_w2 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("BG", "MI_FIO", (6, 0), (7, 0)),),
+        chiusa=True,
+    )
+    giri = costruisci_giri_multigiornata(
+        {
+            D_LUN: [g1_w1],
+            D_MAR: [g2_w1],
+            D_LUN_2: [g1_w2],
+            D_MAR_2: [g2_w2],
+        }
+    )
+    assert len(giri) == 1
+    primo = giri[0]
+    assert len(primo.giornate) == 2
+    assert primo.giornate[0].dates_apply == (D_LUN, D_LUN_2)
+    assert primo.giornate[1].dates_apply == (D_MAR, D_MAR_2)
+    assert primo.chiuso is True
+    assert primo.motivo_chiusura == "naturale"
+
+
+def test_cluster_a1_ordinamento_per_data_prima_giornata() -> None:
+    """Output post-cluster ordinato per `giornate[0].data` crescente."""
+    a = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "X", (8, 0), (9, 0)),),
+        chiusa=True,
+    )
+    b = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "Y", (8, 0), (9, 0)),),
+        chiusa=True,
+    )
+    # Inseriti in ordine "inverso": data più recente prima
+    giri = costruisci_giri_multigiornata({D_LUN_2: [a], D_LUN: [b]})
+    assert len(giri) == 2
+    assert giri[0].giornate[0].data == D_LUN
+    assert giri[1].giornate[0].data == D_LUN_2
+
+
+def test_cluster_a1_vuoto_testa_diverso_due_giri() -> None:
+    """Stessa sequenza di corse ma `vuoto_testa` diverso → 2 giri.
+
+    A1 strict tratta i vuoti come parte della shape: motivo/orari diversi
+    indicano decisioni operative diverse del builder.
+    """
+    from colazione.domain.builder_giro.posizionamento import BloccoMaterialeVuoto
+
+    cat_no_vuoto = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (8, 0), (9, 0)),),
+        chiusa=True,
+    )
+    cat_con_vuoto = dataclasses.replace(
+        cat_no_vuoto,
+        vuoto_testa=BloccoMaterialeVuoto(
+            codice_origine="MI_FIO",
+            codice_destinazione="MI_FIO",
+            ora_partenza=time(7, 0),
+            ora_arrivo=time(7, 30),
+            motivo="testa",
+            cross_notte_giorno_precedente=False,
+        ),
+    )
+    giri = costruisci_giri_multigiornata({D_LUN: [cat_no_vuoto], D_LUN_2: [cat_con_vuoto]})
+    assert len(giri) == 2

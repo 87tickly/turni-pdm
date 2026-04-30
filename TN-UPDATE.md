@@ -10,6 +10,121 @@
 
 ---
 
+## 2026-04-30 (45) — Bug 5 refactor MR 1/7: clustering A1 catene → giornate-tipo
+
+### Contesto
+
+Sessione pomeriggio: utente conferma bug 5 ("Builder crea 1 variante/
+giornata, non N") come bug reale e sceglie **opzione B** (refactor
+completo verso modello canonico "giornata-tipo + varianti" del
+`MODELLO-DATI.md` §LIV 2). Sotto-decisioni allineate via 4 domande:
+
+- **A1** — chiave equivalenza A1 strict: stessa lista esatta
+  `(numero_treno, ora_partenza, ora_arrivo, codice_origine,
+  codice_destinazione)` per ogni corsa, più vuoti testa/coda identici.
+  Una corsa di differenza → giornate-tipo distinte.
+- **B1** — periodo osservazione = intero `programma.[valido_da,
+  valido_a]` (≈365 giorni), unica scelta che chiude il bug.
+- **C3** — `data_inizio + n_giornate` API rimangono ma diventano
+  `Optional`, default = periodo intero (backward compatible).
+- **D1** — Builder PdC: 1 turno per ogni variante calendario del giro
+  (no migration su `turno_pdc_variante`).
+
+Diagnosi numerica (programma 1341): 10 giri / 85 giornate / **85
+varianti totali** / `MAX(varianti_per_giornata)=1` / `variant_index`
+distinti = `{0}`. 100% giornate ha 1 sola variante: bug strutturale
+confermato.
+
+Piano: 7 MR (uno per commit), questo è MR 1/7.
+
+### Modifiche (MR 1/7)
+
+**`backend/src/colazione/domain/builder_giro/multi_giornata.py`**:
+
+- Aggiunto campo `dates_apply: tuple[date, ...] = ()` a `GiornataGiro`
+  (frozen dataclass) + property `dates_apply_or_data` con fallback a
+  `(data,)` se vuoto. Default `()` mantiene retrocompatibilità con
+  costruzioni esistenti pre-cluster.
+- Nuovi helper di chiave A1 strict (`_corsa_key`, `_vuoto_key`,
+  `_giornata_key`, `_chiave_a1_giro`) — chiave deterministica include
+  vuoti testa/coda e tutti i 5 campi della corsa.
+- Nuova `_cluster_giri_a1(giri_tentativi)`: fonde Giri con stessa
+  chiave in 1 Giro canonico (data minima del cluster, `dates_apply` =
+  unione ordinata delle date in posizione k).
+- Refactor `costruisci_giri_multigiornata` come orchestrator a 2
+  fasi:
+  1. `_costruisci_giri_per_data` (rinominato dal vecchio body, logica
+     Sprint 5.6 invariata)
+  2. `_cluster_giri_a1` sul risultato.
+  Output ordinato per `giornate[0].data` crescente. Signature pubblica
+  invariata (consumer composizione.py/persister.py non rotti).
+
+**`backend/tests/test_multi_giornata.py`**:
+
+- 7 nuovi test per la sezione "Sprint 7.5 — Clustering A1":
+  `test_cluster_a1_due_date_stessa_sequenza_un_giro`,
+  `test_cluster_a1_orari_diversi_due_giri`,
+  `test_cluster_a1_localita_diverse_due_giri`,
+  `test_giornata_giro_dates_apply_or_data_fallback`,
+  `test_cluster_a1_cross_notte_due_settimane_un_giro` (caso più
+  importante: 2 settimane di pattern 2-giornate identico → 1 giro),
+  `test_cluster_a1_ordinamento_per_data_prima_giornata`,
+  `test_cluster_a1_vuoto_testa_diverso_due_giri`.
+
+### Verifiche
+
+- `pytest tests/test_multi_giornata.py`: **32/32** verdi (25 vecchi +
+  7 nuovi).
+- `pytest tests/test_multi_giornata.py tests/test_composizione.py
+  tests/test_posizionamento.py tests/test_catena.py
+  tests/test_risolvi_corsa.py`: **155/155** verdi (tutti i test puri
+  builder_giro intatti).
+- `mypy src/colazione/domain/builder_giro/multi_giornata.py`: clean.
+
+**Errori test integration documentati come pre-esistenti**: 49 test in
+`test_persister.py`, `test_builder_giri.py`, `test_genera_giri_api.py`,
+`test_pde_importer_db.py` falliscono con
+`ForeignKeyViolation: turno_pdc_blocco_corsa_materiale_vuoto_id_fkey`
+durante `DELETE FROM corsa_materiale_vuoto` del fixture cleanup.
+Verificato via `git stash` + ri-test: gli errori sono presenti **anche
+senza** MR 1, sono residuo di stato DB locale (turno_pdc del
+programma 1341 referenziato vuoti orfani). Pulizia DB demandata a un
+task indipendente, non blocca MR 1.
+
+### Stato
+
+**MR 1/7 chiuso.** Backbone clustering A1 in produzione nei test puri.
+
+I consumer (`composizione.py` → `persister.py` → `builder.py`
+orchestrator) leggono ancora la singola data (via `dates_apply_or_data`
+fallback) e producono comportamento identico al pre-refactor — il
+clustering è "trasparente" finché MR 2/3/4 non leggeranno il nuovo
+`dates_apply`.
+
+Restano 6 MR:
+- **MR 2** — `composizione.py`: `GiornataAssegnata` passa-attraverso
+  `dates_apply` da `GiornataGiro`.
+- **MR 3** — `persister.py`: usa `dates_apply` reali invece
+  dell'intersezione menzogna in `_estrai_validita_giornata`.
+- **MR 4** — `builder.py` orchestrator + `api/giri.py`: periodo intero
+  default, parametri opzionali (decisione C3).
+- **MR 5** — `builder_pdc/builder.py`: 1 turno PdC per ogni variante
+  del giro (decisione D1).
+- **MR 6** — Frontend `GiroDettaglioRoute.tsx` +
+  `TurnoPdcDettaglioRoute.tsx`: tab/select varianti.
+- **MR 7** — Migrazione dati programma 1341 + smoke completo a chiudere
+  bug 5 con numeri.
+
+### Prossimo step
+
+MR 2: refactor `composizione.py` per propagare `dates_apply` attraverso
+`GiornataAssegnata`. Atteso `GiornataAssegnata` con nuovo campo
+`dates_apply: tuple[date, ...]` valorizzato dal mapping
+`giornata.dates_apply_or_data`. Test `test_composizione.py` da
+aggiornare per coprire la propagazione.
+
+---
+
 ## 2026-04-30 (44) — UI trasparenza varianti numero_treno + chiusura bug 4 PdE
 
 ### Contesto
