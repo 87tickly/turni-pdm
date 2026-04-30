@@ -10,6 +10,131 @@
 
 ---
 
+## 2026-04-30 (59) — Sprint 7.4 MR 4/4: smoke con dati reali — SPRINT CHIUSO
+
+### Contesto
+
+MR 4/4 (ultimo) dello Sprint 7.4. Smoke end-to-end con dati reali
+che dimostra il debito normativo dichiarato in entry 42 ora chiuso:
+prima dello Sprint 7.4 una giornata di giro lunga produceva un turno
+PdC fuori norma con violazioni hard di prestazione e condotta;
+dopo, lo split CV intermedio produce N turni distinti tutti entro i
+limiti.
+
+### Modifiche
+
+**Nuovo `backend/scripts/smoke_74_split_cv.py`** (~280 righe):
+
+- Costruisce un giro materiale con 4 corse commerciali consecutive
+  (06:00→15:30, totale 8h di condotta su 4 blocchi):
+  - A: SEDE→ESTERNA 06:00-08:00
+  - B: ESTERNA→**MORTARA** 08:30-10:30 (CV)
+  - C: **MORTARA**→ESTERNA 11:00-13:00 (CV)
+  - D: ESTERNA→SEDE 13:30-15:30
+- Stazione `MORTARA` è in `STAZIONI_CV_DEROGA` di
+  `backend/src/colazione/domain/builder_pdc/split_cv.py`
+  (NORMATIVA-PDC.md:701-717), quindi ammessa al cambio volante
+  anche senza Depot esplicito.
+- Lancia `genera_giri()` (default periodo intero) → giro creato.
+- Lancia `genera_turno_pdc()` → splitter MR 1 trova punto CV a
+  MORTARA, builder MR 2 produce N TurnoPdc distinti.
+- Stampa per ogni turno: marker (PRINC. / RAMO), codice,
+  ramo_label, prestazione, condotta, violazioni.
+- Lascia i dati in DB per verifica visuale frontend
+  (`/pianificatore-giro/giri/<id>/turni-pdc`).
+
+### Numeri reali (output smoke)
+
+```
+[builder/pdc] 4 TurnoPdc creati:
+  RAMO T-G-TCV-001-G01-R1 (R1/2 di giornata 1)
+       n_giornate=1 | prestazione=380min | condotta=240min | violazioni=1
+       (refezione_mancante: ramo corto senza PK ≥30' in finestra)
+  RAMO T-G-TCV-001-G01-R2 (R2/2 di giornata 1)
+       n_giornate=1 | prestazione=380min | condotta=240min | violazioni=0
+  RAMO T-G-TCV-001-G02-R1 (R1/2 di giornata 2)
+       n_giornate=1 | prestazione=380min | condotta=240min | violazioni=1
+  RAMO T-G-TCV-001-G02-R2 (R2/2 di giornata 2)
+       n_giornate=1 | prestazione=380min | condotta=240min | violazioni=0
+```
+
+### Confronto pre/post Sprint 7.4
+
+| Metrica | Pre Sprint 7.4 (entry 42 baseline) | Post Sprint 7.4 |
+|---|---|---|
+| Giornata input | 4 corse, 11h20 prestazione, 8h condotta | invariata |
+| TurnoPdc creati | **1** (con 1 giornata violante) | **2 per giornata** (rami split) |
+| Codici | `T-G-TCV-001` | `T-G-TCV-001-G{NN}-R{1,2}` |
+| Prestazione max ramo | 680 min > cap 510 | 380 min < cap 510 ✓ |
+| Condotta max ramo | 480 min > cap 330 | 240 min < cap 330 ✓ |
+| Violazioni hard | **2** (prestazione+condotta) | **0** ✓ |
+| Violazioni soft | 0 | 2 × `refezione_mancante` (rami corti) |
+
+Le 2 violazioni `refezione_mancante` residue sono normative: 6h20 di
+prestazione (ramo) > 6h soglia refezione, ma il ramo non ha PK ≥30'
+nelle finestre 11:30-15:30 / 18:30-22:30. Risolvibile in iterazione
+successiva alzando soglia o introducendo PK fittizi nei rami corti
+(ma cambia la semantica della normativa).
+
+### Verifiche finali Sprint 7.4
+
+- `uv run mypy --strict src`: **51 source files clean**.
+- `uv run pytest --tb=no`: **414 passed, 1 skipped** (era 397+1
+  pre-Sprint 7.4, +17 nuovi test split_cv MR 1, no regressioni).
+- `pnpm typecheck`: clean.
+- `pnpm test --run`: **31 passed, 8 file**.
+- Smoke runtime: 4 TurnoPdc-ramo distinti, prestazione e condotta
+  entro cap normativi.
+- Verifica visuale frontend: dati in DB programma
+  `TEST_SMOKE_SPLIT_CV` (giro 16495), navigare a
+  `/pianificatore-giro/giri/16495/turni-pdc`.
+
+### Stato Sprint 7.4
+
+**Sprint 7.4 chiuso end-to-end.** 4 MR consecutivi
+(`05b4d94..798709b..18db21c..` + smoke):
+
+| MR | Commit | Verifica |
+|---|---|---|
+| 1 — splitter puro | `05b4d94` | 17 unit test verdi |
+| 2 — builder integration | `798709b` | mypy + 414 test invariati |
+| 3 — API + UI badge | `18db21c` | typecheck + 31 test invariati |
+| 4 — smoke + chiusura | (questo commit) | smoke runtime con numeri attesi |
+
+Il debito normativo dichiarato in entry 42 (giornate lunghe → turni
+PdC fuori norma) è chiuso strutturalmente. Quando una giornata
+contiene una stazione CV ammessa, il builder produce automaticamente
+N TurnoPdc distinti che rispettano i cap di prestazione/condotta.
+
+### Limiti noti residui (rinviati a iterazioni future)
+
+- **Refezione nei rami corti**: il ramo splittato perde le
+  opportunità di refezione del giro intero. Caso emerso nello
+  smoke. Non è una regressione (la giornata pre-split aveva
+  comunque una violazione di prestazione molto più pesante);
+  affinabile relaxando le finestre o introducendo PK virtuali.
+- **CV no-overhead** (gap < 65' → CVa/CVp anziché ACCa+ACCp con
+  risparmio 80'): non implementato per MVP. Ogni ramo paga
+  accessori standard. Refinement futuro.
+- **Stazioni CV configurabili per programma**: oggi MVP usa
+  `Depot` azienda + deroghe hardcoded. Refactor a regola
+  configurabile in iterazione successiva.
+- **Vincoli FR settimanali, ciclo 5+2, vettura passiva tag**:
+  residui dichiarati entry 42, fuori scope Sprint 7.4.
+
+### Prossimo step
+
+Decisione utente. Backlog aggiornato:
+
+- Sprint 7.3 dashboard PdC (apre 2° ruolo ecosistema).
+- Code review Fausto sui commit del refactor bug 5 + Sprint 7.4.
+- Smoke con dati reali Trenord 2025-2026 (programma #1289 vero,
+  non sintetico) per validazione su PdE reale.
+- Affinamenti split CV (no-overhead, refezione adattiva) se
+  l'utente li priorità.
+
+---
+
 ## 2026-04-30 (58) — Sprint 7.4 MR 3/4: API + UI badge "Ramo X di N"
 
 ### Contesto
