@@ -10,6 +10,105 @@
 
 ---
 
+## 2026-04-30 (55) — Step A: UI radio modalità periodo su Genera Giri
+
+### Contesto
+
+Il backend del builder giri (Sprint 7.5 MR 4 / entry 49) accetta già
+`data_inizio` e `n_giornate` come opzionali, con default = periodo
+intero del programma. La UI invece costringeva il pianificatore a
+scegliere data_inizio + n_giornate sempre, ignorando l'opzionalità
+backend. Step A del backlog (entry 53, opzione "rifinitura UX")
+chiude questo gap con un selettore di modalità a 3 opzioni — scelta
+utente esplicita: 3 radio anziché checkbox singolo, per esporre tutte
+e 3 le modalità del backend.
+
+### Modifiche
+
+**`frontend/src/lib/api/giri.ts`**:
+
+- `GeneraGiriParams.data_inizio` e `.n_giornate` passano da
+  obbligatori a opzionali.
+- `generaGiri()` costruisce ora il querystring **condizionalmente**:
+  i due parametri vengono inviati solo se valorizzati. Quando
+  entrambi omessi → backend usa `valido_da..valido_a`.
+
+**`frontend/src/routes/pianificatore-giro/GeneraGiriDialog.tsx`**:
+
+- Nuovi props `validoDa: string` + `validoA: string` (passati dalla
+  route padre, già disponibili in `ProgrammaDettaglioRead`).
+- Nuovo state `modalita: "intero" | "da_data" | "range"` (default
+  `"intero"`).
+- Nuovo radio group con 3 opzioni mutuamente esclusive:
+  - **Periodo intero del programma** (default): nessun parametro
+    inviato → backend `valido_da..valido_a`.
+  - **Da una data fino a fine programma**: solo `data_inizio` →
+    backend `data_inizio..valido_a`.
+  - **Range parziale**: `data_inizio` + `n_giornate` →
+    range esatto.
+- I campi `data_inizio` (date input con `min=validoDa`,
+  `max=validoA`) e `n_giornate` appaiono solo nei rami che li
+  richiedono.
+- Cap UI `n_giornate` portato da 180 → **400** per match backend
+  Sprint 7.5 MR 4.
+- Anteprima testuale "Programma valido dal X al Y (N giorni totali)"
+  in cima al fieldset.
+- Validazione condizionale: `isValid` richiede solo
+  `localita_codice` in modalità `intero`, `+ data_inizio` in
+  `da_data`, `+ n_giornate` in `range`.
+- `submit()` riscritto per costruire `GeneraGiriParams` selettivo
+  (passa solo i campi pertinenti).
+- Helper interno `daysBetweenInclusive(a, b)` per il counter
+  giornate del programma — convenzione `(b-a).days+1` allineata al
+  backend.
+- Nuovo componente locale `ModalitaRadio` per la singola voce del
+  radio group (label + hint + stile attivo).
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`**:
+
+- Passa `validoDa={programma.valido_da}` e
+  `validoA={programma.valido_a}` al dialog.
+
+### Verifiche
+
+- `pnpm typecheck`: clean.
+- `pnpm test`: **31 passed (8 file)** — invariato. I test esistenti
+  della Route padre (`ProgrammaDettaglioRoute.test.tsx`) restano
+  verdi: il dialog non è aperto nel test, quindi i nuovi props non
+  causano regressioni.
+- Verifica runtime visuale: differita. Richiederebbe backend +
+  programma reale. Il diff è meccanico e isolato (3 radio +
+  branching condizionale) e coperto staticamente da typecheck +
+  test esistenti.
+
+### Stato
+
+**Step A chiuso.** La UI ora espone le 3 modalità di periodo
+supportate dal backend dalla MR 4. Il pianificatore può:
+
+- generare per il programma intero senza specificare nulla
+  (caso d'uso annuale);
+- partire da una data e arrivare a fine programma
+  (caso d'uso "da Q3 in poi");
+- ritagliare un range esatto (caso d'uso test/anteprima).
+
+Niente regressioni: chi vuole ancora il vecchio comportamento
+(data_inizio + 14 giornate) seleziona "Range parziale" e si trova il
+form identico a prima.
+
+### Prossimo step
+
+Decisione utente. Backlog rimasto:
+- Sprint 7.4 split CV intermedio (chiude violazioni
+  prestazione/condotta PdC sui giri lunghi).
+- Sprint 7.3 dashboard Pianificatore Turno PdC (apre 2° ruolo
+  ecosistema).
+- Smoke con dati reali Trenord 2025-2026 (validazione end-to-end
+  refactor bug 5 + Step A).
+- Code review Fausto sui 9 commit del refactor bug 5.
+
+---
+
 ## 2026-04-30 (54) — Cleanup mypy strict: `dict(Sequence[Row[...]])` → `.tuples().all()`
 
 ### Contesto

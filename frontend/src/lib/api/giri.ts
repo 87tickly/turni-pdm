@@ -26,8 +26,16 @@ export interface BuilderResult {
 }
 
 export interface GeneraGiriParams {
-  data_inizio: string;
-  n_giornate: number;
+  /**
+   * Data di inizio del range. Se omessa, il backend usa `programma.valido_da`
+   * (default Sprint 7.5 MR 4 / Step A).
+   */
+  data_inizio?: string;
+  /**
+   * Numero di giornate del range (cap 400). Se omesso, il backend estende
+   * fino a `programma.valido_a` (default Sprint 7.5 MR 4 / Step A).
+   */
+  n_giornate?: number;
   localita_codice: string;
   force?: boolean;
 }
@@ -103,8 +111,12 @@ export async function generaGiri(
   params: GeneraGiriParams,
 ): Promise<BuilderResult> {
   const search = new URLSearchParams();
-  search.set("data_inizio", params.data_inizio);
-  search.set("n_giornate", String(params.n_giornate));
+  if (params.data_inizio !== undefined && params.data_inizio !== "") {
+    search.set("data_inizio", params.data_inizio);
+  }
+  if (params.n_giornate !== undefined) {
+    search.set("n_giornate", String(params.n_giornate));
+  }
   search.set("localita_codice", params.localita_codice);
   if (params.force === true) search.set("force", "true");
   return apiJson<BuilderResult>(`/api/programmi/${programmaId}/genera-giri?${search.toString()}`, {

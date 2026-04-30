@@ -133,6 +133,8 @@ export function ProgrammaDettaglioRoute() {
       <RegolaEditor programmaId={programma.id} open={editorOpen} onOpenChange={setEditorOpen} />
       <GeneraGiriDialog
         programmaId={programma.id}
+        validoDa={programma.valido_da}
+        validoA={programma.valido_a}
         open={generaOpen}
         onOpenChange={setGeneraOpen}
         onCompleted={() => navigate(`/pianificatore-giro/programmi/${programma.id}/giri`)}
