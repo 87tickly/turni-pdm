@@ -10,6 +10,66 @@
 
 ---
 
+## 2026-04-30 (51) — Setup MCP Grok (alias FAUSTO) + regola 9 CLAUDE.md
+
+### Contesto
+
+Per il refactor bug 5 (e in generale per task di code review/cleanup),
+configurato un MCP server `grok` user-level con modello
+`grok-code-fast-1`. Alias progetto: **FAUSTO**. Quando l'utente dice
+"fatti aiutare da Fausto" / "delega Fausto" → usa i tool
+`mcp__grok__*` (`code_review`, `ask`, `brainstorm`, `chat`,
+`run_code`, ecc.).
+
+### Modifiche
+
+**Setup ambiente (out-of-repo, user-level)**:
+
+- Server clonato in `~/.claude/mcp-servers/grok/` da
+  `wynandw87/claude-code-grok-mcp` (specifico per Claude Code, espone
+  `code_review` come tool dedicato).
+- Venv Python 3.12 + dipendenza `requests`.
+- Modello settato a `grok-code-fast-1` via
+  `python3 server.py config --model grok-code-fast-1`.
+- Chiave `XAI_API_KEY` persistita in `~/.zshrc` (per shell future) +
+  in `~/.claude/settings.json` con `chmod 600` (per il server MCP
+  lanciato da Claude Code Desktop).
+- Sanity check: `import server` ritorna OK + modello attivo
+  `grok-code-fast-1`.
+
+**Repository**:
+
+- `CLAUDE.md`: nuova **regola 9** "Ausilio Grok Code (alias FAUSTO)".
+  Spiega quando consultare/non consultare Fausto, come briefarlo,
+  costo monitorato, scope privacy. La regola è permanente — riletta
+  a inizio di ogni sessione assieme alle altre 8.
+
+### Verifiche
+
+- `chmod 600 ~/.claude/settings.json`: solo l'utente lo legge.
+- Chiave NON committata in alcun file del repo (CLAUDE.md fa solo
+  riferimento a `XAI_API_KEY`/path config).
+- Server importa pulito + modello configurato.
+
+### Stato
+
+Setup completo, **server attivo dalla prossima sessione di Claude
+Code** (richiede chiusura+riapertura dell'app Claude Desktop per
+caricare `~/.claude/settings.json`). La sessione corrente non vede
+ancora i tool Grok.
+
+### Prossimo step
+
+- Sessione corrente: continuo MR 6 e MR 7 del refactor bug 5 senza
+  Grok (il contesto sessione è essenziale, non delegabile).
+- Post-MR 7: chiusura sessione, riavvio Claude Code, Fausto disponibile.
+  Primo uso pianificato: code review indipendente del refactor bug 5
+  (commits `8711ab3..95c9cc1` + ultimi 2 MR) + cleanup 6 errori mypy
+  pre-esistenti su `dict(Sequence[Row[...]])` in `api/giri.py` +
+  `api/turni_pdc.py`.
+
+---
+
 ## 2026-04-30 (50) — Bug 5 refactor MR 5/7: Builder PdC 1 turno per variante
 
 ### Contesto

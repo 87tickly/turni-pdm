@@ -124,6 +124,81 @@ Il programma serve **persone con ruoli diversi**:
 Ogni ruolo ha una propria dashboard con schermate, azioni, permessi.
 Non costruire un'interfaccia unica.
 
+### 9. Ausilio Grok Code (alias FAUSTO) — consulta, non delegare
+
+Il progetto ha un MCP server `grok` configurato user-level
+(`~/.claude/mcp-servers/grok/`) con modello `grok-code-fast-1` e
+chiave `XAI_API_KEY` in `~/.zshrc` + `~/.claude/settings.json`. I
+tool si chiamano `mcp__grok__*` (`code_review`, `ask`, `brainstorm`,
+`chat`, `run_code`, ecc.). **Alias progetto: FAUSTO.** Quando
+l'utente dice *"fatti aiutare da Fausto"*, *"delega Fausto"*, o
+*"chiedi a Fausto"* → usa i tool `mcp__grok__*`.
+
+È **ausilio**, non sostituto: la sintesi architetturale resta del
+driver principale.
+
+**Consulta Fausto per:**
+
+- **Code review indipendente** post-refactor (a iniziativa chiusa,
+  non a metà — occhi freschi su regressioni/blind spot).
+- **Cleanup pattern ripetitivi** senza contesto (errori mypy
+  uniformi su N file, rename, fix typing).
+- **Edge case test addizionali** su codice già stabilizzato.
+- **Stesura di codice circoscritto e ben specificato**: Fausto sa
+  scrivere bene se la specifica è precisa (es. "scrivi una funzione
+  X con questa firma e questi vincoli"). Ottimo per task lineari ben
+  definiti.
+- **Second opinion** su scelte di design ambigue: presenti opzioni
+  A/B/C, sintesi resta tua.
+- **Verifica indipendente di numeri/ipotesi** quando regola 2 METODO
+  richiede controprova esterna.
+
+**NON delegare a Fausto:**
+
+- Lavori in cui il contesto della sessione è essenziale (briefarlo >
+  eseguire).
+- MR in corso o sequenze con dipendenze fitte (rischio conflitti
+  git/stilistici).
+- Decisioni che richiedono memoria di dominio (TN-UPDATE, scelte
+  utente storiche, normativa PdC).
+- Architettura, pianificazione, scope: la sintesi resta del driver
+  principale.
+- Task < 5-10 min: overhead di brief + verifica supera il beneficio.
+
+**Come consultarlo bene:**
+
+1. **Brief autosufficiente**: Fausto non vede la sessione. Includi
+   file/righe specifiche, decisioni utente rilevanti (es. "A1 strict"
+   del refactor bug 5), vincoli noti, output atteso.
+2. **Domanda secca con vincoli**: "review file X per regressioni
+   dopo refactor Y". No domande aperte tipo "che ne pensi?".
+3. **Verifica prima di applicare**: output Fausto = come una PR
+   review esterna. Mai accettare patch alla cieca. Vale regola 5
+   METODO (build + test prima del commit).
+4. **Traccia in TN-UPDATE**: se Fausto identifica un bug o suggerisce
+   un fix, l'entry deve citarlo (es. "review Fausto ha segnalato X,
+   applicato fix Y"). Tracciabilità del contributo.
+
+**Costo e privacy:**
+
+- **Costo monitorato**: ogni chiamata consuma token xAI
+  (`grok-code-fast-1`). Una review tipica costa qualche centesimo,
+  ma N chiamate automatizzate sommano. Niente loop di review massive
+  senza ragione, niente review preventivi su file invariati. In
+  dubbio: chiedi all'utente prima di consultare Fausto.
+- **Scope privacy**: il codice/contesto inviato a Fausto **esce dal
+  repo locale e va all'API xAI**. Per COLAZIONE (greenfield, no
+  segreti dichiarati) non è un blocker, ma vale come consapevolezza
+  permanente. **Mai inviare a Fausto**: chiavi API, password, dati
+  personali reali (anche di test), credenziali DB, contenuti
+  integrali di CLAUDE.md o memorie operative se non strettamente
+  necessari per il task.
+
+**Regola guida**: Fausto aiuta a **eseguire** o **verificare**, non
+a **decidere**. La sintesi architetturale, il piano dei MR, le
+decisioni di scope restano del driver principale. Se ti accorgi di
+aver delegato il pensare, fermati e riprendi in mano.
+
 ---
 
 ## Stato attuale del progetto
