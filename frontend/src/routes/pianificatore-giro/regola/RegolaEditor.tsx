@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { HelpCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import {
@@ -16,14 +17,67 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Textarea } from "@/components/ui/Textarea";
 import { useAddRegola } from "@/hooks/useProgrammi";
 import { ApiError } from "@/lib/api/client";
+import { cn } from "@/lib/utils";
 import { makeRowId, rowToPayload, type ComposizioneRow, type FiltroRow } from "@/lib/regola/schema";
-import { ComposizioneEditor } from "@/routes/pianificatore-giro/regola/ComposizioneEditor";
+import {
+  ComposizioneEditor,
+  type ModoComposizione,
+} from "@/routes/pianificatore-giro/regola/ComposizioneEditor";
 import { FiltriEditor } from "@/routes/pianificatore-giro/regola/FiltriEditor";
 
 interface RegolaEditorProps {
   programmaId: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+const MODI: Array<{ id: ModoComposizione; label: string; hint: string }> = [
+  {
+    id: "singola",
+    label: "Singola",
+    hint: "1 unità di un materiale (es. 1×ETR526).",
+  },
+  {
+    id: "doppia",
+    label: "Doppia",
+    hint: "2 unità accoppiate (anche di tipo diverso, es. ETR526+ETR425). Km contati per entrambi.",
+  },
+  {
+    id: "personalizzata",
+    label: "Personalizzata",
+    hint: "Composizione libera (es. E464+5×Vivalto) o accoppiamenti speciali non ancora censiti.",
+  },
+];
+
+const emptyRow = (): ComposizioneRow => ({
+  id: makeRowId(),
+  materiale_tipo_codice: "",
+  n_pezzi: 1,
+});
+
+/**
+ * Sincronizza la lista composizione con il modo richiesto. Preserva le
+ * scelte già fatte dall'utente quando possibile (estende/tronca senza
+ * resettare i materiali già selezionati).
+ */
+function adattaComposizioneAlModo(
+  rows: ComposizioneRow[],
+  modo: ModoComposizione,
+): ComposizioneRow[] {
+  if (modo === "singola") {
+    const first = rows[0] ?? emptyRow();
+    return [{ ...first, n_pezzi: 1 }];
+  }
+  if (modo === "doppia") {
+    const first = rows[0] ?? emptyRow();
+    const second = rows[1] ?? emptyRow();
+    return [
+      { ...first, n_pezzi: 1 },
+      { ...second, n_pezzi: 1 },
+    ];
+  }
+  // personalizzata: mantieni le righe esistenti, garantisci almeno 1.
+  return rows.length > 0 ? rows : [emptyRow()];
 }
 
 /**
@@ -35,11 +89,9 @@ interface RegolaEditorProps {
  */
 export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorProps) {
   const [filtri, setFiltri] = useState<FiltroRow[]>([]);
-  const [composizione, setComposizione] = useState<ComposizioneRow[]>([
-    { id: makeRowId(), materiale_tipo_codice: "", n_pezzi: 1 },
-  ]);
+  const [modo, setModo] = useState<ModoComposizione>("singola");
+  const [composizione, setComposizione] = useState<ComposizioneRow[]>([emptyRow()]);
   const [priorita, setPriorita] = useState(60);
-  const [isComposizioneManuale, setIsComposizioneManuale] = useState(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -48,13 +100,18 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
   const handleClose = (next: boolean) => {
     if (!next) {
       setFiltri([]);
-      setComposizione([{ id: makeRowId(), materiale_tipo_codice: "", n_pezzi: 1 }]);
+      setModo("singola");
+      setComposizione([emptyRow()]);
       setPriorita(60);
-      setIsComposizioneManuale(false);
       setNote("");
       setError(null);
     }
     onOpenChange(next);
+  };
+
+  const cambiaModo = (next: ModoComposizione) => {
+    setModo(next);
+    setComposizione((prev) => adattaComposizioneAlModo(prev, next));
   };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -87,7 +144,9 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
             materiale_tipo_codice: c.materiale_tipo_codice,
             n_pezzi: c.n_pezzi,
           })),
-          is_composizione_manuale: isComposizioneManuale,
+          // Solo la modalità Personalizzata bypassa il check
+          // `materiale_accoppiamento_ammesso` lato backend.
+          is_composizione_manuale: modo === "personalizzata",
           priorita,
           note: note.trim().length > 0 ? note.trim() : null,
         },
@@ -103,6 +162,8 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
       );
     }
   };
+
+  const modoCorrente = MODI.find((m) => m.id === modo) ?? MODI[0];
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -122,25 +183,54 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
 
           <section className="flex flex-col gap-2">
             <h3 className="text-sm font-semibold text-foreground">Composizione</h3>
+            <div
+              role="radiogroup"
+              aria-label="Modalità composizione"
+              className="flex flex-wrap gap-1.5 rounded-md border border-border bg-secondary/30 p-1"
+            >
+              {MODI.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={modo === m.id}
+                  onClick={() => cambiaModo(m.id)}
+                  disabled={addMutation.isPending}
+                  className={cn(
+                    "flex-1 rounded px-3 py-1.5 text-sm font-medium transition-colors",
+                    "disabled:cursor-not-allowed disabled:opacity-50",
+                    modo === m.id
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">{modoCorrente.hint}</p>
             <ComposizioneEditor
               composizione={composizione}
+              modo={modo}
               onChange={setComposizione}
               disabled={addMutation.isPending}
             />
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={isComposizioneManuale}
-                onChange={(e) => setIsComposizioneManuale(e.target.checked)}
-                disabled={addMutation.isPending}
-              />
-              Composizione manuale (override del builder automatico)
-            </label>
           </section>
 
           <section className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="priorita">Priorità (0-100)</Label>
+              <Label htmlFor="priorita" className="flex items-center gap-1.5">
+                Priorità (0-100)
+                <HelpCircle
+                  className="h-3.5 w-3.5 cursor-help text-muted-foreground"
+                  aria-hidden
+                />
+                <span className="sr-only">
+                  La priorità serve solo se due regole coprono la stessa corsa: vince quella con
+                  numero più alto. Se le tue regole non si sovrappongono, lascia il valore di
+                  default.
+                </span>
+              </Label>
               <Input
                 id="priorita"
                 type="number"
@@ -151,9 +241,10 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
                   setPriorita(Math.min(100, Math.max(0, Number.parseInt(e.target.value, 10) || 0)))
                 }
                 disabled={addMutation.isPending}
+                title="Conta solo se due regole coprono la stessa corsa: vince la priorità più alta. Se le tue regole sono disgiunte, lascia 60."
               />
               <p className="text-xs text-muted-foreground">
-                Le regole con priorità più alta vincono in caso di overlap.
+                Conta solo se due regole coprono la stessa corsa: vince la priorità più alta.
               </p>
             </div>
           </section>
@@ -165,7 +256,7 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
               value={note}
               onChange={(e) => setNote(e.target.value)}
               disabled={addMutation.isPending}
-              placeholder="Es. Solo diretti Mi.Centrale↔Tirano (130 corse direttrice)"
+              placeholder="Es. Solo diretti Mi.Centrale↔Tirano (130 corse linea)"
             />
           </section>
 

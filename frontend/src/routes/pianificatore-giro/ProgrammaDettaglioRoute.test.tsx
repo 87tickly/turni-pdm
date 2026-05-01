@@ -101,8 +101,9 @@ describe("ProgrammaDettaglioRoute", () => {
     // Sezione configurazione
     expect(screen.getByText(/Configurazione/i)).toBeInTheDocument();
     expect(screen.getByText(/10\.000/)).toBeInTheDocument(); // km/ciclo formattato it-IT
-    // Filtri della regola
-    expect(screen.getByText(/Direttrice/i)).toBeInTheDocument();
+    // Filtri della regola — il campo backend "direttrice" è etichettato "Linea" in UI.
+    // Match preciso (^Linea$) per evitare collisioni con altre stringhe contenenti "linea".
+    expect(screen.getByText(/^Linea$/)).toBeInTheDocument();
     expect(screen.getByText(/TIRANO-SONDRIO-LECCO-MILANO/)).toBeInTheDocument();
     // Composizione
     expect(screen.getByText(/ETR526 × 1/)).toBeInTheDocument();

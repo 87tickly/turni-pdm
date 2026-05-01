@@ -3,10 +3,15 @@
  * l'editor regola del frontend. Allineato a `colazione.schemas.programmi`
  * (CAMPI_AMMESSI + _CAMPO_OP_COMPATIBILI).
  *
- * Ordine: campi principali in alto (direttrice, categoria, stazioni),
- * campi avanzati in basso (codice_linea, numero_treno, ecc.). Decisione
- * utente: il pianificatore ragiona per direttrice/categoria, non per
- * codice_linea (codici tecnici).
+ * Ordine: campi principali in alto (linea, categoria, stazioni),
+ * campi avanzati in basso (codice servizio, numero_treno, ecc.).
+ *
+ * Nota terminologia (Sprint 7.6 MR 1): il campo backend si chiama
+ * ancora `direttrice` (dato PdE Trenord) ma in UI lo presentiamo come
+ * "Linea" — il pianificatore ragiona in termini di linee commerciali
+ * (es. "TIRANO-SONDRIO-LECCO-MILANO"), non di direttrici tecniche.
+ * Il `codice_linea` (S1, RE3, R23…) è il codice di servizio
+ * commerciale e resta avanzato.
  */
 
 export const CAMPI_REGOLA = [
@@ -40,7 +45,7 @@ export const OP_PER_CAMPO: Record<CampoRegola, ReadonlyArray<string>> = {
 };
 
 export const LABEL_CAMPO: Record<CampoRegola, string> = {
-  direttrice: "Direttrice",
+  direttrice: "Linea",
   categoria: "Categoria",
   codice_origine: "Stazione di origine",
   codice_destinazione: "Stazione di destinazione",
@@ -48,9 +53,27 @@ export const LABEL_CAMPO: Record<CampoRegola, string> = {
   fascia_oraria: "Fascia oraria",
   is_treno_garantito_feriale: "Treno garantito (feriale)",
   is_treno_garantito_festivo: "Treno garantito (festivo)",
-  codice_linea: "Codice linea (avanzato)",
+  codice_linea: "Codice servizio (avanzato)",
   numero_treno: "Numero treno (avanzato)",
   rete: "Rete (avanzato)",
+};
+
+/**
+ * Hint sotto-label di ogni campo (mostrato in piccolo sotto la select
+ * "Campo" come spiegazione contestuale per il pianificatore).
+ */
+export const HINT_CAMPO: Partial<Record<CampoRegola, string>> = {
+  direttrice: "Es. TIRANO-SONDRIO-LECCO-MILANO. Puoi sceglierne più di una.",
+  categoria: "Es. REG, RE, R, MET, S, INT.",
+  codice_origine: "Codice stazione di partenza della corsa.",
+  codice_destinazione: "Codice stazione di arrivo della corsa.",
+  giorno_tipo: "Tipo di giorno calendario (feriale/sabato/festivo).",
+  fascia_oraria: "Filtra le corse per orario di partenza.",
+  is_treno_garantito_feriale: "Servizi minimi garantiti nei feriali.",
+  is_treno_garantito_festivo: "Servizi minimi garantiti nei festivi.",
+  codice_linea: "Codice di servizio commerciale: S1, RE3, R23…",
+  numero_treno: "Numero treno PdE (es. 2413).",
+  rete: "Rete RFI/concessa (avanzato).",
 };
 
 export const LABEL_OP: Record<string, string> = {

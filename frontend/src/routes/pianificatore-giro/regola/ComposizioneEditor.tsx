@@ -7,9 +7,27 @@ import { Select } from "@/components/ui/Select";
 import { useMateriali } from "@/hooks/useAnagrafiche";
 import { makeRowId, type ComposizioneRow } from "@/lib/regola/schema";
 
+/**
+ * Modo di composizione (Sprint 7.6 MR 1):
+ *
+ * - **singola**: 1 unità del materiale macro (es. 1×ETR526). UI =
+ *   un solo dropdown materiale, `n_pezzi` nascosto (sempre 1).
+ * - **doppia**: 2 unità accoppiate (anche di tipo diverso, es.
+ *   ETR526+ETR425). UI = due dropdown materiale, `n_pezzi` nascosto
+ *   (sempre 1 per ciascuno). Per la manutenzione i km vengono contati
+ *   per ognuno dei due materiali.
+ * - **personalizzata**: composizione libera (locomotiva + N carrozze
+ *   tipo E464+5×Vivalto, o accoppiamenti speciali non ancora censiti).
+ *   UI = N righe, `n_pezzi` editabile. Bypassa il check
+ *   `materiale_accoppiamento_ammesso` (= il flag backend
+ *   `is_composizione_manuale=true`).
+ */
+export type ModoComposizione = "singola" | "doppia" | "personalizzata";
+
 interface ComposizioneEditorProps {
   composizione: ComposizioneRow[];
   onChange: (composizione: ComposizioneRow[]) => void;
+  modo: ModoComposizione;
   disabled?: boolean;
 }
 
@@ -20,13 +38,16 @@ interface ComposizioneEditorProps {
  * permettere la rimozione e ricostruzione fluida — il submit del
  * RegolaEditor garantisce length >= 1).
  *
- * Esempi:
- *   [{ETR526, 1}, {ETR425, 1}]  composizione doppia (Mi.Centrale-Tirano)
- *   [{ATR803, 1}]                singolo materiale (Cremona)
+ * Esempi (convenzione: 1 unità = 1 riga con n_pezzi=1):
+ *   [{ETR526, 1}, {ETR425, 1}]              doppia mista (526+425)
+ *   [{ATR803, 1}]                            singola (Cremona)
+ *   [{ETR526, 1}, {ETR526, 1}]              doppia uguale (526+526)
+ *   [{E464, 1}, {Vivalto, 5}]               personalizzata (loco + 5 carrozze)
  */
 export function ComposizioneEditor({
   composizione,
   onChange,
+  modo,
   disabled = false,
 }: ComposizioneEditorProps) {
   const materialiQuery = useMateriali();
@@ -54,6 +75,19 @@ export function ComposizioneEditor({
     ]);
   };
 
+  // Etichette dei dropdown: per Doppia distinguiamo "Materiale 1" / "Materiale 2".
+  const labelMateriale = (idx: number): string => {
+    if (modo === "doppia") return idx === 0 ? "Materiale 1" : "Materiale 2";
+    return "Materiale";
+  };
+
+  // In Singola/Doppia n_pezzi è sempre 1 e l'input non è editabile.
+  // In Personalizzata l'utente può alzare la quantità (carrozze, ecc).
+  const showPezzi = modo === "personalizzata";
+
+  // In Singola/Doppia la struttura è fissa: niente bottone Aggiungi/Rimuovi.
+  const allowStructEdit = modo === "personalizzata";
+
   return (
     <div className="flex flex-col gap-3">
       {composizione.length === 0 && (
@@ -67,8 +101,10 @@ export function ComposizioneEditor({
           key={row.id}
           className="grid grid-cols-12 items-end gap-2 rounded-md border border-border bg-white p-3"
         >
-          <div className="col-span-7 flex flex-col gap-1">
-            {idx === 0 && <Label className="text-xs">Materiale</Label>}
+          <div className={showPezzi ? "col-span-7 flex flex-col gap-1" : "col-span-11 flex flex-col gap-1"}>
+            {(idx === 0 || modo === "doppia") && (
+              <Label className="text-xs">{labelMateriale(idx)}</Label>
+            )}
             <Select
               value={row.materiale_tipo_codice}
               disabled={disabled}
@@ -99,45 +135,58 @@ export function ComposizioneEditor({
             </Select>
           </div>
 
-          <div className="col-span-4 flex flex-col gap-1">
-            {idx === 0 && <Label className="text-xs">N. pezzi</Label>}
-            <Input
-              type="number"
-              min={1}
-              value={row.n_pezzi}
-              disabled={disabled}
-              onChange={(e) =>
-                updateRow(idx, {
-                  n_pezzi: Math.max(1, Number.parseInt(e.target.value, 10) || 1),
-                })
-              }
-            />
-          </div>
+          {showPezzi && (
+            <div className="col-span-4 flex flex-col gap-1">
+              {idx === 0 && <Label className="text-xs">N. pezzi</Label>}
+              <Input
+                type="number"
+                min={1}
+                value={row.n_pezzi}
+                disabled={disabled}
+                onChange={(e) =>
+                  updateRow(idx, {
+                    n_pezzi: Math.max(1, Number.parseInt(e.target.value, 10) || 1),
+                  })
+                }
+              />
+            </div>
+          )}
 
-          <div className="col-span-1 flex justify-end">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => removeRow(idx)}
-              disabled={disabled}
-              aria-label="Rimuovi materiale"
-              title="Rimuovi materiale"
-            >
-              <Trash2 className="h-4 w-4" aria-hidden />
-            </Button>
-          </div>
+          {allowStructEdit && (
+            <div className="col-span-1 flex justify-end">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => removeRow(idx)}
+                disabled={disabled}
+                aria-label="Rimuovi materiale"
+                title="Rimuovi materiale"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden />
+              </Button>
+            </div>
+          )}
         </div>
       ))}
 
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={addRow}
-        disabled={disabled || materiali.length === 0}
-        className="self-start"
-      >
-        <Plus className="mr-1.5 h-4 w-4" aria-hidden /> Aggiungi materiale
-      </Button>
+      {allowStructEdit && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={addRow}
+          disabled={disabled || materiali.length === 0}
+          className="self-start"
+        >
+          <Plus className="mr-1.5 h-4 w-4" aria-hidden /> Aggiungi materiale
+        </Button>
+      )}
+
+      {modo === "doppia" && (
+        <p className="text-xs text-muted-foreground">
+          Composizione doppia: il chilometraggio sarà contato per ognuno dei due materiali (utile
+          per la pianificazione manutenzione).
+        </p>
+      )}
     </div>
   );
 }

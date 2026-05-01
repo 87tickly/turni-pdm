@@ -1,5 +1,6 @@
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 
+import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
@@ -9,6 +10,7 @@ import {
   CAMPI_REGOLA,
   CATEGORIE_COMUNI,
   GIORNI_TIPO,
+  HINT_CAMPO,
   LABEL_CAMPO,
   LABEL_OP,
   OP_PER_CAMPO,
@@ -47,7 +49,10 @@ export function FiltriEditor({ filtri, onChange, disabled = false }: FiltriEdito
   };
 
   const addRow = () => {
-    onChange([...filtri, { id: makeRowId(), campo: "direttrice", op: "eq", valore: "" }]);
+    // Default op = "in" (multi-valore): scelta UX Sprint 7.6 MR 1, il
+    // pianificatore tipicamente vuole una regola che copra più linee
+    // contemporaneamente (es. tutte le linee di una sede).
+    onChange([...filtri, { id: makeRowId(), campo: "direttrice", op: "in", valore: "" }]);
   };
 
   return (
@@ -67,72 +72,88 @@ export function FiltriEditor({ filtri, onChange, disabled = false }: FiltriEdito
 
       {filtri.map((row, idx) => {
         const opsAvailable = OP_PER_CAMPO[row.campo];
+        const hint = HINT_CAMPO[row.campo];
         return (
           <div
             key={row.id}
-            className="grid grid-cols-12 items-end gap-2 rounded-md border border-border bg-white p-3"
+            className="flex flex-col gap-2 rounded-md border border-border bg-white p-3"
           >
-            <div className="col-span-4 flex flex-col gap-1">
-              {idx === 0 && <Label className="text-xs">Campo</Label>}
-              <Select
-                value={row.campo}
-                disabled={disabled}
-                onChange={(e) => {
-                  const nuovoCampo = e.target.value as CampoRegola;
-                  const opCompat = OP_PER_CAMPO[nuovoCampo];
-                  updateRow(idx, {
-                    campo: nuovoCampo,
-                    op: opCompat[0] ?? "eq",
-                    valore: "",
-                  });
-                }}
-              >
-                {CAMPI_REGOLA.map((c) => (
-                  <option key={c} value={c}>
-                    {LABEL_CAMPO[c]}
-                  </option>
-                ))}
-              </Select>
-            </div>
+            <div className="grid grid-cols-12 items-end gap-2">
+              <div className="col-span-4 flex flex-col gap-1">
+                {idx === 0 && <Label className="text-xs">Campo</Label>}
+                <Select
+                  value={row.campo}
+                  disabled={disabled}
+                  onChange={(e) => {
+                    const nuovoCampo = e.target.value as CampoRegola;
+                    const opCompat = OP_PER_CAMPO[nuovoCampo];
+                    // Cambio campo: preserva l'op corrente se è compatibile
+                    // col nuovo campo (così non sovrascriviamo una scelta
+                    // esplicita dell'utente, tipo "eq" su una regola
+                    // caricata dal backend). Altrimenti preferisci "in"
+                    // come default multi-valore.
+                    const opPreferito = opCompat.includes(row.op)
+                      ? row.op
+                      : opCompat.includes("in")
+                        ? "in"
+                        : (opCompat[0] ?? "eq");
+                    updateRow(idx, {
+                      campo: nuovoCampo,
+                      op: opPreferito,
+                      valore: "",
+                    });
+                  }}
+                >
+                  {CAMPI_REGOLA.map((c) => (
+                    <option key={c} value={c}>
+                      {LABEL_CAMPO[c]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
 
-            <div className="col-span-3 flex flex-col gap-1">
-              {idx === 0 && <Label className="text-xs">Operatore</Label>}
-              <Select
-                value={row.op}
-                disabled={disabled || opsAvailable.length === 1}
-                onChange={(e) => updateRow(idx, { op: e.target.value, valore: "" })}
-              >
-                {opsAvailable.map((op) => (
-                  <option key={op} value={op}>
-                    {LABEL_OP[op] ?? op}
-                  </option>
-                ))}
-              </Select>
-            </div>
+              <div className="col-span-3 flex flex-col gap-1">
+                {idx === 0 && <Label className="text-xs">Operatore</Label>}
+                <Select
+                  value={row.op}
+                  disabled={disabled || opsAvailable.length === 1}
+                  onChange={(e) => updateRow(idx, { op: e.target.value, valore: "" })}
+                >
+                  {opsAvailable.map((op) => (
+                    <option key={op} value={op}>
+                      {LABEL_OP[op] ?? op}
+                    </option>
+                  ))}
+                </Select>
+              </div>
 
-            <div className="col-span-4 flex flex-col gap-1">
-              {idx === 0 && <Label className="text-xs">Valore</Label>}
-              <ValueInput
-                row={row}
-                disabled={disabled}
-                direttrici={direttriciQuery.data ?? []}
-                stazioni={(stazioniQuery.data ?? []).map((s) => s.codice)}
-                onChange={(valore) => updateRow(idx, { valore })}
-              />
-            </div>
+              <div className="col-span-4 flex flex-col gap-1">
+                {idx === 0 && <Label className="text-xs">Valore</Label>}
+                <ValueInput
+                  row={row}
+                  disabled={disabled}
+                  direttrici={direttriciQuery.data ?? []}
+                  stazioni={(stazioniQuery.data ?? []).map((s) => s.codice)}
+                  onChange={(valore) => updateRow(idx, { valore })}
+                />
+              </div>
 
-            <div className="col-span-1 flex justify-end">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => removeRow(idx)}
-                disabled={disabled}
-                aria-label="Rimuovi filtro"
-                title="Rimuovi filtro"
-              >
-                <Trash2 className="h-4 w-4" aria-hidden />
-              </Button>
+              <div className="col-span-1 flex justify-end">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => removeRow(idx)}
+                  disabled={disabled}
+                  aria-label="Rimuovi filtro"
+                  title="Rimuovi filtro"
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden />
+                </Button>
+              </div>
             </div>
+            {hint !== undefined && (
+              <p className="text-xs text-muted-foreground">{hint}</p>
+            )}
           </div>
         );
       })}
@@ -162,6 +183,12 @@ interface ValueInputProps {
  * Widget del valore: cambia in base a (campo, op). Sempre legge/scrive
  * stringhe — il parsing finale (CSV → array, "true" → bool) avviene a
  * submit time.
+ *
+ * Per gli enumerati con op="in" (linea/categoria/giorno_tipo) usiamo
+ * un pattern multi-select con chips: l'utente sceglie una opzione alla
+ * volta da un dropdown e i selezionati appaiono come badge sopra (con
+ * X per rimuoverli). Internamente la stringa è sempre CSV — il parsing
+ * resta in `rowToPayload`.
  */
 function ValueInput({ row, disabled, direttrici, stazioni, onChange }: ValueInputProps) {
   const { campo, op } = row;
@@ -181,7 +208,20 @@ function ValueInput({ row, disabled, direttrici, stazioni, onChange }: ValueInpu
     );
   }
 
-  // Direttrice singola: dropdown da anagrafica
+  // Linea (= direttrice backend) multi: chips + dropdown.
+  if (campo === "direttrice" && op === "in") {
+    return (
+      <MultiValueChips
+        value={row.valore}
+        disabled={disabled}
+        options={direttrici}
+        placeholder="+ aggiungi linea…"
+        onChange={onChange}
+      />
+    );
+  }
+
+  // Linea singola: dropdown.
   if (campo === "direttrice" && op === "eq") {
     return (
       <Select value={row.valore} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
@@ -209,6 +249,19 @@ function ValueInput({ row, disabled, direttrici, stazioni, onChange }: ValueInpu
     );
   }
 
+  // Stazione multi: chips
+  if ((campo === "codice_origine" || campo === "codice_destinazione") && op === "in") {
+    return (
+      <MultiValueChips
+        value={row.valore}
+        disabled={disabled}
+        options={stazioni}
+        placeholder="+ aggiungi stazione…"
+        onChange={onChange}
+      />
+    );
+  }
+
   // Giorno tipo singolo
   if (campo === "giorno_tipo" && op === "eq") {
     return (
@@ -220,6 +273,33 @@ function ValueInput({ row, disabled, direttrici, stazioni, onChange }: ValueInpu
           </option>
         ))}
       </Select>
+    );
+  }
+
+  // Giorno tipo multi: chips
+  if (campo === "giorno_tipo" && op === "in") {
+    return (
+      <MultiValueChips
+        value={row.valore}
+        disabled={disabled}
+        options={[...GIORNI_TIPO]}
+        placeholder="+ aggiungi giorno…"
+        onChange={onChange}
+      />
+    );
+  }
+
+  // Categoria multi: chips con suggerimenti comuni
+  if (campo === "categoria" && op === "in") {
+    return (
+      <MultiValueChips
+        value={row.valore}
+        disabled={disabled}
+        options={[...CATEGORIE_COMUNI]}
+        placeholder="+ aggiungi categoria…"
+        allowCustom
+        onChange={onChange}
+      />
     );
   }
 
@@ -276,5 +356,106 @@ function ValueInput({ row, disabled, direttrici, stazioni, onChange }: ValueInpu
       onChange={(e) => onChange(e.target.value)}
       placeholder={isList ? "Valore1, Valore2, …" : "Valore"}
     />
+  );
+}
+
+interface MultiValueChipsProps {
+  value: string;
+  disabled: boolean;
+  options: string[];
+  placeholder: string;
+  /** Se true, accetta valori non presenti in `options` (input testo). */
+  allowCustom?: boolean;
+  onChange: (csv: string) => void;
+}
+
+/**
+ * Multi-select compact: chips per i valori già scelti (rimovibili) +
+ * dropdown a tendina con le opzioni residue. Internamente la stringa
+ * è CSV per uniformità con il resto del sistema filtri.
+ */
+function MultiValueChips({
+  value,
+  disabled,
+  options,
+  placeholder,
+  allowCustom = false,
+  onChange,
+}: MultiValueChipsProps) {
+  const selected = value
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const remaining = options.filter((o) => !selected.includes(o));
+
+  const removeAt = (idx: number) => {
+    const next = selected.filter((_, i) => i !== idx);
+    onChange(next.join(", "));
+  };
+
+  const addValue = (v: string) => {
+    const trimmed = v.trim();
+    if (trimmed.length === 0 || selected.includes(trimmed)) return;
+    // La virgola e' separatore CSV: rifiutiamo valori che la contengono
+    // per evitare che vengano riinterpretati come piu' valori al
+    // prossimo `split(",")`. Caso reale solo per `allowCustom` (es.
+    // categorie inserite a mano), gli enumerated sono safe.
+    if (trimmed.includes(",")) return;
+    onChange([...selected, trimmed].join(", "));
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {selected.map((v, i) => (
+            <Badge key={`${v}-${i}`} variant="secondary" className="gap-1 pr-1">
+              <span className="font-normal">{v}</span>
+              {!disabled && (
+                <button
+                  type="button"
+                  onClick={() => removeAt(i)}
+                  className="ml-0.5 rounded-full p-0.5 hover:bg-muted-foreground/20"
+                  aria-label={`Rimuovi ${v}`}
+                  title={`Rimuovi ${v}`}
+                >
+                  <X className="h-3 w-3" aria-hidden />
+                </button>
+              )}
+            </Badge>
+          ))}
+        </div>
+      )}
+      <Select
+        value=""
+        disabled={disabled || (remaining.length === 0 && !allowCustom)}
+        onChange={(e) => {
+          if (e.target.value !== "") {
+            addValue(e.target.value);
+          }
+        }}
+      >
+        <option value="">{placeholder}</option>
+        {remaining.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </Select>
+      {allowCustom && (
+        <Input
+          placeholder="Oppure digita e premi Invio…"
+          disabled={disabled}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              const v = (e.target as HTMLInputElement).value;
+              addValue(v);
+              (e.target as HTMLInputElement).value = "";
+            }
+          }}
+        />
+      )}
+    </div>
   );
 }

@@ -10,6 +10,135 @@
 
 ---
 
+## 2026-05-02 (68) — Sprint 7.6 MR 1: UX modal regola di assegnazione
+
+### Contesto
+
+Smoke utente Sprint 7.3: durante la creazione di una regola dal
+Pianificatore Giro Materiale (modal "Nuova regola di assegnazione")
+sono emersi 3 problemi UX (punti 3, 4, 5 del piano Sprint 7.6):
+
+- **Filtri**: il dropdown "Direttrice" mostrava 39 valori con label
+  poco intuitivo; mancava il default multi-valore (l'utente vuole
+  tipicamente coprire più linee in una stessa regola, es.
+  "Pavia-Vercelli + Pavia-Alessandria" nello stesso giro materiale).
+  La memoria precedente (`feedback_filtri_regola_direttrice.md` del
+  2026-04-27) andava nella direzione opposta — l'utente ha esplicitamente
+  invertito la decisione: "le direttrici sono troppe e inutili, basta
+  solo la linea".
+- **Composizione**: il campo "N. pezzi" come input numerico libero era
+  poco chiaro per i materiali macro (ETR526, ETR421, ATR803…) dove
+  l'unica scelta sensata è Singola/Doppia. Il caso E464+carrozze
+  (composizione MD: 1 loco + 5/6 carrozze) restava un edge non gestito.
+- **Tooltip**: campo "Priorità (0-100)" senza spiegazione;
+  checkbox "Composizione manuale (override del builder automatico)"
+  non spiegava cosa significhi attivarla.
+
+Sprint 7.6 MR 1 è frontend-only, low-risk, no schema/API changes:
+solo refactor del modal regola.
+
+### Modifiche
+
+**Frontend** (4 file modificati, +461 / -129 righe):
+
+- `src/lib/regola/schema.ts`:
+  - `LABEL_CAMPO.direttrice = "Linea"` (rinomina UI; campo backend
+    invariato)
+  - `LABEL_CAMPO.codice_linea = "Codice servizio (avanzato)"` (era
+    "Codice linea (avanzato)" → ambiguo con la nuova "Linea")
+  - Nuovo export `HINT_CAMPO`: testo helper sotto la select Campo
+    per ognuno degli 11 campi (es. "Es. TIRANO-SONDRIO-LECCO-MILANO.
+    Puoi sceglierne più di una.")
+- `src/routes/pianificatore-giro/regola/FiltriEditor.tsx`:
+  - Default op nuova riga = "in" (multi-valore) invece di "eq"
+  - Cambio campo: preserva op corrente se compatibile col nuovo
+    campo (fix Fausto Finding 1 — non sovrascrive scelta esplicita
+    dell'utente come "eq" su regole caricate dal backend)
+  - Nuovo widget `MultiValueChips` per gli enumerated con op="in"
+    (linea, categoria, giorno_tipo, stazioni): chips per i selezionati
+    con X di rimozione + dropdown per l'aggiunta. Internamente la
+    stringa resta CSV (compatibile con `rowToPayload`)
+  - `MultiValueChips.addValue` rifiuta valori contenenti virgola
+    (fix Fausto Finding 3 — evita rottura del CSV per categorie
+    custom)
+  - Hint contestuale (`HINT_CAMPO`) mostrato sotto ogni riga filtro
+- `src/routes/pianificatore-giro/regola/ComposizioneEditor.tsx`:
+  - Nuovo prop `modo: "singola" | "doppia" | "personalizzata"`
+  - **Singola**: 1 dropdown materiale, `n_pezzi` nascosto (sempre 1),
+    no bottone Aggiungi/Rimuovi
+  - **Doppia**: 2 dropdown materiali ("Materiale 1" / "Materiale 2"),
+    `n_pezzi` nascosto, struttura fissa, info "km contati per ognuno
+    dei due" (utile per pianificazione manutenzione)
+  - **Personalizzata**: comportamento storico (N righe libere,
+    `n_pezzi` editabile per E464+carrozze)
+- `src/routes/pianificatore-giro/regola/RegolaEditor.tsx`:
+  - State `modo` con default "singola"
+  - Toggle radio (3 button) "Singola | Doppia | Personalizzata" con
+    hint contestuale visibile sotto
+  - `adattaComposizioneAlModo()`: sincronizza `composizione[]` quando
+    cambia modo (preserva scelte esistenti dove possibile)
+  - Submit: `is_composizione_manuale = (modo === "personalizzata")` —
+    coerenza payload backend, niente checkbox separato (il flag è
+    semantico equivalente alla modalità Personalizzata)
+  - Tooltip Priorità con icona `HelpCircle` + `title` HTML +
+    `sr-only` per screen reader
+- `src/routes/pianificatore-giro/ProgrammaDettaglioRoute.test.tsx`:
+  - Aggiornato matcher `/Direttrice/i` → `/^Linea$/` per riflettere
+    la rinomina label
+
+### Review FAUSTO
+
+Lanciata via API xAI `grok-code-fast-1` su tutto il diff
+(9.674 token in, 334 out, ~1¢ stimato). Trovati 6 finding:
+
+| ID | Severità | Status |
+|----|-----------|--------|
+| F1 | CRITICO   | ✅ Fix applicato (preserva op compatibile) |
+| F2 | CRITICO   | ⏸ Accettato per MR1: troncamento righe da Personalizzata→Singola è fastidioso ma non perdita dato persistito (regola in editing locale) |
+| F3 | IMPORTANTE | ✅ Fix applicato (rifiuta virgole in custom value) |
+| F4 | IMPORTANTE | ⏸ A11y keyboard nav radio modo (Arrow keys + roving tabindex): improvement futuro |
+| F5 | MINORE    | ⏸ aria-describedby vs sr-only sul tooltip Priorità |
+| F6 | MINORE    | ⏸ Validazione custom values fuori lista in MultiValueChips |
+
+F2/F4/F5/F6 tracciati come improvement Sprint successivo, non
+blocker MR1.
+
+### Verifiche
+
+- `pnpm typecheck`: ✅ clean
+- `pnpm test --run`: ✅ **53 passed** (baseline 53, regressioni 0)
+- `pnpm build` (Vite production): ✅ 1757 modules, 391KB bundle
+  (113KB gzip), 1.71s
+- Verifica visiva runtime: NON eseguita via preview server interno
+  (CORS backend ammette solo `localhost:5173`; il preview avviato
+  su 5174 viene bloccato). HMR del dev server utente ha già preso
+  le modifiche — verifica visiva delegata all'utente sul suo browser.
+
+### Memoria aggiornata
+
+- `feedback_filtri_regola_direttrice.md`: invertita la regola
+  precedente (Direttrice promossa, codice_linea avanzato, default eq)
+  → nuova (Linea = direttrice rinominata, default in multi-valore,
+  codice_linea diventa "Codice servizio").
+
+### Stato Sprint 7.6
+
+- ✅ MR 1 chiuso (questa entry).
+- ⏸ MR 2: dato sedi (FIO=MILANO_CERTOSA, NOV multi-stazione
+  Cadorna+Bovisa+Novate+Saronno) — DB-only, low-risk.
+- ⏸ MR 3: genera-giri cumulativo (rimuovi force globale, scoping
+  per (programma, località)) + riepilogo km giornata — backend,
+  più invasivo.
+
+### Prossimo step
+
+MR 2 (dato sedi). Verificare prima il valore corrente di
+`stazione_collegata_codice` per ogni località di Trenord, poi
+aggiornare via SQL/migration aggiuntiva e popolare
+`localita_stazione_vicina` per NOV (via `seed_whitelist_e_accoppiamenti.py`).
+
+---
+
 ## 2026-05-01 (67) — INCIDENT: PdE Trenord cancellato da pytest, recuperato + fix preventivo
 
 ### Contesto
