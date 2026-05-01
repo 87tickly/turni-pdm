@@ -10,6 +10,100 @@
 
 ---
 
+## 2026-05-01 (67) — INCIDENT: PdE Trenord cancellato da pytest, recuperato + fix preventivo
+
+### Contesto
+
+Durante l'indagine dei 3 fail pytest pre-esistenti (entry 63), ho
+lanciato la suite completa con `uv run pytest --tb=line`. Il modulo
+`tests/test_pde_importer_db.py` ha un fixture `_wipe_corse` autouse
+che cancella TUTTE le corse/turni/giri/programmi/stazioni del DB
+**senza WHERE**:
+
+```python
+await session.execute(text("DELETE FROM turno_pdc"))
+await session.execute(text("DELETE FROM giro_materiale"))
+await session.execute(text("DELETE FROM programma_materiale"))
+await session.execute(text("DELETE FROM corsa_commerciale"))
+await session.execute(text("DELETE FROM stazione"))
+```
+
+Risultato: distrutte **6.536 corse PdE Trenord 2025-2026** (importate
+dall'utente nelle sessioni precedenti, dato persistente sul volume
+Docker `colazione_pgdata`) + i programmi materiale dell'utente (incluso
+"hlkbljhkb" id 2918 che l'utente aveva appena creato per smoke
+dell'UI Sprint 7.3). Errore mio per non aver runnato pytest con
+`SKIP_DB_TESTS=1` o protezione equivalente.
+
+Confermato durante smoke utente sull'UI: dopo "Genera giri" il
+backend ritornava `n_giri_creati=0, n_corse_processate=0` perché non
+c'erano corse in DB. Conferma via SQL: `COUNT(*) FROM corsa_commerciale = 0`.
+
+### Recupero
+
+- File PdE sorgente intatto in
+  `backend/data/pde-input/All.1A5_14dic2025-12dic2026_TRENI e BUS_Rev5_RL.xlsx`
+  (5.5 MB, copia dell'utente).
+- CLI re-import:
+
+```bash
+cd backend
+PYTHONPATH=src uv run python -m colazione.importers.pde_importer \
+  --file "data/pde-input/All.1A5_14dic2025-12dic2026_TRENI e BUS_Rev5_RL.xlsx" \
+  --azienda trenord
+```
+
+Output: `Run ID 695: total=6536 (kept=0 create=6536 delete=0)` in
+22.3s. **PdE recuperato integralmente**. Verificato:
+`COUNT(*) FROM corsa_commerciale WHERE azienda_id = 2 = 6536`.
+
+### Fix preventivo
+
+`tests/test_pde_importer_db.py`: aggiunta doppia guardia `pytestmark`:
+
+1. `SKIP_DB_TESTS=1` → skip universale (esistente)
+2. **Nuova**: `ALLOW_DESTRUCTIVE_DB_TESTS != "1"` → skip per default,
+   protegge il DB di sviluppo. Per eseguire il test in CI o su DB
+   temporanei, settare la variabile esplicitamente.
+
+Docstring aggiornata con avvertimento ⚠️ TEST DISTRUTTIVO ⚠️ e
+istruzioni d'uso. Il test resta funzionalmente identico, solo
+protetto per default.
+
+### Verifiche
+
+- Suite pytest dopo il fix: ✅ **433 passed, 12 skipped in 37.27s**
+  (12 skip = 11 nuovi `test_pde_importer_db` + 1 storico)
+- `COUNT(*) FROM corsa_commerciale` post-suite: ✅ **6.536 (intatto)**
+- File PdE volume Docker: ✅ persistente
+
+### Danno collaterale residuo
+
+- **Programmi utente cancellati**: programma 2918 "hlkbljhkb" creato
+  dall'utente sull'UI per smoke 7.3 è perso. Resta solo
+  "Test Trenord 2026" id 3090 stato `archiviato`. Va ricreato manualmente
+  per smoke (l'utente ha scelto "ricreo io via API" nella conversazione).
+
+### Lessons learned
+
+1. Mai runnare suite pytest completa su DB di sviluppo con dati
+   reali senza guardia esplicita.
+2. I test con `_wipe_*` senza WHERE sono tossici per qualsiasi DB
+   non-effimero. Fix: convertire a wipe scoped (`WHERE LIKE 'TEST_%'`)
+   o guardia env var (questo MR).
+3. `test_persister.py` ha già wipe scoped (`WHERE LIKE 'TEST_%'`).
+   `test_genera_giri_api.py` idem (fix applicato in entry 63). Solo
+   `test_pde_importer_db.py` aveva il pattern distruttivo.
+
+### Prossimo step
+
+- Ricreare programma di smoke via API (admin) per provare flow
+  "Genera giri" → giri persistiti → "Genera turno PdC" → turno
+  visibile in dashboard PIANIFICATORE_PDC (Sprint 7.3 chiuso ma non
+  ancora smoke-ato runtime su dati reali post-MR 4).
+
+---
+
 ## 2026-05-01 (66) — Sprint 7.3 MR 4: validazioni live + pannello vincoli ciclo — SPRINT 7.3 CHIUSO
 
 ### Contesto

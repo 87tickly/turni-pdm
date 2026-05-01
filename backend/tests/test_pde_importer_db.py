@@ -3,8 +3,27 @@
 Richiede Postgres locale via `docker compose up -d db` + migrazioni
 applicate (azienda 'trenord' seed + 0004 row_hash).
 
-Set `SKIP_DB_TESTS=1` per saltare. Usa la fixture canonica
-`tests/fixtures/pde_sample.xlsx` (38 righe Trenord).
+⚠️ TEST DISTRUTTIVO ⚠️
+
+Il `_wipe_corse` autouse cancella **TUTTE** le corse, turni, giri,
+programmi, stazioni del DB (no WHERE filtrante). È stato pensato per
+un DB di CI temporaneo, ma su un DB di sviluppo con dati reali (es.
+PdE Trenord 2025-2026 importato dall'utente, 6.536 corse persistenti
+sul volume Docker `colazione_pgdata`) **distrugge i dati di lavoro**.
+
+Per questa ragione, dal 2026-05-01 (entry 67) il modulo è skippato di
+default. Per eseguirlo:
+
+    ALLOW_DESTRUCTIVE_DB_TESTS=1 uv run pytest tests/test_pde_importer_db.py
+
+Settare la variabile **solo** in CI o su DB temporanei usa-e-getta.
+Mai su DB di sviluppo con dati di lavoro.
+
+Set `SKIP_DB_TESTS=1` per saltare anche se la variabile sopra è
+attiva (override di emergenza).
+
+Usa la fixture canonica `tests/fixtures/pde_sample.xlsx` (38 righe
+Trenord).
 
 Coverage del nuovo modello "ogni riga PdE = una riga DB":
 - **No-train-left-behind**: COUNT(*) DB = righe lette dal file (38)
@@ -33,10 +52,26 @@ from colazione.models.corse import (
     CorsaImportRun,
 )
 
-pytestmark = pytest.mark.skipif(
-    os.getenv("SKIP_DB_TESTS") == "1",
-    reason="DB not configured for tests",
-)
+# Doppia guardia:
+# 1. SKIP_DB_TESTS=1 → skip universale (no DB, es. unit-only run)
+# 2. Default (ALLOW_DESTRUCTIVE_DB_TESTS != "1") → skip per
+#    proteggere dati di sviluppo. Vedi docstring del modulo per
+#    quando attivare il flag.
+pytestmark = [
+    pytest.mark.skipif(
+        os.getenv("SKIP_DB_TESTS") == "1",
+        reason="DB not configured for tests",
+    ),
+    pytest.mark.skipif(
+        os.getenv("ALLOW_DESTRUCTIVE_DB_TESTS") != "1",
+        reason=(
+            "Test DISTRUTTIVO: il _wipe_corse cancella TUTTE le corse/"
+            "turni/giri/stazioni del DB senza WHERE. Skip di default per "
+            "proteggere dati di lavoro. Settare ALLOW_DESTRUCTIVE_DB_TESTS=1 "
+            "per eseguirlo (vedi docstring del modulo)."
+        ),
+    ),
+]
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pde_sample.xlsx"
 FIXTURE_N_ROWS = 38  # righe nella fixture (ground truth)
