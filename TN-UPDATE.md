@@ -10,6 +10,127 @@
 
 ---
 
+## 2026-05-01 (60) — Code review completa post Sprint 7.4
+
+### Contesto
+
+Review richiesta dall'utente dopo chiusura Sprint 7.4 (entry 59).
+Stato di partenza: 414 test backend + 31 frontend verdi, mypy
+strict clean, smoke end-to-end superato. Niente codice metà-fatto
+da chiudere prima — i residui dichiarati in entry 59 sono tutti
+scope futuri o decisioni utente, non debiti da pigrizia.
+
+Scope: tutto il codice del repo. Profondità: ogni finding con
+`file:riga`, motivo, impatto, fix proposto.
+
+### Modifiche
+
+- Letti ~30 file critici: builder PdC + split CV, builder giro +
+  posizionamento + persister, parser PdE + pde_importer, API
+  giri/turni_pdc, auth (tokens/dependencies/password), config,
+  modelli giri/turni_pdc, migration 0010, test split_cv, frontend
+  turniPdc.ts, sezioni rilevanti NORMATIVA-PDC.md.
+- Mappato il repo: 50 source backend, 27 test (415 funzioni
+  `test_*`), 60 ts/tsx frontend, 11 migrazioni, 15 doc.
+- Confronto incrociato codice ↔ normativa per CV (§5/§9.2),
+  preriscaldo (§3.3, §8.5), cap prestazione (§3.1), accessori
+  (§3.4).
+- Verifica seed Trenord: `MORTARA` presente, `TIRANO` non in
+  seed 0002 (potenziale mismatch del set hardcoded).
+- Output: `docs/CODE-REVIEW-2026-05-01.md` (~700 righe).
+
+### Findings
+
+**6 critici**:
+
+1. **C1** — `builder_pdc/builder.py:528` anti-rigenerazione
+   turni PdC fa full table scan in-memory + filtro Python su
+   `generation_metadata_json->>'giro_materiale_id'`. Pattern
+   speculare a quello già risolto su `giro_materiale.programma_id`
+   (migration 0010) che però qui non è stato esteso.
+2. **C2** — `builder_pdc/builder.py:295,300` due definizioni
+   divergenti di "notturno": `is_notturno` usa
+   `ora_presa < 5*60` ma `cap_prestazione` usa `60 <= ora_presa < 5*60`.
+   Una giornata che parte fra 00:00 e 00:59 è marcata notturna
+   ma prende cap STANDARD → potenziale falso negativo di
+   violazione + disallineamento con `split_cv._eccede_limiti`.
+3. **C3** — `builder_giro/builder.py:269,295` `_count_giri_esistenti`
+   e `_wipe_giri_programma` continuano a leggere da
+   `generation_metadata_json->>'programma_id'` invece che dalla
+   colonna FK `giro_materiale.programma_id` introdotta da migration
+   0010. Indice `idx_giro_materiale_programma_id` inutilizzato,
+   ridondanza con CASCADE FK.
+4. **C4** — `builder_pdc/builder.py:52` preriscaldo ACCp 80'
+   dic-feb (NORMATIVA §3.3) NON implementato. Il modello ha già
+   `TurnoPdcBlocco.is_accessori_maggiorati` ma il builder lo
+   setta sempre False. Eccezione Fiorenza §8.5 idem. Impatto:
+   prestazione invernale sottostimata di 40' per giornata,
+   split CV potrebbe non scattare quando dovrebbe.
+5. **C5** — `builder_pdc/builder.py:225` ogni gap fra blocchi
+   classificato sempre come `PK`. ACC (gap >65', PdC consegna)
+   e CV no-overhead (gap <65', stazione CV) non implementati.
+   Coerente con scope dichiarato in entry 59 ma con conseguenza:
+   transizioni post-split CV pagano ACCa+ACCp standard invece di
+   CVa+CVp risparmio 80'.
+6. **C6** — `split_cv.py:59` `STAZIONI_CV_DEROGA = {"MORTARA",
+   "TIRANO"}` hardcoded. `MORTARA` confermato nel seed 0002,
+   `TIRANO` NON trovato nel seed: dipende da come è codificato
+   nel DB dopo import PdE. Se non matcha, deroga non si applica
+   sulla direttrice Tirano (caso prioritario da memorie utente).
+
+**11 importanti**: `datetime.utcnow()` deprecated (I1); `assert`
+in produzione (I2); JWT access TTL 72h (I3); `impianto` di
+TurnoPdc popolato col `tipo_materiale` (semantica errata, I4);
+`updated_at` mai aggiornato sui write (I5); filtro pool catene
+con `giorno_tipo='feriale'` hardcoded (I6); `_aggiungi_dormite_fr`
+muta in-place (I7); zero test su `_inserisci_refezione`,
+`_aggiungi_dormite_fr`, `_persisti_un_turno_pdc` (I8); query JSON
+duplicata (I9); `_km_media_annua_giro` usa solo prima corsa per
+giornata (I10); race condition `_next_numero_rientro_sede` (I11).
+
+**7 minori**: package `domain/normativa/__init__.py` vuoto (M1);
+modulo `revisioni` dichiarato ma non usato (M2); cap
+`ciclo_giorni=14` non documentato (M3); truncation silente codice
+turno (M4); smoke 7.4 senza cleanup (M5); `require_role` con
+string match (M6); refresh token senza revoca server-side (M7).
+
+**Verifiche negative significative**: nessuna SQL injection, no
+XSS, FK con `ondelete` esplicito coerente, query batch corrette
+(no N+1), bcrypt cost 12 OWASP-aligned. Solo `jwt_secret` ha
+default debole — accettabile in dev, da imporre via env in prod.
+
+### Stato
+
+Code review chiusa. Documento in `docs/CODE-REVIEW-2026-05-01.md`
+con dettaglio per finding (file:riga, problema, impatto, fix
+proposto, costo stima). Categorizzazione per priorità di chiusura
+in fondo al documento.
+
+**Nessuna modifica al codice** in questo commit: la review è di
+sola analisi. La scelta di quali finding chiudere subito vs
+rinviare resta dell'utente.
+
+### Prossimo step
+
+Decisione utente sull'ordine di chiusura. Cluster proposti:
+
+1. **Cleanup veloce** (<2h totali): I1+I2 mypy/style, C3 FK
+   programma_id, I9 query duplicata, M1+M3+M4+M5 cleanup minori.
+2. **Decisioni con utente** (<1h decisione + fix): C2 cap
+   notturno boundary, C6 verifica codice TIRANO sul DB reale,
+   I3 JWT TTL, I4 semantica `impianto`.
+3. **Strutturali grandi** (1+ gg): C1 FK turno_pdc → giro_materiale,
+   C4 preriscaldo data-aware, C5 ACC/CV no-overhead, I8 test
+   mancanti.
+4. **Post-MVP**: M2, M6, M7.
+
+Opzione alternativa: review indipendente Fausto (Grok) sui 6
+critici prima di applicare i fix, per second opinion (regola 9
+CLAUDE.md). Costo qualche centesimo, vale solo se si vuole una
+verifica esterna prima di toccare il codice.
+
+---
+
 ## 2026-04-30 (59) — Sprint 7.4 MR 4/4: smoke con dati reali — SPRINT CHIUSO
 
 ### Contesto
