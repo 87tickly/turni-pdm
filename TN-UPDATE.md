@@ -10,6 +10,72 @@
 
 ---
 
+## 2026-05-01 (61) — Allineamento CLAUDE.md a stato reale del progetto
+
+### Contesto
+
+Prima di aprire la nuova sessione su Sprint 7.3 (dashboard
+Pianificatore Turno PdC), CLAUDE.md aveva sezioni obsolete che
+avrebbero potuto creare confusione metodologica:
+
+- Tabella "Stato attuale del progetto": dichiarava FASE C "in coda"
+  e FASE D "in coda — solo dopo che C è chiusa", ma in realtà tutti
+  e 7 i doc FASE C esistono già e Sprint 7 (FASE D) è in pieno
+  sviluppo.
+- "Stack tecnologico": diceva "da decidere in STACK-TECNICO.md" ma
+  lo stack è cementato (Python 3.12 + FastAPI + Postgres 16 +
+  React 18 + Vite, ecc.) e c'è codice eseguibile.
+- "Variabili d'ambiente": "da definire" ma esiste
+  `backend/.env.example` con tutte le var.
+- "Riferimenti": mancava `docs/CODE-REVIEW-2026-05-01.md` e
+  `backend/.env.example`.
+
+### Modifiche
+
+`CLAUDE.md`:
+
+- Tabella stato fasi: A/B/C → ✅ chiuse; D → 🔄 in corso.
+- Aggiunta sotto-tabella "Stato Sprint 7" per tracciare
+  esplicitamente cosa è chiuso (7.0, 7.2, 7.4, 7.5) e cosa è
+  pendente (7.3 dashboard PdC, prossimo).
+- Sezione "Documenti FASE C" trasformata da to-do list a
+  riferimento (i 7 doc esistono già).
+- Sezione "Stack tecnologico": rimosso "da decidere", aggiunto
+  riepilogo concreto dello stack effettivo (backend + frontend
+  + auth + infra dev).
+- Sezione "Variabili d'ambiente": rimosso "da definire", aggiunto
+  riferimento a `backend/.env.example` con elenco var principali.
+- Sezione "Convenzioni" → API: rimosso "da formalizzare",
+  rinviato a `docs/STACK-TECNICO.md`.
+- Sezione "Riferimenti": aggiunti `docs/CODE-REVIEW-2026-05-01.md`
+  e `backend/.env.example`.
+
+Aggiunto cenno alla code review (esiste, 24 finding, separata
+dallo sviluppo, decisione utente sull'intercalare cleanup veloci
+vs procedere dritto sullo Sprint 7.3).
+
+### Stato
+
+CLAUDE.md allineato. Glossario, regole 1-9, convenzioni naming
+e tutto il resto invariati. Nuova sessione può partire senza
+intoppi: i pezzi obsoleti che avrebbero generato domande
+"perché dice X quando in realtà è Y?" sono spariti.
+
+### Prossimo step
+
+Aprire nuova sessione su **Sprint 7.3 — Dashboard Pianificatore
+Turno PdC** (apre il 2° ruolo dell'ecosistema).
+
+Riferimenti che la nuova sessione deve consultare per partire:
+
+- `TN-UPDATE.md` entry (60) e (59) per contesto recente
+- `docs/METODO-DI-LAVORO.md` per il framework comportamentale
+- `docs/RUOLI-E-DASHBOARD.md` per la specifica dei 5 ruoli
+- Memorie persistenti (in particolare quelle su preferenze
+  utente e decisioni cementate)
+
+---
+
 ## 2026-05-01 (60) — Code review completa post Sprint 7.4
 
 ### Contesto

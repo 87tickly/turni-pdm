@@ -205,37 +205,86 @@ aver delegato il pensare, fermati e riprendi in mano.
 
 | Fase | Stato | Output |
 |------|-------|--------|
-| **A — Greenfield reset** | ✅ completa (2026-04-25) | Repo pulito, solo dominio + 1 seed |
-| **B — Nuovo CLAUDE.md** | 🔄 in corso | Questo file |
-| **C — Documentazione architetturale** | ⏸️ in coda | 7 documenti da scrivere uno per volta con review utente |
-| **D — Costruzione codice** | ⏸️ in coda | Solo dopo che C è chiusa e validata |
+| **A — Greenfield reset** | ✅ chiusa (2026-04-25) | Repo pulito, solo dominio + 1 seed |
+| **B — CLAUDE.md** | ✅ chiusa (aggiornato 2026-05-01) | Questo file |
+| **C — Documentazione architetturale** | ✅ chiusa | 7 documenti scritti, vedi sotto |
+| **D — Costruzione codice** | 🔄 in corso | Sprint 7 in pieno sviluppo |
 
-### Documenti FASE C da scrivere (ordine)
+### Documenti FASE C (tutti presenti in `docs/`)
 
 1. `docs/VISIONE.md` — cos'è il programma, per chi, cosa risolve
-2. `docs/STACK-TECNICO.md` — backend/frontend/DB/hosting/auth (richiede decisioni utente)
+2. `docs/STACK-TECNICO.md` — stack scelto + env vars
 3. `docs/RUOLI-E-DASHBOARD.md` — 5 dashboard, schermate, permessi
 4. `docs/LOGICA-COSTRUZIONE.md` — algoritmo nativo PdE → giro → PdC
 5. `docs/SCHEMA-DATI-NATIVO.md` — schema SQL concreto (eseguibile)
-6. `docs/IMPORT-PDE.md` — come si legge il PdE Numbers
+6. `docs/IMPORT-PDE.md` — parser PdE Trenord (testo Periodicità = verità)
 7. `docs/PIANO-MVP.md` — primo MVP girabile, ordine costruzione
+
+### Stato Sprint 7 (FASE D)
+
+| Sotto-sprint | Scope | Stato |
+|---|---|---|
+| 7.0 | Lettura `NORMATIVA-PDC.md` + decisioni dominio | ✅ chiuso |
+| 7.2 | Builder turno PdC MVP (entry 42) | ✅ chiuso |
+| 7.3 | Dashboard Pianificatore Turno PdC (2° ruolo) | ⏸️ **prossimo** |
+| 7.4 | Split CV intermedio (4 MR, entry 56-59) | ✅ chiuso 2026-04-30 |
+| 7.5 | Refactor bug 5 + clustering A1 (intercalato) | ✅ chiuso |
+
+Il 1° ruolo (Pianificatore Giro Materiale) è operativo e testato su
+PdE reale Trenord 2025-2026 (6.536 corse importate, run 644). Lo
+Sprint 7.3 apre il 2° ruolo (Pianificatore Turno PdC) con dashboard
+dedicata. Restano poi i ruoli Manutenzione, Personale, PdC finale.
+
+### Code review post Sprint 7.4
+
+`docs/CODE-REVIEW-2026-05-01.md` — 6 critici, 11 importanti, 7 minori
+con `file:riga`/motivo/impatto/fix/costo. Review separata dallo
+sviluppo: niente fix obbligatori prima dello Sprint 7.3, decidi tu
+se intercalare cleanup veloci (C3, I1, I2) o procedere dritto.
 
 ---
 
 ## Stack tecnologico
 
-**Da decidere in `docs/STACK-TECNICO.md`** (FASE C documento 2). Le scelte
-impattano CLAUDE.md, che andrà aggiornato dopo.
+Decisioni cementate (vedi `docs/STACK-TECNICO.md` per il dettaglio):
 
-Il progetto vecchio usava: Python 3.12 + FastAPI + React/TS + shadcn +
-Tauri (pianificato) + SQLite/PostgreSQL + Railway. Possiamo riutilizzare
-parte di queste scelte se rette, ma niente è obbligatorio.
+**Backend**:
+- Python 3.12 + FastAPI (async)
+- SQLAlchemy 2.x async ORM + Alembic migrations
+- PostgreSQL 16 (JSONB per metadata, FK con `ondelete` esplicito)
+- pytest + pytest-asyncio
+- mypy --strict, ruff
+- Package manager: `uv` (lockfile `uv.lock`)
+
+**Frontend**:
+- React 18 + TypeScript + Vite
+- TanStack Query per data fetching
+- shadcn/ui + Tailwind
+- Vitest per test
+- Package manager: `pnpm`
+
+**Auth**: JWT HS256, bcrypt password (cost 12), access+refresh tokens.
+
+**Infra dev**: Postgres in Docker su `localhost:5432`. Niente
+deploy production ancora (MVP locale).
 
 ---
 
 ## Variabili d'ambiente
 
-Da definire in `docs/STACK-TECNICO.md`. Per ora nessuna.
+Riferimento canonico: `backend/.env.example` (copia in `.env.local`).
+
+Variabili principali:
+
+- `DATABASE_URL` — Postgres connection string (psycopg3 driver)
+- `JWT_SECRET` — chiave firma JWT (min 32 char in prod)
+- `JWT_ALGORITHM`, `JWT_ACCESS_TOKEN_EXPIRE_MIN`, `JWT_REFRESH_TOKEN_EXPIRE_DAYS`
+- `ADMIN_DEFAULT_USERNAME`, `ADMIN_DEFAULT_PASSWORD` (bootstrap)
+- `CORS_ALLOW_ORIGINS` (default `http://localhost:5173`)
+- `DEFAULT_AZIENDA` (multi-tenant default, `trenord`)
+
+Caricamento: `pydantic_settings.BaseSettings` da `.env`/`.env.local`,
+case-insensitive, extra ignorati. Vedi `backend/src/colazione/config.py`.
 
 ---
 
@@ -270,7 +319,7 @@ Riassunto rapido. Per il dettaglio normativo vedi `docs/NORMATIVA-PDC.md`.
 - **Naming dominio**: termini italiani (prestazione, condotta, deposito, turno, giro materiale)
 - **Naming codice**: inglese per struttura (routes, services, models), italiano per concetti di dominio (pdc, giro, refezione)
 - **Orari**: minuti dall'inizio giornata (es. 510 = 8h30)
-- **API**: RESTful, prefisso `/api/`, risposte JSON (da formalizzare in STACK-TECNICO.md)
+- **API**: RESTful, prefisso `/api/`, risposte JSON (vedi `docs/STACK-TECNICO.md`)
 
 ---
 
@@ -280,5 +329,7 @@ Riassunto rapido. Per il dettaglio normativo vedi `docs/NORMATIVA-PDC.md`.
 - `docs/METODO-DI-LAVORO.md` — framework comportamentale
 - `docs/NORMATIVA-PDC.md` — fonte verità dominio
 - `docs/MODELLO-DATI.md` v0.5 — modello concettuale
+- `docs/CODE-REVIEW-2026-05-01.md` — review post Sprint 7.4 (24 finding)
+- `backend/.env.example` — template variabili d'ambiente
 - `data/depositi_manutenzione_trenord_seed.json` — anagrafica reale 7 depositi + 1884 pezzi
 - `docs/_archivio/LIVE-COLAZIONE-storico.md` — diario progetto vecchio (memoria storica)
