@@ -10,6 +10,95 @@
 
 ---
 
+## 2026-05-01 (63) — Fix 3 fail pytest pre-esistenti (test setup non isolato dal PdE)
+
+### Contesto
+
+Entry 62 ha chiuso Sprint 7.3 MR 1 con un debt aperto: 3 test FAIL
+pytest visti al 17% della suite, mai identificati per via di output
+bufferizzato. Confermato in entry 62 che NON erano regressioni del
+MR 1 (mai toccato builder/parser/persister), ma il debt andava
+chiuso prima di MR 2 per non sovrapporre futuri fail con
+pre-esistenti.
+
+### Diagnosi
+
+Run live `uv run pytest -v --tb=short -x`: primo fail è
+`test_genera_giri_api.py::test_response_shape_completa`:
+
+```
+assert body["n_giri_creati"] == 1
+E   assert 303 == 1
+```
+
+Il programma di test creato in `_setup_db_completo()` aveva
+`filtri_json=[]` nella regola di assegnazione → matcha TUTTE le
+corse dell'azienda. Il DB di sviluppo contiene il PdE Trenord
+2025-2026 reale (**6.536 corse importate** dall'utente nelle
+sessioni precedenti, dato persistente sul volume Docker
+`colazione_pgdata`). Il `_wipe()` cancella solo
+`corsa_commerciale WHERE numero_treno LIKE 'TEST_%'`, quindi le
+6.536 corse PdE restano in DB.
+
+Quando `genera-giri` parte sulle 6.538 corse (6.536 PdE + 2
+TEST_API_*), il builder produce ~303 giri invece di 1 → assert
+falliscono.
+
+I 3 fail (`FFF`) erano tutti in `test_genera_giri_api.py` perché
+sono i soli test che assertano sul **numero esatto** di giri/corse
+processate. Gli altri test del file (4xx errors, auth, shape) non
+controllano i count quindi passavano comunque.
+
+### Fix
+
+Aggiunto filtro al `_setup_db_completo()` per isolare il
+programma di test dalle corse PdE residue:
+
+```python
+filtri_json=[
+    {
+        "campo": "numero_treno",
+        "op": "in",
+        "valore": ["TEST_API_1", "TEST_API_2"],
+    }
+],
+```
+
+Op `in` per `numero_treno` è già supportato dallo schema
+`FiltroRegola` (vedi `schemas/programmi.py:50` —
+`_CAMPO_OP_COMPATIBILI["numero_treno"] = {"eq", "in"}`).
+
+Commento esplicito nel test che spiega perché il filtro è
+necessario (residuo PdE → builder match-all).
+
+### Verifiche
+
+- `uv run pytest tests/test_genera_giri_api.py -v --tb=line`:
+  ✅ 16 passed in 8.95s (prima del fix il singolo
+  `test_response_shape_completa` ci metteva minuti perché creava
+  303 giri).
+- `uv run pytest --tb=line`: ✅ **421 passed, 1 skipped in
+  26.01s** (era "FFF" al 17% prima del fix, ora suite completa
+  verde).
+
+### Stato
+
+Suite backend completa al verde. Baseline pulita per Sprint 7.3
+MR 2.
+
+### Prossimo step
+
+**Sprint 7.3 MR 2** — vista giri readonly + lista turni cross-giro:
+
+- Backend: `GET /api/turni-pdc?azienda_id=...&impianto=...&stato=...`
+  con paginazione (oggi esiste solo `GET /api/giri/{id}/turni-pdc`
+  per singolo giro)
+- Frontend: schermate 4.2 `/pianificatore-pdc/giri` (sola lettura,
+  riusa la lista del 1° ruolo) e 4.3 `/pianificatore-pdc/turni`
+  (lista turni dell'azienda)
+
+---
+
 ## 2026-05-01 (62) — Sprint 7.3 MR 1: scaffold ruolo PIANIFICATORE_PDC + dashboard home
 
 ### Contesto

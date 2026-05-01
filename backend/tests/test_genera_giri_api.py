@@ -132,10 +132,21 @@ async def _setup_db_completo(stato_programma: str = "attivo") -> int:
         await session.flush()
         prog_id = int(prog.id)
 
+        # NB: il filtro per numero_treno isola il programma di test dalle
+        # corse del PdE reale (6536+) eventualmente residue nel DB di
+        # sviluppo. Senza questo filtro `filtri_json=[]` matcha TUTTE le
+        # corse dell'azienda → builder produce centinaia di giri invece
+        # di 1, e gli assert sui count falliscono.
         session.add(
             ProgrammaRegolaAssegnazione(
                 programma_id=prog_id,
-                filtri_json=[],
+                filtri_json=[
+                    {
+                        "campo": "numero_treno",
+                        "op": "in",
+                        "valore": ["TEST_API_1", "TEST_API_2"],
+                    }
+                ],
                 composizione_json=[{"materiale_tipo_codice": "ALe711", "n_pezzi": 3}],
                 materiale_tipo_codice="ALe711",
                 numero_pezzi=3,
