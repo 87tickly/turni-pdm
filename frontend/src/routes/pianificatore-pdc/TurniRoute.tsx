@@ -130,7 +130,7 @@ export function PianificatorePdcTurniRoute() {
       ) : turniQuery.data !== undefined ? (
         <TurniTable
           turni={turniQuery.data}
-          onOpen={(id) => navigate(`/pianificatore-giro/turni-pdc/${id}`)}
+          onOpen={(id) => navigate(`/pianificatore-pdc/turni/${id}`)}
         />
       ) : null}
     </div>

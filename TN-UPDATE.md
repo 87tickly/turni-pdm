@@ -10,6 +10,84 @@
 
 ---
 
+## 2026-05-01 (65) — Sprint 7.3 MR 3: editor turno PdC sotto path PdC + scrittura ruolo PdC
+
+### Contesto
+
+MR 2 (entry 64) ha popolato la lista turni cross-giro. MR 3 chiude
+il loop di navigazione del 2° ruolo:
+
+1. Click su un turno nella lista → si apre il viewer Gantt **sotto
+   path PdC** (`/pianificatore-pdc/turni/:id`) con back-link
+   coerente verso la lista del 2° ruolo
+2. La generazione turni (`POST /api/giri/:id/genera-turno-pdc`) è
+   ora competenza primaria del PIANIFICATORE_PDC oltre che GIRO
+
+Decisione di design: niente duplicazione del componente Gantt (già
+~350 righe di rendering blocchi/giornate/avvisi). Ho reso path-aware
+il singolo `TurnoPdcDettaglioRoute` esistente e lo riuso sotto
+entrambi i path via re-export.
+
+### Modifiche
+
+**Backend** (1 file):
+
+- `src/colazione/api/turni_pdc.py`:
+  - nuovo alias auth `_authz_write_turni = require_any_role(GIRO, PDC)`
+    con commento esplicito su chi è il "primario" del flusso
+    (PdC) e backward compat (GIRO mantiene il bottone "Genera
+    turno PdC" sull'editor giro)
+  - `genera_turno_pdc_endpoint` (POST `/api/giri/:id/genera-turno-pdc`)
+    cambiato da `_authz` a `_authz_write_turni`
+
+**Frontend** (4 file):
+
+- `routes/pianificatore-giro/TurnoPdcDettaglioRoute.tsx`:
+  reso path-aware via `useLocation()`. Quando il `pathname`
+  comincia con `/pianificatore-pdc`, il back-link punta a
+  `/pianificatore-pdc/turni`; altrimenti mantiene il
+  comportamento storico (back a `/pianificatore-giro/giri/:id/turni-pdc`).
+- `routes/pianificatore-pdc/TurnoDettaglioRoute.tsx` (sostituito
+  placeholder MR 1): re-export del componente unico via
+  `export { TurnoPdcDettaglioRoute as PianificatorePdcTurnoDettaglioRoute }`.
+  Niente duplicazione UI.
+- `routes/pianificatore-pdc/TurniRoute.tsx`: drilldown click riga
+  da `/pianificatore-giro/turni-pdc/:id` a
+  `/pianificatore-pdc/turni/:id`.
+- `routes/pianificatore-pdc/TurnoDettaglioRoute.test.tsx` (nuovo,
+  2 test): verifica che il back-link sia path-aware (PdC → lista
+  turni 2° ruolo, Giro → drilldown turni del giro).
+
+### Stato
+
+**Verifiche**:
+
+- `uv run mypy --strict src`: ✅ 52 source files clean
+- Backend pytest completo: ✅ **436 passed, 1 skipped in 31.27s**
+  (invariato: MR 3 cambia solo auth, no nuovi test backend
+  perché `require_any_role` è già coperto da `test_giri_turni_pdc_list_api.py`)
+- Frontend `pnpm typecheck`: ✅ clean
+- Frontend `pnpm test --run`: ✅ **47 passed in 6.33s** (era 45, +2)
+
+Il flusso del 2° ruolo è ora completo end-to-end:
+`/pianificatore-pdc/dashboard` → lista turni → dettaglio Gantt →
+back. Anche la dashboard del 1° ruolo continua a funzionare
+(backward compat su scritture turni).
+
+### Prossimo step
+
+**Sprint 7.3 MR 4** (ultimo) — validazioni live:
+
+- Backend: nuovo endpoint `GET /api/turni-pdc/:id/validazioni`
+  che ritorna struttura `{ giornate: [{n, prestazione_violata,
+  condotta_violata, refezione_mancante, ...}], cycle: {...} }`
+  oppure refactor del dettaglio per esporre i flag direttamente
+- Frontend: badge cap prestazione/condotta/refezione per ogni
+  giornata nell'editor Gantt + pannello vincoli ciclo (riposo
+  intra-ciclo §11.5, riposo settimanale §11.4, FR §10.6)
+
+---
+
 ## 2026-05-01 (64) — Sprint 7.3 MR 2: vista giri readonly + lista turni cross-giro
 
 ### Contesto

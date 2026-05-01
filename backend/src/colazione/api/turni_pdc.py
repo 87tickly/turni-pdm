@@ -42,9 +42,16 @@ turni_pdc_router = APIRouter(prefix="/api/turni-pdc", tags=["turni-pdc"])
 
 _authz = Depends(require_role("PIANIFICATORE_GIRO"))
 # Sprint 7.3 MR 2: lettura cross-giro ammessa anche al PIANIFICATORE_PDC
-# (vedi RUOLI-E-DASHBOARD §4.3). La generazione/scrittura turni resta
-# scope MR 3 — per ora gli endpoint write usano `_authz` (Giro).
+# (vedi RUOLI-E-DASHBOARD §4.3).
 _authz_read = Depends(require_any_role("PIANIFICATORE_GIRO", "PIANIFICATORE_PDC"))
+# Sprint 7.3 MR 3: la generazione/scrittura turni PdC è competenza
+# primaria del PIANIFICATORE_PDC (RUOLI-E-DASHBOARD §4: "Costruisce/modifica
+# turni PdC dai giri"). Il PIANIFICATORE_GIRO mantiene l'accesso per
+# backward compat (il bottone "Genera turno PdC" sul dettaglio giro
+# del 1° ruolo continua a funzionare).
+_authz_write_turni = Depends(
+    require_any_role("PIANIFICATORE_GIRO", "PIANIFICATORE_PDC")
+)
 
 
 # =====================================================================
@@ -168,7 +175,7 @@ async def genera_turno_pdc_endpoint(
     giro_id: int,
     valido_da: date | None = Query(default=None, description="Data validità turno (default: oggi)"),
     force: bool = Query(default=False, description="Sovrascrive turni precedenti"),
-    user: CurrentUser = _authz,
+    user: CurrentUser = _authz_write_turni,
     session: AsyncSession = Depends(get_session),
 ) -> list[TurnoPdcGenerazioneResponse]:
     """Sprint 7.5 MR 5 (decisione utente D1): ritorna **lista** di turni

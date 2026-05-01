@@ -1,4 +1,4 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { AlertCircle, AlertTriangle, ArrowLeft, Bed, Moon } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -15,6 +15,13 @@ import type {
 export function TurnoPdcDettaglioRoute() {
   const { turnoId: turnoIdParam } = useParams<{ turnoId: string }>();
   const turnoId = turnoIdParam !== undefined ? Number(turnoIdParam) : undefined;
+  const location = useLocation();
+  // Sprint 7.3 MR 3: la stessa pagina è raggiungibile sia da
+  // `/pianificatore-giro/turni-pdc/:id` (1° ruolo, drilldown da editor
+  // giro) sia da `/pianificatore-pdc/turni/:id` (2° ruolo, drilldown da
+  // lista turni cross-giro). Il back-link va alla lista del ruolo da
+  // cui si è arrivati.
+  const isPdcRoute = location.pathname.startsWith("/pianificatore-pdc");
   const query = useTurnoPdcDettaglio(turnoId);
 
   if (turnoId === undefined || Number.isNaN(turnoId)) {
@@ -49,9 +56,11 @@ export function TurnoPdcDettaglioRoute() {
     <div className="flex flex-col gap-5">
       <Link
         to={
-          giroId !== null
-            ? `/pianificatore-giro/giri/${giroId}/turni-pdc`
-            : "/pianificatore-giro/programmi"
+          isPdcRoute
+            ? "/pianificatore-pdc/turni"
+            : giroId !== null
+              ? `/pianificatore-giro/giri/${giroId}/turni-pdc`
+              : "/pianificatore-giro/programmi"
         }
         className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-primary"
       >
