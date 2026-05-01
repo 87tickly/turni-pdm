@@ -10,6 +10,130 @@
 
 ---
 
+## 2026-05-01 (66) — Sprint 7.3 MR 4: validazioni live + pannello vincoli ciclo — SPRINT 7.3 CHIUSO
+
+### Contesto
+
+Ultimo MR dello Sprint 7.3. MR 1-3 hanno costruito il 2° ruolo
+PIANIFICATORE_PDC end-to-end (dashboard home → vista giri readonly →
+lista turni cross-giro → editor turno Gantt). MR 4 espone le
+validazioni normative live nell'editor Gantt:
+
+- 3 flag bool per giornata (`prestazione_violata`, `condotta_violata`,
+  `refezione_mancante`) calcolati on-the-fly nel dettaglio
+- 3 aggregati a livello turno (`n_giornate_violanti`,
+  `n_violazioni_hard`, `n_violazioni_soft`)
+- passthrough strutturato dei vincoli ciclo da
+  `generation_metadata_json.violazioni` → nuovo campo top-level
+  `validazioni_ciclo: list[str]`
+
+### Modifiche
+
+**Backend** (2 file, 1 nuovo):
+
+- `src/colazione/api/turni_pdc.py`:
+  - import `CONDOTTA_MAX_MIN`, `PRESTAZIONE_MAX_NOTTURNO`,
+    `PRESTAZIONE_MAX_STANDARD` dal builder (no duplicazione costanti
+    normative)
+  - `TurnoPdcGiornataRead`: aggiunti `prestazione_violata`,
+    `condotta_violata`, `refezione_mancante` (default False)
+  - `TurnoPdcDettaglioRead`: aggiunti `n_giornate_violanti`,
+    `n_violazioni_hard`, `n_violazioni_soft`,
+    `validazioni_ciclo: list[str]`
+  - `get_turno_pdc_dettaglio`: calcolo on-the-fly nel loop
+    `for g in giornate_orm`. Soglia refezione: prestazione > 360
+    min (6h) richiede refezione ≥ 30 min (NORMATIVA-PDC §3.2),
+    soft (non aggiunta a `n_giornate_violanti`).
+- **Nuovo** `tests/test_turno_pdc_validazioni_api.py` (~250 righe,
+  8 test): giornata dentro cap, prestazione standard fuori cap,
+  prestazione notturna fuori cap, condotta fuori cap, refezione
+  mancante (>6h e <30 min), giornata corta (≤6h, no refezione
+  richiesta), aggregati con mix di violazioni, passthrough
+  validazioni_ciclo da metadata.
+
+**Frontend** (4 file, 1 nuovo):
+
+- `src/lib/api/turniPdc.ts`:
+  - `TurnoPdcGiornata`: aggiunti i 3 flag bool MR 4
+  - `TurnoPdcDettaglio`: aggiunti `n_giornate_violanti`,
+    `n_violazioni_hard`, `n_violazioni_soft`, `validazioni_ciclo`
+- `src/routes/pianificatore-giro/TurnoPdcDettaglioRoute.tsx` (componente
+  unico riusato anche sotto path PdC, vedi MR 3):
+  - `Stats`: aggiunto secondo blocco "ambra" con
+    n_giornate_violanti / n_violazioni_hard / n_violazioni_soft
+    visibile solo se `hasViolazioni`
+  - `GiornataPanel` header: 3 nuovi badge condizionali con icona
+    `AlertTriangle` (prest. fuori cap, cond. fuori cap, refez.
+    mancante), `data-testid` per test
+  - `Avvisi`: refactor da `violazioni: string[]` a
+    `validazioniCiclo: string[]` con titolo "Vincoli ciclo: N
+    segnalazioni" + commento aggiornato che cita normativa
+    §11/§10.6
+- **Nuovo** `routes/pianificatore-pdc/TurnoValidazioni.test.tsx`
+  (6 test): no violazioni → no badge/no pannello, prestazione
+  violata → badge giornata, condotta+refezione mancante → 2 badge,
+  Stats con aggregati visibili, vincoli ciclo panel visibile/nascosto.
+- `routes/pianificatore-pdc/TurnoDettaglioRoute.test.tsx`: aggiornata
+  fixture `makeTurno` con i 4 nuovi campi obbligatori.
+
+### Stato Sprint 7.3
+
+**Sprint 7.3 chiuso end-to-end.** 4 MR consecutivi (1-2-3-4):
+
+| MR | Commit | Scope |
+|---|---|---|
+| 1 | `f321593` | Scaffold ruolo + dashboard home (KPI) |
+| 1.5 | `30f4b15` | Fix 3 fail pytest pre-esistenti (entry 63) |
+| 2 | `68f5df1` | Vista giri readonly + lista turni cross-giro |
+| 3 | `37b5ff9` | Editor turno PdC sotto path PdC + scrittura ruolo |
+| 4 | (questo) | Validazioni live + pannello vincoli ciclo |
+
+**Verifiche finali Sprint 7.3**:
+
+- `uv run mypy --strict src`: ✅ 52 source files clean
+- Backend pytest completo: ✅ **444 passed, 1 skipped in 34.18s**
+  (baseline pre-Sprint 7.3 era 414 → +30 nuovi su 4 file test
+  nuovi)
+- Frontend `pnpm typecheck`: ✅ clean
+- Frontend `pnpm test --run`: ✅ **53 passed in 6.89s** (baseline
+  31 → +22 nuovi su 5 file test nuovi)
+
+**Flusso utente PIANIFICATORE_PDC operativo**:
+
+1. Login (admin o utente con ruolo PIANIFICATORE_PDC)
+2. `/pianificatore-pdc/dashboard` — KPI giri/turni/violazioni
+3. `/pianificatore-pdc/turni` — lista turni con filtri impianto/stato/q
+4. Click riga turno → `/pianificatore-pdc/turni/:id` editor Gantt
+   con badge cap normativi per giornata + aggregati Stats
+5. Pannello "Vincoli ciclo" se metadata builder contiene tag
+   violazioni intra-ciclo
+
+### Scope-out dichiarato (rinviato Sprint 7.6+)
+
+- Schermata 4.5 "Revisioni cascading" — richiede modello
+  `revisione_provvisoria` non ancora implementato
+- Calcolo proattivo lato backend dei vincoli ciclo (riposo
+  intra-ciclo §11.5, settimanale §11.4, FR §10.6): MR 4 espone
+  passthrough da metadata builder, non ricalcola. Lo fa il
+  builder all'atto della generazione.
+- Funzionalità di edit drag&drop blocchi nell'editor Gantt:
+  oggi è viewer readonly. Sprint 8 introdurrà l'editing.
+
+### Prossimo step
+
+Sprint 7.3 chiuso. Roadmap futura (vedi `RUOLI-E-DASHBOARD.md`):
+
+- **Sprint 7.6** — Dashboard 3 (MANUTENZIONE): inventario per
+  deposito, manutenzioni programmate, spostamenti tra depositi.
+  Include modello `revisione_provvisoria` (necessario per MR 4.5
+  rinviato del 7.3).
+- **Sprint 7.7** — Dashboard 4 (GESTIONE_PERSONALE): anagrafica,
+  assegnazioni giornate, indisponibilità, sostituzioni.
+- **Sprint 7.8** — Dashboard 5 (PERSONALE_PDC): vista personale
+  del macchinista (proprio turno, ferie, segnalazioni).
+
+---
+
 ## 2026-05-01 (65) — Sprint 7.3 MR 3: editor turno PdC sotto path PdC + scrittura ruolo PdC
 
 ### Contesto

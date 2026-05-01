@@ -49,7 +49,10 @@ export function TurnoPdcDettaglioRoute() {
   const turno = query.data;
   const meta = turno.generation_metadata_json;
   const giroId = meta.giro_materiale_id ?? null;
-  const violazioni = meta.violazioni ?? [];
+  // Sprint 7.3 MR 4: sostituiamo l'accesso diretto a `meta.violazioni`
+  // con il campo strutturato `turno.validazioni_ciclo` (passthrough
+  // ma tipato a livello API, non più `unknown`).
+  const validazioniCiclo = turno.validazioni_ciclo;
   const frGiornate = meta.fr_giornate ?? [];
 
   return (
@@ -70,8 +73,8 @@ export function TurnoPdcDettaglioRoute() {
       <Header turno={turno} />
       <Stats turno={turno} />
 
-      {(violazioni.length > 0 || frGiornate.length > 0) && (
-        <Avvisi violazioni={violazioni} frGiornate={frGiornate} />
+      {(validazioniCiclo.length > 0 || frGiornate.length > 0) && (
+        <Avvisi validazioniCiclo={validazioniCiclo} frGiornate={frGiornate} />
       )}
 
       <section className="flex flex-col gap-4">
@@ -114,12 +117,26 @@ function Stats({ turno }: { turno: TurnoPdcDettaglio }) {
   const totPrestazione = turno.giornate.reduce((s, g) => s + g.prestazione_min, 0);
   const totCondotta = turno.giornate.reduce((s, g) => s + g.condotta_min, 0);
   const totRefezione = turno.giornate.reduce((s, g) => s + g.refezione_min, 0);
+  // Sprint 7.3 MR 4: aggregati validazione hard/soft
+  const hasViolazioni = turno.n_violazioni_hard > 0 || turno.n_violazioni_soft > 0;
   return (
-    <div className="grid grid-cols-2 gap-3 rounded-md border border-border bg-white p-4 md:grid-cols-4">
-      <Stat label="Prestazione totale" value={formatHM(totPrestazione)} />
-      <Stat label="Condotta totale" value={formatHM(totCondotta)} />
-      <Stat label="Refezione totale" value={formatHM(totRefezione)} />
-      <Stat label="Giornate" value={String(turno.giornate.length)} />
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-3 rounded-md border border-border bg-white p-4 md:grid-cols-4">
+        <Stat label="Prestazione totale" value={formatHM(totPrestazione)} />
+        <Stat label="Condotta totale" value={formatHM(totCondotta)} />
+        <Stat label="Refezione totale" value={formatHM(totRefezione)} />
+        <Stat label="Giornate" value={String(turno.giornate.length)} />
+      </div>
+      {hasViolazioni && (
+        <div className="grid grid-cols-1 gap-3 rounded-md border border-amber-300 bg-amber-50 p-4 md:grid-cols-3">
+          <Stat
+            label="Giornate violanti"
+            value={`${turno.n_giornate_violanti} / ${turno.giornate.length}`}
+          />
+          <Stat label="Violazioni hard" value={String(turno.n_violazioni_hard)} />
+          <Stat label="Violazioni soft" value={String(turno.n_violazioni_soft)} />
+        </div>
+      )}
     </div>
   );
 }
@@ -136,29 +153,35 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function Avvisi({
-  violazioni,
+  validazioniCiclo,
   frGiornate,
 }: {
-  violazioni: string[];
+  validazioniCiclo: string[];
   frGiornate: { giornata: number; stazione: string; ore: number }[];
 }) {
   return (
     <div className="flex flex-col gap-2">
-      {violazioni.length > 0 && (
-        <details className="rounded-md border border-amber-300 bg-amber-50 text-sm text-amber-900">
+      {validazioniCiclo.length > 0 && (
+        <details
+          className="rounded-md border border-amber-300 bg-amber-50 text-sm text-amber-900"
+          data-testid="vincoli-ciclo-panel"
+        >
           <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 font-medium">
-            <AlertTriangle className="h-4 w-4" aria-hidden /> {violazioni.length} violazion
-            {violazioni.length === 1 ? "e" : "i"} normativa
+            <AlertTriangle className="h-4 w-4" aria-hidden /> Vincoli ciclo:{" "}
+            {validazioniCiclo.length} segnalazion
+            {validazioniCiclo.length === 1 ? "e" : "i"}
           </summary>
           <ul className="space-y-1 px-4 pb-3 font-mono text-xs">
-            {violazioni.map((v, i) => (
+            {validazioniCiclo.map((v, i) => (
               <li key={i}>· {v}</li>
             ))}
           </ul>
           <p className="border-t border-amber-200 px-3 py-2 text-xs italic">
-            MVP Sprint 7.2: il builder non splitta ancora i turni con CV
-            intermedio. Sprint 7.4 introdurrà lo split per rispettare
-            prestazione/condotta max.
+            Tag prodotti dal builder durante il calcolo (NORMATIVA-PDC §11
+            riposo intra-ciclo / §11.4 settimanale / §10.6 FR). Sprint 7.4
+            ha introdotto lo split CV intermedio per i cap di
+            prestazione/condotta a livello giornata; i vincoli di ciclo
+            qui elencati sono di livello superiore.
           </p>
         </details>
       )}
@@ -194,6 +217,34 @@ function GiornataPanel({ giornata }: { giornata: TurnoPdcGiornata }) {
           {giornata.is_notturno && (
             <Badge variant="secondary" className="gap-1 text-[10px]">
               <Moon className="h-3 w-3" aria-hidden /> notturno
+            </Badge>
+          )}
+          {/* Sprint 7.3 MR 4: badge cap normativi live */}
+          {giornata.prestazione_violata && (
+            <Badge
+              variant="warning"
+              className="gap-1 text-[10px]"
+              data-testid={`badge-prestazione-violata-g${giornata.numero_giornata}`}
+            >
+              <AlertTriangle className="h-3 w-3" aria-hidden /> prest. fuori cap
+            </Badge>
+          )}
+          {giornata.condotta_violata && (
+            <Badge
+              variant="warning"
+              className="gap-1 text-[10px]"
+              data-testid={`badge-condotta-violata-g${giornata.numero_giornata}`}
+            >
+              <AlertTriangle className="h-3 w-3" aria-hidden /> cond. fuori cap
+            </Badge>
+          )}
+          {giornata.refezione_mancante && (
+            <Badge
+              variant="outline"
+              className="gap-1 text-[10px] border-amber-400 text-amber-800"
+              data-testid={`badge-refezione-mancante-g${giornata.numero_giornata}`}
+            >
+              <AlertTriangle className="h-3 w-3" aria-hidden /> refez. mancante
             </Badge>
           )}
         </div>

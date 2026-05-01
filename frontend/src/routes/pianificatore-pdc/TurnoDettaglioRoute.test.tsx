@@ -30,6 +30,10 @@ function makeTurno(over: Partial<TurnoPdcDettaglio> = {}): TurnoPdcDettaglio {
       fr_giornate: [],
     },
     giornate: [],
+    n_giornate_violanti: 0,
+    n_violazioni_hard: 0,
+    n_violazioni_soft: 0,
+    validazioni_ciclo: [],
     ...over,
   };
 }

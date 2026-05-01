@@ -26,6 +26,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from colazione.auth import require_any_role, require_role
 from colazione.db import get_session
 from colazione.domain.builder_pdc.builder import (
+    CONDOTTA_MAX_MIN,
+    PRESTAZIONE_MAX_NOTTURNO,
+    PRESTAZIONE_MAX_STANDARD,
     BuilderTurnoPdcResult,
     GiriEsistentiError,
     GiroNonTrovatoError,
@@ -142,6 +145,13 @@ class TurnoPdcGiornataRead(BaseModel):
     condotta_min: int
     refezione_min: int
     is_notturno: bool
+    # Sprint 7.3 MR 4: flag validazione live (calcolati on-the-fly nel
+    # dettaglio, no migration). Servono al frontend per renderizzare
+    # badge cap nell'editor Gantt senza dover replicare le costanti
+    # normative.
+    prestazione_violata: bool = False  # cap 510 standard / 420 notturno
+    condotta_violata: bool = False  # cap 330
+    refezione_mancante: bool = False  # prestazione > 360 e refezione < 30
     blocchi: list[TurnoPdcBloccoRead]
 
 
@@ -159,6 +169,15 @@ class TurnoPdcDettaglioRead(BaseModel):
     updated_at: datetime
     generation_metadata_json: dict[str, Any]
     giornate: list[TurnoPdcGiornataRead]
+    # Sprint 7.3 MR 4: aggregati per il pannello vincoli ciclo nel
+    # frontend.
+    n_giornate_violanti: int = 0  # numero di giornate con almeno 1 violazione hard
+    n_violazioni_hard: int = 0  # totale violazioni hard (prestazione+condotta su tutte le giornate)
+    n_violazioni_soft: int = 0  # totale violazioni soft (refezione_mancante per ora)
+    # Validazioni a livello ciclo lette da `generation_metadata_json.violazioni`
+    # (popolate dal builder, vedi NORMATIVA-PDC §11/§10.6). MR 4 non
+    # le ricalcola, le passa attraverso.
+    validazioni_ciclo: list[str] = []
 
 
 # =====================================================================
@@ -577,8 +596,38 @@ async def get_turno_pdc_dettaglio(
             )
         )
 
+    # Sprint 7.3 MR 4: validazione live cap normativi.
+    # Soglia refezione: prestazione > 6h (360 min) richiede refezione
+    # ≥ 30 min (NORMATIVA-PDC §3.2). Implementazione "soft" — il
+    # builder già marca la violazione in metadata; qui esponiamo il
+    # flag direttamente per giornata così il frontend può renderizzare
+    # badge anche senza parsare il json.
+    PRESTAZIONE_REFEZIONE_SOGLIA_MIN = 360
+    REFEZIONE_MIN_RICHIESTI = 30
+
     giornate_out: list[TurnoPdcGiornataRead] = []
+    n_giornate_violanti = 0
+    n_violazioni_hard = 0
+    n_violazioni_soft = 0
     for g in giornate_orm:
+        cap_prestazione = (
+            PRESTAZIONE_MAX_NOTTURNO if g.is_notturno else PRESTAZIONE_MAX_STANDARD
+        )
+        prestazione_violata = g.prestazione_min > cap_prestazione
+        condotta_violata = g.condotta_min > CONDOTTA_MAX_MIN
+        refezione_mancante = (
+            g.prestazione_min > PRESTAZIONE_REFEZIONE_SOGLIA_MIN
+            and g.refezione_min < REFEZIONE_MIN_RICHIESTI
+        )
+        if prestazione_violata:
+            n_violazioni_hard += 1
+        if condotta_violata:
+            n_violazioni_hard += 1
+        if refezione_mancante:
+            n_violazioni_soft += 1
+        if prestazione_violata or condotta_violata:
+            n_giornate_violanti += 1
+
         giornate_out.append(
             TurnoPdcGiornataRead(
                 id=g.id,
@@ -598,9 +647,21 @@ async def get_turno_pdc_dettaglio(
                 condotta_min=g.condotta_min,
                 refezione_min=g.refezione_min,
                 is_notturno=g.is_notturno,
+                prestazione_violata=prestazione_violata,
+                condotta_violata=condotta_violata,
+                refezione_mancante=refezione_mancante,
                 blocchi=blocchi_per_giornata.get(g.id, []),
             )
         )
+
+    # Validazioni a livello ciclo lette dal metadata del builder.
+    # `generation_metadata_json.violazioni` è una lista di stringhe
+    # tag (es. "refezione_mancante", "ciclo_riposo_settimanale") che
+    # il builder produce durante il calcolo. MR 4 le passa al
+    # frontend che le renderizza in un pannello "Vincoli ciclo".
+    metadata = dict(turno.generation_metadata_json or {})
+    raw_validazioni = metadata.get("violazioni", []) or []
+    validazioni_ciclo: list[str] = [str(v) for v in raw_validazioni if isinstance(v, str)]
 
     return TurnoPdcDettaglioRead(
         id=turno.id,
@@ -612,6 +673,10 @@ async def get_turno_pdc_dettaglio(
         stato=turno.stato,
         created_at=turno.created_at,
         updated_at=turno.updated_at,
-        generation_metadata_json=dict(turno.generation_metadata_json or {}),
+        generation_metadata_json=metadata,
         giornate=giornate_out,
+        n_giornate_violanti=n_giornate_violanti,
+        n_violazioni_hard=n_violazioni_hard,
+        n_violazioni_soft=n_violazioni_soft,
+        validazioni_ciclo=validazioni_ciclo,
     )

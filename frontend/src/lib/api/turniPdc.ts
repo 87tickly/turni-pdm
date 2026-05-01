@@ -78,6 +78,12 @@ export interface TurnoPdcGiornata {
   condotta_min: number;
   refezione_min: number;
   is_notturno: boolean;
+  // Sprint 7.3 MR 4: flag validazione live calcolati on-the-fly dal
+  // backend in `GET /api/turni-pdc/:id`. Renderizzati come badge
+  // ambra/rossi nell'editor Gantt.
+  prestazione_violata: boolean;
+  condotta_violata: boolean;
+  refezione_mancante: boolean;
   blocchi: TurnoPdcBlocco[];
 }
 
@@ -107,6 +113,12 @@ export interface TurnoPdcDettaglio {
     [key: string]: unknown;
   };
   giornate: TurnoPdcGiornata[];
+  // Sprint 7.3 MR 4: aggregati validazione + passthrough vincoli ciclo
+  // dal generation_metadata_json.
+  n_giornate_violanti: number;
+  n_violazioni_hard: number;
+  n_violazioni_soft: number;
+  validazioni_ciclo: string[];
 }
 
 export interface GeneraTurnoPdcParams {
