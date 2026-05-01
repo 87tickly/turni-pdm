@@ -10,6 +10,91 @@
 
 ---
 
+## 2026-05-01 (60) — Code review completa post-Sprint-7.4
+
+### Contesto
+
+Review sistematica dell'intero codebase COLAZIONE richiesta dall'utente
+prima di procedere al prossimo sprint. Copertura: backend (`domain/`,
+`api/`, `models/`, `alembic/`), frontend (`src/lib/`, `src/routes/`),
+infrastruttura. Metodologia: lettura diretta + grep mirati + confronto
+con `docs/NORMATIVA-PDC.md` (fonte di verità) e `docs/MODELLO-DATI.md`.
+
+### Modifiche
+
+**Nuovo `docs/CODE-REVIEW-2026-04-30.md`** (~350 righe):
+
+6 finding CRITICI, 10 IMPORTANTI, 5 MINORI. Nessuna modifica al codice
+di produzione — il documento è solo la review, i fix sono a cura dell'utente.
+
+### Finding principali per gravità
+
+**CRITICI** (6):
+
+- **C1** — Anti-rigenerazione turni PdC: full table scan in memoria.
+  `genera_turno_pdc()` (`builder_pdc/builder.py:528-537`) carica tutti i
+  `TurnoPdc` dell'azienda in Python invece di filtrare via JSONB su DB.
+  Fix: `cast(generation_metadata_json["giro_materiale_id"].astext, BigInteger) == giro_id`.
+
+- **C2** — Cap notturno 420' applicato erroneamente ai turni 00:00-00:59.
+  `split_cv._eccede_limiti()` usa `draft.is_notturno` (include mezzanotte)
+  invece della condizione precisa `60 <= ora_presa < 5*60` (01:00-04:59).
+  Conseguenza: split non necessari su giornate che iniziano a mezzanotte.
+
+- **C3** — `_count_giri_esistenti` e `_wipe_giri_programma` usano JSON
+  (`generation_metadata_json->>'programma_id'`) invece della FK esplicita
+  `giro_materiale.programma_id` (aggiunta da migration 0010). Full scan
+  invece di index lookup; confronto stringa invece di intero.
+
+- **C4** — Preriscaldo ACCp 80' (dic-feb, normativa §3.3) non implementato.
+  Il builder usa sempre `ACCESSORI_MIN_STANDARD=40`. Turni invernali hanno
+  prestazione sottostimata di 40'. Campo `is_accessori_maggiorati` sempre
+  `False`. Bug silente in produzione dicembre-febbraio.
+
+- **C5** — Tutti i gap tra corse classificati come PK indipendentemente
+  dalla durata. La normativa §6 richiede ACC (ACCa+ACCp) per gap 65-300'
+  e ACC di default per gap >300'. Il builder usa PK per qualsiasi gap > 0.
+  Debito normativo strutturale, richiede MR dedicato. Va tracciato come
+  residuo aperto.
+
+- **C6** — `STAZIONI_CV_DEROGA = {"MORTARA", "TIRANO"}` confrontate con
+  `stazione.codice` DB che potrebbe contenere codici RFI (es. "S03388").
+  Il test smoke usa stazioni sintetiche, non testa il caso reale. Richiede
+  verifica formato codici nel DB reale.
+
+**IMPORTANTI** (10): utcnow() deprecato, assert in produzione, JWT 72h,
+impianto TurnoPdc con tipo_materiale (semantica sbagliata), updated_at
+mai aggiornato, duplicazione logica varianti numero_treno, filtro pool
+feriale-only, mutazione in-place fr_dormite, zero test su
+`_inserisci_refezione` e `_aggiungi_dormite_fr`, package normativa vuoto.
+
+**MINORI** (5): is_validato_utente dead field, smoke senza cleanup, gap
+negativo silente, CheckConstraint codice_breve mancante ORM, require_role
+fragile.
+
+### Stato
+
+**Documento prodotto**: `docs/CODE-REVIEW-2026-04-30.md`.
+Nessuna modifica al codice — PR aperta con solo il documento.
+L'utente decide quali fix prioritizzare e in che ordine.
+
+I finding C5 (gap ACC vs PK) e C4 (preriscaldo) richiedono decisioni
+architetturali prima di procedere — entrambi sono segnalati come debiti
+normativi che diventano problemi reali in produzione.
+
+### Prossimo step
+
+Decisione utente su quali finding fixare e in quale ordine. Suggerito:
+
+1. C1, C3, I1, I2 — fix rapidi (tot ~2h), zero decisioni architetturali.
+2. C2 — fix 1h, una volta confermato il comportamento atteso per 00:00-00:59.
+3. C4 (preriscaldo) — richiede come passare la data al builder.
+4. C6 — verifica formato codici stazione nel DB reale.
+5. C5 (ACC vs PK) — MR dedicato, da pianificare.
+6. I9 (test `_inserisci_refezione` + FR) — scrittura test mancanti.
+
+---
+
 ## 2026-04-30 (59) — Sprint 7.4 MR 4/4: smoke con dati reali — SPRINT CHIUSO
 
 ### Contesto
