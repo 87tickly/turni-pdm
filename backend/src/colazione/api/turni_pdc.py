@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from colazione.auth import require_role
+from colazione.auth import require_any_role, require_role
 from colazione.db import get_session
 from colazione.domain.builder_pdc.builder import (
     BuilderTurnoPdcResult,
@@ -41,9 +41,10 @@ router = APIRouter(prefix="/api/giri", tags=["turni-pdc"])
 turni_pdc_router = APIRouter(prefix="/api/turni-pdc", tags=["turni-pdc"])
 
 _authz = Depends(require_role("PIANIFICATORE_GIRO"))
-# MVP: il bottone "Genera turno PdC" parte dal dettaglio giro, quindi
-# l'azione resta nel contesto del Pianificatore Giro. Quando avremo
-# la dashboard Pianificatore Turno PdC dedicata, scinderemo i ruoli.
+# Sprint 7.3 MR 2: lettura cross-giro ammessa anche al PIANIFICATORE_PDC
+# (vedi RUOLI-E-DASHBOARD §4.3). La generazione/scrittura turni resta
+# scope MR 3 — per ora gli endpoint write usano `_authz` (Giro).
+_authz_read = Depends(require_any_role("PIANIFICATORE_GIRO", "PIANIFICATORE_PDC"))
 
 
 # =====================================================================
@@ -220,7 +221,7 @@ async def genera_turno_pdc_endpoint(
 )
 async def list_turni_pdc_giro(
     giro_id: int,
-    user: CurrentUser = _authz,
+    user: CurrentUser = _authz_read,
     session: AsyncSession = Depends(get_session),
 ) -> list[TurnoPdcListItem]:
     stmt = (
@@ -280,6 +281,106 @@ async def list_turni_pdc_giro(
 
 
 # =====================================================================
+# GET /api/turni-pdc — lista cross-giro per dashboard PIANIFICATORE_PDC
+# =====================================================================
+
+
+@turni_pdc_router.get(
+    "",
+    response_model=list[TurnoPdcListItem],
+    summary="Lista turni PdC dell'azienda (cross-giro, con filtri)",
+)
+async def list_turni_pdc_azienda(
+    impianto: str | None = Query(
+        None, description="Filtra per impianto (deposito personale)."
+    ),
+    stato: str | None = Query(None, description="Filtra per stato (es. 'bozza')."),
+    profilo: str | None = Query(None, description="Filtra per profilo (es. 'Condotta')."),
+    valido_da_min: date | None = Query(
+        None, description="Filtra turni con valido_da >= questa data."
+    ),
+    valido_da_max: date | None = Query(
+        None, description="Filtra turni con valido_da <= questa data."
+    ),
+    q: str | None = Query(
+        None,
+        description="Ricerca testuale su codice (case-insensitive contiene).",
+        min_length=1,
+        max_length=50,
+    ),
+    limit: int = Query(100, ge=1, le=500, description="Max righe ritornate."),
+    offset: int = Query(0, ge=0, description="Offset paginazione."),
+    user: CurrentUser = _authz_read,
+    session: AsyncSession = Depends(get_session),
+) -> list[TurnoPdcListItem]:
+    """Lista turni PdC dell'azienda, ordinata per ``codice``.
+
+    Sprint 7.3 MR 2: alimenta la schermata 4.3
+    `/pianificatore-pdc/turni`. La response usa lo stesso shape di
+    `GET /api/giri/{id}/turni-pdc` (`TurnoPdcListItem`) per consentire
+    il riuso dei componenti UI tabella.
+    """
+    stmt = select(TurnoPdc).where(TurnoPdc.azienda_id == user.azienda_id)
+    if impianto is not None:
+        stmt = stmt.where(TurnoPdc.impianto == impianto)
+    if stato is not None:
+        stmt = stmt.where(TurnoPdc.stato == stato)
+    if profilo is not None:
+        stmt = stmt.where(TurnoPdc.profilo == profilo)
+    if valido_da_min is not None:
+        stmt = stmt.where(TurnoPdc.valido_da >= valido_da_min)
+    if valido_da_max is not None:
+        stmt = stmt.where(TurnoPdc.valido_da <= valido_da_max)
+    if q is not None:
+        stmt = stmt.where(TurnoPdc.codice.ilike(f"%{q}%"))
+    stmt = stmt.order_by(TurnoPdc.codice).limit(limit).offset(offset)
+    turni = list((await session.execute(stmt)).scalars())
+    if not turni:
+        return []
+
+    # Stessa strategia batch di `list_turni_pdc_giro`: una query per le
+    # giornate di tutti i turni → mappa per turno_id → list items.
+    turno_ids = [t.id for t in turni]
+    giornate = list(
+        (
+            await session.execute(
+                select(TurnoPdcGiornata).where(TurnoPdcGiornata.turno_pdc_id.in_(turno_ids))
+            )
+        ).scalars()
+    )
+    giornate_per_turno: dict[int, list[TurnoPdcGiornata]] = {}
+    for g in giornate:
+        giornate_per_turno.setdefault(g.turno_pdc_id, []).append(g)
+
+    out: list[TurnoPdcListItem] = []
+    for t in turni:
+        gg = giornate_per_turno.get(t.id, [])
+        meta = t.generation_metadata_json or {}
+        out.append(
+            TurnoPdcListItem(
+                id=t.id,
+                codice=t.codice,
+                impianto=t.impianto,
+                profilo=t.profilo,
+                ciclo_giorni=t.ciclo_giorni,
+                valido_da=t.valido_da,
+                stato=t.stato,
+                created_at=t.created_at,
+                n_giornate=len(gg),
+                prestazione_totale_min=sum(g.prestazione_min for g in gg),
+                condotta_totale_min=sum(g.condotta_min for g in gg),
+                n_violazioni=len(meta.get("violazioni", []) or []),
+                n_dormite_fr=len(meta.get("fr_giornate", []) or []),
+                is_ramo_split=bool(meta.get("is_ramo_split", False)),
+                split_origine_giornata=meta.get("split_origine_giornata"),
+                split_ramo=meta.get("split_ramo"),
+                split_totale_rami=meta.get("split_totale_rami"),
+            )
+        )
+    return out
+
+
+# =====================================================================
 # GET /api/turni-pdc/{turno_id}
 # =====================================================================
 
@@ -291,7 +392,7 @@ async def list_turni_pdc_giro(
 )
 async def get_turno_pdc_dettaglio(
     turno_id: int,
-    user: CurrentUser = _authz,
+    user: CurrentUser = _authz_read,
     session: AsyncSession = Depends(get_session),
 ) -> TurnoPdcDettaglioRead:
     turno = (

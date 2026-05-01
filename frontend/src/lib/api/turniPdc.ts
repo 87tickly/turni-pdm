@@ -139,3 +139,39 @@ export async function listTurniPdcGiro(giroId: number): Promise<TurnoPdcListItem
 export async function getTurnoPdcDettaglio(turnoId: number): Promise<TurnoPdcDettaglio> {
   return apiJson<TurnoPdcDettaglio>(`/api/turni-pdc/${turnoId}`, { method: "GET" });
 }
+
+// =====================================================================
+// Sprint 7.3 MR 2 — lista turni PdC azienda (cross-giro)
+// =====================================================================
+
+export interface ListTurniPdcAziendaParams {
+  impianto?: string;
+  stato?: string;
+  profilo?: string;
+  /** ISO date YYYY-MM-DD */
+  valido_da_min?: string;
+  /** ISO date YYYY-MM-DD */
+  valido_da_max?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function listTurniPdcAzienda(
+  params: ListTurniPdcAziendaParams = {},
+): Promise<TurnoPdcListItem[]> {
+  const search = new URLSearchParams();
+  if (params.impianto !== undefined && params.impianto !== "")
+    search.set("impianto", params.impianto);
+  if (params.stato !== undefined && params.stato !== "") search.set("stato", params.stato);
+  if (params.profilo !== undefined && params.profilo !== "") search.set("profilo", params.profilo);
+  if (params.valido_da_min !== undefined) search.set("valido_da_min", params.valido_da_min);
+  if (params.valido_da_max !== undefined) search.set("valido_da_max", params.valido_da_max);
+  if (params.q !== undefined && params.q !== "") search.set("q", params.q);
+  if (params.limit !== undefined) search.set("limit", String(params.limit));
+  if (params.offset !== undefined) search.set("offset", String(params.offset));
+  const qs = search.toString();
+  return apiJson<TurnoPdcListItem[]>(`/api/turni-pdc${qs ? `?${qs}` : ""}`, {
+    method: "GET",
+  });
+}

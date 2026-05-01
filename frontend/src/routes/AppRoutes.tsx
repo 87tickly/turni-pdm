@@ -17,6 +17,8 @@ import { PianificatorePdcGiriRoute } from "@/routes/pianificatore-pdc/GiriRoute"
 import { PianificatorePdcRevisioniCascadingRoute } from "@/routes/pianificatore-pdc/RevisioniCascadingRoute";
 import { PianificatorePdcTurniRoute } from "@/routes/pianificatore-pdc/TurniRoute";
 import { PianificatorePdcTurnoDettaglioRoute } from "@/routes/pianificatore-pdc/TurnoDettaglioRoute";
+// Note: GiriRoute e TurniRoute (Sprint 7.3 MR 2) non sono più placeholder
+// ma componenti completi che usano gli endpoint cross-azienda backend.
 
 const ROLE_PIANIFICATORE_GIRO = "PIANIFICATORE_GIRO";
 const ROLE_PIANIFICATORE_PDC = "PIANIFICATORE_PDC";

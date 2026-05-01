@@ -10,6 +10,109 @@
 
 ---
 
+## 2026-05-01 (64) — Sprint 7.3 MR 2: vista giri readonly + lista turni cross-giro
+
+### Contesto
+
+Sprint 7.3 MR 1 (entry 62) aveva aperto il ruolo PIANIFICATORE_PDC con
+dashboard home + 4 placeholder route. MR 2 popola le 2 route più
+importanti: schermata 4.2 (vista giri) e 4.3 (lista turni cross-giro)
+da `RUOLI-E-DASHBOARD §4`. Restano placeholder: editor turno (MR 3),
+revisioni cascading (Sprint 7.6+).
+
+### Modifiche
+
+**Backend** (5 file, 1 nuovo):
+
+- **Modificato** `src/colazione/auth/dependencies.py` + `__init__.py`:
+  nuovo helper `require_any_role(*roles)` per endpoint accessibili
+  in lettura da più ruoli (admin bypassa). Usato dai nuovi GET
+  cross-azienda — la scrittura resta protetta dal `require_role`
+  specifico.
+- **Modificato** `src/colazione/api/giri.py`:
+  - import `require_any_role`
+  - aggiunto alias `_authz_read = require_any_role(GIRO, PDC)` per
+    le letture
+  - **nuovo endpoint** `GET /api/giri` (lista cross-programma per
+    azienda) con filtri `programma_id`, `stato`, `tipo_materiale`,
+    `q` (ilike numero_turno), paginazione `limit`/`offset`,
+    risposta `list[GiroMaterialeListItem]` (riusato schema)
+  - cambiato auth di `GET /api/giri/{giro_id}` da `_authz` (solo
+    GIRO) a `_authz_read` (anche PDC, lettura)
+- **Modificato** `src/colazione/api/turni_pdc.py`:
+  - alias `_authz_read = require_any_role(GIRO, PDC)`
+  - **nuovo endpoint** `GET /api/turni-pdc` (lista cross-giro per
+    azienda) con filtri `impianto`, `stato`, `profilo`,
+    `valido_da_min`/`valido_da_max`, `q` (ilike codice),
+    paginazione, risposta `list[TurnoPdcListItem]`. Stessa
+    strategia batch del `list_turni_pdc_giro` esistente (1 query
+    giornate per tutti i turni → mappa per turno_id).
+  - cambiato auth di `GET /api/giri/{giro_id}/turni-pdc` e
+    `GET /api/turni-pdc/{turno_id}` da `_authz` a `_authz_read`
+- **Nuovo** `tests/test_giri_turni_pdc_list_api.py` (~280 righe,
+  15 test): 401 senza token, 200 admin/PIANIFICATORE_GIRO,
+  filtri (programma_id, stato, q, impianto, valido_da range),
+  paginazione, shape item `n_giornate`/`prestazione_totale_min`/
+  `condotta_totale_min` calcolati dalle giornate.
+
+**Frontend** (8 file, 4 nuovi):
+
+- **Modificato** `src/lib/api/giri.ts`: aggiunto
+  `ListGiriAziendaParams` + `listGiriAzienda(params)` (querystring
+  builder).
+- **Modificato** `src/lib/api/turniPdc.ts`: aggiunto
+  `ListTurniPdcAziendaParams` + `listTurniPdcAzienda(params)`.
+- **Modificato** `src/hooks/useGiri.ts`: hook
+  `useGiriAzienda(params)` con queryKey
+  `["giri", "azienda", params]`.
+- **Modificato** `src/hooks/useTurniPdc.ts`: hook
+  `useTurniPdcAzienda(params)`.
+- **Sostituito** placeholder
+  `src/routes/pianificatore-pdc/GiriRoute.tsx` (~200 righe):
+  search bar (q debounced via submit), filtro stato dropdown,
+  tabella riusata pattern `ProgrammaGiriRoute`, badge stato,
+  empty state, error block. Click riga → drilldown
+  `/pianificatore-giro/giri/:id` (l'editor sotto path PdC è MR 3).
+- **Sostituito** placeholder
+  `src/routes/pianificatore-pdc/TurniRoute.tsx` (~250 righe):
+  search bar codice, filtro impianto + stato, tabella con
+  prestazione/condotta/violazioni/badge ramo split, click →
+  `/pianificatore-giro/turni-pdc/:id`.
+- **Nuovo** `GiriRoute.test.tsx` (4 test) + `TurniRoute.test.tsx`
+  (5 test): rendering, empty state, search, filtri, error state,
+  badge ramo split.
+
+### Stato
+
+**Verifiche**:
+
+- `uv run mypy --strict src`: ✅ 52 source files clean
+- Backend pytest completo: ✅ **436 passed, 1 skipped in 31.15s**
+  (era 421 → +15 nuovi)
+- Frontend `pnpm typecheck`: ✅ clean
+- Frontend `pnpm test --run`: ✅ **45 passed in 5.85s** (era 36 → +9)
+
+Endpoint operativi e testabili via UI:
+
+- `GET /api/giri[?programma_id=&stato=&q=&...]`
+- `GET /api/turni-pdc[?impianto=&stato=&q=&valido_da_min=&...]`
+
+Frontend: `/pianificatore-pdc/giri` e `/pianificatore-pdc/turni`
+non sono più placeholder ma componenti completi con search e filtri.
+Restano placeholder MR 3-4: editor turno PdC sotto path PdC,
+validazioni live cap prestazione/condotta.
+
+### Prossimo step
+
+**Sprint 7.3 MR 3** — editor turno PdC sotto path PdC:
+- Frontend: aliasing/spostamento `TurnoPdcDettaglioRoute` esistente
+  a `/pianificatore-pdc/turni/:turnoId` (oggi vive sotto
+  `/pianificatore-giro/turni-pdc/:turnoId`)
+- Backend: scissione auth scrittura — `POST /api/giri/:id/genera-turno-pdc`
+  ammette `PIANIFICATORE_PDC` oltre a `PIANIFICATORE_GIRO`
+
+---
+
 ## 2026-05-01 (63) — Fix 3 fail pytest pre-esistenti (test setup non isolato dal PdE)
 
 ### Contesto

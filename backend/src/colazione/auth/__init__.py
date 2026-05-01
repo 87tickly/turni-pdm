@@ -12,6 +12,7 @@ Le route HTTP sono in `colazione/api/auth.py`. Schemas I/O API in
 from colazione.auth.dependencies import (
     get_current_user,
     require_admin,
+    require_any_role,
     require_role,
 )
 from colazione.auth.password import hash_password, verify_password
@@ -34,6 +35,7 @@ __all__ = [
     "get_current_user",
     "hash_password",
     "require_admin",
+    "require_any_role",
     "require_role",
     "verify_password",
 ]

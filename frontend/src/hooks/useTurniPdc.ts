@@ -9,8 +9,10 @@ import {
 import {
   generaTurnoPdc,
   getTurnoPdcDettaglio,
+  listTurniPdcAzienda,
   listTurniPdcGiro,
   type GeneraTurnoPdcParams,
+  type ListTurniPdcAziendaParams,
   type TurnoPdcDettaglio,
   type TurnoPdcGenerazioneResponse,
   type TurnoPdcListItem,
@@ -41,6 +43,19 @@ export function useTurnoPdcDettaglio(
       return getTurnoPdcDettaglio(turnoId);
     },
     enabled: turnoId !== undefined,
+  });
+}
+
+/**
+ * Sprint 7.3 MR 2 — lista turni PdC azienda con filtri (cross-giro).
+ * Alimenta `/pianificatore-pdc/turni`.
+ */
+export function useTurniPdcAzienda(
+  params: ListTurniPdcAziendaParams = {},
+): UseQueryResult<TurnoPdcListItem[]> {
+  return useQuery({
+    queryKey: [...TURNI_PDC_KEY, "azienda", params],
+    queryFn: () => listTurniPdcAzienda(params),
   });
 }
 

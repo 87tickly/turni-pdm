@@ -9,11 +9,13 @@ import {
 import {
   generaGiri,
   getGiroDettaglio,
+  listGiriAzienda,
   listGiriProgramma,
   type BuilderResult,
   type GeneraGiriParams,
   type GiroDettaglio,
   type GiroListItem,
+  type ListGiriAziendaParams,
 } from "@/lib/api/giri";
 
 const GIRI_KEY = ["giri"] as const;
@@ -26,6 +28,19 @@ export function useGiriProgramma(programmaId: number | undefined): UseQueryResul
       return listGiriProgramma(programmaId);
     },
     enabled: programmaId !== undefined,
+  });
+}
+
+/**
+ * Sprint 7.3 MR 2 — lista giri azienda con filtri (cross-programma).
+ * Alimenta `/pianificatore-pdc/giri` (vista readonly del 2° ruolo).
+ */
+export function useGiriAzienda(
+  params: ListGiriAziendaParams = {},
+): UseQueryResult<GiroListItem[]> {
+  return useQuery({
+    queryKey: [...GIRI_KEY, "azienda", params],
+    queryFn: () => listGiriAzienda(params),
   });
 }
 

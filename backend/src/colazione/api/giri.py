@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from colazione.auth import require_role
+from colazione.auth import require_any_role, require_role
 from colazione.db import get_session
 from colazione.domain.builder_giro.builder import (
     BuilderResult,
@@ -50,6 +50,9 @@ from colazione.schemas.security import CurrentUser
 router = APIRouter(prefix="/api/programmi", tags=["giri"])
 
 _authz = Depends(require_role("PIANIFICATORE_GIRO"))
+# Sprint 7.3 MR 2: lettura giri ammessa anche al PIANIFICATORE_PDC.
+# Le scritture (POST genera-giri) restano protette da `_authz`.
+_authz_read = Depends(require_any_role("PIANIFICATORE_GIRO", "PIANIFICATORE_PDC"))
 
 
 # =====================================================================
@@ -330,13 +333,78 @@ giri_dettaglio_router = APIRouter(prefix="/api/giri", tags=["giri"])
 
 
 @giri_dettaglio_router.get(
+    "",
+    response_model=list[GiroMaterialeListItem],
+    summary="Lista giri materiali dell'azienda (cross-programma)",
+)
+async def list_giri_azienda(
+    programma_id: int | None = Query(
+        None, description="Filtra per programma. Se omesso, ritorna i giri di tutti i programmi dell'azienda."
+    ),
+    stato: str | None = Query(None, description="Filtra per stato (es. 'bozza', 'pubblicato')."),
+    tipo_materiale: str | None = Query(
+        None, description="Filtra per descrizione tipo materiale (match esatto)."
+    ),
+    q: str | None = Query(
+        None,
+        description="Ricerca testuale su numero_turno (case-insensitive contiene).",
+        min_length=1,
+        max_length=50,
+    ),
+    limit: int = Query(100, ge=1, le=500, description="Max righe ritornate."),
+    offset: int = Query(0, ge=0, description="Offset paginazione."),
+    user: CurrentUser = _authz_read,
+    session: AsyncSession = Depends(get_session),
+) -> list[GiroMaterialeListItem]:
+    """Lista giri materiali dell'azienda, ordinata per ``numero_turno``.
+
+    Sprint 7.3 MR 2: alimenta la schermata 4.2
+    `/pianificatore-pdc/giri` (vista readonly del 2° ruolo) e può
+    essere riusata dal 1° ruolo per drilldown cross-programma.
+    Auth: PIANIFICATORE_GIRO o PIANIFICATORE_PDC (admin bypassa).
+    """
+    stmt = select(GiroMateriale).where(GiroMateriale.azienda_id == user.azienda_id)
+    if programma_id is not None:
+        stmt = stmt.where(GiroMateriale.programma_id == programma_id)
+    if stato is not None:
+        stmt = stmt.where(GiroMateriale.stato == stato)
+    if tipo_materiale is not None:
+        stmt = stmt.where(GiroMateriale.tipo_materiale == tipo_materiale)
+    if q is not None:
+        stmt = stmt.where(GiroMateriale.numero_turno.ilike(f"%{q}%"))
+    stmt = stmt.order_by(GiroMateriale.numero_turno).limit(limit).offset(offset)
+    rows = (await session.execute(stmt)).scalars().all()
+    out: list[GiroMaterialeListItem] = []
+    for g in rows:
+        meta = g.generation_metadata_json or {}
+        out.append(
+            GiroMaterialeListItem(
+                id=g.id,
+                numero_turno=g.numero_turno,
+                tipo_materiale=g.tipo_materiale,
+                materiale_tipo_codice=g.materiale_tipo_codice,
+                numero_giornate=g.numero_giornate,
+                km_media_giornaliera=float(g.km_media_giornaliera)
+                if g.km_media_giornaliera is not None
+                else None,
+                km_media_annua=float(g.km_media_annua) if g.km_media_annua is not None else None,
+                motivo_chiusura=meta.get("motivo_chiusura"),
+                chiuso=bool(meta.get("chiuso", False)),
+                stato=g.stato,
+                created_at=g.created_at,
+            )
+        )
+    return out
+
+
+@giri_dettaglio_router.get(
     "/{giro_id}",
     response_model=GiroMaterialeDettaglioRead,
     summary="Dettaglio giro materiale (per visualizzatore Gantt)",
 )
 async def get_giro_dettaglio(
     giro_id: int,
-    user: CurrentUser = _authz,
+    user: CurrentUser = _authz_read,
     session: AsyncSession = Depends(get_session),
 ) -> GiroMaterialeDettaglioRead:
     """Ritorna giro + giornate + varianti + blocchi (sequenza

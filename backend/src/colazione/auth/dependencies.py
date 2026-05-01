@@ -79,6 +79,31 @@ def require_role(role: str) -> Callable[..., Awaitable[CurrentUser]]:
     return _checker
 
 
+def require_any_role(*roles: str) -> Callable[..., Awaitable[CurrentUser]]:
+    """Factory: dependency che richiede uno qualsiasi dei ruoli forniti
+    (admin bypassa).
+
+    Usato per endpoint accessibili in sola lettura da più ruoli (es.
+    GET /api/giri leggibile sia da PIANIFICATORE_GIRO sia da
+    PIANIFICATORE_PDC). La scrittura resta protetta da `require_role`
+    sul ruolo specifico.
+    """
+    if not roles:
+        raise ValueError("require_any_role: serve almeno un ruolo")
+
+    async def _checker(
+        user: CurrentUser = Depends(get_current_user),
+    ) -> CurrentUser:
+        if user.is_admin or any(r in user.roles for r in roles):
+            return user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"uno dei ruoli {sorted(roles)} richiesto",
+        )
+
+    return _checker
+
+
 def require_admin() -> Callable[..., Awaitable[CurrentUser]]:
     """Factory: dependency che richiede flag `is_admin=True`."""
 

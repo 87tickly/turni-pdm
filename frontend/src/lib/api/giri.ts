@@ -1,10 +1,11 @@
 /**
  * Wrapper API per i giri materiale (Sprint 4.4.5b backend +
- * Sprint 5.6 R1 read-side).
+ * Sprint 5.6 R1 read-side + Sprint 7.3 MR 2 cross-programma).
  *
  * Endpoint:
  *   POST /api/programmi/{id}/genera-giri  → lancia il builder
  *   GET  /api/programmi/{id}/giri         → lista giri del programma
+ *   GET  /api/giri                        → lista giri azienda (cross-programma)
  *   GET  /api/giri/{id}                   → dettaglio Gantt giro
  *
  * Tipi allineati a `colazione.api.giri` (BuilderResultResponse,
@@ -130,4 +131,31 @@ export async function listGiriProgramma(programmaId: number): Promise<GiroListIt
 
 export async function getGiroDettaglio(giroId: number): Promise<GiroDettaglio> {
   return apiJson<GiroDettaglio>(`/api/giri/${giroId}`, { method: "GET" });
+}
+
+// =====================================================================
+// Sprint 7.3 MR 2 — lista giri azienda (cross-programma)
+// =====================================================================
+
+export interface ListGiriAziendaParams {
+  programma_id?: number;
+  stato?: string;
+  tipo_materiale?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function listGiriAzienda(
+  params: ListGiriAziendaParams = {},
+): Promise<GiroListItem[]> {
+  const search = new URLSearchParams();
+  if (params.programma_id !== undefined) search.set("programma_id", String(params.programma_id));
+  if (params.stato !== undefined) search.set("stato", params.stato);
+  if (params.tipo_materiale !== undefined) search.set("tipo_materiale", params.tipo_materiale);
+  if (params.q !== undefined && params.q !== "") search.set("q", params.q);
+  if (params.limit !== undefined) search.set("limit", String(params.limit));
+  if (params.offset !== undefined) search.set("offset", String(params.offset));
+  const qs = search.toString();
+  return apiJson<GiroListItem[]>(`/api/giri${qs ? `?${qs}` : ""}`, { method: "GET" });
 }
