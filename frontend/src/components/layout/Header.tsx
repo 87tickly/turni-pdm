@@ -1,16 +1,24 @@
 import { LogOut, User as UserIcon } from "lucide-react";
+import { useLocation } from "react-router-dom";
 
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/lib/auth/AuthContext";
 
+/** Mappa path → titolo header, valutato dal primo segmento di location. */
+function titleForPath(pathname: string): string {
+  if (pathname.startsWith("/pianificatore-pdc")) return "Pianificatore Turno PdC";
+  if (pathname.startsWith("/pianificatore-giro")) return "Pianificatore Giro Materiale";
+  return "Colazione";
+}
+
 export function Header() {
   const { user, logout } = useAuth();
+  const location = useLocation();
+  const title = titleForPath(location.pathname);
 
   return (
     <header className="flex h-14 items-center justify-between border-b border-border bg-white px-6">
-      <div className="text-sm font-medium tracking-wide text-primary/80">
-        Pianificatore Giro Materiale
-      </div>
+      <div className="text-sm font-medium tracking-wide text-primary/80">{title}</div>
       <div className="flex items-center gap-3">
         {user !== null && (
           <span className="flex items-center gap-2 text-sm">

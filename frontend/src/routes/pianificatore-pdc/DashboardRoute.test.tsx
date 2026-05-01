@@ -1,0 +1,136 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
+import { Route, Routes } from "react-router-dom";
+
+import { PianificatorePdcDashboardRoute } from "@/routes/pianificatore-pdc/DashboardRoute";
+import { renderWithProviders } from "@/test/renderWithProviders";
+import type { PianificatorePdcOverview } from "@/lib/api/pianificatorePdc";
+
+function makeOverview(over: Partial<PianificatorePdcOverview> = {}): PianificatorePdcOverview {
+  return {
+    giri_materiali_count: 17,
+    turni_pdc_per_impianto: [
+      { impianto: "BRESCIA", count: 4 },
+      { impianto: "MILANO_GA", count: 8 },
+    ],
+    turni_con_violazioni_hard: 2,
+    revisioni_cascading_attive: 0,
+    ...over,
+  };
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+describe("PianificatorePdcDashboardRoute", () => {
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.fn();
+    vi.spyOn(globalThis, "fetch").mockImplementation(fetchSpy);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function renderRoute() {
+    return renderWithProviders(
+      <Routes>
+        <Route path="/pianificatore-pdc/dashboard" element={<PianificatorePdcDashboardRoute />} />
+      </Routes>,
+      {
+        routerProps: { initialEntries: ["/pianificatore-pdc/dashboard"] },
+        withAuth: true,
+      },
+    );
+  }
+
+  it("mostra titolo + KPI card con valori da overview", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(makeOverview()));
+
+    renderRoute();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /Dashboard Pianificatore Turno PdC/i }),
+      ).toBeInTheDocument();
+    });
+
+    // KPI Giri materiali — aspetta che la fetch popoli il valore (loading "…" → "17")
+    await waitFor(() => {
+      expect(screen.getByText("17")).toBeInTheDocument();
+    });
+    // KPI Turni PdC totali (somma 4+8 = 12)
+    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByText("Su 2 impianto/i")).toBeInTheDocument();
+    // KPI Violazioni hard
+    expect(
+      screen.getByText("Prestazione/condotta fuori cap"),
+    ).toBeInTheDocument();
+    // KPI Revisioni cascading
+    expect(screen.getByText("Disponibile da Sprint 7.6")).toBeInTheDocument();
+  });
+
+  it("renderizza il breakdown turni per impianto", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(makeOverview()));
+
+    renderRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("BRESCIA")).toBeInTheDocument();
+    });
+    expect(screen.getByText("MILANO_GA")).toBeInTheDocument();
+    expect(screen.getByText("4")).toBeInTheDocument();
+    expect(screen.getByText("8")).toBeInTheDocument();
+  });
+
+  it("breakdown vuoto → messaggio nessun turno", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(makeOverview({ turni_pdc_per_impianto: [] })),
+    );
+
+    renderRoute();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Nessun turno PdC presente/i),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("link rapidi puntano alle sub-route del ruolo", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(makeOverview()));
+
+    renderRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText("Vista giri materiali")).toBeInTheDocument();
+    });
+
+    const linkGiri = screen.getByRole("link", { name: /Apri vista giri/i });
+    expect(linkGiri).toHaveAttribute("href", "/pianificatore-pdc/giri");
+
+    const linkTurni = screen.getByRole("link", { name: /Apri lista turni/i });
+    expect(linkTurni).toHaveAttribute("href", "/pianificatore-pdc/turni");
+  });
+
+  it("error state mostra messaggio di errore", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: "boom" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    renderRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText(/Errore caricamento KPI/i)).toBeInTheDocument();
+    });
+  });
+});

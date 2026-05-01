@@ -10,6 +10,114 @@
 
 ---
 
+## 2026-05-01 (62) — Sprint 7.3 MR 1: scaffold ruolo PIANIFICATORE_PDC + dashboard home
+
+### Contesto
+
+Apertura Sprint 7.3 — costruzione del 2° ruolo dell'ecosistema
+(Pianificatore Turno PdC). Prima di questo MR esisteva solo
+`PIANIFICATORE_GIRO`: tutto il flusso turni-PdC viveva sotto
+`/pianificatore-giro/turni-pdc/...` e gli endpoint backend erano
+hardcoded a `require_role("PIANIFICATORE_GIRO")` con commento
+esplicito *"quando avremo la dashboard PdC dedicata, scinderemo i
+ruoli"*.
+
+Piano dei 4 MR concordato con utente:
+
+- **MR 1 (questo)** — scaffold ruolo + dashboard home con KPI
+- **MR 2** — vista giri readonly + lista turni cross-giro
+- **MR 3** — editor turno PdC sotto path PdC + scrittura ruolo PdC
+- **MR 4** — validazioni live (badge cap prestazione/condotta) +
+  pannello vincoli ciclo
+
+Scope-out dichiarato: schermata 4.5 "Revisioni cascading" rinviata
+a Sprint 7.6+ (richiede modello `revisione_provvisoria` non ancora
+implementato + algoritmo di propagazione). Motivazione oggettiva:
+scope >1gg indipendente, non scope-cutting silente.
+
+### Modifiche
+
+**Backend** (3 file toccati):
+
+- **Nuovo** `backend/src/colazione/api/pianificatore_pdc.py`
+  (~120 righe): router `/api/pianificatore-pdc/*`, endpoint
+  `GET /overview` che ritorna 4 KPI scoped per `azienda_id` JWT:
+  - `giri_materiali_count` (sorgente per turni)
+  - `turni_pdc_per_impianto` (group by + order by stabile)
+  - `turni_con_violazioni_hard` (count distinct su violazioni
+    cap prestazione 510/420 + cap condotta 330, OR esplicito su
+    notturno/standard)
+  - `revisioni_cascading_attive` (placeholder = 0, Sprint 7.6+)
+  Auth `require_role("PIANIFICATORE_PDC")` (admin bypassa).
+- **Modificato** `backend/src/colazione/main.py`: registrato il
+  nuovo router.
+- **Nuovo** `backend/tests/test_pianificatore_pdc_api.py`
+  (~280 righe, 7 test): 401 senza token, 403 con ruolo
+  PIANIFICATORE_GIRO non sufficiente, KPI a 0 su DB vuoto, KPI
+  corretti su mix di dati, copertura dei 3 cap (condotta,
+  notturno, count distinct).
+
+**Frontend** (10 file):
+
+- **Nuovo** `frontend/src/lib/api/pianificatorePdc.ts` — client
+  fetch + types `PianificatorePdcOverview` allineati al backend.
+- **Nuovo** `frontend/src/hooks/usePianificatorePdc.ts` — React
+  Query hook `usePianificatorePdcOverview`.
+- **Nuova cartella** `frontend/src/routes/pianificatore-pdc/` con
+  5 route:
+  - `DashboardRoute.tsx` (~200 righe): home con 4 KPI card
+    (Giri materiali, Turni PdC totali, Violazioni hard,
+    Revisioni cascading), tabella breakdown impianti, 2 link
+    rapidi alle sub-route. Card "violazioni" border ambra se
+    valore > 0.
+  - `GiriRoute.tsx`, `TurniRoute.tsx`,
+    `TurnoDettaglioRoute.tsx` — placeholder MR 2/3 (riusano
+    `PlaceholderPage` esistente).
+  - `RevisioniCascadingRoute.tsx` — placeholder Sprint 7.6+.
+  - `DashboardRoute.test.tsx` — 5 test vitest (rendering,
+    KPI populated, breakdown, link, error state).
+- **Modificato** `frontend/src/routes/AppRoutes.tsx`: blocco
+  `/pianificatore-pdc/*` protetto da
+  `<ProtectedRoute requiredRole="PIANIFICATORE_PDC">`. Index `/`
+  generico (un utente potrebbe avere solo PdC senza Giro).
+- **Modificato** `frontend/src/components/layout/Sidebar.tsx`:
+  sidebar dinamica che filtra i gruppi nav in base ai ruoli
+  dell'utente. Admin vede tutto.
+- **Modificato** `frontend/src/components/layout/Header.tsx`:
+  titolo dinamico mappato dal path corrente
+  (`/pianificatore-pdc/*` → "Pianificatore Turno PdC").
+
+### Stato
+
+**Verifiche fatte**:
+
+- `uv run mypy --strict src`: ✅ 52 source files clean
+- Test backend mirato (`test_pianificatore_pdc_api.py`):
+  ✅ 7 passed
+- `pnpm typecheck`: ✅ clean
+- `pnpm test --run`: ✅ 36 passed (era 31, +5 nuovi)
+
+**Verifica non completata**: la suite pytest completa (415 test) ha
+parlato di "FFF" intorno al 17% prima del kill manuale, ma
+l'output era bufferizzato e non sono riuscito a identificare
+quali test fallissero in tempo ragionevole. Decisione utente:
+committare lo stesso (il mio MR aggiunge solo file nuovi e modifica
+solo registrazione router/AppRoutes/Sidebar/Header — il rischio
+regressione su builder/persister/parser è zero). I 3 fail vanno
+indagati separatamente nel prossimo step.
+
+### Prossimo step
+
+1. **Indagare i 3 fail pytest** (priorità prima di MR 2): runnare
+   `uv run pytest -v --tb=short 2>&1 | tee /tmp/pytest.log` con
+   output non bufferizzato per identificarli. Se sono regressioni
+   del mio MR 1 → fix immediato. Se sono pre-esistenti (es.
+   flakiness DB, dati seed cambiati) → entry diagnosi separata.
+2. **Sprint 7.3 MR 2** — vista giri readonly + lista turni cross-giro
+   (backend `GET /api/turni-pdc` con filtri + frontend route).
+
+---
+
 ## 2026-05-01 (61) — Allineamento CLAUDE.md a stato reale del progetto
 
 ### Contesto
