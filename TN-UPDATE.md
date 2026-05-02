@@ -10,6 +10,133 @@
 
 ---
 
+## 2026-05-02 (76) — Sprint 7.7 MR 2: calendario ufficiale festività italiane
+
+### Contesto
+
+Decisione utente 2026-05-02 (memoria
+`project_refactor_varianti_giri_separati_TODO.md`):
+
+> "aiuterebbe aggiungere nel programma il calendario ufficiale cosi
+> almeno l algoritmo sa che oggi è il 2 maggio?"
+
+Prerequisito del refactor "varianti → giri separati con etichette
+parlanti" (Sprint 7.7.3, prossima sessione). Il builder potrà
+classificare ogni data come Feriale/Sabato/Domenica/Festivo e
+generare giri separati per categoria (es. "giro feriale" vs "giro
+festivo" se i percorsi cambiano).
+
+### Modifiche
+
+#### Backend (5 file, 1 nuovo migration, 1 nuovo modulo, 1 nuovo test)
+
+- **Migration alembic 0015** `0015_festivita_ufficiale.py`
+  (revision `e3b9a046f218`, down_revision `d2a8f17bc94e`):
+  - Crea tabella `festivita_ufficiale`
+    `(id, azienda_id NULL, data, nome, tipo, created_at)`.
+  - Index su `data` + 2 UNIQUE parziali (1 per festività nazionali
+    `azienda_id IS NULL`, 1 per locali `azienda_id IS NOT NULL`).
+  - Seed: 12 festività × 6 anni (2025-2030) = 72 righe nazionali +
+    Sant'Ambrogio Trenord (6 righe) = 78 righe totali.
+- **Nuovo `domain/calendario.py`**: helper puri (no DB):
+  - `pasqua_gregoriana(anno)` algoritmo Anonymous Gregorian
+    (Meeus-Jones-Butcher), valido per qualsiasi anno
+  - `pasquetta(anno)` = Pasqua + 1 giorno
+  - `festivita_italiane_fisse(anno)` lista 10 fisse `(date, nome)`
+  - `festivita_italiane(anno)` lista completa fisse + Pasqua +
+    Pasquetta (12), ordinata cronologica
+  - `tipo_giorno(data, festivita)` ritorna
+    `"feriale" | "sabato" | "domenica" | "festivo"` con precedenza
+    festivo su weekend (decisione utente: "festivo che cade di
+    sabato è festivo, non sabato")
+- `models/anagrafica.py`:
+  - Import `date` + `Date` aggiunti
+  - Nuova classe `FestivitaUfficiale` (id, azienda_id NULL, data,
+    nome, tipo, created_at)
+- `models/__init__.py`: aggiunto `FestivitaUfficiale` a import + `__all__`
+- `api/anagrafiche.py`:
+  - Import `FestivitaUfficiale`, `tipo_giorno`, `or_`, `date`
+  - Nuovi schemi `FestivitaRead`, `CalendarioRead`
+  - Nuovo endpoint `GET /api/calendario/{anno}` che ritorna
+    festività dell'anno per azienda corrente (nazionali + locali).
+    `anno` deve essere in [2025, 2030], altrimenti 404 con
+    suggerimento di estendere migration 0015.
+- `tests/test_models.py`: `EXPECTED_TABLE_COUNT = 35 → 36`
+- **Nuovo `tests/test_calendario.py`** (15 test puri, no DB):
+  - `TestPasquaGregoriana`: 5 anni noti + cross-check 1995
+  - `test_pasquetta_e_pasqua_piu_uno`
+  - `test_festivita_fisse_ordinate_e_complete`
+  - `test_festivita_italiane_include_pasqua_e_pasquetta`
+  - `TestTipoGiorno`: 6 casi (feriale/sabato/domenica/festivo +
+    precedenza festivo su sabato/domenica)
+
+#### Frontend (2 file)
+
+- `lib/api/anagrafiche.ts`:
+  - Nuovi tipi `FestivitaRead` `(data: string, nome, tipo, azienda_id: number | null)` + `CalendarioRead` `(anno, festivita)`
+  - Funzione `getCalendario(anno)`
+- `hooks/useAnagrafiche.ts`:
+  - Import `getCalendario`, `CalendarioRead`
+  - Nuovo hook `useCalendario(anno)` con `staleTime: 1h` (festività
+    cambiano raramente)
+
+### Verifiche
+
+- `uv run mypy --strict src`: ✅ 53 source files clean (era 52, +1
+  nuovo `calendario.py`)
+- `uv run pytest --tb=line`: ✅ **454 passed, 12 skipped in 19.76s**
+  (baseline 439 → +15 nuovi calendario)
+- Frontend `pnpm typecheck`: ✅ clean
+- Frontend `pnpm test --run`: ✅ **53 passed**
+- Frontend `pnpm build` (Vite production): ✅ 1757 modules,
+  389KB bundle (114KB gzip), 935ms
+
+### Migrazione DB applicata
+
+`alembic upgrade head`: `d2a8f17bc94e → e3b9a046f218`. Stato corrente:
+0015 applied. Verifica DB:
+
+```sql
+SELECT COUNT(*) FROM festivita_ufficiale;  -- 78
+SELECT COUNT(*) FROM festivita_ufficiale WHERE azienda_id IS NULL; -- 72
+SELECT COUNT(*) FROM festivita_ufficiale WHERE azienda_id IS NOT NULL; -- 6 (Sant'Ambrogio)
+```
+
+Festività 2026 (13 totali per Trenord):
+- 1/1 Capodanno · 6/1 Epifania · 5/4 Pasqua · 6/4 Lunedì dell'Angelo
+- 25/4 Liberazione · 1/5 Lavoro · 2/6 Repubblica
+- 15/8 Ferragosto · 1/11 Ognissanti
+- 7/12 **Sant'Ambrogio** (locale Trenord) · 8/12 Immacolata
+- 25/12 Natale · 26/12 S. Stefano
+
+### Cosa abilita
+
+- **Frontend**: il `useCalendario(anno)` può alimentare un calendario
+  visivo nel programma (highlight festivi/weekend), oggi non ancora
+  esposto in UI.
+- **Builder Sprint 7.7.3**: la helper `tipo_giorno()` permette al
+  refactor varianti di etichettare ogni data come
+  feriale/sabato/festivo, propedeutico alla generazione di giri
+  separati per categoria.
+
+### Limitazioni note
+
+- Anni seedati: 2025-2030. Per anni fuori range l'endpoint ritorna
+  404 con messaggio "estendere migration 0015". In futuro si può
+  generalizzare con seed dinamico al momento della query.
+- Festività locali oggi popolate solo per Trenord (Sant'Ambrogio).
+  Per altre aziende multi-tenant servirà un seed dedicato (es. Santa
+  Rosalia per Palermo, San Giovanni per Firenze).
+
+### Prossimo step (NUOVA SESSIONE)
+
+MR 7.7.3 — Refactor varianti → giri separati con etichette parlanti.
+Memoria di riferimento:
+`project_refactor_varianti_giri_separati_TODO.md`. Il calendario è
+ora pronto per essere consumato dal builder.
+
+---
+
 ## 2026-05-02 (75) — Hotfix Fix C2: giri SEMPRE chiusi (troncamento al limite whitelist)
 
 ### Contesto

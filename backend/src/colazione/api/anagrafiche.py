@@ -9,6 +9,9 @@ Pianificatore Giro Materiale:
   sosta extra)
 - ``GET /api/direttrici`` — distinct delle direttrici nel PdE
 - ``GET /api/localita-manutenzione`` — sedi (codice, codice_breve, stazione_collegata)
+- ``GET /api/calendario/{anno}`` — Sprint 7.7 MR 2: festività dell'azienda
+  (nazionali + locali) per l'anno indicato + tag giorno per ogni data del
+  periodo richiesto.
 
 Multi-tenant: ``azienda_id`` dal JWT, niente input client.
 Auth: ruolo ``PIANIFICATORE_GIRO`` (admin bypassa).
@@ -16,15 +19,19 @@ Auth: ruolo ``PIANIFICATORE_GIRO`` (admin bypassa).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import distinct, select
+from sqlalchemy import distinct, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.auth import require_role
 from colazione.db import get_session
+from colazione.domain.calendario import tipo_giorno
 from colazione.models.anagrafica import (
     Depot,
+    FestivitaUfficiale,
     LocalitaManutenzione,
     MaterialeTipo,
     Stazione,
@@ -165,3 +172,70 @@ async def list_localita_manutenzione(
     )
     rows = (await session.execute(stmt)).scalars().all()
     return [LocalitaManutenzioneRead.model_validate(r) for r in rows]
+
+
+# =====================================================================
+# Sprint 7.7 MR 2 — Calendario ufficiale festività
+# =====================================================================
+
+
+class FestivitaRead(BaseModel):
+    """Una festività del calendario ufficiale (nazionale o azienda)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    data: date
+    nome: str
+    tipo: str  # "nazionale" | "religiosa" | "patronale"
+    azienda_id: int | None  # NULL = nazionale universale
+
+
+class CalendarioRead(BaseModel):
+    """Risposta di ``GET /api/calendario/{anno}``: festività + tag giorno."""
+
+    anno: int
+    festivita: list[FestivitaRead]
+
+
+@router.get("/calendario/{anno}", response_model=CalendarioRead)
+async def get_calendario(
+    anno: int,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> CalendarioRead:
+    """Festività dell'anno per l'azienda corrente: nazionali (azienda_id NULL)
+    + locali (azienda_id = user.azienda_id).
+
+    Sprint 7.7 MR 2. Il frontend usa questa lista per visualizzare il
+    calendario nel programma e per etichettare i giorni come
+    feriale/sabato/domenica/festivo.
+    """
+    if anno < 2025 or anno > 2030:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Anno {anno} fuori dal range seedato (2025-2030). "
+                "Per anni futuri estendere la migration 0015."
+            ),
+        )
+    stmt = (
+        select(FestivitaUfficiale)
+        .where(
+            FestivitaUfficiale.data >= date(anno, 1, 1),
+            FestivitaUfficiale.data <= date(anno, 12, 31),
+            or_(
+                FestivitaUfficiale.azienda_id.is_(None),
+                FestivitaUfficiale.azienda_id == user.azienda_id,
+            ),
+        )
+        .order_by(FestivitaUfficiale.data, FestivitaUfficiale.nome)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return CalendarioRead(
+        anno=anno,
+        festivita=[FestivitaRead.model_validate(r) for r in rows],
+    )
+
+
+# Esposto per riuso da altri moduli backend (es. builder Sprint 7.7.3).
+__all__ = ["router", "tipo_giorno"]

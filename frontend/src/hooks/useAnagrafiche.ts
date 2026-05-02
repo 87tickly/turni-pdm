@@ -9,11 +9,13 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 
 import {
+  getCalendario,
   listDepots,
   listDirettrici,
   listLocalitaManutenzione,
   listMateriali,
   listStazioni,
+  type CalendarioRead,
   type DepotRead,
   type LocalitaManutenzioneRead,
   type MaterialeRead,
@@ -59,5 +61,18 @@ export function useLocalitaManutenzione(): UseQueryResult<LocalitaManutenzioneRe
     queryKey: ["anagrafiche", "localita-manutenzione"],
     queryFn: listLocalitaManutenzione,
     staleTime: FIVE_MIN,
+  });
+}
+
+/**
+ * Sprint 7.7 MR 2 — calendario ufficiale (festività nazionali +
+ * locali) per l'anno indicato. ``staleTime: 1h`` perché le festività
+ * cambiano raramente entro la stessa sessione utente.
+ */
+export function useCalendario(anno: number): UseQueryResult<CalendarioRead> {
+  return useQuery({
+    queryKey: ["anagrafiche", "calendario", anno],
+    queryFn: () => getCalendario(anno),
+    staleTime: 60 * 60 * 1000,
   });
 }

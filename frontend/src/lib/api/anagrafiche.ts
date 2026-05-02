@@ -55,3 +55,32 @@ export async function listLocalitaManutenzione(): Promise<LocalitaManutenzioneRe
     method: "GET",
   });
 }
+
+// =====================================================================
+// Sprint 7.7 MR 2 — Calendario ufficiale festività
+// =====================================================================
+
+export interface FestivitaRead {
+  /** ISO date `YYYY-MM-DD`. */
+  data: string;
+  nome: string;
+  /** "nazionale" | "religiosa" | "patronale" */
+  tipo: string;
+  /** NULL = festività nazionale; altrimenti azienda-specifica (es. patrono). */
+  azienda_id: number | null;
+}
+
+export interface CalendarioRead {
+  anno: number;
+  festivita: FestivitaRead[];
+}
+
+/**
+ * Festività dell'anno per l'azienda corrente (nazionali + locali).
+ *
+ * Anni seedati nella migration 0015: 2025-2030. Anni fuori range
+ * → 404. Per anni futuri estendere la migration.
+ */
+export async function getCalendario(anno: number): Promise<CalendarioRead> {
+  return apiJson<CalendarioRead>(`/api/calendario/${anno}`, { method: "GET" });
+}

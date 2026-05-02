@@ -6,12 +6,13 @@ materiali, località manutenzione, depositi PdC, e tabelle associative.
 Vedi `docs/SCHEMA-DATI-NATIVO.md` §3 e migrazione 0001 per i dettagli.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -166,6 +167,38 @@ class LocalitaStazioneVicina(Base):
     stazione_codice: Mapped[str] = mapped_column(
         String(20), ForeignKey("stazione.codice", ondelete="RESTRICT")
     )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FestivitaUfficiale(Base):
+    """Calendario ufficiale festività (Sprint 7.7 MR 2, migration 0015).
+
+    Una riga per ogni giorno NON-feriale che NON è pura conseguenza
+    del weekday (sabato/domenica si calcolano dal `data.weekday()`).
+    Riguarda quindi solo:
+
+    - Festività nazionali italiane (10 fisse + Pasqua + Pasquetta)
+    - Festività locali per azienda/regione (Sant'Ambrogio per Trenord)
+    - Eventuali ricorrenze speciali per programma (oggi non usate)
+
+    `azienda_id` NULL = festività universale (nazionale).
+    `azienda_id` valorizzato = festività specifica per quell'azienda
+    (es. patrono locale).
+
+    Il builder usa questa tabella + `domain/calendario.tipo_giorno()`
+    per classificare ogni data come feriale/sabato/domenica/festivo,
+    propedeutico al refactor "varianti → giri separati" (Sprint 7.7.3).
+    """
+
+    __tablename__ = "festivita_ufficiale"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    azienda_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("azienda.id", ondelete="CASCADE")
+    )
+    data: Mapped[date] = mapped_column(Date, index=True)
+    nome: Mapped[str] = mapped_column(Text)
+    tipo: Mapped[str] = mapped_column(String(20), default="nazionale")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
