@@ -1,0 +1,116 @@
+{
+  "_metadata": {
+    "nome_file": "vincoli_materiale_inviolabili.json",
+    "data_creazione": "2026-05-02",
+    "fonte": "Conferma utente in chat + dataset turni_materiale_2026_dump.json + interrogazione DB materiale_tipo",
+    "scopo": "Vincoli a livello tipo materiale, INDIPENDENTI dal singolo programma di pianificazione. Non possono essere violati da una regola programma_regola_assegnazione: il backend valida ogni POST/PUT regola contro questo file e ritorna 400 se viola.",
+    "differenza_da_programma_regola_assegnazione": "programma_regola_assegnazione contiene scelte SOFT del pianificatore per il singolo programma (es. 'su questo programma uso Vivalto per la R39'). Questo file contiene vincoli HARD che si applicano sempre, a prescindere dal programma scelto dal pianificatore.",
+    "azienda": "trenord",
+    "scope_multi_tenant": "Quando si importerà SAD/Trenitalia/altre aziende, i vincoli 'tipo: tecnico_alimentazione' restano (legge di fisica). I vincoli 'tipo: contrattuale_omologazione' e 'tipo: operativo_turistico' sono specifici Trenord e vanno reimpostati per altre aziende.",
+    "totale_vincoli": 3,
+    "metodo_match": "I vincoli matchano direttamente su materiale_tipo.codice (PK), non su string famiglia (più robusto). Le linee vengono matchate sulle stazioni origine/destinazione delle corse catturate dai filtri della regola (regex pattern), non su codice_linea (che varia tra PdE diversi)."
+  },
+  "vincoli": [
+    {
+      "id": "tecnico_elettrico_no_linee_diesel",
+      "nome": "Materiale elettrico ↔ obbligo catenaria",
+      "tipo": "tecnico_alimentazione",
+      "scope": "Universale (legge di fisica - vale per tutte le aziende)",
+      "modalita": "blacklist",
+      "descrizione": "Materiale puramente elettrico (sia elettromotrice sia loco-trainata con E464) richiede catenaria. NON può circolare su linee non elettrificate.",
+      "materiale_tipo_codici_target": [
+        "ETR421",
+        "ETR522",
+        "ETR521",
+        "ETR204",
+        "ETR245",
+        "ETR425",
+        "ETR526",
+        "ETR103",
+        "ETR104",
+        "ETR524",
+        "R_TAF",
+        "TAF",
+        "ALe711_3",
+        "ALe711_4",
+        "ALe245_treno",
+        "MD",
+        "Vivalto",
+        "E464"
+      ],
+      "stazioni_vietate_pattern_regex": [
+        "(?i)\\bISEO\\b",
+        "(?i)\\bEDOLO\\b",
+        "(?i)\\bPISOGNE\\b",
+        "(?i)\\bDARFO\\b",
+        "(?i)\\bROVATO\\b.*\\bISEO\\b",
+        "(?i)\\bBRESCIA.*PARMA\\b|\\bPARMA.*BRESCIA\\b",
+        "(?i)\\bBORGO.*VAL.*TARO\\b"
+      ],
+      "linee_descrizione_vietate": [
+        "Brescia-Iseo-Edolo (NON elettrificata)",
+        "Brescia-Parma (NON elettrificata)"
+      ],
+      "materiale_tipo_codici_esenti": [
+        "ATR803",
+        "ATR125",
+        "ATR115",
+        "ALn668(1000)",
+        "D520"
+      ],
+      "note": "ATR803 Coleoni è diesel ibrido (trazione termica + elettrica), può girare ovunque. ATR125/ATR115/ALn668(1000)/D520 sono diesel pure: tecnicamente potrebbero andare anche su elettrificate, ma è scelta operativa Trenord (vincolo soft, non in questo file). Le stazioni 'vietate' sono i capolinea/intermedie tipiche delle linee non elettrificate del PdE Trenord."
+    },
+    {
+      "id": "contrattuale_tilo_flirt_524",
+      "nome": "TILO Flirt (ETR524) — omologazione TILO/CH",
+      "tipo": "contrattuale_omologazione",
+      "scope": "Specifico Trenord (accordo TILO con SBB-CFF-FFS)",
+      "modalita": "whitelist",
+      "descrizione": "Il materiale ETR524 Stadler FLIRT è omologato per il servizio TILO transfrontaliero Italia-Svizzera. Può circolare SOLO sulle linee con destinazione Chiasso, Malpensa-Varese o Luino-Malpensa.",
+      "materiale_tipo_codici_target": [
+        "ETR524"
+      ],
+      "stazioni_ammesse_pattern_regex": [
+        "(?i)\\bCHIASSO\\b",
+        "(?i)\\bCOMO\\b",
+        "(?i)\\bMALPENSA\\b|\\bMXP\\b",
+        "(?i)\\bLUINO\\b",
+        "(?i)\\bVARESE\\b",
+        "(?i)\\bGALLARATE\\b",
+        "(?i)\\bSARONNO\\b"
+      ],
+      "linee_descrizione_ammesse": [
+        "Como-Chiasso-Milano",
+        "Luino-Gallarate-Milano",
+        "Varese-Saronno-Milano (con servizio MXP-Varese)"
+      ],
+      "servizi_commerciali_dichiarati": ["S10", "S30", "S40", "RE80"],
+      "note": "Servizi TILO rilevati nel PdE 2026: S10, S30, S40. Una corsa è considerata ammessa se origine O destinazione matcha almeno un pattern. Verificato sul dataset: 7 turni ETR524 tutti compliant."
+    },
+    {
+      "id": "operativo_treno_dei_sapori_d520",
+      "nome": "Treno dei Sapori (D520) — solo Brescia-Iseo-Edolo",
+      "tipo": "operativo_turistico",
+      "scope": "Specifico Trenord (treno turistico stagionale)",
+      "modalita": "whitelist",
+      "descrizione": "Il Treno dei Sapori è un convoglio turistico speciale Trenord trainato dal locomotore diesel D520, in servizio sulla linea della Valcamonica (Brescia-Iseo-Edolo). Non viene utilizzato su altre linee.",
+      "materiale_tipo_codici_target": [
+        "D520"
+      ],
+      "stazioni_ammesse_pattern_regex": [
+        "(?i)\\bBRESCIA\\b",
+        "(?i)\\bISEO\\b",
+        "(?i)\\bEDOLO\\b",
+        "(?i)\\bPISOGNE\\b",
+        "(?i)\\bDARFO\\b",
+        "(?i)\\bSULZANO\\b",
+        "(?i)\\bMARONE\\b",
+        "(?i)\\bPARATICO\\b"
+      ],
+      "linee_descrizione_ammesse": [
+        "Brescia-Iseo-Edolo (NON elettrificata)"
+      ],
+      "note": "Conferma utente 2026-05-02. Verificato dal dataset: turno 1184 (D520) circola esclusivamente su Brescia-Iseo-Edolo. La nota PDF dichiara 'Turno dedicato Treno dei Sapori'."
+    }
+  ]
+}

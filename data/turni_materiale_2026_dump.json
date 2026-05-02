@@ -1,0 +1,5289 @@
+{
+  "_metadata": {
+    "sorgente_pdf": "Turno Materiale Trenord dal 2_3_26.pdf (PdE 2026)",
+    "data_estrazione": "2026-05-02",
+    "data_pdf_deposito": "25/02/2026",
+    "turnificazione": "912",
+    "validita_documento": "dal 2/3/26",
+    "totale_pagine_pdf": 353,
+    "totale_turni": 54,
+    "metodo": "pdftotext -layout + parser Python",
+    "famiglia_fonte_primaria": "note_gantt_pdf (campo Note delle pagine Gantt + spec_line copertina) - fonte autorevole Trenord",
+    "famiglia_fallback": "composizione_raw (regole pattern su codici interni TN-AleNNN)",
+    "classificazione_famiglie_trenord": {
+      "Caravaggio": "ETR421 + ETR522 (stessa famiglia commerciale Trenord, dichiarato in nota PDF \"Caravaggio Npz (ETR421)\" o \"Caravaggio Npz (ETR522)\")",
+      "Donizetti": "ETR204 (dichiarato \"Donizetti - ETR 204\")",
+      "Coradia 245": "ETR245 (vecchio doppio piano)",
+      "Coradia 425": "ETR425",
+      "Coradia 526": "ETR526",
+      "Rock": "ETR521",
+      "POP": "ETR103, ETR104",
+      "TILO Flirt": "ETR524 - vincolo: solo Chiasso, MXP-Varese, Luino-MXP. Servizi commerciali rilevati: S10, S30, S40",
+      "TSR": "ALe711+ALe710 (lunghezze 3pz/4pz/5pz/6pz)",
+      "TAF": "ALe506+ALe426+Le736 ex Trenitalia (\"TAF TI\") - SEPARATO DA TSR",
+      "R-TAF": "ALe760/761+Le990 (variante storica Trenord)",
+      "Vivalto": "E464 + nBBW (loco-trainata doppio piano)",
+      "MDVE/MDVC": "E464 + npBDL/npBDCTE + nBC (loco-trainata classica, npBDCTE estiva)",
+      "ATR803 Coleoni": "diesel ibrido (varianti A/B/C/PP)",
+      "Treno dei Sapori": "turistico speciale Brescia-Iseo (locomotore D520)"
+    },
+    "vincoli_geografici_dichiarati": {
+      "TILO Flirt (ETR524)": "Solo Chiasso, MXP-Varese, Luino-MXP - 0 violazioni rilevate nel PdE 2026"
+    },
+    "tratte_attualmente_chiuse_2026": [
+      "Bergamo-Ponte S.Pietro (treni \"via Carnate\" terminano a Ponte S.Pietro)",
+      "Lecco-Bergamo (linea sospesa - 0 turni nel dataset toccano entrambe le stazioni)"
+    ],
+    "note": "Tutte le 54 famiglie sono state estratte dalle note Gantt del PDF (fonte autorevole). Le linee_inferite includono anche rami di posizionamento/deadhead."
+  },
+  "turni": [
+    {
+      "numero_turno": "1100",
+      "validita": "P",
+      "composizione_raw": "1npBDL+5nBC-clim+1E464N",
+      "spec_line_raw": "PR 270 - PPF 120 - m. 174 - MD",
+      "famiglie_materiale": [
+        "MDVE/MDVC (E464+npBDL/BDCTE+nBC)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "PR 270 - PPF 120 - m. 174 - MD"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": "MD",
+      "pr": 270,
+      "ppf": 120,
+      "metri": 174,
+      "tsr_pezzi": null,
+      "numero_giornate": 2,
+      "km_giornaliera_media": "270,69",
+      "km_annua_ponderata": "154.832,47",
+      "pezzi": [
+        {
+          "pezzo": "npBDL",
+          "numero": 2
+        },
+        {
+          "pezzo": "nBC-clim",
+          "numero": 10
+        },
+        {
+          "pezzo": "E464N",
+          "numero": 2
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Cremona-Codogno-Milano",
+          "commerciale": "S12 / R47 (Codogno)"
+        },
+        {
+          "fisica": "Cremona-Treviglio-Milano",
+          "commerciale": "R39 (Cremona-Treviglio-Milano P.Garibaldi)"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 13,
+      "treni_sample": [
+        "1100",
+        "2255",
+        "2260",
+        "10600",
+        "10603",
+        "10606",
+        "10607",
+        "10609",
+        "10610",
+        "28183",
+        "28220",
+        "93019",
+        "93058"
+      ],
+      "treni_min": 1100,
+      "treni_max": 93058,
+      "stazioni_capolinea": [
+        "CODOGNO",
+        "CREMONA",
+        "MI.CERT",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "MILANO CERTOSA"
+      ],
+      "pagina_copertina": 1,
+      "pagine_gantt": [
+        2
+      ]
+    },
+    {
+      "numero_turno": "1101",
+      "validita": "P",
+      "composizione_raw": "4nBBW+1npBBHW+1E464N+1nAAW",
+      "spec_line_raw": "PR 402 - PPF 125 - m.174 - VIVALTO",
+      "famiglie_materiale": [
+        "Vivalto (E464+nBBW loco-trainata)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "PR 402 - PPF 125 - m.174 - VIVALTO"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": "VIVALTO",
+      "pr": 402,
+      "ppf": 125,
+      "metri": 174,
+      "tsr_pezzi": null,
+      "numero_giornate": 10,
+      "km_giornaliera_media": "408,22",
+      "km_annua_ponderata": "1.167.504,12",
+      "pezzi": [
+        {
+          "pezzo": "nBBW",
+          "numero": 40
+        },
+        {
+          "pezzo": "npBBHW",
+          "numero": 10
+        },
+        {
+          "pezzo": "E464N",
+          "numero": 10
+        },
+        {
+          "pezzo": "nAAW",
+          "numero": 10
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Milano via Treviglio",
+          "commerciale": "RE3 (Bergamo via Treviglio)"
+        },
+        {
+          "fisica": "Milano-Mortara-Alessandria",
+          "commerciale": "S9/R31 (Mortara-Alessandria)"
+        },
+        {
+          "fisica": "Linea passante Milano",
+          "commerciale": "S1/S2/S3 passante"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)",
+        "Stazione Milano Centrale (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 123,
+      "treni_sample": [
+        "1022",
+        "1101",
+        "2206",
+        "2211",
+        "2214",
+        "2215",
+        "2216",
+        "2217",
+        "2218",
+        "2219",
+        "2222",
+        "2223",
+        "2224",
+        "2225",
+        "2226",
+        "2227",
+        "2230",
+        "2231",
+        "2232",
+        "2233",
+        "2234",
+        "2235",
+        "2238",
+        "2239",
+        "2240",
+        "2241",
+        "2242",
+        "2243",
+        "2246",
+        "2247"
+      ],
+      "treni_min": 1022,
+      "treni_max": 68021,
+      "stazioni_capolinea": [
+        "ALESSANDRIA",
+        "BERGAMO",
+        "MI.CERT",
+        "MI.LAMB",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "MI.S.CR",
+        "MILANO CENTRALE",
+        "MILANO CERTOSA",
+        "MILANO ROGOREDO",
+        "MORTARA",
+        "TREVIGLIO",
+        "VIGEVANO"
+      ],
+      "pagina_copertina": 3,
+      "pagine_gantt": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ]
+    },
+    {
+      "numero_turno": "1102",
+      "validita": "P",
+      "composizione_raw": "4nBBW+1nAAW+1E464N+1npBBHW",
+      "spec_line_raw": "PR 402 - PPF 125 - m.174 - VIVALTO",
+      "famiglie_materiale": [
+        "Vivalto (E464+nBBW loco-trainata)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "PR 402 - PPF 125 - m.174 - VIVALTO"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": "VIVALTO",
+      "pr": 402,
+      "ppf": 125,
+      "metri": 174,
+      "tsr_pezzi": null,
+      "numero_giornate": 3,
+      "km_giornaliera_media": "635,73",
+      "km_annua_ponderata": "545.459,61",
+      "pezzi": [
+        {
+          "pezzo": "nBBW",
+          "numero": 12
+        },
+        {
+          "pezzo": "nAAW",
+          "numero": 3
+        },
+        {
+          "pezzo": "E464N",
+          "numero": 3
+        },
+        {
+          "pezzo": "npBBHW",
+          "numero": 3
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Mantova-Cremona-Milano",
+          "commerciale": "R10 (Mantova-Cremona-Milano)"
+        },
+        {
+          "fisica": "Genova-Voghera-Milano",
+          "commerciale": "RE2 (Genova-Voghera-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 32,
+      "treni_sample": [
+        "1102",
+        "2154",
+        "2157",
+        "2158",
+        "2159",
+        "2166",
+        "2167",
+        "2168",
+        "2169",
+        "2176",
+        "2177",
+        "2178",
+        "2179",
+        "2181",
+        "2186",
+        "2309",
+        "2310",
+        "2311",
+        "2316",
+        "2318",
+        "2387",
+        "28243",
+        "28244",
+        "28246",
+        "28247",
+        "28323",
+        "28324",
+        "30165",
+        "30171",
+        "30212"
+      ],
+      "treni_min": 1102,
+      "treni_max": 30435,
+      "stazioni_capolinea": [
+        "BOZZOLO",
+        "CREMONA",
+        "MI.CERT",
+        "NOVI",
+        "PIADENA",
+        "VOGHERA"
+      ],
+      "pagina_copertina": 12,
+      "pagine_gantt": [
+        13,
+        14
+      ]
+    },
+    {
+      "numero_turno": "1103",
+      "validita": "P",
+      "composizione_raw": "1npBDL-clim+1E464N+6nBC-clim",
+      "spec_line_raw": "PR 315 - PPF 120 - m. 201 - MD - Materiale Attrezzato con AI",
+      "famiglie_materiale": [
+        "MDVE/MDVC (E464+npBDL/BDCTE+nBC)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "PR 315 - PPF 120 - m. 201 - MD - Materiale Attrezzato con AI"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": "MD - Materiale Attrezzato con AI",
+      "pr": 315,
+      "ppf": 120,
+      "metri": 201,
+      "tsr_pezzi": null,
+      "numero_giornate": 4,
+      "km_giornaliera_media": "272,97",
+      "km_annua_ponderata": "312.279,51",
+      "pezzi": [
+        {
+          "pezzo": "npBDL-clim",
+          "numero": 4
+        },
+        {
+          "pezzo": "E464N",
+          "numero": 4
+        },
+        {
+          "pezzo": "nBC-clim",
+          "numero": 24
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Milano via Carnate (capolinea attuale: Ponte S.Pietro - tratta PSP-BG chiusa)",
+          "commerciale": "R5 (Bergamo via Carnate)"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 31,
+      "treni_sample": [
+        "1103",
+        "25815",
+        "25818",
+        "25819",
+        "25820",
+        "25821",
+        "25823",
+        "25824",
+        "25830",
+        "25834",
+        "25835",
+        "25839",
+        "25846",
+        "25850",
+        "25851",
+        "25855",
+        "25862",
+        "25863",
+        "25866",
+        "25867",
+        "25869",
+        "25871",
+        "25872",
+        "25878",
+        "25882",
+        "25883",
+        "28154",
+        "28227",
+        "28361",
+        "28362"
+      ],
+      "treni_min": 1103,
+      "treni_max": 28366,
+      "stazioni_capolinea": [
+        "CARNATE",
+        "CARNATE USMATE",
+        "MI.CERT",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "PONTE S.PIETRO",
+        "PONTE SP",
+        "USMATE"
+      ],
+      "pagina_copertina": 15,
+      "pagine_gantt": [
+        16,
+        17
+      ]
+    },
+    {
+      "numero_turno": "1104",
+      "validita": "Valido dal 28/3 al 28/9",
+      "composizione_raw": "1npBDCTE-clim+1E464N+5nBC-clim",
+      "spec_line_raw": "PR 270 - PPF 120 - m. 174 - MD - Materiale Attrezzato con AI",
+      "famiglie_materiale": [
+        "MDVE/MDVC (E464+npBDL/BDCTE+nBC)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "PR 270 - PPF 120 - m. 174 - MD - Materiale Attrezzato con AI"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": "MD - Materiale Attrezzato con AI",
+      "pr": 270,
+      "ppf": 120,
+      "metri": 174,
+      "tsr_pezzi": null,
+      "numero_giornate": 1,
+      "km_giornaliera_media": "271,51",
+      "km_annua_ponderata": "50.228,86",
+      "pezzi": [
+        {
+          "pezzo": "npBDCTE-clim",
+          "numero": 1
+        },
+        {
+          "pezzo": "E464N",
+          "numero": 1
+        },
+        {
+          "pezzo": "nBC-clim",
+          "numero": 5
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Ventimiglia (treno turistico stagionale)",
+          "commerciale": "Treno del Mare"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 17,
+      "treni_sample": [
+        "1104",
+        "3090",
+        "3091",
+        "3092",
+        "3093",
+        "3094",
+        "3095",
+        "28061",
+        "28062",
+        "28353",
+        "28354",
+        "88082",
+        "88083",
+        "88084",
+        "88085",
+        "88086",
+        "88087"
+      ],
+      "treni_min": 1104,
+      "treni_max": 88087,
+      "stazioni_capolinea": [
+        "ALBENGA",
+        "BERGAMO",
+        "MI.CERT",
+        "MILANO CERTOSA",
+        "VENT"
+      ],
+      "pagina_copertina": 18,
+      "pagine_gantt": [
+        19
+      ]
+    },
+    {
+      "numero_turno": "1105",
+      "validita": "Valido dal 28/3 al 28/9",
+      "composizione_raw": "1npBDCTE-clim+1E464N+6nBC-clim",
+      "spec_line_raw": "PR 315 - PPF 120 - m. 201 - MD - Materiale Attrezzato AI",
+      "famiglie_materiale": [
+        "MDVE/MDVC (E464+npBDL/BDCTE+nBC)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "PR 315 - PPF 120 - m. 201 - MD - Materiale Attrezzato AI"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": "MD - Materiale Attrezzato AI",
+      "pr": 315,
+      "ppf": 120,
+      "metri": 201,
+      "tsr_pezzi": null,
+      "numero_giornate": 2,
+      "km_giornaliera_media": "194,51",
+      "km_annua_ponderata": "71.968,44",
+      "pezzi": [
+        {
+          "pezzo": "npBDCTE-clim",
+          "numero": 2
+        },
+        {
+          "pezzo": "E464N",
+          "numero": 2
+        },
+        {
+          "pezzo": "nBC-clim",
+          "numero": 12
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Ventimiglia (treno turistico stagionale)",
+          "commerciale": "Treno del Mare"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 20,
+      "treni_sample": [
+        "1105",
+        "3085",
+        "3086",
+        "3087",
+        "3088",
+        "3096",
+        "3097",
+        "28058",
+        "28164",
+        "28175",
+        "28200",
+        "28201",
+        "28203",
+        "28477",
+        "29512",
+        "29513",
+        "68085",
+        "68088",
+        "88078",
+        "88079"
+      ],
+      "treni_min": 1105,
+      "treni_max": 88079,
+      "stazioni_capolinea": [
+        "MI.CERT",
+        "MI.P.GAR",
+        "MILANO CERTOSA",
+        "VENT"
+      ],
+      "pagina_copertina": 20,
+      "pagine_gantt": [
+        21
+      ]
+    },
+    {
+      "numero_turno": "1110",
+      "validita": "P",
+      "composizione_raw": "2ALe711+1ALe710",
+      "spec_line_raw": "TSR 3pz - m.79",
+      "famiglie_materiale": [
+        "TSR (ALe711+ALe710)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "TSR 3pz - m.79"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 79,
+      "tsr_pezzi": 3,
+      "numero_giornate": 11,
+      "km_giornaliera_media": "293,37",
+      "km_annua_ponderata": "922.927,11",
+      "pezzi": [
+        {
+          "pezzo": "ALe711",
+          "numero": 22
+        },
+        {
+          "pezzo": "ALe710",
+          "numero": 11
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Novara-Pioltello-Milano",
+          "commerciale": "S6/R (Novara-Milano via Pioltello)"
+        },
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        },
+        {
+          "fisica": "Varese-Saronno-Milano",
+          "commerciale": "RE5/S5 (Varese-Milano)"
+        },
+        {
+          "fisica": "Milano-Gallarate",
+          "commerciale": "RE/R"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 99,
+      "treni_sample": [
+        "1110",
+        "1423",
+        "24508",
+        "24510",
+        "24512",
+        "24514",
+        "24517",
+        "24519",
+        "24521",
+        "24522",
+        "24523",
+        "24525",
+        "24527",
+        "24529",
+        "24530",
+        "24537",
+        "24538",
+        "24545",
+        "24546",
+        "24553",
+        "24554",
+        "24556",
+        "24558",
+        "24560",
+        "24561",
+        "24562",
+        "24564",
+        "24565",
+        "24567",
+        "24569"
+      ],
+      "treni_min": 1110,
+      "treni_max": 68585,
+      "stazioni_capolinea": [
+        "BUSTO",
+        "GALLARATE",
+        "MI.CERT",
+        "MILANO CERTOSA",
+        "NOVARA",
+        "PIOL",
+        "RHO",
+        "TREVIGLIO",
+        "VARESE"
+      ],
+      "pagina_copertina": 22,
+      "pagine_gantt": [
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33
+      ]
+    },
+    {
+      "numero_turno": "1111",
+      "validita": "P",
+      "composizione_raw": "2ALe711+3ALe710",
+      "spec_line_raw": "TSR 5pz - m.131",
+      "famiglie_materiale": [
+        "TSR (ALe711+ALe710)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "TSR 5pz - m.131"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 131,
+      "tsr_pezzi": 5,
+      "numero_giornate": 12,
+      "km_giornaliera_media": "581,33",
+      "km_annua_ponderata": "1.995.135,32",
+      "pezzi": [
+        {
+          "pezzo": "ALe711",
+          "numero": 24
+        },
+        {
+          "pezzo": "ALe710",
+          "numero": 36
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Novara-Pioltello-Milano",
+          "commerciale": "S6/R (Novara-Milano via Pioltello)"
+        },
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        },
+        {
+          "fisica": "Varese-Saronno-Milano",
+          "commerciale": "RE5/S5 (Varese-Milano)"
+        },
+        {
+          "fisica": "Milano-Gallarate",
+          "commerciale": "RE/R"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 104,
+      "treni_sample": [
+        "1111",
+        "1423",
+        "4453",
+        "24508",
+        "24510",
+        "24511",
+        "24512",
+        "24513",
+        "24514",
+        "24515",
+        "24516",
+        "24517",
+        "24518",
+        "24519",
+        "24520",
+        "24521",
+        "24522",
+        "24523",
+        "24524",
+        "24525",
+        "24526",
+        "24527",
+        "24528",
+        "24529",
+        "24530",
+        "24531",
+        "24532",
+        "24533",
+        "24534",
+        "24535"
+      ],
+      "treni_min": 1111,
+      "treni_max": 68593,
+      "stazioni_capolinea": [
+        "BUSTO",
+        "GALLARATE",
+        "MI.CERT",
+        "MI.P.GAR",
+        "MILANO CERTOSA",
+        "NOVARA",
+        "PIOL",
+        "RHO",
+        "TREVIGLIO",
+        "VARESE"
+      ],
+      "pagina_copertina": 34,
+      "pagine_gantt": [
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46
+      ]
+    },
+    {
+      "numero_turno": "1112",
+      "validita": "P",
+      "composizione_raw": "2ALe711+3ALe710",
+      "spec_line_raw": "TSR 5pz - m.131",
+      "famiglie_materiale": [
+        "TSR (ALe711+ALe710)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "TSR 5pz - m.131"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 131,
+      "tsr_pezzi": 5,
+      "numero_giornate": 9,
+      "km_giornaliera_media": "531,75",
+      "km_annua_ponderata": "1.368.714,47",
+      "pezzi": [
+        {
+          "pezzo": "ALe711",
+          "numero": 18
+        },
+        {
+          "pezzo": "ALe710",
+          "numero": 27
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Novara-Pioltello-Milano",
+          "commerciale": "S6/R (Novara-Milano via Pioltello)"
+        },
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 107,
+      "treni_sample": [
+        "1112",
+        "24600",
+        "24601",
+        "24602",
+        "24603",
+        "24604",
+        "24605",
+        "24606",
+        "24608",
+        "24613",
+        "24614",
+        "24615",
+        "24616",
+        "24617",
+        "24618",
+        "24619",
+        "24620",
+        "24621",
+        "24622",
+        "24623",
+        "24624",
+        "24625",
+        "24626",
+        "24627",
+        "24628",
+        "24629",
+        "24630",
+        "24631",
+        "24632",
+        "24633"
+      ],
+      "treni_min": 1112,
+      "treni_max": 30128,
+      "stazioni_capolinea": [
+        "MI.CERT",
+        "MI.P.GAR",
+        "MILANO CERTOSA",
+        "NOVARA",
+        "PIOL",
+        "TREVIGLIO"
+      ],
+      "pagina_copertina": 47,
+      "pagine_gantt": [
+        48,
+        49,
+        50,
+        51,
+        52,
+        53
+      ]
+    },
+    {
+      "numero_turno": "1113",
+      "validita": "P",
+      "composizione_raw": "1ATR115",
+      "spec_line_raw": "ATR 115 - m.40",
+      "famiglie_materiale": [
+        "ATR115 (diesel)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "ATR 115 - m.40"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 40,
+      "tsr_pezzi": null,
+      "numero_giornate": 4,
+      "km_giornaliera_media": "201,81",
+      "km_annua_ponderata": "230.865,56",
+      "pezzi": [
+        {
+          "pezzo": "ATR115",
+          "numero": 4
+        }
+      ],
+      "sede_manutenzione": [
+        "LECCO"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Lecco-Molteno-Milano",
+          "commerciale": "R6 (Lecco-Molteno-Milano)"
+        },
+        {
+          "fisica": "Milano-Lecco",
+          "commerciale": "R6/R7 (Lecco-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 36,
+      "treni_sample": [
+        "1113",
+        "10414",
+        "10416",
+        "10417",
+        "10426",
+        "10427",
+        "10428",
+        "10429",
+        "10430",
+        "10431",
+        "10432",
+        "10433",
+        "10434",
+        "10435",
+        "10436",
+        "10437",
+        "10438",
+        "10439",
+        "10440",
+        "10441",
+        "10443",
+        "24719",
+        "24722",
+        "24728",
+        "24729",
+        "24733",
+        "24734",
+        "24737",
+        "24748",
+        "24749"
+      ],
+      "treni_min": 1113,
+      "treni_max": 28218,
+      "stazioni_capolinea": [
+        "COMO",
+        "LECCO",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "MOLTENO",
+        "MONZA"
+      ],
+      "pagina_copertina": 54,
+      "pagine_gantt": [
+        55,
+        56
+      ]
+    },
+    {
+      "numero_turno": "1114",
+      "validita": "P",
+      "composizione_raw": "1ATR125",
+      "spec_line_raw": "ATR 125 - m.78",
+      "famiglie_materiale": [
+        "ATR125 Minuetto (diesel)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "ATR 125 - m.78"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 78,
+      "tsr_pezzi": null,
+      "numero_giornate": 9,
+      "km_giornaliera_media": "264,05",
+      "km_annua_ponderata": "679.673,51",
+      "pezzi": [
+        {
+          "pezzo": "ATR125",
+          "numero": 9
+        }
+      ],
+      "sede_manutenzione": [
+        "LECCO"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Milano via Carnate (capolinea attuale: Ponte S.Pietro - tratta PSP-BG chiusa)",
+          "commerciale": "R5 (Bergamo via Carnate)"
+        },
+        {
+          "fisica": "Lecco-Molteno-Milano",
+          "commerciale": "R6 (Lecco-Molteno-Milano)"
+        },
+        {
+          "fisica": "Milano-Lecco",
+          "commerciale": "R6/R7 (Lecco-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 64,
+      "treni_sample": [
+        "1114",
+        "1325",
+        "3446",
+        "4355",
+        "10414",
+        "10415",
+        "10418",
+        "10421",
+        "24715",
+        "24717",
+        "24719",
+        "24720",
+        "24722",
+        "24724",
+        "24725",
+        "24726",
+        "24728",
+        "24729",
+        "24730",
+        "24732",
+        "24733",
+        "24734",
+        "24736",
+        "24737",
+        "24740",
+        "24741",
+        "24743",
+        "24744",
+        "24745",
+        "24748"
+      ],
+      "treni_min": 1114,
+      "treni_max": 93102,
+      "stazioni_capolinea": [
+        "CARNATE",
+        "CARNATE USMATE",
+        "COMO",
+        "LECCO",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "MOLTENO",
+        "MONZA",
+        "USMATE"
+      ],
+      "pagina_copertina": 57,
+      "pagine_gantt": [
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66
+      ]
+    },
+    {
+      "numero_turno": "1115",
+      "validita": "P",
+      "composizione_raw": "1TN-Aln803-A+1TN-Ln803-PP+1TN-Aln803-B+1TN-Ln803-C",
+      "spec_line_raw": "ATR 803 (Colleoni) - m.67",
+      "famiglie_materiale": [
+        "ATR803 Coleoni (diesel ibrido)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "ATR 803 (Colleoni) - m.67"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 67,
+      "tsr_pezzi": null,
+      "numero_giornate": 7,
+      "km_giornaliera_media": "423,04",
+      "km_annua_ponderata": "846.918,06",
+      "pezzi": [
+        {
+          "pezzo": "TN-Aln803-A",
+          "numero": 7
+        },
+        {
+          "pezzo": "TN-Ln803-PP",
+          "numero": 7
+        },
+        {
+          "pezzo": "TN-Aln803-B",
+          "numero": 7
+        },
+        {
+          "pezzo": "TN-Ln803-C",
+          "numero": 7
+        }
+      ],
+      "sede_manutenzione": [
+        "CREMONA"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Mantova-Cremona-Milano",
+          "commerciale": "R10 (Mantova-Cremona-Milano)"
+        },
+        {
+          "fisica": "Brescia-Parma (NON elettrificata)",
+          "commerciale": "R (linea Parma)"
+        },
+        {
+          "fisica": "Brescia-Milano (linea storica)",
+          "commerciale": "RE3/RE7"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 44,
+      "treni_sample": [
+        "1115",
+        "10801",
+        "10803",
+        "10809",
+        "10811",
+        "10812",
+        "10813",
+        "10814",
+        "10815",
+        "10816",
+        "10817",
+        "10818",
+        "10819",
+        "10820",
+        "10821",
+        "10822",
+        "10823",
+        "10824",
+        "10825",
+        "10826",
+        "10827",
+        "10828",
+        "10829",
+        "10830",
+        "10831",
+        "10832",
+        "10833",
+        "10834",
+        "10835",
+        "10836"
+      ],
+      "treni_min": 1115,
+      "treni_max": 28271,
+      "stazioni_capolinea": [
+        "BRESCIA",
+        "CREMONA",
+        "PARMA",
+        "PIADENA"
+      ],
+      "pagina_copertina": 67,
+      "pagine_gantt": [
+        68,
+        69
+      ]
+    },
+    {
+      "numero_turno": "1116",
+      "validita": "P",
+      "composizione_raw": "1TN-Aln803-B+1TN-Ln803-C+1TN-Ln803-PP+1TN-Aln803-A",
+      "spec_line_raw": "ATR 803 (Colleoni) - m.67- PV-Al con +4'/-4 PV dal 21/1 al 22/3",
+      "famiglie_materiale": [
+        "ATR803 Coleoni (diesel ibrido)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "ATR 803 (Colleoni) - m.67- PV-Al con +4'/-4 PV dal 21/1 al 22/3"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 67,
+      "tsr_pezzi": null,
+      "numero_giornate": 16,
+      "km_giornaliera_media": "308,82",
+      "km_annua_ponderata": "1.413.165,78",
+      "pezzi": [
+        {
+          "pezzo": "TN-Aln803-B",
+          "numero": 16
+        },
+        {
+          "pezzo": "TN-Ln803-C",
+          "numero": 16
+        },
+        {
+          "pezzo": "TN-Ln803-PP",
+          "numero": 16
+        },
+        {
+          "pezzo": "TN-Aln803-A",
+          "numero": 16
+        }
+      ],
+      "sede_manutenzione": [
+        "CREMONA"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Cremona-Codogno-Milano",
+          "commerciale": "S12 / R47 (Codogno)"
+        },
+        {
+          "fisica": "Milano-Mortara-Alessandria",
+          "commerciale": "S9/R31 (Mortara-Alessandria)"
+        },
+        {
+          "fisica": "Pavia-Stradella-Milano",
+          "commerciale": "S13/R (Pavia)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 103,
+      "treni_sample": [
+        "1116",
+        "10560",
+        "10561",
+        "10562",
+        "10563",
+        "10564",
+        "10565",
+        "10566",
+        "10567",
+        "10568",
+        "10569",
+        "10574",
+        "10575",
+        "10576",
+        "10577",
+        "10578",
+        "10579",
+        "10580",
+        "10581",
+        "10582",
+        "10583",
+        "10584",
+        "10585",
+        "10586",
+        "10587",
+        "10588",
+        "10589",
+        "10590",
+        "10591",
+        "10592"
+      ],
+      "treni_min": 1116,
+      "treni_max": 93054,
+      "stazioni_capolinea": [
+        "ALESSANDRIA",
+        "CODOGNO",
+        "CREMONA",
+        "MORTARA",
+        "PAVIA"
+      ],
+      "pagina_copertina": 70,
+      "pagine_gantt": [
+        71,
+        72,
+        73,
+        74,
+        75,
+        76
+      ]
+    },
+    {
+      "numero_turno": "1121",
+      "validita": "P",
+      "composizione_raw": "1TN-Ale421-DM2+1TN-Ale421-DM1+1TN-Le421-TA+1TN-Le421-TB",
+      "spec_line_raw": "Caravaggio 4pz - m.110 - Treni Mi-PC rit +4' in arr dal 24/2 al 7/4",
+      "famiglie_materiale": [
+        "Caravaggio (ETR421/ETR522)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Caravaggio 4pz - m.110 - Treni Mi-PC rit +4' in arr dal 24/2 al 7/4"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 110,
+      "tsr_pezzi": null,
+      "numero_giornate": 9,
+      "km_giornaliera_media": "445,84",
+      "km_annua_ponderata": "1.147.594,79",
+      "pezzi": [
+        {
+          "pezzo": "TN-Ale421-DM2",
+          "numero": 9
+        },
+        {
+          "pezzo": "TN-Ale421-DM1",
+          "numero": 9
+        },
+        {
+          "pezzo": "TN-Le421-TA",
+          "numero": 9
+        },
+        {
+          "pezzo": "TN-Le421-TB",
+          "numero": 9
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        },
+        {
+          "fisica": "Cremona-Codogno-Milano",
+          "commerciale": "S12 / R47 (Codogno)"
+        },
+        {
+          "fisica": "Milano-Domodossola",
+          "commerciale": "RE5/RE6 (Domodossola)"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 118,
+      "treni_sample": [
+        "1022",
+        "1121",
+        "2407",
+        "2411",
+        "2413",
+        "2414",
+        "2416",
+        "2417",
+        "2419",
+        "2421",
+        "2424",
+        "2426",
+        "2427",
+        "2428",
+        "2430",
+        "2432",
+        "2433",
+        "2434",
+        "2436",
+        "2437",
+        "2438",
+        "2439",
+        "2440",
+        "2442",
+        "2443",
+        "3850",
+        "10213",
+        "10216",
+        "10218",
+        "10219"
+      ],
+      "treni_min": 1022,
+      "treni_max": 93082,
+      "stazioni_capolinea": [
+        "ARONA",
+        "CARAVAGGIO",
+        "CODOGNO",
+        "DOMODOSSOLA",
+        "MI.CERT",
+        "MI.GRECO",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "MILANO CERTOSA",
+        "PIACENZA",
+        "RHO",
+        "SESTO"
+      ],
+      "pagina_copertina": 77,
+      "pagine_gantt": [
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87
+      ]
+    },
+    {
+      "numero_turno": "1122",
+      "validita": "P",
+      "composizione_raw": "1TN-Ale421-DM1+1TN-Ale421-DM2+1TN-Le421-TB1+1TN-Le421-TA",
+      "spec_line_raw": "Caravaggio 4pz - 1°CL (ETR421) - m.110",
+      "famiglie_materiale": [
+        "Caravaggio (ETR421/ETR522)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Caravaggio 4pz - 1°CL (ETR421) - m.110"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 110,
+      "tsr_pezzi": null,
+      "numero_giornate": 10,
+      "km_giornaliera_media": "778,20",
+      "km_annua_ponderata": "2.225.660,59",
+      "pezzi": [
+        {
+          "pezzo": "TN-Ale421-DM1",
+          "numero": 10
+        },
+        {
+          "pezzo": "TN-Ale421-DM2",
+          "numero": 10
+        },
+        {
+          "pezzo": "TN-Le421-TB1",
+          "numero": 10
+        },
+        {
+          "pezzo": "TN-Le421-TA",
+          "numero": 10
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        },
+        {
+          "fisica": "Brescia-Milano (linea storica)",
+          "commerciale": "RE3/RE7"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano Centrale (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 55,
+      "treni_sample": [
+        "1042",
+        "1116",
+        "1122",
+        "1181",
+        "1187",
+        "2600",
+        "2601",
+        "2606",
+        "2607",
+        "2613",
+        "2615",
+        "2616",
+        "2617",
+        "2618",
+        "2620",
+        "2621",
+        "2622",
+        "2623",
+        "2624",
+        "2625",
+        "2626",
+        "2627",
+        "2628",
+        "2629",
+        "2630",
+        "2631",
+        "2632",
+        "2633",
+        "2634",
+        "2635"
+      ],
+      "treni_min": 1042,
+      "treni_max": 28337,
+      "stazioni_capolinea": [
+        "BRESCIA",
+        "CARAVAGGIO",
+        "MI.CERT",
+        "MILANO CENTRALE",
+        "MILANO CERTOSA"
+      ],
+      "pagina_copertina": 88,
+      "pagine_gantt": [
+        89,
+        90,
+        91,
+        92,
+        93,
+        94
+      ]
+    },
+    {
+      "numero_turno": "1123",
+      "validita": "P",
+      "composizione_raw": "1TN-Ale421-DM2+1TN-Le421-TA+1TN-Le421-TB+1TN-Ale421-DM1",
+      "spec_line_raw": "Caravaggio 4pz - m.110",
+      "famiglie_materiale": [
+        "Caravaggio (ETR421/ETR522)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Caravaggio 4pz - m.110"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 110,
+      "tsr_pezzi": null,
+      "numero_giornate": 9,
+      "km_giornaliera_media": "518,71",
+      "km_annua_ponderata": "1.335.170,06",
+      "pezzi": [
+        {
+          "pezzo": "TN-Ale421-DM2",
+          "numero": 9
+        },
+        {
+          "pezzo": "TN-Le421-TA",
+          "numero": 9
+        },
+        {
+          "pezzo": "TN-Le421-TB",
+          "numero": 9
+        },
+        {
+          "pezzo": "TN-Ale421-DM1",
+          "numero": 9
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Novara-Pioltello-Milano",
+          "commerciale": "S6/R (Novara-Milano via Pioltello)"
+        },
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        },
+        {
+          "fisica": "Milano-Lecco",
+          "commerciale": "R6/R7 (Lecco-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 87,
+      "treni_sample": [
+        "1123",
+        "2619",
+        "2680",
+        "2690",
+        "2699",
+        "24814",
+        "24816",
+        "24818",
+        "24819",
+        "24820",
+        "24821",
+        "24822",
+        "24823",
+        "24824",
+        "24825",
+        "24826",
+        "24827",
+        "24828",
+        "24829",
+        "24830",
+        "24831",
+        "24832",
+        "24833",
+        "24834",
+        "24835",
+        "24836",
+        "24837",
+        "24838",
+        "24839",
+        "24840"
+      ],
+      "treni_min": 1123,
+      "treni_max": 33175,
+      "stazioni_capolinea": [
+        "CARAVAGGIO",
+        "COMO",
+        "LECCO",
+        "MI.CERT",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "MILANO CERTOSA",
+        "NOVARA"
+      ],
+      "pagina_copertina": 95,
+      "pagine_gantt": [
+        96,
+        97,
+        98,
+        99,
+        100
+      ]
+    },
+    {
+      "numero_turno": "1124",
+      "validita": "P",
+      "composizione_raw": "1TN-Le421-TA+1TN-Ale421-DM1+1TN-Ale421-DM2+1TN-Le421-TB1",
+      "spec_line_raw": "Caravaggio 4pz - 1°CL (ETR421) - m.110",
+      "famiglie_materiale": [
+        "Caravaggio (ETR421/ETR522)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Caravaggio 4pz - 1°CL (ETR421) - m.110"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 110,
+      "tsr_pezzi": null,
+      "numero_giornate": 6,
+      "km_giornaliera_media": "607,85",
+      "km_annua_ponderata": "1.043.078,83",
+      "pezzi": [
+        {
+          "pezzo": "TN-Le421-TA",
+          "numero": 6
+        },
+        {
+          "pezzo": "TN-Ale421-DM1",
+          "numero": 6
+        },
+        {
+          "pezzo": "TN-Ale421-DM2",
+          "numero": 6
+        },
+        {
+          "pezzo": "TN-Le421-TB1",
+          "numero": 6
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        },
+        {
+          "fisica": "Brescia-Milano (linea storica)",
+          "commerciale": "RE3/RE7"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 33,
+      "treni_sample": [
+        "1116",
+        "1124",
+        "2608",
+        "2614",
+        "2615",
+        "2617",
+        "2619",
+        "2624",
+        "2625",
+        "2626",
+        "2627",
+        "2628",
+        "2629",
+        "2634",
+        "2635",
+        "2636",
+        "2638",
+        "2639",
+        "2644",
+        "2645",
+        "2648",
+        "2651",
+        "2656",
+        "2658",
+        "2660",
+        "2675",
+        "2677",
+        "2684",
+        "10911",
+        "27131"
+      ],
+      "treni_min": 1116,
+      "treni_max": 28322,
+      "stazioni_capolinea": [
+        "BRESCIA",
+        "CARAVAGGIO",
+        "MI.CERT",
+        "MI.LAMB",
+        "MI.LAMBRATE"
+      ],
+      "pagina_copertina": 101,
+      "pagine_gantt": [
+        102,
+        103,
+        104,
+        105,
+        106
+      ]
+    },
+    {
+      "numero_turno": "1125",
+      "validita": "P",
+      "composizione_raw": "1TN-Le522-TB+1TN-Ale522-DM2+1TN-Ale522-DM1+1TN-Le522-TX+1TN-Le522-TA",
+      "spec_line_raw": "Caravaggio 5pz (ETR522) - m.137",
+      "famiglie_materiale": [
+        "Caravaggio (ETR421/ETR522)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Caravaggio 5pz (ETR522) - m.137"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 137,
+      "tsr_pezzi": null,
+      "numero_giornate": 17,
+      "km_giornaliera_media": "496,91",
+      "km_annua_ponderata": "2.415.982,60",
+      "pezzi": [
+        {
+          "pezzo": "TN-Le522-TB",
+          "numero": 17
+        },
+        {
+          "pezzo": "TN-Ale522-DM2",
+          "numero": 17
+        },
+        {
+          "pezzo": "TN-Ale522-DM1",
+          "numero": 17
+        },
+        {
+          "pezzo": "TN-Le522-TX",
+          "numero": 17
+        },
+        {
+          "pezzo": "TN-Le522-TA",
+          "numero": 17
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        },
+        {
+          "fisica": "Genova-Voghera-Milano",
+          "commerciale": "RE2 (Genova-Voghera-Milano)"
+        },
+        {
+          "fisica": "Milano-Mortara-Alessandria",
+          "commerciale": "S9/R31 (Mortara-Alessandria)"
+        },
+        {
+          "fisica": "Brescia-Milano (linea storica)",
+          "commerciale": "RE3/RE7"
+        },
+        {
+          "fisica": "Linea passante Milano",
+          "commerciale": "S1/S2/S3 passante"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)",
+        "Stazione Milano Centrale (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 251,
+      "treni_sample": [
+        "1125",
+        "2301",
+        "2302",
+        "2303",
+        "2304",
+        "2312",
+        "2313",
+        "2314",
+        "2315",
+        "2317",
+        "2319",
+        "2320",
+        "2322",
+        "2325",
+        "2327",
+        "2328",
+        "2329",
+        "2330",
+        "2331",
+        "2332",
+        "2333",
+        "2334",
+        "2335",
+        "2336",
+        "2337",
+        "2338",
+        "2339",
+        "2340",
+        "2341",
+        "2342"
+      ],
+      "treni_min": 1125,
+      "treni_max": 33173,
+      "stazioni_capolinea": [
+        "ALESSANDRIA",
+        "BRESCIA",
+        "CARAVAGGIO",
+        "COMO",
+        "MI.CERT",
+        "MI.GRECO",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "MILANO CENTRALE",
+        "MILANO CERTOSA",
+        "MILANO ROGOREDO",
+        "MORTARA",
+        "NOVI",
+        "RHO",
+        "TORTONA",
+        "VOGHERA"
+      ],
+      "pagina_copertina": 107,
+      "pagine_gantt": [
+        108,
+        109,
+        110,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117
+      ]
+    },
+    {
+      "numero_turno": "1126",
+      "validita": "P",
+      "composizione_raw": "1TN-Le522-TB+1TN-Le522-TX+1TN-Le522-TA+1TN-Ale522-DM1+1TN-Ale522-DM2",
+      "spec_line_raw": "Caravaggio 5pz (ETR522) - m.137",
+      "famiglie_materiale": [
+        "Caravaggio (ETR421/ETR522)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Caravaggio 5pz (ETR522) - m.137"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 137,
+      "tsr_pezzi": null,
+      "numero_giornate": 7,
+      "km_giornaliera_media": "436,70",
+      "km_annua_ponderata": "874.271,94",
+      "pezzi": [
+        {
+          "pezzo": "TN-Le522-TB",
+          "numero": 7
+        },
+        {
+          "pezzo": "TN-Le522-TX",
+          "numero": 7
+        },
+        {
+          "pezzo": "TN-Le522-TA",
+          "numero": 7
+        },
+        {
+          "pezzo": "TN-Ale522-DM1",
+          "numero": 7
+        },
+        {
+          "pezzo": "TN-Ale522-DM2",
+          "numero": 7
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Milano via Carnate (capolinea attuale: Ponte S.Pietro - tratta PSP-BG chiusa)",
+          "commerciale": "R5 (Bergamo via Carnate)"
+        },
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        },
+        {
+          "fisica": "Brescia-Milano (linea storica)",
+          "commerciale": "RE3/RE7"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 83,
+      "treni_sample": [
+        "1126",
+        "2201",
+        "2212",
+        "2213",
+        "2220",
+        "2221",
+        "2228",
+        "2229",
+        "2236",
+        "2237",
+        "2244",
+        "2245",
+        "2256",
+        "2257",
+        "2258",
+        "2262",
+        "2271",
+        "2273",
+        "2275",
+        "2276",
+        "2277",
+        "2278",
+        "2279",
+        "2280",
+        "2282",
+        "2284",
+        "2512",
+        "2517",
+        "2520",
+        "2525"
+      ],
+      "treni_min": 1126,
+      "treni_max": 88033,
+      "stazioni_capolinea": [
+        "BERGAMO",
+        "BRESCIA",
+        "CARAVAGGIO",
+        "COMO",
+        "MI.CERT",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "MILANO CERTOSA",
+        "PONTE SP"
+      ],
+      "pagina_copertina": 118,
+      "pagine_gantt": [
+        119,
+        120,
+        121
+      ]
+    },
+    {
+      "numero_turno": "1127",
+      "validita": "P",
+      "composizione_raw": "1TN-Le522-TA+1TN-Le522-TB1+1TN-Ale522-DM1+1TN-Ale522-DM2+1TN-Le522-TX",
+      "spec_line_raw": "Caravaggio 5pz con 1°CL (ETR522) - m.137",
+      "famiglie_materiale": [
+        "Caravaggio (ETR421/ETR522)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Caravaggio 5pz con 1°CL (ETR522) - m.137"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 137,
+      "tsr_pezzi": null,
+      "numero_giornate": 12,
+      "km_giornaliera_media": "551,90",
+      "km_annua_ponderata": "1.894.133,67",
+      "pezzi": [
+        {
+          "pezzo": "TN-Le522-TA",
+          "numero": 12
+        },
+        {
+          "pezzo": "TN-Le522-TB1",
+          "numero": 12
+        },
+        {
+          "pezzo": "TN-Ale522-DM1",
+          "numero": 12
+        },
+        {
+          "pezzo": "TN-Ale522-DM2",
+          "numero": 12
+        },
+        {
+          "pezzo": "TN-Le522-TX",
+          "numero": 12
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        },
+        {
+          "fisica": "Cremona-Treviglio-Milano",
+          "commerciale": "R39 (Cremona-Treviglio-Milano P.Garibaldi)"
+        },
+        {
+          "fisica": "Mantova-Cremona-Milano",
+          "commerciale": "R10 (Mantova-Cremona-Milano Centrale)"
+        },
+        {
+          "fisica": "Milano-Domodossola",
+          "commerciale": "RE5/RE6 (Domodossola)"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)",
+        "Stazione Milano Centrale (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 166,
+      "treni_sample": [
+        "1022",
+        "1127",
+        "2153",
+        "2156",
+        "2161",
+        "2162",
+        "2165",
+        "2170",
+        "2173",
+        "2174",
+        "2175",
+        "2182",
+        "2406",
+        "2407",
+        "2408",
+        "2411",
+        "2413",
+        "2414",
+        "2415",
+        "2416",
+        "2417",
+        "2418",
+        "2419",
+        "2421",
+        "2424",
+        "2426",
+        "2427",
+        "2428",
+        "2430",
+        "2431"
+      ],
+      "treni_min": 1022,
+      "treni_max": 93090,
+      "stazioni_capolinea": [
+        "ARONA",
+        "BOZZOLO",
+        "BUSTO",
+        "CARAVAGGIO",
+        "COMO",
+        "CREMONA",
+        "DOMODOSSOLA",
+        "MI.CERT",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "MILANO CENTRALE",
+        "MILANO CERTOSA",
+        "PIADENA",
+        "RHO",
+        "SESTO"
+      ],
+      "pagina_copertina": 122,
+      "pagine_gantt": [
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        142
+      ]
+    },
+    {
+      "numero_turno": "1128",
+      "validita": "P",
+      "composizione_raw": "1TN-Ale521-DM1+1TN-Le521-TX+1TN-Le521-TA+1TN-Le521-TB+1TN-Ale521-DM2",
+      "spec_line_raw": "Rock 5pz - m.137",
+      "famiglie_materiale": [
+        "Rock (ETR521)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Rock 5pz - m.137"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 137,
+      "tsr_pezzi": null,
+      "numero_giornate": 4,
+      "km_giornaliera_media": "490,65",
+      "km_annua_ponderata": "561.304,25",
+      "pezzi": [
+        {
+          "pezzo": "TN-Ale521-DM1",
+          "numero": 4
+        },
+        {
+          "pezzo": "TN-Le521-TX",
+          "numero": 4
+        },
+        {
+          "pezzo": "TN-Le521-TA",
+          "numero": 4
+        },
+        {
+          "pezzo": "TN-Le521-TB",
+          "numero": 4
+        },
+        {
+          "pezzo": "TN-Ale521-DM2",
+          "numero": 4
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Varese-Saronno-Milano",
+          "commerciale": "RE5/S5 (Varese-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 46,
+      "treni_sample": [
+        "1128",
+        "2503",
+        "2506",
+        "2508",
+        "2510",
+        "2511",
+        "2512",
+        "2513",
+        "2514",
+        "2515",
+        "2516",
+        "2517",
+        "2518",
+        "2519",
+        "2520",
+        "2521",
+        "2522",
+        "2523",
+        "2524",
+        "2525",
+        "2526",
+        "2527",
+        "2528",
+        "2529",
+        "2530",
+        "2531",
+        "2532",
+        "2533",
+        "2534",
+        "2535"
+      ],
+      "treni_min": 1128,
+      "treni_max": 68583,
+      "stazioni_capolinea": [
+        "MI.CERT",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "VARESE"
+      ],
+      "pagina_copertina": 143,
+      "pagine_gantt": [
+        144,
+        145
+      ]
+    },
+    {
+      "numero_turno": "1130",
+      "validita": "P",
+      "composizione_raw": "1TN-Ale526-A41+3TN-Le526-A42-A45-A44+1TN-Le526-A43+1TN-Ale526-A46",
+      "spec_line_raw": "Coradia 526 - m.98",
+      "famiglie_materiale": [
+        "Coradia 526 (ETR526)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Coradia 526 - m.98"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 98,
+      "tsr_pezzi": null,
+      "numero_giornate": 9,
+      "km_giornaliera_media": "762,22",
+      "km_annua_ponderata": "1.961.957,71",
+      "pezzi": [
+        {
+          "pezzo": "TN-Ale526-A41",
+          "numero": 9
+        },
+        {
+          "pezzo": "TN-Le526-A43",
+          "numero": 9
+        },
+        {
+          "pezzo": "TN-Ale526-A46",
+          "numero": 9
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Milano-Lecco-Tirano",
+          "commerciale": "R7 (Tirano-Lecco-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 36,
+      "treni_sample": [
+        "1130",
+        "2812",
+        "2813",
+        "2815",
+        "2816",
+        "2818",
+        "2819",
+        "2821",
+        "2822",
+        "2824",
+        "2825",
+        "2827",
+        "2828",
+        "2830",
+        "2831",
+        "2833",
+        "2834",
+        "2836",
+        "2837",
+        "2839",
+        "2840",
+        "2842",
+        "2843",
+        "10198",
+        "10199",
+        "10290",
+        "10310",
+        "24817",
+        "24886",
+        "28120"
+      ],
+      "treni_min": 1130,
+      "treni_max": 28371,
+      "stazioni_capolinea": [
+        "LECCO",
+        "MI.CERT",
+        "MI.P.GAR",
+        "MILANO CERTOSA",
+        "SONDRIO",
+        "TIRANO"
+      ],
+      "pagina_copertina": 146,
+      "pagine_gantt": [
+        147,
+        148
+      ]
+    },
+    {
+      "numero_turno": "1131",
+      "validita": "P",
+      "composizione_raw": "1TN-Ale204-A4+1TN-Le204-A2+1TN-Le204-A3+1TN-Ale204-A1",
+      "spec_line_raw": "Donizetti - ETR 204 - m.84",
+      "famiglie_materiale": [
+        "Donizetti (ETR204)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Donizetti - ETR 204 - m.84"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 84,
+      "tsr_pezzi": null,
+      "numero_giornate": 11,
+      "km_giornaliera_media": "324,68",
+      "km_annua_ponderata": "1.021.454,96",
+      "pezzi": [
+        {
+          "pezzo": "TN-Ale204-A4",
+          "numero": 11
+        },
+        {
+          "pezzo": "TN-Le204-A2",
+          "numero": 11
+        },
+        {
+          "pezzo": "TN-Le204-A3",
+          "numero": 11
+        },
+        {
+          "pezzo": "TN-Ale204-A1",
+          "numero": 11
+        }
+      ],
+      "sede_manutenzione": [
+        "LECCO"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Milano-Lecco-Tirano",
+          "commerciale": "R7 (Tirano-Lecco-Milano)"
+        },
+        {
+          "fisica": "Bergamo-Milano via Carnate (capolinea attuale: Ponte S.Pietro - tratta PSP-BG chiusa)",
+          "commerciale": "R5 (Bergamo via Carnate)"
+        },
+        {
+          "fisica": "Linea passante Milano",
+          "commerciale": "S1/S2/S3 passante"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 105,
+      "treni_sample": [
+        "1131",
+        "2844",
+        "2855",
+        "2858",
+        "2863",
+        "2868",
+        "2874",
+        "10155",
+        "10156",
+        "10157",
+        "10158",
+        "10159",
+        "10160",
+        "10161",
+        "10162",
+        "10163",
+        "10164",
+        "10165",
+        "10166",
+        "10167",
+        "10168",
+        "10169",
+        "10170",
+        "10171",
+        "10172",
+        "10173",
+        "10174",
+        "10175",
+        "10176",
+        "10177"
+      ],
+      "treni_min": 1131,
+      "treni_max": 94017,
+      "stazioni_capolinea": [
+        "COLICO",
+        "LECCO",
+        "MI.CERT",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "MILANO CERTOSA",
+        "MILANO ROGOREDO",
+        "PONTE SP",
+        "SONDRIO",
+        "TIRANO"
+      ],
+      "pagina_copertina": 149,
+      "pagine_gantt": [
+        150,
+        151,
+        152,
+        153,
+        154
+      ]
+    },
+    {
+      "numero_turno": "1132",
+      "validita": "P",
+      "composizione_raw": "1TN-Ale204-A4+1TN-Ale204-A1+1TN-Le204-A2+1TN-Le204-A3",
+      "spec_line_raw": "Donizetti - ETR 204 - m.84",
+      "famiglie_materiale": [
+        "Donizetti (ETR204)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Donizetti - ETR 204 - m.84"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 84,
+      "tsr_pezzi": null,
+      "numero_giornate": 8,
+      "km_giornaliera_media": "492,30",
+      "km_annua_ponderata": "1.126.393,16",
+      "pezzi": [
+        {
+          "pezzo": "TN-Ale204-A4",
+          "numero": 8
+        },
+        {
+          "pezzo": "TN-Ale204-A1",
+          "numero": 8
+        },
+        {
+          "pezzo": "TN-Le204-A2",
+          "numero": 8
+        },
+        {
+          "pezzo": "TN-Le204-A3",
+          "numero": 8
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Milano-Lecco-Tirano",
+          "commerciale": "R7 (Tirano-Lecco-Milano)"
+        },
+        {
+          "fisica": "Bergamo-Milano via Carnate (capolinea attuale: Ponte S.Pietro - tratta PSP-BG chiusa)",
+          "commerciale": "R5 (Bergamo via Carnate)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 48,
+      "treni_sample": [
+        "1132",
+        "1225",
+        "2811",
+        "2814",
+        "2817",
+        "2820",
+        "2823",
+        "2826",
+        "2829",
+        "2832",
+        "2835",
+        "2838",
+        "2841",
+        "2857",
+        "2874",
+        "2876",
+        "10300",
+        "10302",
+        "10322",
+        "10327",
+        "10329",
+        "10330",
+        "10331",
+        "10332",
+        "10339",
+        "10341",
+        "10715",
+        "10716",
+        "10719",
+        "10720"
+      ],
+      "treni_min": 1132,
+      "treni_max": 28336,
+      "stazioni_capolinea": [
+        "COLICO",
+        "LECCO",
+        "MI.CERT",
+        "PONTE SP",
+        "SONDRIO",
+        "TIRANO"
+      ],
+      "pagina_copertina": 155,
+      "pagine_gantt": [
+        156,
+        157
+      ]
+    },
+    {
+      "numero_turno": "1133",
+      "validita": "P",
+      "composizione_raw": "1TN-Le204-A2+1TN-Ale204-A4+1TN-Le204-A3+1TN-Ale204-A1",
+      "spec_line_raw": "Donizetti - ETR 204 - m.84",
+      "famiglie_materiale": [
+        "Donizetti (ETR204)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Donizetti - ETR 204 - m.84"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 84,
+      "tsr_pezzi": null,
+      "numero_giornate": 10,
+      "km_giornaliera_media": "438,39",
+      "km_annua_ponderata": "1.253.804,61",
+      "pezzi": [
+        {
+          "pezzo": "TN-Le204-A2",
+          "numero": 10
+        },
+        {
+          "pezzo": "TN-Ale204-A4",
+          "numero": 10
+        },
+        {
+          "pezzo": "TN-Le204-A3",
+          "numero": 10
+        },
+        {
+          "pezzo": "TN-Ale204-A1",
+          "numero": 10
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Brescia-Milano (linea storica)",
+          "commerciale": "RE3/RE7"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 81,
+      "treni_sample": [
+        "1133",
+        "10007",
+        "10008",
+        "10101",
+        "10102",
+        "10103",
+        "10104",
+        "10105",
+        "10106",
+        "10110",
+        "10112",
+        "10114",
+        "10115",
+        "10116",
+        "10117",
+        "10118",
+        "10119",
+        "10120",
+        "10121",
+        "10122",
+        "10123",
+        "10124",
+        "10125",
+        "10126",
+        "10127",
+        "10128",
+        "10129",
+        "10130",
+        "10131",
+        "10132"
+      ],
+      "treni_min": 1133,
+      "treni_max": 30590,
+      "stazioni_capolinea": [
+        "BERGAMO",
+        "BOZZOLO",
+        "BRESCIA",
+        "CREMONA",
+        "MI.CERT",
+        "MI.GRECO",
+        "MILANO CERTOSA"
+      ],
+      "pagina_copertina": 158,
+      "pagine_gantt": [
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165,
+        166,
+        167
+      ]
+    },
+    {
+      "numero_turno": "1134",
+      "validita": "Valido dal 23/5",
+      "composizione_raw": "1TN-Ale204-A4+1TN-Le204-A2+1TN-Le204-A3+1TN-Ale204-A1",
+      "spec_line_raw": "Donizetti - ETR 204 - m.84 -",
+      "famiglie_materiale": [
+        "Donizetti (ETR204)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Donizetti - ETR 204 - m.84 -"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 84,
+      "tsr_pezzi": null,
+      "numero_giornate": 12,
+      "km_giornaliera_media": "367,23",
+      "km_annua_ponderata": "898.973,59",
+      "pezzi": [
+        {
+          "pezzo": "TN-Ale204-A4",
+          "numero": 12
+        },
+        {
+          "pezzo": "TN-Le204-A2",
+          "numero": 12
+        },
+        {
+          "pezzo": "TN-Le204-A3",
+          "numero": 12
+        },
+        {
+          "pezzo": "TN-Ale204-A1",
+          "numero": 12
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Cremona-Codogno-Milano",
+          "commerciale": "S12 / R47 (Codogno)"
+        },
+        {
+          "fisica": "Cremona-Treviglio-Milano",
+          "commerciale": "R39 (Cremona-Treviglio-Milano P.Garibaldi)"
+        },
+        {
+          "fisica": "Brescia-Milano (linea storica)",
+          "commerciale": "RE3/RE7"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 107,
+      "treni_sample": [
+        "1134",
+        "2180",
+        "2185",
+        "4255",
+        "10001",
+        "10002",
+        "10004",
+        "10005",
+        "10006",
+        "10007",
+        "10008",
+        "10009",
+        "10512",
+        "10513",
+        "10514",
+        "10516",
+        "10517",
+        "10518",
+        "10519",
+        "10520",
+        "10521",
+        "10522",
+        "10523",
+        "10524",
+        "10525",
+        "10526",
+        "10527",
+        "10528",
+        "10529",
+        "10530"
+      ],
+      "treni_min": 1134,
+      "treni_max": 93104,
+      "stazioni_capolinea": [
+        "BOZZOLO",
+        "BRESCIA",
+        "CODOGNO",
+        "CREMONA",
+        "MI.CERT",
+        "MI.P.GAR",
+        "MILANO CERTOSA",
+        "TREVIGLIO"
+      ],
+      "pagina_copertina": 168,
+      "pagine_gantt": [
+        169,
+        170,
+        171,
+        172,
+        173,
+        174,
+        175,
+        176,
+        177
+      ]
+    },
+    {
+      "numero_turno": "1134I",
+      "validita": "Valido fino al 22/5",
+      "composizione_raw": "1TN-Ale204-A4+1TN-Le204-A2+1TN-Le204-A3+1TN-Ale204-A1",
+      "spec_line_raw": "Donizetti - ETR 204 - m.84 -",
+      "famiglie_materiale": [
+        "Donizetti (ETR204)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Donizetti - ETR 204 - m.84 -"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 84,
+      "tsr_pezzi": null,
+      "numero_giornate": 12,
+      "km_giornaliera_media": "366,41",
+      "km_annua_ponderata": "360.552,11",
+      "pezzi": [
+        {
+          "pezzo": "TN-Ale204-A4",
+          "numero": 12
+        },
+        {
+          "pezzo": "TN-Le204-A2",
+          "numero": 12
+        },
+        {
+          "pezzo": "TN-Le204-A3",
+          "numero": 12
+        },
+        {
+          "pezzo": "TN-Ale204-A1",
+          "numero": 12
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Cremona-Codogno-Milano",
+          "commerciale": "S12 / R47 (Codogno)"
+        },
+        {
+          "fisica": "Cremona-Treviglio-Milano",
+          "commerciale": "R39 (Cremona-Treviglio-Milano P.Garibaldi)"
+        },
+        {
+          "fisica": "Brescia-Milano (linea storica)",
+          "commerciale": "RE3/RE7"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 107,
+      "treni_sample": [
+        "2180",
+        "2185",
+        "4255",
+        "10001",
+        "10002",
+        "10004",
+        "10005",
+        "10006",
+        "10007",
+        "10008",
+        "10009",
+        "10512",
+        "10513",
+        "10514",
+        "10516",
+        "10517",
+        "10518",
+        "10519",
+        "10520",
+        "10521",
+        "10522",
+        "10523",
+        "10524",
+        "10525",
+        "10526",
+        "10527",
+        "10528",
+        "10529",
+        "10530",
+        "10531"
+      ],
+      "treni_min": 2180,
+      "treni_max": 93146,
+      "stazioni_capolinea": [
+        "BOZZOLO",
+        "BRESCIA",
+        "CODOGNO",
+        "CREMONA",
+        "MI.CERT",
+        "MI.P.GAR",
+        "MILANO CERTOSA",
+        "TREVIGLIO"
+      ],
+      "pagina_copertina": 178,
+      "pagine_gantt": [
+        179,
+        180,
+        181,
+        182,
+        183,
+        184,
+        185,
+        186,
+        187
+      ]
+    },
+    {
+      "numero_turno": "1135",
+      "validita": "P",
+      "composizione_raw": "1TN-Le204-A2+1TN-Le204-A3+1TN-Ale204-A4+1TN-Ale204-A1",
+      "spec_line_raw": "Donizetti - ETR 204 - m.84",
+      "famiglie_materiale": [
+        "Donizetti (ETR204)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Donizetti - ETR 204 - m.84"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 84,
+      "tsr_pezzi": null,
+      "numero_giornate": 6,
+      "km_giornaliera_media": "419,98",
+      "km_annua_ponderata": "720.685,72",
+      "pezzi": [
+        {
+          "pezzo": "TN-Le204-A2",
+          "numero": 6
+        },
+        {
+          "pezzo": "TN-Le204-A3",
+          "numero": 6
+        },
+        {
+          "pezzo": "TN-Ale204-A4",
+          "numero": 6
+        },
+        {
+          "pezzo": "TN-Ale204-A1",
+          "numero": 6
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Genova-Voghera-Milano",
+          "commerciale": "RE2 (Genova-Voghera-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 35,
+      "treni_sample": [
+        "1135",
+        "10450",
+        "10452",
+        "10454",
+        "10455",
+        "10456",
+        "10457",
+        "10458",
+        "10459",
+        "10465",
+        "10466",
+        "10467",
+        "10468",
+        "10469",
+        "10470",
+        "10471",
+        "10472",
+        "10473",
+        "10474",
+        "10475",
+        "10476",
+        "10477",
+        "10478",
+        "10479",
+        "10480",
+        "10481",
+        "10483",
+        "10494",
+        "10495",
+        "10496"
+      ],
+      "treni_min": 1135,
+      "treni_max": 28268,
+      "stazioni_capolinea": [
+        "MI.CERT",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "PIACENZA",
+        "VOGHERA"
+      ],
+      "pagina_copertina": 188,
+      "pagine_gantt": [
+        189,
+        190
+      ]
+    },
+    {
+      "numero_turno": "1136",
+      "validita": "P",
+      "composizione_raw": "1TN-Ale103-A4+1TN-Le103-A2+1TN-Ale103-A1",
+      "spec_line_raw": "POP 3pz - m.66",
+      "famiglie_materiale": [
+        "POP (ETR103/ETR104)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "POP 3pz - m.66"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 66,
+      "tsr_pezzi": null,
+      "numero_giornate": 2,
+      "km_giornaliera_media": "189,87",
+      "km_annua_ponderata": "108.605,12",
+      "pezzi": [
+        {
+          "pezzo": "TN-Ale103-A4",
+          "numero": 2
+        },
+        {
+          "pezzo": "TN-Le103-A2",
+          "numero": 2
+        },
+        {
+          "pezzo": "TN-Ale103-A1",
+          "numero": 2
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Luino-Gallarate-Milano",
+          "commerciale": "R6 (Luino-Gallarate-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 7,
+      "treni_sample": [
+        "1136",
+        "25306",
+        "25307",
+        "25313",
+        "25314",
+        "28135",
+        "28222"
+      ],
+      "treni_min": 1136,
+      "treni_max": 28222,
+      "stazioni_capolinea": [
+        "LUINO",
+        "MI.CERT",
+        "MI.P.GAR"
+      ],
+      "pagina_copertina": 191,
+      "pagine_gantt": [
+        192
+      ]
+    },
+    {
+      "numero_turno": "1137",
+      "validita": "P",
+      "composizione_raw": "1TN-Ale104-A4+1TN-Le104-A2+1TN-Ale104-A1+1TN-Le104-A3",
+      "spec_line_raw": "POP 4pz - m.84",
+      "famiglie_materiale": [
+        "POP (ETR103/ETR104)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "POP 4pz - m.84"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 84,
+      "tsr_pezzi": null,
+      "numero_giornate": 5,
+      "km_giornaliera_media": "190,09",
+      "km_annua_ponderata": "271.822,45",
+      "pezzi": [
+        {
+          "pezzo": "TN-Ale104-A4",
+          "numero": 5
+        },
+        {
+          "pezzo": "TN-Le104-A2",
+          "numero": 5
+        },
+        {
+          "pezzo": "TN-Ale104-A1",
+          "numero": 5
+        },
+        {
+          "pezzo": "TN-Le104-A3",
+          "numero": 5
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Luino-Gallarate-Milano",
+          "commerciale": "R6 (Luino-Gallarate-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 28,
+      "treni_sample": [
+        "1137",
+        "25301",
+        "25302",
+        "25303",
+        "25304",
+        "25305",
+        "25307",
+        "25308",
+        "25309",
+        "25313",
+        "25314",
+        "25316",
+        "25328",
+        "25331",
+        "25332",
+        "25335",
+        "25336",
+        "25339",
+        "25340",
+        "25343",
+        "25345",
+        "25346",
+        "28234",
+        "28278",
+        "28288",
+        "28299",
+        "30245",
+        "30280"
+      ],
+      "treni_min": 1137,
+      "treni_max": 30280,
+      "stazioni_capolinea": [
+        "BUSTO",
+        "LUINO",
+        "MI.CERT",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "MILANO CERTOSA",
+        "SESTO"
+      ],
+      "pagina_copertina": 193,
+      "pagine_gantt": [
+        194,
+        195,
+        196
+      ]
+    },
+    {
+      "numero_turno": "1160",
+      "validita": "P",
+      "composizione_raw": "1TN-A522-TB1+1TN-A522-TX+1TN-A522-TA+1TN-A522-DM1+1TN-A522-DM2",
+      "spec_line_raw": "Caravaggio 5pz (ETR522-Aeroportuali) - m.137",
+      "famiglie_materiale": [
+        "Caravaggio (ETR421/ETR522)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Caravaggio 5pz (ETR522-Aeroportuali) - m.137"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 137,
+      "tsr_pezzi": null,
+      "numero_giornate": 7,
+      "km_giornaliera_media": "699,66",
+      "km_annua_ponderata": "1.400.712,72",
+      "pezzi": [
+        {
+          "pezzo": "TN-A522-TB1",
+          "numero": 7
+        },
+        {
+          "pezzo": "TN-A522-TX",
+          "numero": 7
+        },
+        {
+          "pezzo": "TN-A522-TA",
+          "numero": 7
+        },
+        {
+          "pezzo": "TN-A522-DM1",
+          "numero": 7
+        },
+        {
+          "pezzo": "TN-A522-DM2",
+          "numero": 7
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        },
+        {
+          "fisica": "Varese-Saronno-Milano",
+          "commerciale": "RE5/S5 (Varese-Milano)"
+        },
+        {
+          "fisica": "Milano-Gallarate",
+          "commerciale": "RE/R"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano Centrale (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 87,
+      "treni_sample": [
+        "1160",
+        "2913",
+        "2914",
+        "2916",
+        "2917",
+        "2918",
+        "2919",
+        "2920",
+        "2921",
+        "2922",
+        "2923",
+        "2924",
+        "2925",
+        "2926",
+        "2927",
+        "2928",
+        "2929",
+        "2930",
+        "2931",
+        "2932",
+        "2933",
+        "2934",
+        "2935",
+        "2936",
+        "2937",
+        "2938",
+        "2939",
+        "2940",
+        "2941",
+        "2942"
+      ],
+      "treni_min": 1160,
+      "treni_max": 30346,
+      "stazioni_capolinea": [
+        "CARAVAGGIO",
+        "GALLARATE",
+        "MALPENSA",
+        "MI.CERT",
+        "MILANO CENTRALE",
+        "MILANO CERTOSA",
+        "SARONNO"
+      ],
+      "pagina_copertina": 197,
+      "pagine_gantt": [
+        198,
+        199,
+        200,
+        201,
+        202,
+        203
+      ]
+    },
+    {
+      "numero_turno": "1161",
+      "validita": "Valido fino al 27/3 e dal 29/9",
+      "composizione_raw": "1TN-A421-DM1+1TN-A421-TA+1TN-A421-TB+1TN-A421-DM2",
+      "spec_line_raw": "Caravaggio 4pz (ETR421-Aeroportuali) - m.110",
+      "famiglie_materiale": [
+        "Caravaggio (ETR421/ETR522)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Caravaggio 4pz (ETR421-Aeroportuali) - m.110"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 110,
+      "tsr_pezzi": null,
+      "numero_giornate": 5,
+      "km_giornaliera_media": "832,47",
+      "km_annua_ponderata": "420.397,58",
+      "pezzi": [
+        {
+          "pezzo": "TN-A421-DM1",
+          "numero": 5
+        },
+        {
+          "pezzo": "TN-A421-TA",
+          "numero": 5
+        },
+        {
+          "pezzo": "TN-A421-TB",
+          "numero": 5
+        },
+        {
+          "pezzo": "TN-A421-DM2",
+          "numero": 5
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 11,
+      "treni_sample": [
+        "1031",
+        "1038",
+        "1083",
+        "1090",
+        "1161",
+        "28115",
+        "28116",
+        "28117",
+        "28118",
+        "93297",
+        "93298"
+      ],
+      "treni_min": 1031,
+      "treni_max": 93298,
+      "stazioni_capolinea": [
+        "CARAVAGGIO",
+        "MI.CERT"
+      ],
+      "pagina_copertina": 204,
+      "pagine_gantt": [
+        205,
+        206,
+        207
+      ]
+    },
+    {
+      "numero_turno": "1161A",
+      "validita": "Valido dal 1/8 al 28/9",
+      "composizione_raw": "1TN-A421-DM2+1TN-A421-DM1+1TN-A421-TA+1TN-A421-TB",
+      "spec_line_raw": "Caravaggio 4pz (ETR421-Aeroportuali) - m.110",
+      "famiglie_materiale": [
+        "Caravaggio (ETR421/ETR522)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Caravaggio 4pz (ETR421-Aeroportuali) - m.110"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 110,
+      "tsr_pezzi": null,
+      "numero_giornate": 5,
+      "km_giornaliera_media": "867,62",
+      "km_annua_ponderata": "255.947,79",
+      "pezzi": [
+        {
+          "pezzo": "TN-A421-DM2",
+          "numero": 5
+        },
+        {
+          "pezzo": "TN-A421-DM1",
+          "numero": 5
+        },
+        {
+          "pezzo": "TN-A421-TA",
+          "numero": 5
+        },
+        {
+          "pezzo": "TN-A421-TB",
+          "numero": 5
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 8,
+      "treni_sample": [
+        "1039",
+        "1091",
+        "1152",
+        "1195",
+        "28115",
+        "28116",
+        "28117",
+        "28118"
+      ],
+      "treni_min": 1039,
+      "treni_max": 28118,
+      "stazioni_capolinea": [
+        "CARAVAGGIO",
+        "MI.CERT"
+      ],
+      "pagina_copertina": 208,
+      "pagine_gantt": [
+        209,
+        210
+      ]
+    },
+    {
+      "numero_turno": "1161I",
+      "validita": "Valido dal 28/3 al 31/7",
+      "composizione_raw": "1TN-A421-DM2+1TN-A421-DM1+1TN-A421-TA+1TN-A421-TB",
+      "spec_line_raw": "Caravaggio 4pz (ETR421-Aeroportuali) - m.110",
+      "famiglie_materiale": [
+        "Caravaggio (ETR421/ETR522)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Caravaggio 4pz (ETR421-Aeroportuali) - m.110"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 110,
+      "tsr_pezzi": null,
+      "numero_giornate": 5,
+      "km_giornaliera_media": "865,61",
+      "km_annua_ponderata": "545.336,07",
+      "pezzi": [
+        {
+          "pezzo": "TN-A421-DM2",
+          "numero": 5
+        },
+        {
+          "pezzo": "TN-A421-DM1",
+          "numero": 5
+        },
+        {
+          "pezzo": "TN-A421-TA",
+          "numero": 5
+        },
+        {
+          "pezzo": "TN-A421-TB",
+          "numero": 5
+        }
+      ],
+      "sede_manutenzione": [
+        "MILANO FIOREN"
+      ],
+      "linee_inferite": [
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 13,
+      "treni_sample": [
+        "1032",
+        "1083",
+        "1084",
+        "1143",
+        "1150",
+        "1152",
+        "1195",
+        "28115",
+        "28116",
+        "28117",
+        "28118",
+        "93297",
+        "93298"
+      ],
+      "treni_min": 1032,
+      "treni_max": 93298,
+      "stazioni_capolinea": [
+        "CARAVAGGIO",
+        "MI.CERT"
+      ],
+      "pagina_copertina": 211,
+      "pagine_gantt": [
+        212,
+        213,
+        214
+      ]
+    },
+    {
+      "numero_turno": "1162",
+      "validita": "P",
+      "composizione_raw": "3Le245+2ALe245",
+      "spec_line_raw": "Coradia 245 - m.83",
+      "famiglie_materiale": [
+        "Coradia 245 (ETR245)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Coradia 245 - m.83"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 83,
+      "tsr_pezzi": null,
+      "numero_giornate": 10,
+      "km_giornaliera_media": "214,35",
+      "km_annua_ponderata": "613.052,42",
+      "pezzi": [
+        {
+          "pezzo": "Le245",
+          "numero": 30
+        },
+        {
+          "pezzo": "ALe245",
+          "numero": 20
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Linea passante Milano",
+          "commerciale": "S1/S2/S3 passante"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 137,
+      "treni_sample": [
+        "1162",
+        "1321",
+        "1526",
+        "1825",
+        "1930",
+        "3949",
+        "4051",
+        "4151",
+        "25611",
+        "25613",
+        "25615",
+        "25616",
+        "25617",
+        "25618",
+        "25619",
+        "25620",
+        "25621",
+        "25622",
+        "25623",
+        "25624",
+        "25625",
+        "25626",
+        "25627",
+        "25628",
+        "25629",
+        "25630",
+        "25631",
+        "25632",
+        "25633",
+        "25634"
+      ],
+      "treni_min": 1162,
+      "treni_max": 28395,
+      "stazioni_capolinea": [
+        "MILANO ROGOREDO"
+      ],
+      "pagina_copertina": 215,
+      "pagine_gantt": [
+        216,
+        217,
+        218,
+        219
+      ]
+    },
+    {
+      "numero_turno": "1163",
+      "validita": "P",
+      "composizione_raw": "1TN-Ale425-A41+2TN-Le425-A42-A45+1TN-Ale425-A46+1TN-Le425-A43",
+      "spec_line_raw": "Coradia 425 - m.82",
+      "famiglie_materiale": [
+        "Coradia 425 (ETR425)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Coradia 425 - m.82"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 82,
+      "tsr_pezzi": null,
+      "numero_giornate": 14,
+      "km_giornaliera_media": "367,98",
+      "km_annua_ponderata": "1.473.385,02",
+      "pezzi": [
+        {
+          "pezzo": "TN-Ale425-A41",
+          "numero": 14
+        },
+        {
+          "pezzo": "TN-Le425-A42-A45",
+          "numero": 28
+        },
+        {
+          "pezzo": "TN-Ale425-A46",
+          "numero": 14
+        },
+        {
+          "pezzo": "TN-Le425-A43",
+          "numero": 14
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Varese-Saronno-Milano",
+          "commerciale": "RE5/S5 (Varese-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 25,
+      "treni_sample": [
+        "1163",
+        "4456",
+        "24904",
+        "24907",
+        "24916",
+        "24918",
+        "24925",
+        "24927",
+        "24932",
+        "24934",
+        "24941",
+        "24943",
+        "24948",
+        "24950",
+        "24957",
+        "24959",
+        "24964",
+        "24966",
+        "24973",
+        "24975",
+        "24980",
+        "24982",
+        "24994",
+        "24997",
+        "28193"
+      ],
+      "treni_min": 1163,
+      "treni_max": 28193,
+      "stazioni_capolinea": [
+        "ASSO",
+        "COMO",
+        "MEDA",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "VARESE"
+      ],
+      "pagina_copertina": 220,
+      "pagine_gantt": [
+        221,
+        222,
+        223,
+        224,
+        225,
+        226,
+        227,
+        228,
+        229
+      ]
+    },
+    {
+      "numero_turno": "1165",
+      "validita": "P",
+      "composizione_raw": "1ALe710+2ALe711",
+      "spec_line_raw": "TSR 3pz - m.79",
+      "famiglie_materiale": [
+        "TSR (ALe711+ALe710)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "TSR 3pz - m.79"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 79,
+      "tsr_pezzi": 3,
+      "numero_giornate": 12,
+      "km_giornaliera_media": "326,23",
+      "km_annua_ponderata": "1.119.620,41",
+      "pezzi": [
+        {
+          "pezzo": "ALe710",
+          "numero": 12
+        },
+        {
+          "pezzo": "ALe711",
+          "numero": 24
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Varese-Saronno-Milano",
+          "commerciale": "RE5/S5 (Varese-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 41,
+      "treni_sample": [
+        "1165",
+        "1224",
+        "4050",
+        "4759",
+        "5810",
+        "24020",
+        "24025",
+        "24030",
+        "24035",
+        "24045",
+        "24113",
+        "24115",
+        "24117",
+        "24118",
+        "24121",
+        "24122",
+        "24126",
+        "24127",
+        "24131",
+        "24132",
+        "24135",
+        "24136",
+        "24140",
+        "24141",
+        "24145",
+        "24146",
+        "24149",
+        "24150",
+        "24154",
+        "24155"
+      ],
+      "treni_min": 1165,
+      "treni_max": 24182,
+      "stazioni_capolinea": [
+        "ASSO",
+        "COMO",
+        "MARIANO",
+        "MEDA",
+        "SARONNO",
+        "VARESE"
+      ],
+      "pagina_copertina": 230,
+      "pagine_gantt": [
+        231,
+        232,
+        233,
+        234,
+        235,
+        236,
+        237,
+        238,
+        239,
+        240,
+        241
+      ]
+    },
+    {
+      "numero_turno": "1166",
+      "validita": "P",
+      "composizione_raw": "2ALe711+2ALe710",
+      "spec_line_raw": "TSR 4pz - m. 105 - Linea Mi-NO +2' in arrivo e -2' in partenza dal 2/3 al 31/7",
+      "famiglie_materiale": [
+        "TSR (ALe711+ALe710)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "TSR 4pz - m. 105 - Linea Mi-NO +2' in arrivo e -2' in partenza dal 2/3 al 31/7"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 105,
+      "tsr_pezzi": 4,
+      "numero_giornate": 10,
+      "km_giornaliera_media": "265,41",
+      "km_annua_ponderata": "759.081,16",
+      "pezzi": [
+        {
+          "pezzo": "ALe711",
+          "numero": 20
+        },
+        {
+          "pezzo": "ALe710",
+          "numero": 20
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Varese-Saronno-Milano",
+          "commerciale": "RE5/S5 (Varese-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 13,
+      "treni_sample": [
+        "1166",
+        "4759",
+        "5810",
+        "24113",
+        "24118",
+        "24127",
+        "24132",
+        "24141",
+        "24146",
+        "24155",
+        "24160",
+        "24169",
+        "24174"
+      ],
+      "treni_min": 1166,
+      "treni_max": 24174,
+      "stazioni_capolinea": [
+        "ASSO",
+        "COMO",
+        "MEDA",
+        "VARESE"
+      ],
+      "pagina_copertina": 242,
+      "pagine_gantt": [
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249,
+        250,
+        251
+      ]
+    },
+    {
+      "numero_turno": "1167",
+      "validita": "P",
+      "composizione_raw": "2ALe711+3ALe710",
+      "spec_line_raw": "TSR 5pz - m.131",
+      "famiglie_materiale": [
+        "TSR (ALe711+ALe710)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 131,
+      "tsr_pezzi": 5,
+      "numero_giornate": 7,
+      "km_giornaliera_media": "430,14",
+      "km_annua_ponderata": "861.148,39",
+      "pezzi": [
+        {
+          "pezzo": "ALe711",
+          "numero": 14
+        },
+        {
+          "pezzo": "ALe710",
+          "numero": 21
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Varese-Saronno-Milano",
+          "commerciale": "RE5/S5 (Varese-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 83,
+      "treni_sample": [
+        "1167",
+        "2432",
+        "24014",
+        "24016",
+        "24017",
+        "24018",
+        "24019",
+        "24021",
+        "24022",
+        "24023",
+        "24024",
+        "24026",
+        "24027",
+        "24028",
+        "24029",
+        "24031",
+        "24032",
+        "24033",
+        "24034",
+        "24036",
+        "24037",
+        "24038",
+        "24039",
+        "24041",
+        "24043",
+        "24047",
+        "24111",
+        "24113",
+        "24114",
+        "24115"
+      ],
+      "treni_min": 1167,
+      "treni_max": 28107,
+      "stazioni_capolinea": [
+        "SARONNO",
+        "VARESE"
+      ],
+      "pagina_copertina": 252,
+      "pagine_gantt": [
+        253,
+        254,
+        255,
+        256
+      ]
+    },
+    {
+      "numero_turno": "1168",
+      "validita": "P",
+      "composizione_raw": "4ALe710+2ALe711",
+      "spec_line_raw": "TSR 6pz- m.157 - Linea Mi-NO +2' in arrivo e -2' in partenza dal 2/3 al 31/7",
+      "famiglie_materiale": [
+        "TSR (ALe711+ALe710)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "TSR 6pz- m.157 - Linea Mi-NO +2' in arrivo e -2' in partenza dal 2/3 al 31/7"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 157,
+      "tsr_pezzi": 6,
+      "numero_giornate": 14,
+      "km_giornaliera_media": "398,55",
+      "km_annua_ponderata": "1.595.787,01",
+      "pezzi": [
+        {
+          "pezzo": "ALe710",
+          "numero": 56
+        },
+        {
+          "pezzo": "ALe711",
+          "numero": 28
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Novara-Pioltello-Milano",
+          "commerciale": "S6/R (Novara-Milano via Pioltello)"
+        },
+        {
+          "fisica": "Varese-Saronno-Milano",
+          "commerciale": "RE5/S5 (Varese-Milano)"
+        },
+        {
+          "fisica": "Pavia-Stradella-Milano",
+          "commerciale": "S13/R (Pavia)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 163,
+      "treni_sample": [
+        "1020",
+        "1168",
+        "2335",
+        "3548",
+        "4351",
+        "4655",
+        "4855",
+        "24221",
+        "24222",
+        "24223",
+        "24224",
+        "24227",
+        "24228",
+        "24231",
+        "24232",
+        "24233",
+        "24234",
+        "24237",
+        "24238",
+        "24241",
+        "24242",
+        "24243",
+        "24244",
+        "24247",
+        "24248",
+        "24251",
+        "24252",
+        "24253",
+        "24254",
+        "24257"
+      ],
+      "treni_min": 1020,
+      "treni_max": 24467,
+      "stazioni_capolinea": [
+        "CAMNAGO",
+        "COMO",
+        "MEDA",
+        "NOVARA",
+        "PAVIA",
+        "SARONNO",
+        "VARESE"
+      ],
+      "pagina_copertina": 257,
+      "pagine_gantt": [
+        258,
+        259,
+        260,
+        261,
+        262,
+        263,
+        264,
+        265,
+        266,
+        267,
+        268,
+        269
+      ]
+    },
+    {
+      "numero_turno": "1169",
+      "validita": "P",
+      "composizione_raw": "1Ale760+1Ale761+2Le990",
+      "spec_line_raw": "R-TAF - m.106 - Linea Mi-NO +2' in arrivo e -2' in partenza dal 2/3 al 31/7",
+      "famiglie_materiale": [
+        "R-TAF (ALe760/761+Le990 storico)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "R-TAF - m.106 - Linea Mi-NO +2' in arrivo e -2' in partenza dal 2/3 al 31/7"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 106,
+      "tsr_pezzi": null,
+      "numero_giornate": 10,
+      "km_giornaliera_media": "362,39",
+      "km_annua_ponderata": "1.036.422,99",
+      "pezzi": [
+        {
+          "pezzo": "Ale760",
+          "numero": 10
+        },
+        {
+          "pezzo": "Ale761",
+          "numero": 10
+        },
+        {
+          "pezzo": "Le990",
+          "numero": 20
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Novara-Pioltello-Milano",
+          "commerciale": "S6/R (Novara-Milano via Pioltello)"
+        },
+        {
+          "fisica": "Varese-Saronno-Milano",
+          "commerciale": "RE5/S5 (Varese-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 28,
+      "treni_sample": [
+        "1169",
+        "2335",
+        "3548",
+        "3648",
+        "24217",
+        "24218",
+        "24219",
+        "24220",
+        "24225",
+        "24226",
+        "24229",
+        "24230",
+        "24235",
+        "24236",
+        "24239",
+        "24240",
+        "24245",
+        "24246",
+        "24249",
+        "24250",
+        "24255",
+        "24256",
+        "24259",
+        "24260",
+        "24265",
+        "24266",
+        "24269",
+        "24270"
+      ],
+      "treni_min": 1169,
+      "treni_max": 24270,
+      "stazioni_capolinea": [
+        "COMO",
+        "NOVARA",
+        "SARONNO",
+        "VARESE"
+      ],
+      "pagina_copertina": 270,
+      "pagine_gantt": [
+        271,
+        272,
+        273,
+        274,
+        275,
+        276,
+        277,
+        278,
+        279,
+        280
+      ]
+    },
+    {
+      "numero_turno": "1170",
+      "validita": "P",
+      "composizione_raw": "1ALe506+1ALe426+2Le736",
+      "spec_line_raw": "TAF TI - m.106",
+      "famiglie_materiale": [
+        "TAF (ALe426+ALe506+Le736 ex Trenitalia)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 106,
+      "tsr_pezzi": null,
+      "numero_giornate": 7,
+      "km_giornaliera_media": "477,66",
+      "km_annua_ponderata": "956.276,46",
+      "pezzi": [
+        {
+          "pezzo": "ALe506",
+          "numero": 7
+        },
+        {
+          "pezzo": "ALe426",
+          "numero": 7
+        },
+        {
+          "pezzo": "Le736",
+          "numero": 14
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Linea passante Milano",
+          "commerciale": "S1/S2/S3 passante"
+        }
+      ],
+      "stazioni_terminali_milano": [
+        "Stazione Milano P.Garibaldi (terminus)"
+      ],
+      "vincoli_violati": [],
+      "treni_count": 72,
+      "treni_sample": [
+        "1021",
+        "1170",
+        "3042",
+        "24902",
+        "24903",
+        "24905",
+        "24906",
+        "24914",
+        "24915",
+        "24917",
+        "24919",
+        "24920",
+        "24921",
+        "24922",
+        "24923",
+        "24924",
+        "24926",
+        "24928",
+        "24929",
+        "24930",
+        "24931",
+        "24933",
+        "24935",
+        "24936",
+        "24937",
+        "24938",
+        "24939",
+        "24940",
+        "24942",
+        "24944"
+      ],
+      "treni_min": 1021,
+      "treni_max": 28386,
+      "stazioni_capolinea": [
+        "MI.GRECO",
+        "MI.P.GAR",
+        "MI.P.GARIBALDI",
+        "MILANO ROGOREDO"
+      ],
+      "pagina_copertina": 281,
+      "pagine_gantt": [
+        282,
+        283
+      ]
+    },
+    {
+      "numero_turno": "1171",
+      "validita": "P",
+      "composizione_raw": "1TN-Le522-TA+1TN-Ale522-DM1+1TN-Ale522-DM2+1TN-Le522-TB+1TN-Le522-TX",
+      "spec_line_raw": "Caravaggio 5pz ( ETR522) -m. 137 - Linea Mi-NO +2' in arrivo e -2' in partenza dal 2",
+      "famiglie_materiale": [
+        "Caravaggio (ETR421/ETR522)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Caravaggio 5pz ( ETR522) -m. 137 - Linea Mi-NO +2' in arrivo e -2' in partenza dal 2/3 al 31/7"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 137,
+      "tsr_pezzi": null,
+      "numero_giornate": 17,
+      "km_giornaliera_media": "413,43",
+      "km_annua_ponderata": "2.010.116,62",
+      "pezzi": [
+        {
+          "pezzo": "TN-Le522-TA",
+          "numero": 17
+        },
+        {
+          "pezzo": "TN-Ale522-DM1",
+          "numero": 17
+        },
+        {
+          "pezzo": "TN-Ale522-DM2",
+          "numero": 17
+        },
+        {
+          "pezzo": "TN-Le522-TB",
+          "numero": 17
+        },
+        {
+          "pezzo": "TN-Le522-TX",
+          "numero": 17
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Novara-Pioltello-Milano",
+          "commerciale": "S6/R (Novara-Milano via Pioltello)"
+        },
+        {
+          "fisica": "Bergamo-Milano via Pioltello (linea diretta)",
+          "commerciale": "R3 (Bergamo via Pioltello)"
+        },
+        {
+          "fisica": "Varese-Saronno-Milano",
+          "commerciale": "RE5/S5 (Varese-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 10,
+      "treni_sample": [
+        "1171",
+        "3001",
+        "3002",
+        "3003",
+        "3004",
+        "68012",
+        "88125",
+        "88126",
+        "88127",
+        "88128"
+      ],
+      "treni_min": 1171,
+      "treni_max": 88128,
+      "stazioni_capolinea": [
+        "CAMNAGO",
+        "CARAVAGGIO",
+        "COMO",
+        "NOVARA",
+        "SARONNO",
+        "VARESE"
+      ],
+      "pagina_copertina": 284,
+      "pagine_gantt": [
+        285,
+        286,
+        287,
+        288,
+        289,
+        290,
+        291,
+        292,
+        293,
+        294,
+        295,
+        296,
+        297,
+        298,
+        299
+      ]
+    },
+    {
+      "numero_turno": "1180",
+      "validita": "P",
+      "composizione_raw": "1ATR125",
+      "spec_line_raw": "ATR 125 - m.78",
+      "famiglie_materiale": [
+        "ATR125 Minuetto (diesel)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "ATR 125 - m.78"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 78,
+      "tsr_pezzi": null,
+      "numero_giornate": 8,
+      "km_giornaliera_media": "326,61",
+      "km_annua_ponderata": "747.290,81",
+      "pezzi": [
+        {
+          "pezzo": "ATR125",
+          "numero": 8
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Brescia-Iseo-Edolo (NON elettrificata)",
+          "commerciale": "R5 (linea Iseo)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 1,
+      "treni_sample": [
+        "1180"
+      ],
+      "treni_min": 1180,
+      "treni_max": 1180,
+      "stazioni_capolinea": [
+        "BRESCIA",
+        "EDOLO",
+        "ISEO"
+      ],
+      "pagina_copertina": 300,
+      "pagine_gantt": [
+        301,
+        302,
+        303,
+        304,
+        305,
+        306,
+        307
+      ]
+    },
+    {
+      "numero_turno": "1181",
+      "validita": "P",
+      "composizione_raw": "1ATR115",
+      "spec_line_raw": "ATR115 - m.40",
+      "famiglie_materiale": [
+        "ATR115 (diesel)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "ATR115 - m.40"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 40,
+      "tsr_pezzi": null,
+      "numero_giornate": 4,
+      "km_giornaliera_media": "332,36",
+      "km_annua_ponderata": "380.218,04",
+      "pezzi": [
+        {
+          "pezzo": "ATR115",
+          "numero": 4
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Brescia-Iseo-Edolo (NON elettrificata)",
+          "commerciale": "R5 (linea Iseo)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 1,
+      "treni_sample": [
+        "1181"
+      ],
+      "treni_min": 1181,
+      "treni_max": 1181,
+      "stazioni_capolinea": [
+        "BRESCIA",
+        "EDOLO",
+        "ISEO"
+      ],
+      "pagina_copertina": 308,
+      "pagine_gantt": [
+        309,
+        310,
+        311
+      ]
+    },
+    {
+      "numero_turno": "1182",
+      "validita": "P",
+      "composizione_raw": "2ALn668(1000)",
+      "spec_line_raw": "2 Aln668 - m.47",
+      "famiglie_materiale": [
+        "ALn668 (diesel storico)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "2 Aln668 - m.47"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 47,
+      "tsr_pezzi": null,
+      "numero_giornate": 4,
+      "km_giornaliera_media": "88,43",
+      "km_annua_ponderata": "101.162,87",
+      "pezzi": [
+        {
+          "pezzo": "ALn668(1000)",
+          "numero": 8
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Brescia-Iseo-Edolo (NON elettrificata)",
+          "commerciale": "R5 (linea Iseo)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 2,
+      "treni_sample": [
+        "1000",
+        "1182"
+      ],
+      "treni_min": 1000,
+      "treni_max": 1182,
+      "stazioni_capolinea": [
+        "BRESCIA",
+        "EDOLO",
+        "ISEO"
+      ],
+      "pagina_copertina": 312,
+      "pagine_gantt": [
+        313,
+        314
+      ]
+    },
+    {
+      "numero_turno": "1184",
+      "validita": "P",
+      "composizione_raw": "1D520",
+      "spec_line_raw": "Turno dedicato Treno dei Sapori",
+      "famiglie_materiale": [
+        "Treno dei Sapori (turistico speciale)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "Turno dedicato Treno dei Sapori"
+      ],
+      "servizi_tilo_dichiarati": [],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": null,
+      "tsr_pezzi": null,
+      "numero_giornate": 1,
+      "km_giornaliera_media": "5,62",
+      "km_annua_ponderata": "1.608,71",
+      "pezzi": [
+        {
+          "pezzo": "D520",
+          "numero": 1
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Brescia-Iseo-Edolo (NON elettrificata)",
+          "commerciale": "R5 (linea Iseo)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 1,
+      "treni_sample": [
+        "1184"
+      ],
+      "treni_min": 1184,
+      "treni_max": 1184,
+      "stazioni_capolinea": [
+        "ISEO"
+      ],
+      "pagina_copertina": 315,
+      "pagine_gantt": [
+        316
+      ]
+    },
+    {
+      "numero_turno": "1190",
+      "validita": "P",
+      "composizione_raw": "2Le524+2Ale524",
+      "spec_line_raw": "TILO S30 - Flirt 4pz - m.74",
+      "famiglie_materiale": [
+        "TILO Flirt (ETR524)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "TILO S30 - Flirt 4pz - m.74"
+      ],
+      "servizi_tilo_dichiarati": [
+        "S30"
+      ],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 74,
+      "tsr_pezzi": null,
+      "numero_giornate": 3,
+      "km_giornaliera_media": "232,30",
+      "km_annua_ponderata": "199.310,97",
+      "pezzi": [
+        {
+          "pezzo": "Le524",
+          "numero": 6
+        },
+        {
+          "pezzo": "Ale524",
+          "numero": 6
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Luino-Gallarate-Milano",
+          "commerciale": "R6 (Luino-Gallarate-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 23,
+      "treni_sample": [
+        "1190",
+        "1219",
+        "3547",
+        "25340",
+        "25346",
+        "25357",
+        "25358",
+        "25361",
+        "25362",
+        "25365",
+        "25366",
+        "25369",
+        "25370",
+        "25373",
+        "25374",
+        "25377",
+        "25378",
+        "25379",
+        "25381",
+        "25382",
+        "25385",
+        "28279",
+        "28348"
+      ],
+      "treni_min": 1190,
+      "treni_max": 28348,
+      "stazioni_capolinea": [
+        "BUSTO",
+        "LUINO"
+      ],
+      "pagina_copertina": 317,
+      "pagine_gantt": [
+        318,
+        319
+      ]
+    },
+    {
+      "numero_turno": "1191",
+      "validita": "Valido fino al 18/3",
+      "composizione_raw": "2Le524+2Ale524",
+      "spec_line_raw": "TILO S40 - S50 Flirt 4pz - m.74",
+      "famiglie_materiale": [
+        "TILO Flirt (ETR524)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "TILO S40 - S50 Flirt 4pz - m.74"
+      ],
+      "servizi_tilo_dichiarati": [
+        "S40"
+      ],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 74,
+      "tsr_pezzi": null,
+      "numero_giornate": 5,
+      "km_giornaliera_media": "218,65",
+      "km_annua_ponderata": "18.585,25",
+      "pezzi": [
+        {
+          "pezzo": "Le524",
+          "numero": 10
+        },
+        {
+          "pezzo": "Ale524",
+          "numero": 10
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Como-Chiasso-Milano",
+          "commerciale": "RE2/S11 (Como-Chiasso-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 76,
+      "treni_sample": [
+        "1191",
+        "3548",
+        "25406",
+        "25407",
+        "25408",
+        "25409",
+        "25410",
+        "25411",
+        "25412",
+        "25413",
+        "25414",
+        "25415",
+        "25416",
+        "25417",
+        "25418",
+        "25419",
+        "25420",
+        "25421",
+        "25422",
+        "25423",
+        "25424",
+        "25425",
+        "25426",
+        "25427",
+        "25428",
+        "25429",
+        "25430",
+        "25431",
+        "25432",
+        "25433"
+      ],
+      "treni_min": 1191,
+      "treni_max": 69558,
+      "stazioni_capolinea": [
+        "ASSO",
+        "CHIASSO",
+        "COMO"
+      ],
+      "pagina_copertina": 320,
+      "pagine_gantt": [
+        321,
+        322
+      ]
+    },
+    {
+      "numero_turno": "1191A",
+      "validita": "Valido dal 19/3",
+      "composizione_raw": "2Le524+2Ale524",
+      "spec_line_raw": "TILO S40 - S50 Flirt 4pz - m.74",
+      "famiglie_materiale": [
+        "TILO Flirt (ETR524)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "TILO S40 - S50 Flirt 4pz - m.74"
+      ],
+      "servizi_tilo_dichiarati": [
+        "S40"
+      ],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 74,
+      "tsr_pezzi": null,
+      "numero_giornate": 5,
+      "km_giornaliera_media": "205,81",
+      "km_annua_ponderata": "276.814,70",
+      "pezzi": [
+        {
+          "pezzo": "Le524",
+          "numero": 10
+        },
+        {
+          "pezzo": "Ale524",
+          "numero": 10
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Como-Chiasso-Milano",
+          "commerciale": "RE2/S11 (Como-Chiasso-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 77,
+      "treni_sample": [
+        "3548",
+        "25406",
+        "25407",
+        "25408",
+        "25409",
+        "25410",
+        "25411",
+        "25412",
+        "25413",
+        "25414",
+        "25415",
+        "25416",
+        "25417",
+        "25418",
+        "25419",
+        "25420",
+        "25421",
+        "25422",
+        "25423",
+        "25424",
+        "25425",
+        "25426",
+        "25427",
+        "25428",
+        "25429",
+        "25430",
+        "25431",
+        "25432",
+        "25433",
+        "25434"
+      ],
+      "treni_min": 3548,
+      "treni_max": 69558,
+      "stazioni_capolinea": [
+        "ASSO",
+        "CHIASSO",
+        "COMO"
+      ],
+      "pagina_copertina": 323,
+      "pagine_gantt": [
+        324,
+        325,
+        326
+      ]
+    },
+    {
+      "numero_turno": "1192",
+      "validita": "P",
+      "composizione_raw": "2Ale524+2Le524",
+      "spec_line_raw": "TILO S10 - Flirt 4pz - m.74-Serv Viagg escluso nella tratta Como Camerl.-PM Alba",
+      "famiglie_materiale": [
+        "TILO Flirt (ETR524)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "TILO S10 - Flirt 4pz - m.74-Serv Viagg escluso nella tratta Como Camerl.-PM Albate e viveversa"
+      ],
+      "servizi_tilo_dichiarati": [
+        "S10"
+      ],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 74,
+      "tsr_pezzi": null,
+      "numero_giornate": 13,
+      "km_giornaliera_media": "76,78",
+      "km_annua_ponderata": "285.455,47",
+      "pezzi": [
+        {
+          "pezzo": "Ale524",
+          "numero": 26
+        },
+        {
+          "pezzo": "Le524",
+          "numero": 26
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Como-Chiasso-Milano",
+          "commerciale": "RE2/S11 (Como-Chiasso-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 84,
+      "treni_sample": [
+        "1020",
+        "1192",
+        "1728",
+        "1729",
+        "2537",
+        "3243",
+        "3548",
+        "4050",
+        "4350",
+        "25107",
+        "25109",
+        "25110",
+        "25111",
+        "25112",
+        "25113",
+        "25114",
+        "25115",
+        "25116",
+        "25117",
+        "25118",
+        "25119",
+        "25120",
+        "25121",
+        "25122",
+        "25123",
+        "25124",
+        "25125",
+        "25126",
+        "25128",
+        "25129"
+      ],
+      "treni_min": 1020,
+      "treni_max": 99996,
+      "stazioni_capolinea": [
+        "ASSO",
+        "CHIASSO",
+        "COMO"
+      ],
+      "pagina_copertina": 327,
+      "pagine_gantt": [
+        328,
+        329,
+        330,
+        331,
+        332,
+        333
+      ]
+    },
+    {
+      "numero_turno": "1195",
+      "validita": "P",
+      "composizione_raw": "4Le524+2Ale524",
+      "spec_line_raw": "TILO S40 - S50 Flirt 6pz - m.106",
+      "famiglie_materiale": [
+        "TILO Flirt (ETR524)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "TILO S40 - S50 Flirt 6pz - m.106"
+      ],
+      "servizi_tilo_dichiarati": [
+        "S40"
+      ],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 106,
+      "tsr_pezzi": null,
+      "numero_giornate": 11,
+      "km_giornaliera_media": "193,50",
+      "km_annua_ponderata": "608.759,39",
+      "pezzi": [
+        {
+          "pezzo": "Le524",
+          "numero": 44
+        },
+        {
+          "pezzo": "Ale524",
+          "numero": 22
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Varese-Saronno-Milano",
+          "commerciale": "RE5/S5 (Varese-Milano)"
+        },
+        {
+          "fisica": "Como-Chiasso-Milano",
+          "commerciale": "RE2/S11 (Como-Chiasso-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 61,
+      "treni_sample": [
+        "1195",
+        "3548",
+        "25406",
+        "25407",
+        "25452",
+        "25550",
+        "25552",
+        "25553",
+        "25554",
+        "25555",
+        "25556",
+        "25557",
+        "25558",
+        "25559",
+        "25560",
+        "25561",
+        "25562",
+        "25563",
+        "25564",
+        "25565",
+        "25566",
+        "25567",
+        "25568",
+        "25569",
+        "25570",
+        "25571",
+        "25572",
+        "25573",
+        "25574",
+        "25575"
+      ],
+      "treni_min": 1195,
+      "treni_max": 69099,
+      "stazioni_capolinea": [
+        "ASSO",
+        "CHIASSO",
+        "VARESE"
+      ],
+      "pagina_copertina": 334,
+      "pagine_gantt": [
+        335,
+        336,
+        337,
+        338,
+        339,
+        340,
+        341,
+        342,
+        343,
+        344,
+        345
+      ]
+    },
+    {
+      "numero_turno": "1196",
+      "validita": "P",
+      "composizione_raw": "4Le524+2Ale524",
+      "spec_line_raw": "TILO S10 - RE 80 Flirt 6pz - m.106- Serv Viagg escluso nella tratta Como SG-PM A",
+      "famiglie_materiale": [
+        "TILO Flirt (ETR524)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "TILO S10 - RE 80 Flirt 6pz - m.106- Serv Viagg escluso nella tratta Como SG-PM Albate e viceversa"
+      ],
+      "servizi_tilo_dichiarati": [
+        "S10"
+      ],
+      "categoria": "Serv Viagg escluso nella tratta Como SG-PM A",
+      "pr": null,
+      "ppf": null,
+      "metri": 106,
+      "tsr_pezzi": null,
+      "numero_giornate": 7,
+      "km_giornaliera_media": "73,33",
+      "km_annua_ponderata": "146.813,77",
+      "pezzi": [
+        {
+          "pezzo": "Le524",
+          "numero": 28
+        },
+        {
+          "pezzo": "Ale524",
+          "numero": 14
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Como-Chiasso-Milano",
+          "commerciale": "RE2/S11 (Como-Chiasso-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 44,
+      "treni_sample": [
+        "1020",
+        "1196",
+        "1728",
+        "2537",
+        "3243",
+        "4050",
+        "25107",
+        "25109",
+        "25110",
+        "25111",
+        "25112",
+        "25113",
+        "25114",
+        "25115",
+        "25116",
+        "25118",
+        "25119",
+        "25122",
+        "25123",
+        "25126",
+        "25127",
+        "25129",
+        "25130",
+        "25131",
+        "25132",
+        "25134",
+        "25135",
+        "25137",
+        "25138",
+        "25139"
+      ],
+      "treni_min": 1020,
+      "treni_max": 69004,
+      "stazioni_capolinea": [
+        "ASSO",
+        "CHIASSO",
+        "COMO"
+      ],
+      "pagina_copertina": 346,
+      "pagine_gantt": [
+        347,
+        348,
+        349
+      ]
+    },
+    {
+      "numero_turno": "1199",
+      "validita": "P",
+      "composizione_raw": "2Ale524+4Le524",
+      "spec_line_raw": "TILO S10 - RE 80 - Flirt TSI 6pz - m.106",
+      "famiglie_materiale": [
+        "TILO Flirt (ETR524)"
+      ],
+      "famiglia_fonte": "note_gantt_pdf",
+      "note_gantt": [
+        "TILO S10 - RE 80 - Flirt TSI 6pz - m.106"
+      ],
+      "servizi_tilo_dichiarati": [
+        "S10"
+      ],
+      "categoria": null,
+      "pr": null,
+      "ppf": null,
+      "metri": 106,
+      "tsr_pezzi": null,
+      "numero_giornate": 10,
+      "km_giornaliera_media": "342,43",
+      "km_annua_ponderata": "979.357,50",
+      "pezzi": [
+        {
+          "pezzo": "Ale524",
+          "numero": 20
+        },
+        {
+          "pezzo": "Le524",
+          "numero": 40
+        }
+      ],
+      "sede_manutenzione": [],
+      "linee_inferite": [
+        {
+          "fisica": "Como-Chiasso-Milano",
+          "commerciale": "RE2/S11 (Como-Chiasso-Milano)"
+        }
+      ],
+      "stazioni_terminali_milano": [],
+      "vincoli_violati": [],
+      "treni_count": 51,
+      "treni_sample": [
+        "1199",
+        "25017",
+        "25113",
+        "25116",
+        "25121",
+        "25124",
+        "25129",
+        "25132",
+        "25137",
+        "25140",
+        "25501",
+        "25502",
+        "25503",
+        "25504",
+        "25506",
+        "25507",
+        "25508",
+        "25509",
+        "25510",
+        "25511",
+        "25512",
+        "25513",
+        "25514",
+        "25515",
+        "25516",
+        "25517",
+        "25518",
+        "25519",
+        "25520",
+        "25521"
+      ],
+      "treni_min": 1199,
+      "treni_max": 69141,
+      "stazioni_capolinea": [
+        "ASSO",
+        "CHIASSO",
+        "COMO",
+        "SESTO"
+      ],
+      "pagina_copertina": 350,
+      "pagine_gantt": [
+        351,
+        352,
+        353
+      ]
+    }
+  ]
+}

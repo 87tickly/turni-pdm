@@ -10,6 +10,136 @@
 
 ---
 
+## 2026-05-02 (85) — Vincoli inviolabili materiale: integrazione backend (validation HARD su POST regole)
+
+### Contesto
+
+L'utente ha richiesto di integrare nel programma i 3 vincoli inviolabili
+documentati in `data/vincoli_materiale_inviolabili.json` (entry 80-84).
+Decisioni utente in chat:
+- **Strada B** per il match: usare `materiale_tipo_codici_target` (codici
+  PK del DB) anziché string famiglia (più robusto, slegato dal naming
+  della famiglia).
+- **Inferenza linea**: scelta più "veritiera" → match dinamico su
+  stazioni origine/destinazione delle corse catturate dai filtri della
+  regola (no codice_linea hardcoded).
+- **Scope**: vincolo HARD si applica a tutto (no skip per `bozza` vs
+  `attivo`, no flag bypass utente).
+
+### Modifiche
+
+#### Dati (`data/`)
+
+- `data/vincoli_materiale_inviolabili.json` esteso con
+  `materiale_tipo_codici_target` (lista codici PK del DB) e pattern
+  regex su nomi stazione (`stazioni_ammesse_pattern_regex` /
+  `stazioni_vietate_pattern_regex`). Codici DB verificati interrogando
+  `materiale_tipo`.
+
+#### Backend (5 file nuovi, 2 modificati)
+
+- `backend/src/colazione/domain/vincoli/__init__.py` (nuovo): export
+  `Violazione`, `carica_vincoli`, `valida_regola`.
+- `backend/src/colazione/domain/vincoli/inviolabili.py` (nuovo): loader
+  JSON con search ascendente del path (compatibile dev locale + Docker
+  volume mount) + override env var `COLAZIONE_VINCOLI_INVIOLABILI_PATH`.
+  Funzione **pura** `valida_regola()` riusa `matches_all` da
+  `risolvi_corsa.py` per applicare i filtri della regola alle corse,
+  poi matcha le stazioni delle corse catturate contro i pattern regex
+  dei vincoli (whitelist/blacklist). DB-agnostic: il caricamento corse
+  + stazioni è responsabilità del chiamante.
+- `backend/src/colazione/schemas/vincoli.py` (nuovo): Pydantic
+  `VincoloViolato`, `CorsaProblematica`, `VincoliViolatiResponse`.
+- `backend/src/colazione/api/programmi.py` (edit): nuovo helper
+  `_verifica_vincoli_inviolabili()` chiamato da:
+  - `POST /api/programmi/{id}/regole` (regola standalone)
+  - `POST /api/programmi` (regole nested in creazione programma)
+  Solleva `HTTPException(400)` con response `VincoliViolatiResponse`
+  che elenca le violazioni con max 5 corse problematiche per
+  leggibilità.
+
+#### Test backend (1 file nuovo)
+
+- `backend/tests/test_vincoli_inviolabili.py` (nuovo, **14 test unit**
+  puri con `CorsaMock` dataclass, no DB):
+  - 3 test vincolo elettrico (linea elettrificata OK, Brescia-Iseo KO,
+    ATR803 esente OK)
+  - 4 test vincolo TILO (Como-Chiasso OK, Malpensa-Varese OK,
+    Tirano KO, Brescia-Iseo doppia violazione elettrico+TILO)
+  - 2 test Treno dei Sapori (Brescia-Iseo OK, Bergamo KO)
+  - 5 test edge cases: composizione mista (Coradia 526+425), filtro
+    `giorno_tipo` ignorato (vincolo geografico è cross-day), filtro
+    `codice_linea` riduce subset corse, lookup stazione mancante usa
+    codice grezzo come fallback, loader carica i 3 vincoli reali.
+
+### Verifiche
+
+- `uv run mypy --strict src` ✅ 58 file (era 54, +4 nuovi).
+- `uv run pytest -q` ✅ **513 passed, 12 skipped** in 128s
+  (baseline precedente 469-485 a seconda della sessione, +14 nuovi
+  test; nessuna regressione su 23 test esistenti `test_programmi_api`).
+- **Smoke API end-to-end** con `curl` su Docker compose stack
+  (PdE Trenord 2025-2026 ~50K corse):
+  1. `POST /api/programmi/{id}/regole` con `ETR524` filtro
+     `codice_linea="S11"` → **400** strutturato con violazione
+     TILO (corse Camnago-Mi.Garibaldi + Bellinzona-Mi.Garibaldi
+     non TILO whitelisted).
+  2. `POST` con `ETR524` senza filtro → **400** con DOPPIA
+     violazione (vincolo elettrico per corse Brescia-Edolo +
+     vincolo TILO per corse fuori whitelist).
+  3. `POST` con `ETR421` filtro `codice_linea="R3"` → **400**
+     vincolo elettrico (codice R3 nel DB include sotto-tratte
+     Brescia-Edolo non elettrificate).
+- Performance validation: ~1-1.5s per validation contro tutto il DB
+  PdE Trenord 2026 (carica ~50K corse + lookup stazioni + match
+  filtri Python). Hot path solo in creazione regola (non frequente),
+  accettabile per ora.
+
+### Conseguenze pratiche
+
+1. **Pianificatore protetto da errori HARD**: non può creare regole
+   `programma_regola_assegnazione` che assegnino TILO ETR524 fuori
+   linee Chiasso/MXP-Varese/Luino-MXP, materiale elettrico su
+   linee non elettrificate, o D520 fuori Brescia-Iseo-Edolo.
+2. **Errore 400 strutturato**: la response include vincolo violato,
+   tipo, descrizione, e fino a 5 esempi di corse problematiche
+   (numero_treno + origine + destinazione). Direttamente consumabile
+   da UI futura per mostrare al pianificatore "perché" una regola
+   è stata rifiutata.
+3. **Multi-tenant ready**: il file vincoli ha `_metadata.scope_multi_tenant`
+   che marca quali vincoli restano per altre aziende (tecnico_alimentazione,
+   universale) e quali sono Trenord-specifici (contrattuale_omologazione
+   TILO, operativo_turistico Treno dei Sapori).
+4. **Architettura pulita**: validator è funzione pura DB-agnostic,
+   testabile senza database. Endpoint API fa il caricamento DB e
+   passa al validator. Chiarezza per estendere/cambiare in futuro.
+
+### Limitazioni note / aperti
+
+- **Performance hot path**: ~1.5s per programma con 12 mesi di PdE
+  (~50K corse). Se il pianificatore crea molte regole in sequenza, può
+  diventare fastidioso. Ottimizzazioni future: indice SQL su
+  `(azienda_id, valido_da, valido_a)` o validation incrementale (solo
+  delta corse del filtro). Non blocker per ora.
+- **Test integration via TestClient**: 0 (sostituiti da smoke curl
+  manuale + 14 test unit puri). Un test integration con setup
+  corse fittizie nel DB di test sarebbe utile per CI ma è scope
+  separato.
+- **Endpoint UPDATE/PATCH regola** non esiste ancora: solo POST e
+  DELETE. Quando si aggiungerà PUT/PATCH, la stessa validation va
+  riusata.
+- **UI consumer**: nessun frontend integrato. Il dropdown materiale
+  filtrato per linea (proposto in entry 80) richiede MR dedicato
+  frontend.
+
+### Prossimo step
+
+Decisione utente: continuare con UI consumer dei vincoli (frontend),
+oppure tornare a Sprint 7.3 (Dashboard Pianificatore Turno PdC), o
+altro task.
+
+---
+
 ## 2026-05-02 (84) — docs: brief design 1° ruolo - dettagli Gantt (8 must-have)
 
 ### Contesto
