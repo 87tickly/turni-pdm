@@ -260,26 +260,30 @@ async def _carica_whitelist_stazioni(session: AsyncSession, localita_id: int) ->
     return frozenset(rows)
 
 
-async def _carica_festivita_periodo(
+async def carica_festivita_periodo(
     session: AsyncSession,
     azienda_id: int,
     valido_da: date,
     valido_a: date,
 ) -> frozenset[date]:
-    """Sprint 7.7 MR 3: carica festività ufficiali rilevanti per il periodo.
+    """Carica festività ufficiali rilevanti per il periodo (Sprint 7.7 MR 3, esposta MR 6).
 
     Include sia le festività nazionali (``azienda_id IS NULL``) sia le
     festività locali specifiche per l'azienda (es. Sant'Ambrogio per
     Trenord, righe ``azienda_id`` valorizzato). Filtra all'intervallo
-    ``[valido_da, valido_a]`` del programma — coerente col fatto che
-    le date di applicazione del giro sono dentro quel range per
-    costruzione.
+    ``[valido_da, valido_a]``.
+
+    **Sprint 7.7 MR 6**: esposta al package builder_giro per riuso da
+    ``api/giri.py::get_giro_dettaglio`` (calcolo etichetta categorica
+    delle varianti). Caller che usa ``tipo_giorno_categoria`` deve
+    estendere il range di +1 giorno per riconoscere il prefestivo
+    della data finale.
 
     Ritorna ``frozenset[date]`` per lookup O(1) in
-    ``calcola_etichetta_giro``. Se la migration 0015 non ha seedato
-    festività per gli anni del periodo (oltre 2030), il set risultante
-    può essere vuoto e ``tipo_giorno()`` ricadrà solo su
-    feriale/sabato/domenica.
+    ``calcola_etichetta_giro``/``calcola_etichetta_variante``. Se la
+    migration 0015 non ha seedato festività per gli anni del periodo
+    (oltre 2030), il set risultante può essere vuoto e
+    ``tipo_giorno()`` ricadrà solo su feriale/sabato/domenica.
     """
     stmt = select(FestivitaUfficiale.data).where(
         or_(
@@ -703,7 +707,7 @@ async def genera_giri(
     whitelist = await _carica_whitelist_stazioni(session, localita.id)
     accoppiamenti = await _carica_accoppiamenti_ammessi(session)
     # Sprint 7.7 MR 3: festività per classificazione etichetta giro.
-    festivita = await _carica_festivita_periodo(
+    festivita = await carica_festivita_periodo(
         session, azienda_id, programma.valido_da, programma.valido_a
     )
 

@@ -10,6 +10,186 @@
 
 ---
 
+## 2026-05-02 (82) — Sprint 7.7 MR 6: etichetta categorica per variante (Lavorativo/Prefestivo/Festivo)
+
+### Contesto
+
+Smoke utente post-MR 5 sul programma "prova" (giro 71490, ETR204
+mostrato nelle screenshot Pavia-Cremona). L'aggregazione A2 funziona
+(modello Trenord 1134, varianti per giornata) ma le **etichette dei
+tab variante** sono illeggibili: mostrano il `validita_testo` PdE
+grezzo troncato dall'UI, es. `"Circola giornalmente. Soppresso..."`,
+`"Circola giornalmente. Non Circo..."`.
+
+Decisione utente 2026-05-02 (in chat post screenshot 4 varianti
+giornata 2 e giornata 3): l'etichetta deve essere **categorica
+semantica**, non testo grezzo. Tre categorie operative + due formati
+speciali + uno fallback:
+
+> "lavorativo, festivo, festivi precedente festivo, solo quel
+> determinato giorno"
+
+> "1: Domenica = Festivo, 2: Prefestivo è quel giorno che precede
+> il giorno festivo, casi misti puoi adottare Lavorativo+Prefestivo
+> oppure dividerlo e dedicare una giornata con scritto Sabato"
+
+> "Ricorda che abbiamo un calendario interno sempre aggiornato"
+
+L'ultima frase è il vincolo chiave: la fonte di verità per le
+festività è la tabella `FestivitaUfficiale` (azienda + nazionali,
+seedata da migration 0015), non il calendario calcolato ad-hoc dal
+parser. La funzione `calcola_etichetta_variante` riceve il set in
+input — il caller (`api/giri.py`) carica dal DB.
+
+### Modifiche
+
+#### Backend (5 file modificati, 0 nuovi)
+
+- **`domain/calendario.py`**: aggiunta funzione pura
+  `tipo_giorno_categoria(data, festivita) -> "lavorativo" |
+  "prefestivo" | "festivo"` accanto al preesistente `tipo_giorno`
+  (4 categorie granulari, MR 2). Differenze con `tipo_giorno`:
+  - **`"festivo"`** include sempre le **domeniche** (Trenord turni
+    "F" lavorano festivi+domeniche).
+  - **`"prefestivo"`** è la **vigilia** di un festivo: tutti i sabati
+    (perché domenica = festivo) + venerdì 24/4/2026 (perché 25/4 =
+    Liberazione) + giovedì 30/4/2026 (perché 1/5 = Festa Lavoro) +
+    31/12 di ogni anno (perché 1/1 = Capodanno).
+  - **`"lavorativo"`** = lun-ven non festivo non prefestivo.
+  - Precedenza: festivo prevale su prefestivo (sabato 25/4/2026 =
+    Liberazione → "festivo", non "prefestivo").
+
+- **`domain/builder_giro/etichetta.py`**: aggiunta funzione pura
+  `calcola_etichetta_variante(dates_apply, festivita) -> str` che
+  produce direttamente la stringa UI. Output:
+  - `"Solo DD/MM/YYYY"` per data unica
+  - `"Lavorativo · N date"` / `"Prefestivo · N date"` /
+    `"Festivo · N date"` per varianti monotipo
+  - `"Misto: A+B[+C] · N date"` per mix (label uniche in ordine
+    calendariale lavorativo → prefestivo → festivo, joinate `+`)
+  - `"(nessuna data)"` per iterable vuoto
+  - DB-agnostic: riceve solo iterable di date + frozenset festività.
+  - La preesistente `calcola_etichetta_giro` (MR 3, 6 categorie su
+    giro intero) resta esposta ma non viene più chiamata
+    dall'application layer.
+
+- **`domain/builder_giro/builder.py`**: rinominata
+  `_carica_festivita_periodo` → `carica_festivita_periodo` (rimosso
+  underscore di privacy) per riuso da `api/giri.py`. Docstring
+  aggiornata: la funzione serve sia `calcola_etichetta_giro` (MR 3)
+  che `calcola_etichetta_variante` (MR 6). 1 call-site interna
+  aggiornata.
+
+- **`domain/builder_giro/__init__.py`**: aggiunti
+  `calcola_etichetta_variante` e `carica_festivita_periodo` al
+  `__all__` esportato.
+
+- **`api/giri.py::get_giro_dettaglio`**:
+  - Import nuovo: `calcola_etichetta_variante`,
+    `carica_festivita_periodo`.
+  - Prima del calcolo etichette, una sola query batch al DB per
+    caricare `FestivitaUfficiale` nel range
+    `[min(dates), max(dates)+1]`. Il +1 è per riconoscere il
+    prefestivo dell'ultima data del giro (es. variante con ultima
+    data 24/4/2026 = vigilia di Liberazione 25/4: serve sapere che
+    25/4 è festivo → 24/4 prefestivo).
+  - `_etichetta_parlante(v)` ora estrae le date da
+    `dates_apply_json` (lista stringhe ISO `YYYY-MM-DD`) e chiama
+    `calcola_etichetta_variante`. Il vecchio formato
+    `"{validita_testo} · {n} date"` è stato rimosso completamente
+    (regola 7 CLAUDE.md: niente backwards-compat hacks).
+  - Docstring di `GiroVarianteRead` aggiornata coi nuovi format
+    espliciti.
+
+#### Test backend (3 file modificati, 0 nuovi)
+
+- **`tests/test_calendario.py`**: nuova classe
+  `TestTipoGiornoCategoria` con 10 test: lavorativo (lun/mer),
+  prefestivo (sabato normale, ven 24/4 vigilia Liberazione, gio 30/4
+  vigilia 1/5, 31/12 vigilia Capodanno), festivo (domenica normale,
+  Festa Lavoro feriale, Liberazione di sabato che vince su prefestivo,
+  lunedì dopo festa che resta lavorativo). Copre la decisione
+  utente "domenica=festivo, prefestivo=vigilia di festivo".
+
+- **`tests/test_etichetta.py`**: nuova classe
+  `TestCalcolaEtichettaVariante` con 12 test: iterable vuoto,
+  data unica con duplicati, monotipo lavorativo/prefestivo/festivo,
+  misto 2 categorie (lavorativo+prefestivo, lavorativo+festivo),
+  misto 3 categorie complete, festivo di sabato che resta festivo,
+  ven 24/4/2026 prefestivo (vigilia Liberazione).
+
+- **`tests/test_genera_giri_api.py::test_get_giro_dettaglio`**:
+  asserzione esatta del formato MR 6: `data_inizio=2026-04-27`
+  (lunedì), `n_giornate=1` → variante con 1 data → etichetta
+  `"Solo 27/04/2026"`. Docstring aggiornata.
+
+### Verifiche
+
+- `uv run mypy --strict src`: ✅ 55 source files clean.
+- `uv run pytest --tb=short`: ✅ **499 passed, 12 skipped in 40.20s**
+  (baseline MR 5 = 477 → +22 nuovi: 10 in `TestTipoGiornoCategoria`
+  + 12 in `TestCalcolaEtichettaVariante`).
+- Frontend `pnpm typecheck`: ✅ clean (nessun cambio frontend
+  richiesto: `etichetta_parlante` resta `string`, l'UI mostra il
+  valore così com'è).
+- Frontend `pnpm test --run`: ✅ 53 passed.
+- Frontend `pnpm build`: ✅ 1757 modules, 389KB bundle (114KB gzip).
+
+### Conseguenze pratiche
+
+1. **UI varianti leggibile**: il pianificatore vede subito
+   `"Lavorativo · 12 date"` invece di
+   `"Circola giornalmente. Soppresso..."`. I tab varianti delle
+   screenshot diventano label semantiche distinguibili a colpo
+   d'occhio.
+2. **Calendario interno = fonte verità**: l'etichetta usa
+   `FestivitaUfficiale` (azienda + nazionali) dal DB, non
+   `festivita_italiane(anno)` ad-hoc. Multi-tenant ready: domani
+   un'azienda con festività locali diverse (es. patrono regionale)
+   userà automaticamente le proprie.
+3. **Range +1 giorno per prefestivi**: il caricamento festività
+   estende max_date di 1 giorno, così il prefestivo dell'ultima
+   data viene riconosciuto. Niente bug "31/12 senza il Capodanno
+   1/1 nel set".
+4. **`validita_testo` resta in DB**: il testo PdE grezzo è ancora
+   esposto in `GiroVarianteRead.validita_testo` per riferimento
+   (es. tooltip o log diagnostico), ma non è più la label
+   principale.
+5. **Compatibilità builder PdC**: il builder PdC continua a leggere
+   `validita_testo` della variante canonica per il turno PdC (vedi
+   `builder_pdc/builder.py:568`). Niente cambia lì — l'etichetta
+   è solo lato API/UI.
+
+### Limitazioni note / aperti
+
+- **Smoke utente sul programma reale**: dopo aver ri-aperto un
+  giro su `/pianificatore-giro/giri/:id`, le etichette delle
+  varianti dovrebbero apparire categoriche. Da verificare visivamente
+  sulla prossima sessione.
+- **Festività azienda 2026-2030**: la migration 0015 seeda gli anni
+  2025-2030. Per giri che si estendono oltre il 2030, il set
+  festività sarà parziale e le etichette potrebbero ricadere su
+  weekday-only. Non blocking per il PdE attuale.
+- **Tema B "CODOGNO sosta vietata"**: separato in MR 7.7.7. Richiede
+  schema DB nuovo (flag `puo_ospitare_sosta` su stazione + tabella
+  redirect off-limits → destinazione). Non in scope qui.
+
+### Prossimo step
+
+MR 7.7.7 — stazioni "off-limits" per sosta materiale (es. CODOGNO
+non può ospitare materiale in sosta, deve fare vuoto verso CREMONA).
+Richiede:
+- Schema DB nuovo (probabilmente `stazione_sosta_vietata` o flag su
+  `stazione`).
+- Tabella di redirezione `(stazione_off_limits → stazione_default)`
+  per il vuoto auto.
+- Builder posizionamento legge la regola e genera vuoto a fine
+  giornata se la stazione di arrivo è off-limits.
+- UI per gestire la lista (probabilmente in 4° ruolo Manutenzione,
+  scope futuro — per ora seed iniziale via migration su CODOGNO).
+
+---
+
 ## 2026-05-02 (81) — docs: brief design 1° ruolo (5 schermate + master)
 
 ### Contesto

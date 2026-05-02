@@ -38,8 +38,10 @@ from colazione.domain.builder_giro.builder import (
     ProgrammaNonAttivoError,
     ProgrammaNonTrovatoError,
     StrictModeViolation,
+    carica_festivita_periodo,
     genera_giri,
 )
+from colazione.domain.builder_giro.etichetta import calcola_etichetta_variante
 from colazione.domain.builder_giro.persister import LocalitaNonTrovataError
 from colazione.domain.builder_giro.risolvi_corsa import RegolaAmbiguaError
 from colazione.models.anagrafica import Stazione
@@ -239,13 +241,17 @@ class GiroBloccoRead(BaseModel):
 
 
 class GiroVarianteRead(BaseModel):
-    """Sprint 7.7 MR 5: una variante calendariale di una giornata-tipo.
+    """Sprint 7.7 MR 5+6: una variante calendariale di una giornata-tipo.
 
     Più varianti per la stessa giornata significano "in periodi diversi
     il convoglio fa percorsi diversi" (modello PDF Trenord 1134).
     L'``etichetta_parlante`` è calcolata server-side da
-    ``validita_testo`` + ``len(dates_apply_json)``, esempio:
-    ``"LV 1:5 · 12 date"``.
+    ``calcola_etichetta_variante`` (MR 6), categorizzazione semantica
+    delle date di applicazione: ``"Lavorativo · 12 date"``,
+    ``"Festivo · 8 date"``, ``"Prefestivo · 4 date"``,
+    ``"Solo 04/05/2026"``, ``"Misto: Lavorativo+Festivo · 7 date"``.
+    Il ``validita_testo`` PdE grezzo resta esposto per riferimento
+    ma non è più mostrato come etichetta principale in UI.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -546,19 +552,42 @@ async def get_giro_dettaglio(
             metadata_json=dict(b.metadata_json or {}),
         )
 
-    def _etichetta_parlante(v: GiroVariante) -> str:
-        """Etichetta variante calcolata server-side.
+    # Sprint 7.7 MR 6: etichetta categorica calcolata server-side via
+    # ``calcola_etichetta_variante``. Carica le festività rilevanti
+    # con UNA sola query batch sul calendario aziendale (FestivitaUfficiale
+    # azienda + nazionali). Range esteso di +1 giorno rispetto a max_date
+    # per riconoscere il prefestivo dell'ultima data del giro
+    # (es. variante con ultima data 24/4/2026 = vigilia di Liberazione 25/4).
+    festivita: frozenset[date] = frozenset()
+    if varianti_orm:
+        date_tutte: list[date] = []
+        for gv in varianti_orm:
+            for d_str in gv.dates_apply_json or []:
+                if isinstance(d_str, str):
+                    date_tutte.append(date.fromisoformat(d_str))
+        if date_tutte:
+            min_date = min(date_tutte)
+            max_date_plus1 = date.fromordinal(max(date_tutte).toordinal() + 1)
+            festivita = await carica_festivita_periodo(
+                session, user.azienda_id, min_date, max_date_plus1
+            )
 
-        Format: ``"{validita_testo} · {n_dates} date"``. Per
-        ``validita_testo`` vuoto/None usa fallback ``"GG"``.
-        Singolo giorno → "1 data" (senza "e" finale).
+    def _etichetta_parlante(v: GiroVariante) -> str:
+        """Sprint 7.7 MR 6: etichetta categorica della variante.
+
+        Output esempi: ``"Lavorativo · 12 date"``, ``"Festivo · 8 date"``,
+        ``"Prefestivo · 4 date"``, ``"Solo 04/05/2026"``,
+        ``"Misto: Lavorativo+Festivo · 7 date"``. Categorizzazione via
+        ``tipo_giorno_categoria`` (festivo include domeniche, prefestivo
+        è la vigilia di un festivo). Il ``validita_testo`` PdE grezzo
+        resta nello schema per riferimento ma non è più mostrato come
+        etichetta principale.
         """
-        testo = (v.validita_testo or "").strip() or "GG"
-        n_dates = len(v.dates_apply_json or [])
-        if n_dates == 0:
-            return testo
-        unita = "data" if n_dates == 1 else "date"
-        return f"{testo} · {n_dates} {unita}"
+        dates_apply: list[date] = []
+        for d_str in v.dates_apply_json or []:
+            if isinstance(d_str, str):
+                dates_apply.append(date.fromisoformat(d_str))
+        return calcola_etichetta_variante(dates_apply, festivita)
 
     # Sprint 7.7 MR 5: blocchi raggruppati per variante; varianti
     # raggruppate per giornata.

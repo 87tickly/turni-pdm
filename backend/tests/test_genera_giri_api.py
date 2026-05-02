@@ -372,9 +372,11 @@ async def test_get_giri_programma_dopo_genera(client: TestClient) -> None:
 async def test_get_giro_dettaglio(client: TestClient) -> None:
     """GET /api/giri/{id} ritorna giornate → varianti → blocchi.
 
-    Sprint 7.7 MR 5: schema giro→giornate→varianti→blocchi. La
-    variante porta ``etichetta_parlante`` (calcolata server-side da
-    ``validita_testo`` + ``len(dates_apply_json)``).
+    Sprint 7.7 MR 5: schema giro→giornate→varianti→blocchi.
+    Sprint 7.7 MR 6: ``etichetta_parlante`` è categorica
+    (``Lavorativo`` / ``Prefestivo`` / ``Festivo`` / ``Solo …`` /
+    ``Misto: …``), calcolata server-side da
+    ``calcola_etichetta_variante`` + festività dal DB.
     """
     prog_id = await _setup_db_completo()
     token = _login(client, "pianificatore_giro_demo", "demo12345")
@@ -401,6 +403,9 @@ async def test_get_giro_dettaglio(client: TestClient) -> None:
     assert "etichetta_parlante" in v0
     assert "dates_apply_json" in v0
     assert "blocchi" in v0
+    # MR 6: data_inizio=2026-04-27 (lunedì), n_giornate=1 → variante
+    # con 1 sola data → etichetta "Solo 27/04/2026" (formato data unica).
+    assert v0["etichetta_parlante"] == "Solo 27/04/2026"
     # Almeno 2 blocchi corsa (setup ha 2 corse)
     blocchi_corsa = [b for b in v0["blocchi"] if b["tipo_blocco"] == "corsa_commerciale"]
     assert len(blocchi_corsa) == 2

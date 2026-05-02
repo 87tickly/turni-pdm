@@ -20,6 +20,7 @@ from colazione.domain.calendario import (
     pasqua_gregoriana,
     pasquetta,
     tipo_giorno,
+    tipo_giorno_categoria,
 )
 
 
@@ -99,3 +100,66 @@ class TestTipoGiorno:
         # 5 aprile 2026 = domenica + Pasqua → festivo
         festivita = frozenset({date(2026, 4, 5)})
         assert tipo_giorno(date(2026, 4, 5), festivita) == "festivo"
+
+
+class TestTipoGiornoCategoria:
+    """Sprint 7.7 MR 6: `tipo_giorno_categoria` classifica le date in
+    3 categorie operative — lavorativo / prefestivo / festivo —
+    secondo la decisione utente 2026-05-02 (domenica = festivo,
+    prefestivo = vigilia di festivo).
+    """
+
+    def test_feriale_lunedi_e_lavorativo(self) -> None:
+        # 4 maggio 2026 = lunedì non festivo, giorno dopo è martedì
+        # non festivo → lavorativo
+        assert tipo_giorno_categoria(date(2026, 5, 4), frozenset()) == "lavorativo"
+
+    def test_mercoledi_normale_e_lavorativo(self) -> None:
+        assert tipo_giorno_categoria(date(2026, 5, 6), frozenset()) == "lavorativo"
+
+    def test_sabato_normale_e_prefestivo(self) -> None:
+        # Sabato 2/5/2026 → giorno dopo domenica = festivo → prefestivo
+        assert tipo_giorno_categoria(date(2026, 5, 2), frozenset()) == "prefestivo"
+
+    def test_venerdi_vigilia_festivo_nazionale_e_prefestivo(self) -> None:
+        # Venerdì 24/4/2026 → giorno dopo è 25/4 = Festa Liberazione
+        # (festivo nazionale) → prefestivo, anche se il venerdì stesso
+        # non è in alcuna lista festività
+        festivita = frozenset({date(2026, 4, 25)})
+        assert tipo_giorno_categoria(date(2026, 4, 24), festivita) == "prefestivo"
+
+    def test_giovedi_tra_due_lavorativi_e_lavorativo(self) -> None:
+        # Giovedì 30/4/2026 — venerdì 1/5 è festivo (Festa del Lavoro)
+        # quindi giovedì 30/4 dovrebbe essere prefestivo se festività
+        # passate. Senza festività: giovedì → lavorativo.
+        assert tipo_giorno_categoria(date(2026, 4, 30), frozenset()) == "lavorativo"
+        # Con festivo del 1/5: il giovedì diventa prefestivo
+        festivita = frozenset({date(2026, 5, 1)})
+        assert tipo_giorno_categoria(date(2026, 4, 30), festivita) == "prefestivo"
+
+    def test_domenica_e_sempre_festivo(self) -> None:
+        # Domenica 3/5/2026 → festivo (anche senza festività in set)
+        assert tipo_giorno_categoria(date(2026, 5, 3), frozenset()) == "festivo"
+
+    def test_festivita_nazionale_in_settimana_e_festivo(self) -> None:
+        # Venerdì 1/5/2026 = Festa del Lavoro
+        festivita = frozenset({date(2026, 5, 1)})
+        assert tipo_giorno_categoria(date(2026, 5, 1), festivita) == "festivo"
+
+    def test_festivita_nazionale_di_sabato_vince_su_prefestivo(self) -> None:
+        # Sabato 25/4/2026 = Liberazione: cade di sabato ma è festivo,
+        # NON prefestivo (la classificazione festivo prevale)
+        festivita = frozenset({date(2026, 4, 25)})
+        assert tipo_giorno_categoria(date(2026, 4, 25), festivita) == "festivo"
+
+    def test_lunedi_dopo_festivita_e_lavorativo_non_prefestivo(self) -> None:
+        # Lunedì 27/4/2026 — il sabato precedente era Liberazione, ma
+        # il giorno DOPO il lunedì è martedì normale → lavorativo
+        festivita = frozenset({date(2026, 4, 25)})
+        assert tipo_giorno_categoria(date(2026, 4, 27), festivita) == "lavorativo"
+
+    def test_31_dicembre_e_prefestivo_se_capodanno_in_set(self) -> None:
+        # 31/12/2026 (giovedì) → 1/1/2027 = Capodanno (festivo)
+        # Caller deve includere Capodanno dell'anno successivo nel set
+        festivita = frozenset({date(2027, 1, 1)})
+        assert tipo_giorno_categoria(date(2026, 12, 31), festivita) == "prefestivo"

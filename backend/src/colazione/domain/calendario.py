@@ -126,3 +126,49 @@ def tipo_giorno(data: date, festivita: frozenset[date]) -> TipoGiorno:
     if weekday == 6:
         return "domenica"
     return "feriale"
+
+
+# Categorizzazione utente Sprint 7.7 MR 6 (decisione 2026-05-02):
+# 3 categorie operative per l'etichetta UI delle varianti calendariali.
+TipoGiornoCategoria = str  # Literal["lavorativo", "prefestivo", "festivo"]
+
+
+def tipo_giorno_categoria(
+    data: date,
+    festivita: frozenset[date],
+) -> TipoGiornoCategoria:
+    """Classifica una data secondo le categorie utente Sprint 7.7 MR 6.
+
+    Decisione utente 2026-05-02 (memoria
+    ``feedback_etichetta_categoria_variante.md``): l'etichetta UI
+    della variante deve essere semantica e sintetica, non il testo
+    grezzo PdE (``"Circola giornalmente. Soppresso..."``). Categorie:
+
+    - ``"festivo"``  — festività nazionale O locale azienda O domenica.
+      Le domeniche sono sempre festivo (Trenord turni "F").
+    - ``"prefestivo"`` — vigilia di un giorno festivo, ovvero il
+      giorno *successivo* è festivo. Esempi: tutti i sabati (perché
+      domenica = festivo), il venerdì 24/4/2026 (perché 25/4 =
+      Liberazione).
+    - ``"lavorativo"`` — tutto il resto: lun-ven non festivo e non
+      vigilia di festivo.
+
+    ``festivita`` è il set delle festività nazionali + locali rilevanti
+    per gli anni coperti dalla data e dal giorno seguente. Il caller è
+    responsabile di costruirlo includendo anche l'anno successivo se
+    la data è il 31 dicembre (per riconoscere il prefestivo di
+    Capodanno).
+    """
+    # 1) Festivo prevale: festività ufficiale O domenica.
+    if data in festivita or data.weekday() == 6:
+        return "festivo"
+
+    # 2) Prefestivo: il giorno successivo è festivo (festività
+    #    ufficiale O domenica). Le date oltre il set delle festività
+    #    note ricadono comunque su domenica (controllo weekday).
+    next_day = date.fromordinal(data.toordinal() + 1)
+    if next_day in festivita or next_day.weekday() == 6:
+        return "prefestivo"
+
+    # 3) Default: lavorativo.
+    return "lavorativo"

@@ -47,6 +47,7 @@ from colazione.domain.builder_giro.builder import (
     ProgrammaNonAttivoError,
     ProgrammaNonTrovatoError,
     StrictModeViolation,
+    carica_festivita_periodo,
     genera_giri,
 )
 from colazione.domain.builder_giro.catena import (
@@ -75,6 +76,7 @@ from colazione.domain.builder_giro.aggregazione_a2 import (
 from colazione.domain.builder_giro.etichetta import (
     ETICHETTE_AMMESSE,
     calcola_etichetta_giro,
+    calcola_etichetta_variante,
 )
 from colazione.domain.builder_giro.multi_giornata import (
     GiornataGiro,
@@ -152,6 +154,8 @@ __all__ = [
     "assegna_e_rileva_eventi",
     "assegna_materiali",
     "calcola_etichetta_giro",
+    "calcola_etichetta_variante",
+    "carica_festivita_periodo",
     "costruisci_catene",
     "costruisci_giri_multigiornata",
     "determina_giorno_tipo",
