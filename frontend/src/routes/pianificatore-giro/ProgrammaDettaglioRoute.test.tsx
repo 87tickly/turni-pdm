@@ -99,12 +99,11 @@ describe("ProgrammaDettaglioRoute", () => {
     expect(screen.getByText(/Bozza/i)).toBeInTheDocument();
     // Periodo appare in header e in Configurazione (due volte)
     expect(screen.getAllByText(/01\/01\/2026 → 31\/12\/2026/).length).toBeGreaterThan(0);
-    // Sezione configurazione
-    expect(screen.getByText(/Configurazione/i)).toBeInTheDocument();
-    // Sprint 7.7 MR 1: "km/ciclo max" non è più mostrato in Configurazione
-    // (spostato sotto la singola regola). Verifichiamo invece "Tolleranza"
-    // come campo presente nella Configurazione.
-    expect(screen.getByText(/Tolleranza fascia oraria/i)).toBeInTheDocument();
+    // Sezione configurazione (heading h2, non il bottone "Modifica configurazione")
+    expect(screen.getByRole("heading", { name: /^Configurazione$/i })).toBeInTheDocument();
+    // Sprint 7.7 MR 1: "km/ciclo max" è in tono legacy (entry 86 design).
+    // Verifichiamo "Fascia oraria tolerance" come campo presente nella Configurazione.
+    expect(screen.getByText(/Fascia oraria tolerance/i)).toBeInTheDocument();
     // Filtri della regola — il campo backend "direttrice" è etichettato "Linea" in UI.
     // Match preciso (^Linea$) per evitare collisioni con altre stringhe contenenti "linea".
     expect(screen.getByText(/^Linea$/)).toBeInTheDocument();
@@ -135,8 +134,9 @@ describe("ProgrammaDettaglioRoute", () => {
       expect(screen.getByText(/Attivo/i)).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: /Archivia/i })).toBeInTheDocument();
-    // No bottone "Nuova regola" in stato attivo
-    expect(screen.queryByRole("button", { name: /Nuova regola/i })).toBeNull();
+    // Schermata 3 design: "Nuova regola" sempre visibile ma disabled se non bozza
+    const nuovaRegola = screen.getByRole("button", { name: /Nuova regola/i });
+    expect(nuovaRegola).toBeDisabled();
     // No bottone "Rimuovi regola" sulle card
     expect(screen.queryByRole("button", { name: /Rimuovi regola/i })).toBeNull();
   });

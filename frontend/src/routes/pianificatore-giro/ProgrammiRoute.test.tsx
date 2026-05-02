@@ -53,26 +53,43 @@ describe("ProgrammiRoute", () => {
   }
 
   it("mostra la lista dei programmi", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse([
-        makeProgramma({ id: 1 }),
-        makeProgramma({ id: 2, nome: "Cremona ATR803", stato: "attivo" }),
-      ]),
-    );
+    // listProgrammi → array; detail/giri per riga → singolo / vuoto.
+    const p1 = makeProgramma({ id: 1 });
+    const p2 = makeProgramma({ id: 2, nome: "Cremona ATR803", stato: "attivo" });
+    fetchSpy.mockImplementation((req: unknown) => {
+      const url = typeof req === "string" ? req : (req as Request).url;
+      if (/\/api\/programmi\/\d+\/giri$/.test(url)) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (/\/api\/programmi\/1$/.test(url)) {
+        return Promise.resolve(jsonResponse({ ...p1, regole: [] }));
+      }
+      if (/\/api\/programmi\/2$/.test(url)) {
+        return Promise.resolve(jsonResponse({ ...p2, regole: [] }));
+      }
+      return Promise.resolve(jsonResponse([p1, p2]));
+    });
 
     renderWithProviders(<ProgrammiRoute />);
 
+    // In Calendar view (default) il nome appare 2× (label + barra). Usa getAllByText.
     await waitFor(() => {
-      expect(screen.getByText(/Trenord 2025-2026 invernale Tirano/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Trenord 2025-2026 invernale Tirano/).length).toBeGreaterThan(0);
     });
-    expect(screen.getByText(/Cremona ATR803/)).toBeInTheDocument();
-    expect(screen.getByText(/2 programmi/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Pubblica Trenord/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/Cremona ATR803/).length).toBeGreaterThan(0);
+    // Counter top "2 programmi · 1 attivo, 1 bozza" (footer ne ha un altro
+    // "2 programmi totali" → match più specifico)
+    expect(screen.getByText(/2 programmi · /)).toBeInTheDocument();
+    // Switch UI: Calendario è il default — passa a Tabella per testare le righe.
+    fireEvent.click(screen.getByRole("button", { name: /Vista tabella/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Pubblica Trenord/i })).toBeInTheDocument();
+    });
     expect(screen.getByRole("button", { name: /Archivia Cremona/i })).toBeInTheDocument();
   });
 
   it("mostra empty state senza programmi", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse([]));
+    fetchSpy.mockResolvedValue(jsonResponse([]));
 
     renderWithProviders(<ProgrammiRoute />);
 
@@ -83,7 +100,7 @@ describe("ProgrammiRoute", () => {
   });
 
   it("mostra empty state diverso quando ci sono filtri attivi", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse([]));
+    fetchSpy.mockResolvedValue(jsonResponse([]));
 
     renderWithProviders(<ProgrammiRoute />);
 
@@ -91,8 +108,8 @@ describe("ProgrammiRoute", () => {
       expect(screen.getByText(/Nessun programma materiale/i)).toBeInTheDocument();
     });
 
-    fetchSpy.mockResolvedValueOnce(jsonResponse([]));
-    fireEvent.change(screen.getByLabelText(/Stato/i), { target: { value: "bozza" } });
+    // Click sul pulsante segmented "Bozza" → applica il filtro stato.
+    fireEvent.click(screen.getByRole("button", { name: /^Bozza$/i, pressed: false }));
 
     await waitFor(() => {
       expect(screen.getByText(/Nessun programma corrisponde ai filtri/i)).toBeInTheDocument();
@@ -107,17 +124,18 @@ describe("ProgrammiRoute", () => {
       expect(fetchSpy).toHaveBeenCalled();
     });
 
-    fireEvent.change(screen.getByLabelText(/Stato/i), { target: { value: "attivo" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Attivo$/i, pressed: false }));
 
     await waitFor(() => {
-      const lastCall = fetchSpy.mock.calls.at(-1)?.[0];
-      const url = typeof lastCall === "string" ? lastCall : (lastCall as Request).url;
-      expect(url).toMatch(/stato=attivo/);
+      const calls = fetchSpy.mock.calls.map((c) =>
+        typeof c[0] === "string" ? c[0] : (c[0] as Request).url,
+      );
+      expect(calls.some((u: string) => u.match(/programmi\?stato=attivo/))).toBe(true);
     });
   });
 
   it("mostra error banner e permette retry", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ detail: "DB down" }, 500));
+    fetchSpy.mockResolvedValue(jsonResponse({ detail: "DB down" }, 500));
 
     renderWithProviders(<ProgrammiRoute />);
 
@@ -126,16 +144,26 @@ describe("ProgrammiRoute", () => {
     });
     expect(screen.getByText(/DB down/)).toBeInTheDocument();
 
-    fetchSpy.mockResolvedValueOnce(jsonResponse([makeProgramma()]));
+    const p = makeProgramma();
+    fetchSpy.mockImplementation((req: unknown) => {
+      const url = typeof req === "string" ? req : (req as Request).url;
+      if (/\/api\/programmi\/1\/giri$/.test(url)) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (/\/api\/programmi\/1$/.test(url)) {
+        return Promise.resolve(jsonResponse({ ...p, regole: [] }));
+      }
+      return Promise.resolve(jsonResponse([p]));
+    });
     fireEvent.click(screen.getByRole("button", { name: /Riprova/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Trenord 2025-2026 invernale Tirano/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Trenord 2025-2026 invernale Tirano/).length).toBeGreaterThan(0);
     });
   });
 
   it("apre il dialog 'Nuovo programma' al click", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse([]));
+    fetchSpy.mockResolvedValue(jsonResponse([]));
     renderWithProviders(<ProgrammiRoute />);
 
     await waitFor(() => {
@@ -150,8 +178,7 @@ describe("ProgrammiRoute", () => {
   });
 
   it("crea un programma e invalida la lista", async () => {
-    // Prima list: vuoto
-    fetchSpy.mockResolvedValueOnce(jsonResponse([]));
+    fetchSpy.mockResolvedValue(jsonResponse([]));
     renderWithProviders(<ProgrammiRoute />);
 
     await waitFor(() => {
@@ -177,7 +204,7 @@ describe("ProgrammiRoute", () => {
     const created = makeProgramma({ id: 99, nome: "Test prog" });
     fetchSpy.mockResolvedValueOnce(jsonResponse(created, 201));
     // Lista ricaricata dopo invalidate
-    fetchSpy.mockResolvedValueOnce(jsonResponse([created]));
+    fetchSpy.mockResolvedValue(jsonResponse([created]));
 
     fireEvent.click(within(dialog).getByRole("button", { name: /Crea programma/i }));
 
@@ -188,15 +215,12 @@ describe("ProgrammiRoute", () => {
       expect(calls.some((u: string) => u.endsWith("/api/programmi"))).toBe(true);
     });
 
-    // Verifica corpo request
     const postCall = fetchSpy.mock.calls.find((c) => {
       const init = c[1] as RequestInit | undefined;
       return init?.method === "POST";
     });
     expect(postCall).toBeDefined();
     const body = JSON.parse((postCall![1] as RequestInit).body as string);
-    // Sprint 7.6 (mini-fix UX): n_giornate_default non e' piu' nel
-    // payload del create — il backend usa il default 1.
     expect(body).toMatchObject({
       nome: "Test prog",
       valido_da: "2026-01-01",

@@ -10,6 +10,196 @@
 
 ---
 
+## 2026-05-02 (87) — Schermate 2 + 3: lista programmi (calendario Gantt) + dettaglio programma (hero + config 2-col + regole + storico)
+
+### Contesto
+
+Continuazione del lavoro su 1° ruolo (Pianificatore Giro Materiale).
+Dopo la dashboard (entry 86), implementazione delle schermate 2 e 3
+del bundle design `colazione-arturo (1).zip`:
+
+- **Schermata 2** `arturo/02-programmi.html` → route `/pianificatore-giro/programmi`
+- **Schermata 3** `arturo/03-dettaglio-programma.html` → route `/pianificatore-giro/programmi/:id`
+
+Stato di partenza: entrambe le route esistevano ma con UI funzionale
+"vecchio stile" — tabella semplice senza calendario, sezioni dettaglio
+verticali senza hero header con KPI inline, RegolaCard senza colonna
+priorità grande.
+
+### Modifiche
+
+#### Frontend (3 file riscritti, 1 di tests, 1 di CSS)
+
+- **`frontend/src/routes/pianificatore-giro/ProgrammiRoute.tsx`**
+  (riscritto, 600 righe):
+  - Title row "Programmi" + counter "{N} programmi · X attivi, Y bozze,
+    Z archiviati" calcolato da lista globale (no filtro).
+  - Controls bar: segmented "Tabella | Calendario" (default Calendario,
+    valore aggiunto del design) + segmented stato Tutti/Bozza/Attivo/
+    Archiviato (sostituisce la Select).
+  - **Calendario view** (default): Gantt orizzontale annuale.
+    - Year nav `‹ {prev} {curr} {next} ›` con disabled quando non ci
+      sono programmi negli anni adiacenti; default = anno corrente
+      se ha programmi, altrimenti primo anno con programmi.
+    - Header mesi GEN…DIC + griglia colonne 12.
+    - Linea verticale rossa "OGGI" se l'anno selezionato è quello
+      corrente; posizione calcolata su day-of-year / 365|366.
+    - Per ogni programma: label-col 180px (nome + #ID + "X reg · Y giri"
+      da queries per-row) + bar-col 1fr con barra colorata per stato
+      (emerald-500 attivo, repeating-gradient bozza, muted-foreground/40
+      archiviato).
+    - Programmi entirely fuori dell'anno selezionato → riga con label
+      "— ricade nel YYYY —".
+    - Footer: "X programmi ricadono fuori dal {year}" / "Tutti
+      visibili" + contatore totale.
+  - **Tabella view** (alt): colonne ID, Nome, Periodo, Stato, Regole,
+    Giri, Aggiornato, Azioni (link "Apri →" + bottoni Pubblica/Archivia
+    per stato corrispondente).
+  - Empty states preservati (no programmi → CTA "Crea il primo";
+    filtri attivi senza match → "Azzera filtri").
+  - Error banner "alert" preservato.
+
+- **`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`**
+  (riscritto, 460 righe):
+  - **Sezione 1 — Hero header**: card con badge stato + #ID, h1 nome,
+    meta riga (periodo + giorni + creato_by + created_at), 3 KPI inline
+    grandi (Regole / Giri persistiti / Run eseguiti — placeholder "—"),
+    action cluster state-dependent:
+    - **Bozza**: "Pubblica" primary (disabled se 0 regole) +
+      "Modifica" outline (disabled, dialog non disponibile) +
+      "Elimina" ghost (disabled, endpoint backend mancante)
+    - **Attivo**: "Genera giri" primary (apre dialog) +
+      "Vedi giri generati" outline + "Archivia" ghost
+    - **Archiviato**: solo "Vedi giri generati"
+  - **Sezione 2 — Configurazione**: card 2-colonne.
+    - Sx: parametri scalari (Periodo validità, Fascia oraria tolerance,
+      Km max/giorno, Km max/ciclo legacy in tono italic discreto)
+    - Dx: strict_options come 6 chip on/off (`✓` emerald / `—` muted)
+      con counter "X di 6 attive" + stazioni sosta extra come chip
+      mono.
+    - Bottone "Modifica configurazione" disabled (residuo TN-UPDATE).
+  - **Sezione 3 — Regole di assegnazione**: counter + bottone
+    "+ Nuova regola" (sempre visibile, disabled se non bozza —
+    coerente con design); regole ordinate per priorità ↓, RegolaCard
+    redesign.
+  - **Sezione 4 — Storico run del builder** (solo se attivo):
+    placeholder con badge "Registro non ancora persistito" + copy che
+    rimanda alla lista giri + CTA "Apri lista giri".
+  - Helper `useGiriProgramma()` per popolare KPI "Giri persistiti".
+
+- **`frontend/src/routes/pianificatore-giro/regola/RegolaCard.tsx`**
+  (riscritto, 130 righe): layout design — colonna sinistra 14ch con
+  "PRIO" + numero grande priorità; corpo destra con cap km tabular-nums
+  in alto a destra + badge "Manuale" se applicabile + sezione Filtri
+  (chip mono grigi) + sezione Composizione (chip mono blue-50/blue-800
+  con bordo) + Note (top border + italic). Trash button compatto in
+  alto a destra quando editable.
+
+- **`frontend/src/routes/pianificatore-giro/ProgrammiRoute.test.tsx`**
+  (aggiornato): test compatibili con la nuova UI. Click sui pulsanti
+  segmented (`getByRole("button", { name: /^Bozza$/i })` etc.)
+  invece che `fireEvent.change` su Select. Mock fetch via
+  `mockImplementation` che dispatcha per URL pattern (lista vs
+  detail vs giri) per popolare correttamente le card per-row.
+
+- **`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.test.tsx`**
+  (3 micro-fix):
+  - `getByText(/Configurazione/i)` → `getByRole("heading", { name: /^Configurazione$/i })`
+    (collisione con bottone "Modifica configurazione")
+  - `getByText(/Tolleranza fascia oraria/i)` → `/Fascia oraria tolerance/i`
+    (label allineata al design)
+  - `queryByRole("button", { name: /Nuova regola/i }).toBeNull()` →
+    `expect(...).toBeDisabled()` (design: bottone visibile sempre,
+    disabled fuori bozza)
+
+- **`frontend/src/index.css`**: aggiunta classe `.bar-bozza` con
+  `repeating-linear-gradient(45deg, #d1d5db 0 6px, #e5e7eb 6px 12px)`
+  + bordo grigio per la barra Gantt programmi in stato bozza
+  (pattern direttamente preso dal design `arturo/02-programmi.html`).
+
+### Verifiche
+
+- `pnpm exec tsc -b --noEmit` ✅ clean
+- `pnpm exec eslint` sui 4 file modificati ✅ clean (warning
+  exhaustive-deps risolto inlinando `allProgrammiQuery.data ?? []`
+  dentro il `useMemo`)
+- `pnpm test --run` ✅ **53 passed** (no regressioni)
+- **Preview verifica visuale** su `:5174` con admin/admin12345 e
+  dati reali del DB Trenord (2 programmi: "fjpfjp" attivo + "Test
+  Trenord 2026" archiviato):
+  - **Programmi (Calendario)**: title row + counter "2 programmi ·
+    1 attivo, 1 archiviato" + segmented switcher + STATO segmented +
+    year nav 2026 + legenda + Gantt con linea OGGI rossa al ~33%
+    (corrispondente a 2 maggio) + barra grigia archiviata Test
+    Trenord (anno intero) + barra verde fjpfjp luglio-agosto + footer
+    "Tutti visibili / 2 programmi totali" ✅
+  - **Programmi (Tabella)**: colonne ID, Nome, Periodo, Stato, Regole,
+    Giri, Aggiornato, Azioni; #5410 fjpfjp ATTIVO 1 reg 19 giri
+    + #5489 Test Trenord ARCHIVIATO 1 reg 0 giri ✅
+  - **Dettaglio fjpfjp**: hero ATTIVO #5410 + h1 "fjpfjp" + meta
+    "10/07/2026 → 01/08/2026 · 23 giorni · creato da user#3 ·
+    02/05/2026" + KPI 1/19/— + cluster Genera giri + Vedi + Archivia.
+    Configurazione 2-col con strict 0/6 attive (tutti `—`) + sosta
+    extra "Nessuna stazione". Regole: PRIO 60 + filtri "Nessuno" +
+    chip blu "ATR803 × 1" + cap km ereditato. Storico run placeholder
+    "Registro non ancora persistito" + Apri lista giri ✅
+  - Console clean (solo info React DevTools + Vite HMR debug) ✅
+
+### Conseguenze pratiche
+
+1. **Vista calendario porta valore reale**: il pianificatore vede
+   sovrapposizioni temporali a colpo d'occhio (estate + festività +
+   lavori che si toccano a settembre nel design); con 2 programmi
+   correnti è già usabile, scalerà a 5-15 programmi annui senza
+   modifiche.
+2. **Hero header dettaglio = single source of truth dello stato del
+   programma**: l'utente vede subito cosa c'è (regole, giri) e cosa
+   può fare (action cluster). Sostituisce la vecchia mini-header
+   testuale.
+3. **RegolaCard più scannabile**: priorità è il primo elemento
+   visivo (numero grande sx), il resto fluisce naturalmente.
+
+### Residui aperti (motivazione oggettiva, alcuni nuovi)
+
+Già segnalati in entry 86 e tuttora aperti:
+- Audit log "Attività recenti" (dashboard)
+- Warnings/residue persistiti per banda alert (dashboard)
+- Sede del run nel card "Ultimo run" (dashboard)
+- `refetchInterval=60_000` sui hook query
+
+Nuovi residui dichiarati con questa entry:
+- **Endpoint `DELETE /api/programmi/{id}`**: il bottone "Elimina"
+  in stato bozza è disabled finché non c'è endpoint backend +
+  conferma cascading. Decisione utente futura: hard-delete vs
+  soft-delete (flag `deleted_at`). Sprint dedicato.
+- **Dialog "Modifica configurazione"**: il bottone è disabled.
+  Richiede form per 6 strict_options + multi-select stazioni
+  sosta extra + edit fascia oraria/km giorno → componente nuovo
+  ~200 righe. Sprint dedicato.
+- **API user lookup**: hero header mostra "creato da user#{id}"
+  invece del username perché non c'è endpoint per risolvere
+  user_id → username (e l'utente loggato non è necessariamente il
+  creatore del programma). Endpoint `GET /api/users/{id}` o
+  populating `created_by_username` nel serializer.
+- **`builder_run` table** per storico run: stessa motivazione
+  di entry 86 (audit log = sprint dedicato). Il placeholder copy
+  rimanda esplicitamente alla pagina `/giri` via CTA, quindi non
+  blocker UX.
+- **Year nav navigation a 2 livelli**: il design mostra `‹ 2025
+  2026 2027 ›` ma se i programmi sono distribuiti su 5+ anni, lo
+  scroll va affinato (jump multipli, dropdown). Non blocker per
+  scope MVP.
+
+### Prossimo step
+
+A scelta utente: (a) chiudere uno dei residui sopra (es. dialog
+Modifica configurazione, endpoint DELETE), (b) procedere con
+schermata 4 (`04-giri.html` — lista giri persistiti), (c) procedere
+con schermata 5 (`05-gantt-giro.html` — Gantt giro materiale, la
+più ricca), (d) tornare a Sprint 7.3 (Dashboard PdC).
+
+---
+
 ## 2026-05-02 (86) — Dashboard 1° ruolo: implementazione design `arturo/01-dashboard.html`
 
 ### Contesto
