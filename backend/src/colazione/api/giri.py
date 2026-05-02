@@ -255,6 +255,9 @@ class GiroGiornataRead(BaseModel):
 
     id: int
     numero_giornata: int
+    # Sprint 7.6 MR 3.2: somma km_tratta delle corse commerciali della
+    # giornata. None se nessuna corsa con km_tratta o giornata pre-MR3.2.
+    km_giornata: float | None = None
     varianti: list[GiroVarianteRead]
 
 
@@ -580,6 +583,7 @@ async def get_giro_dettaglio(
         GiroGiornataRead(
             id=gg.id,
             numero_giornata=gg.numero_giornata,
+            km_giornata=float(gg.km_giornata) if gg.km_giornata is not None else None,
             varianti=varianti_per_giornata.get(gg.id, []),
         )
         for gg in giornate_orm

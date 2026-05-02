@@ -218,6 +218,8 @@ def posiziona_su_localita(
     localita: _LocalitaLike,
     whitelist_stazioni: frozenset[str],
     params: ParamPosizionamento = _DEFAULT_PARAM,
+    *,
+    forza_vuoto_iniziale: bool = False,
 ) -> CatenaPosizionata:
     """Posiziona una catena su una località manutenzione (Sprint 5.3).
 
@@ -225,12 +227,13 @@ def posiziona_su_localita(
 
     1. Valida input (catena non vuota, località con stazione collegata).
     2. **Vuoto di testa** — generato SOLO se entrambe:
-       - ``prima.codice_origine ∈ whitelist_stazioni``
+       - ``prima.codice_origine ∈ whitelist_stazioni`` (oppure
+         ``forza_vuoto_iniziale=True`` — vedi sotto)
        - ``prima.codice_origine != stazione_localita``
        Se ``prima.codice_origine == stazione_localita`` → niente vuoto
        (chiusura naturale). Se ``prima.codice_origine ∉ whitelist`` →
-       niente vuoto, il treno è già nella stazione di partenza dalla
-       sera precedente (multi-giornata).
+       di norma niente vuoto, il treno è già nella stazione di partenza
+       dalla sera precedente (multi-giornata).
        Se la partenza calcolata cade < 00:00, alza
        ``PosizionamentoImpossibileError``.
     3. **Vuoto di coda** — simmetrico, sull'ultima corsa: generato SOLO
@@ -254,6 +257,16 @@ def posiziona_su_localita(
             ``builder.py``. ``frozenset()`` vuoto = nessun vuoto mai
             generato.
         params: ``ParamPosizionamento``.
+        forza_vuoto_iniziale: Sprint 7.6 MR 3.3 (Fix B). Se ``True``,
+            il vuoto di testa viene generato anche quando
+            ``prima.codice_origine`` NON è in whitelist (modello
+            "il treno parte fisicamente dalla sede"). Usato per le
+            catene del primo giorno cronologico della prima
+            generazione di una sede del programma — quando il
+            convoglio esce realmente dalla sede e non c'è una
+            "giornata K-1" del ciclo che lo abbia portato a
+            destinazione. Se la stazione di partenza è uguale alla
+            sede o la stazione è già in whitelist, il flag è inerte.
 
     Returns:
         ``CatenaPosizionata``: catena originale + 0/1/2 vuoti +
@@ -276,8 +289,13 @@ def posiziona_su_localita(
     ultima = catena.corse[-1]
 
     # ---- Vuoto di testa: solo se prima.origine ∈ whitelist e ≠ sede ----
+    # Sprint 7.6 MR 3.3 (Fix B): con forza_vuoto_iniziale=True il vuoto
+    # è generato anche con origine fuori whitelist (caso "primo giorno
+    # del primo giro del programma per la sede").
     vuoto_testa: BloccoMaterialeVuoto | None = None
-    if prima.codice_origine != s and prima.codice_origine in whitelist_stazioni:
+    if prima.codice_origine != s and (
+        prima.codice_origine in whitelist_stazioni or forza_vuoto_iniziale
+    ):
         arrivo_min = _time_to_min(prima.ora_partenza) - params.gap_min
         partenza_min = arrivo_min - params.durata_vuoto_default_min
 

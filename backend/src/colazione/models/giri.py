@@ -104,6 +104,10 @@ class GiroGiornata(Base):
         BigInteger, ForeignKey("giro_materiale.id", ondelete="CASCADE")
     )
     numero_giornata: Mapped[int] = mapped_column(Integer)
+    # Sprint 7.6 MR 3.2 (migration 0013): somma km_tratta delle corse
+    # commerciali di questa giornata. Nullable per giornate pre-MR3.2 o
+    # quando il PdE non aveva km_tratta per le corse della catena.
+    km_giornata: Mapped[float | None] = mapped_column(Numeric(8, 2))
 
 
 class GiroVariante(Base):

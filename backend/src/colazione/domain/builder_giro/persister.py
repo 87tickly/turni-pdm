@@ -137,10 +137,23 @@ def _km_totali_giro(giro: GiroAssegnato) -> float:
     """
     total = 0.0
     for giornata in giro.giornate:
-        for c in giornata.catena_posizionata.catena.corse:
-            km = getattr(c, "km_tratta", None)
-            if km is not None:
-                total += float(km)
+        total += _km_giornata(giornata)
+    return total
+
+
+def _km_giornata(giornata: GiornataAssegnata) -> float:
+    """Somma ``km_tratta`` delle corse commerciali di una singola giornata.
+
+    Sprint 7.6 MR 3.2 (migration 0013): popola
+    ``GiroGiornata.km_giornata`` per il riepilogo per-giornata nella
+    vista dettaglio del giro. Stessa convenzione di `_km_totali_giro`
+    (vuoti tecnici esclusi, corse senza km contribuiscono 0).
+    """
+    total = 0.0
+    for c in giornata.catena_posizionata.catena.corse:
+        km = getattr(c, "km_tratta", None)
+        if km is not None:
+            total += float(km)
     return total
 
 
@@ -578,7 +591,12 @@ async def _persisti_un_giro(
     last_gv_id: int | None = None
     last_seq_blocco: int = 1
     for idx, giornata in enumerate(entry.giro.giornate, start=1):
-        gg = GiroGiornata(giro_materiale_id=gm_id, numero_giornata=idx)
+        km_g = _km_giornata(giornata)
+        gg = GiroGiornata(
+            giro_materiale_id=gm_id,
+            numero_giornata=idx,
+            km_giornata=round(km_g, 2) if km_g > 0 else None,
+        )
         session.add(gg)
         await session.flush()
 

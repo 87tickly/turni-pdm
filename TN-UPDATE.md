@@ -10,6 +10,149 @@
 
 ---
 
+## 2026-05-02 (71) — Sprint 7.6 MR 3: genera-giri cumulativo + km per giornata + Fix B vuoto iniziale
+
+### Contesto
+
+MR3 dello Sprint 7.6, 3 sotto-fix in unico commit perché tutti tre sono
+interventi sul builder/persister logicamente collegati: il programma è
+un turno materiale unico cumulativo, ogni giornata mostra il proprio
+chilometraggio, il primo giro generato per una sede esce davvero dalla
+sede (vuoto iniziale generato anche fuori whitelist).
+
+### Modifiche
+
+#### 3.1 — Genera giri cumulativo (force scoped per sede)
+
+Decisione utente 2026-05-01: "se inizio a generare un turno materiale
+dal 521 e poi per il 526, deve essere sommato a quello creato in
+precedenza". Prima il `force=true` cancellava TUTTI i giri del
+programma; ora cancella solo quelli della sede specifica, le altre
+sedi del programma sono intoccate.
+
+- `src/colazione/domain/builder_giro/builder.py`:
+  - `_count_giri_esistenti` accetta nuovo param opzionale
+    `localita_id: int | None`. Filtra `programma_id =
+    AND localita_manutenzione_partenza_id =`.
+  - `_wipe_giri_programma` accetta `localita_id` e cancella scoped
+    (giri + vuoti tecnici della sola sede).
+  - `genera_giri()`: `n_esistenti_sede = _count_giri_esistenti(...,
+    localita_id=localita.id)` — il check 409 e il wipe sono ora
+    scoped per (programma, sede).
+  - `GiriEsistentiError` cambia firma: ora include `localita_codice`
+    (messaggio "ha già N giri persistiti per la sede X").
+- `tests/test_builder_giri.py`: aggiunta assert
+  `localita_codice == LOC_CODICE` sull'errore.
+
+#### 3.2 — km per giornata (visibile nella vista giro)
+
+Decisione utente 2026-05-01: "ogni inizio giornata del turno
+materiale ha un suo riepilogo, km giornalieri, mensili e altri
+piccoli dettagli".
+
+- **Migration alembic 0013** `0013_km_giornata.py`
+  (revision `c1f5d932b8a2`, down_revision `b9e4c712a83f`):
+  aggiunge colonna `km_giornata NUMERIC(8,2) NULL` a `giro_giornata`.
+  Idempotente (ADD COLUMN nullable). Le righe pre-esistenti restano
+  `NULL`; vengono ricalcolate alla prossima generazione.
+- `models/giri.py`: aggiunto campo `km_giornata: Mapped[float | None]`.
+- `domain/builder_giro/persister.py`:
+  - Nuovo helper `_km_giornata(giornata)` (somma `km_tratta` delle
+    corse commerciali della giornata, vuoti tecnici esclusi).
+  - `_km_totali_giro` riusa il nuovo helper (refactor pulito).
+  - `GiroGiornata(...)` istanziata con
+    `km_giornata=round(km_g, 2) if km_g > 0 else None`.
+- `api/giri.py`: `GiroGiornataRead` espone `km_giornata: float | None`;
+  `get_giro_dettaglio` lo legge dall'ORM.
+- `frontend/src/lib/api/giri.ts`: campo TS `km_giornata: number | null`.
+- `frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`:
+  in `GiornataPanel` accanto a "Giornata N" mostra
+  `{km_giornata} km` con tooltip "Somma km_tratta delle corse
+  commerciali della giornata" (nascosto se NULL).
+
+#### 3.3 — Fix B: vuoto iniziale sede→origine fuori whitelist
+
+Smoke utente 2026-05-02: giro `G-FIO-001` partiva direttamente con
+corsa commerciale `MALPENSA T1 → MILANO CADORNA` alle 00:01, senza
+il vuoto `CERTOSA → MALPENSA T1` che documenta l'uscita fisica del
+treno dalla sede. Causa: la condizione `prima.codice_origine in
+whitelist_stazioni` di `posiziona_su_localita` esclude le origini
+fuori whitelist; il builder presumeva "treno già lì dalla sera prima
+del ciclo", logica corretta per giri intermedi ma errata per il PRIMO
+giorno cronologico della PRIMA generazione di una sede.
+
+- `domain/builder_giro/posizionamento.py`:
+  - `posiziona_su_localita(...)` accepts new keyword-only
+    `forza_vuoto_iniziale: bool = False`.
+  - Condizione del vuoto di testa estesa a:
+    `prima.codice_origine != s and (prima.codice_origine in
+    whitelist_stazioni or forza_vuoto_iniziale)`.
+  - Default False = comportamento legacy invariato per tutti i casi
+    non-primo-giorno.
+- `domain/builder_giro/builder.py`:
+  - `is_prima_generazione_sede = (n_esistenti_sede == 0) or force`
+  - `primo_giorno_con_corse: date | None` = primo giorno del
+    `date_range` con almeno una corsa di perimetro
+  - Per ogni `d` in `date_range`:
+    `forza_vuoto_iniziale = is_prima_generazione_sede and d ==
+    primo_giorno_con_corse`. Passato a `posiziona_su_localita`.
+- `tests/test_posizionamento.py` (3 test nuovi):
+  - `test_forza_vuoto_iniziale_genera_anche_fuori_whitelist`:
+    smoke MALPENSA T1 fuori whitelist → con flag, vuoto generato.
+  - `test_forza_vuoto_iniziale_inerte_se_origine_uguale_sede`:
+    se origine == sede, niente vuoto (catena naturalmente alla sede).
+  - `test_forza_vuoto_iniziale_default_false_compat_legacy`:
+    default False mantiene il comportamento storico.
+
+### Verifiche
+
+- `uv run mypy --strict src`: ✅ 52 source files clean
+- `uv run pytest --tb=short`: ✅ **436 passed, 12 skipped in 19.03s**
+  (baseline 433 → +3 nuovi su test_posizionamento + 1 assert su
+  test_builder_giri.py)
+- Frontend `pnpm typecheck`: ✅ clean
+- Frontend `pnpm test --run`: ✅ **53 passed**
+- Frontend `pnpm build` (Vite production): ✅ 1757 modules, 391KB
+  bundle (114KB gzip), 1.02s
+
+### Migrazione DB applicata
+
+`alembic upgrade head`: `b9e4c712a83f → c1f5d932b8a2`. Stato corrente:
+0013 applied.
+
+### Conseguenze pratiche
+
+1. Il pianificatore ora può lanciare "Genera giri" per N sedi
+   diverse dello stesso programma in successione, senza dover passare
+   `force=true` né perdere il lavoro precedente. Solo la rigenerazione
+   della STESSA sede richiede `force`.
+2. La vista dettaglio giro mostra km/giornata accanto a "Giornata N"
+   (es. `Giornata 1 — 546 km`). I km giornalieri vengono
+   ricalcolati automaticamente al prossimo `force=true` di una
+   generazione (le righe `giro_giornata` pre-MR3.2 restano `NULL`
+   finché non rigenerate).
+3. Il primo giro generato per una sede del programma include il
+   vuoto sede→origine anche se la stazione di partenza non è in
+   whitelist. Esempio: per la regola "ETR522 sulla linea Malpensa
+   Express" il giro G-FIO-001 ora inizia con `CERTOSA → MALPENSA T1`
+   (vuoto) prima della prima corsa commerciale 394.
+
+### Stato Sprint 7.6
+
+- ✅ MR 1 chiuso (entry 68): UX modal regola
+- ✅ Mini-fix UX (entry 69): N. giornate via dal CreaProgrammaDialog
+- ✅ MR 2 chiuso (entry 70): sedi Trenord (FIO=CERTOSA + whitelist)
+- ✅ MR 3 chiuso (questa entry): cumulativo + km giornata + fix B
+
+### Prossimo step
+
+Riprendere il TODO post-MR3 da memoria
+`project_km_cap_per_regola_TODO.md` — spostare `km_max_ciclo` dalla
+creazione programma alla regola (sotto materiale), refactor builder
+per cap-per-regola, default 700-1000 km/giorno se vuoto. Stima ~3h.
+
+---
+
 ## 2026-05-02 (70) — Sprint 7.6 MR 2: configurazione canonica sedi Trenord (FIO=CERTOSA + whitelist M:N)
 
 ### Contesto

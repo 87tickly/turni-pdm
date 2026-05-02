@@ -155,7 +155,17 @@ function GiornataPanel({ giornata }: { giornata: GiroDettaglio["giornate"][numbe
   return (
     <div className="overflow-hidden rounded-md border border-border bg-white">
       <div className="flex items-center justify-between border-b border-border bg-secondary/40 px-4 py-2">
-        <span className="text-sm font-semibold">Giornata {giornata.numero_giornata}</span>
+        <div className="flex items-baseline gap-3">
+          <span className="text-sm font-semibold">Giornata {giornata.numero_giornata}</span>
+          {giornata.km_giornata !== null && (
+            <span
+              className="text-xs text-muted-foreground tabular-nums"
+              title="Somma km_tratta delle corse commerciali della giornata"
+            >
+              {formatNumber(Math.round(giornata.km_giornata))} km
+            </span>
+          )}
+        </div>
         <span className="text-xs text-muted-foreground">
           {varianti.length === 1
             ? "1 variante"

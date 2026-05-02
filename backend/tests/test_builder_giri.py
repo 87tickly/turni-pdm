@@ -317,6 +317,8 @@ async def test_giri_esistenti_409_senza_force(azienda_id: int) -> None:
             )
         assert exc_info.value.programma_id == prog_id
         assert exc_info.value.n_esistenti >= 1
+        # Sprint 7.6 MR 3.1: errore scoped per (programma, sede)
+        assert exc_info.value.localita_codice == LOC_CODICE
 
 
 async def test_force_true_wipe_e_rigenera(azienda_id: int) -> None:

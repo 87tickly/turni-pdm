@@ -87,6 +87,8 @@ export interface GiroVariante {
 export interface GiroGiornata {
   id: number;
   numero_giornata: number;
+  /** Sprint 7.6 MR 3.2: km commerciali della giornata. null se nessuna corsa con km. */
+  km_giornata: number | null;
   varianti: GiroVariante[];
 }
 

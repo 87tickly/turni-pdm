@@ -96,14 +96,26 @@ class ProgrammaNonAttivoError(ValueError):
 
 
 class GiriEsistentiError(RuntimeError):
-    """Il programma ha già giri persistiti (rigenerazione richiede ``force=True``)."""
+    """Il programma ha già giri persistiti per la stessa sede
+    (rigenerazione richiede ``force=True``).
 
-    def __init__(self, programma_id: int, n_esistenti: int) -> None:
+    Sprint 7.6 MR 3.1: il check è SCOPED per (programma, sede): giri di
+    una sede diversa NON bloccano una nuova generazione (modello cumulativo,
+    decisione utente 2026-05-01: "se inizio a generare un turno materiale
+    dal 521 e poi per il 526, deve essere sommato a quello creato in
+    precedenza"). Se passi ``force=True``, vengono cancellati SOLO i giri
+    di QUESTA sede del programma, non tutti.
+    """
+
+    def __init__(self, programma_id: int, localita_codice: str, n_esistenti: int) -> None:
         super().__init__(
-            f"Programma {programma_id} ha già {n_esistenti} giro(i) persistiti. "
-            "Per rigenerare passa force=True (cancella tutti i giri esistenti)."
+            f"Programma {programma_id} ha già {n_esistenti} giro(i) persistiti "
+            f"per la sede {localita_codice!r}. Per rigenerare quelli di questa "
+            "sede passa force=True. I giri delle altre sedi del programma "
+            "NON saranno toccati."
         )
         self.programma_id = programma_id
+        self.localita_codice = localita_codice
         self.n_esistenti = n_esistenti
 
 
@@ -266,18 +278,44 @@ async def _carica_corse(
     return list((await session.execute(stmt)).scalars().all())
 
 
-async def _count_giri_esistenti(session: AsyncSession, programma_id: int) -> int:
-    """Conta i giri già persistiti per questo programma (via metadata)."""
-    stmt = text(
-        "SELECT COUNT(*) FROM giro_materiale WHERE generation_metadata_json->>'programma_id' = :pid"
-    )
-    row = await session.execute(stmt, {"pid": str(programma_id)})
+async def _count_giri_esistenti(
+    session: AsyncSession,
+    programma_id: int,
+    localita_id: int | None = None,
+) -> int:
+    """Conta i giri già persistiti per questo programma.
+
+    Sprint 7.6 MR 3.1 (cumulativo): se ``localita_id`` è passato,
+    filtra anche per ``localita_manutenzione_partenza_id`` — così la
+    rigenerazione di una sede non vede i giri delle altre sedi come
+    "esistenti".
+    """
+    if localita_id is None:
+        stmt = text(
+            "SELECT COUNT(*) FROM giro_materiale WHERE programma_id = :pid"
+        )
+        row = await session.execute(stmt, {"pid": programma_id})
+    else:
+        stmt = text(
+            "SELECT COUNT(*) FROM giro_materiale "
+            "WHERE programma_id = :pid AND localita_manutenzione_partenza_id = :lid"
+        )
+        row = await session.execute(stmt, {"pid": programma_id, "lid": localita_id})
     val = row.scalar_one()
     return int(val)
 
 
-async def _wipe_giri_programma(session: AsyncSession, programma_id: int) -> None:
-    """Cancella tutti i giri (e blocchi a cascade) di questo programma.
+async def _wipe_giri_programma(
+    session: AsyncSession,
+    programma_id: int,
+    localita_id: int | None = None,
+) -> None:
+    """Cancella i giri (e blocchi a cascade) di questo programma.
+
+    Sprint 7.6 MR 3.1 (cumulativo): se ``localita_id`` è passato,
+    cancella SOLO i giri della sede indicata. ``None`` mantiene il
+    comportamento storico (wipe globale del programma) — usato dai
+    test di reset e dal fallback admin.
 
     Ordine FK-safe critico:
 
@@ -292,7 +330,20 @@ async def _wipe_giri_programma(session: AsyncSession, programma_id: int) -> None
     ``giro_blocco_corsa_materiale_vuoto_id_fkey``. Bug intercettato
     da smoke test reale (2026-04-26).
     """
-    pid_param = {"pid": str(programma_id)}
+    if localita_id is None:
+        where_giri = "WHERE gm.programma_id = :pid"
+        delete_where = "WHERE programma_id = :pid"
+        params: dict[str, int] = {"pid": programma_id}
+    else:
+        where_giri = (
+            "WHERE gm.programma_id = :pid "
+            "AND gm.localita_manutenzione_partenza_id = :lid"
+        )
+        delete_where = (
+            "WHERE programma_id = :pid "
+            "AND localita_manutenzione_partenza_id = :lid"
+        )
+        params = {"pid": programma_id, "lid": localita_id}
 
     cmv_ids = list(
         (
@@ -300,19 +351,16 @@ async def _wipe_giri_programma(session: AsyncSession, programma_id: int) -> None
                 text(
                     "SELECT cmv.id FROM corsa_materiale_vuoto cmv "
                     "JOIN giro_materiale gm ON gm.id = cmv.giro_materiale_id "
-                    "WHERE gm.generation_metadata_json->>'programma_id' = :pid"
+                    f"{where_giri}"
                 ),
-                pid_param,
+                params,
             )
         )
         .scalars()
         .all()
     )
 
-    await session.execute(
-        text("DELETE FROM giro_materiale WHERE generation_metadata_json->>'programma_id' = :pid"),
-        pid_param,
-    )
+    await session.execute(text(f"DELETE FROM giro_materiale {delete_where}"), params)
 
     if cmv_ids:
         await session.execute(
@@ -485,12 +533,16 @@ async def genera_giri(
         Coppie normalizzate lex dal chiamante."""
         return (a, b) in accoppiamenti
 
-    # 2. Anti-rigenerazione (decisione utente: 409 senza force=true)
-    n_esistenti = await _count_giri_esistenti(session, programma_id)
-    if n_esistenti > 0:
+    # 2. Anti-rigenerazione SCOPED per (programma, sede) — Sprint 7.6 MR 3.1.
+    # I giri delle ALTRE sedi del programma non sono toccati: il programma
+    # è un turno materiale unico cumulativo che cresce sede-per-sede.
+    n_esistenti_sede = await _count_giri_esistenti(
+        session, programma_id, localita_id=localita.id
+    )
+    if n_esistenti_sede > 0:
         if not force:
-            raise GiriEsistentiError(programma_id, n_esistenti)
-        await _wipe_giri_programma(session, programma_id)
+            raise GiriEsistentiError(programma_id, localita_codice, n_esistenti_sede)
+        await _wipe_giri_programma(session, programma_id, localita_id=localita.id)
 
     # 3. Pipeline: carica corse + costruisci catene per data
     date_range = [data_inizio_eff + timedelta(days=i) for i in range(n_giornate_eff)]
@@ -512,16 +564,33 @@ async def genera_giri(
     # Sprint 5.6 Feature 3: attiva il vincolo finestra uscita deposito
     # 01:00-03:00 per programmi reali (non per test puri legacy).
     param_pos = ParamPosizionamento(finestra_uscita_vietata_attiva=True)
+    # Sprint 7.6 MR 3.3 (Fix B): se non c'è alcun giro persistito per
+    # questa sede del programma, le catene del PRIMO giorno cronologico
+    # sono "uscita reale dal deposito" — il vuoto sede→origine va
+    # generato anche se la stazione di partenza è fuori whitelist
+    # (non c'è una giornata K-1 del ciclo che abbia portato il treno
+    # lì la sera prima).
+    is_prima_generazione_sede = n_esistenti_sede == 0 or force
+    primo_giorno_con_corse: date | None = None
     catene_per_data: dict[date, list[CatenaPosizionata]] = {}
     for d in date_range:
         corse_giorno = [c for c in corse_perimetro if _corsa_vale_in_data(c, d)]
         if not corse_giorno:
             continue
+        if primo_giorno_con_corse is None:
+            primo_giorno_con_corse = d
+        forza_vuoto_iniziale = is_prima_generazione_sede and d == primo_giorno_con_corse
         catene = costruisci_catene(corse_giorno)
         catene_pos: list[CatenaPosizionata] = []
         for cat in catene:
             try:
-                cat_pos = posiziona_su_localita(cat, localita, whitelist, param_pos)
+                cat_pos = posiziona_su_localita(
+                    cat,
+                    localita,
+                    whitelist,
+                    param_pos,
+                    forza_vuoto_iniziale=forza_vuoto_iniziale,
+                )
             except (LocalitaSenzaStazioneError, PosizionamentoImpossibileError) as exc:
                 warnings.append(f"Catena del {d.isoformat()} scartata: {exc}")
                 continue

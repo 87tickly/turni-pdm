@@ -386,6 +386,44 @@ def test_solo_destinazione_in_whitelist_solo_vuoto_coda() -> None:
     assert res.chiusa_a_localita is True
 
 
+def test_forza_vuoto_iniziale_genera_anche_fuori_whitelist() -> None:
+    """Sprint 7.6 MR 3.3 (Fix B): con forza_vuoto_iniziale=True il vuoto
+    di testa è generato anche se l'origine è fuori whitelist (caso
+    "primo giorno cronologico della prima generazione per la sede").
+    Smoke utente 2026-05-02: giro FIO che parte da MALPENSA T1
+    (S01139, fuori whitelist FIO) ora include il vuoto CERTOSA→MALPENSA T1.
+    """
+    # MALPENSA non in WL, ma forza_vuoto_iniziale=True → vuoto generato
+    a = _c("MALPENSA_T1", "MI_CADORNA", (8, 0), (8, 40))
+    cat = Catena(corse=(a,))
+    res = posiziona_su_localita(
+        cat, LOC_FIORENZA, _WL, forza_vuoto_iniziale=True
+    )
+    assert res.vuoto_testa is not None
+    assert res.vuoto_testa.codice_origine == "MI_FIO"
+    assert res.vuoto_testa.codice_destinazione == "MALPENSA_T1"
+
+
+def test_forza_vuoto_iniziale_inerte_se_origine_uguale_sede() -> None:
+    """Sprint 7.6 MR 3.3: il flag NON forza il vuoto se l'origine
+    coincide con la sede (catena già "naturalmente alla sede")."""
+    a = _c("MI_FIO", "BG", (8, 0), (9, 0))
+    cat = Catena(corse=(a,))
+    res = posiziona_su_localita(
+        cat, LOC_FIORENZA, _WL, forza_vuoto_iniziale=True
+    )
+    assert res.vuoto_testa is None
+
+
+def test_forza_vuoto_iniziale_default_false_compat_legacy() -> None:
+    """Sprint 7.6 MR 3.3: il flag default è False — comportamento
+    storico invariato (vuoto solo se origine in whitelist)."""
+    a = _c("MALPENSA_T1", "MI_CADORNA", (8, 0), (8, 40))
+    cat = Catena(corse=(a,))
+    res = posiziona_su_localita(cat, LOC_FIORENZA, _WL)  # niente flag
+    assert res.vuoto_testa is None  # MALPENSA_T1 fuori whitelist → no vuoto
+
+
 def test_origine_uguale_sede_no_vuoto_testa_anche_se_in_whitelist() -> None:
     """Sentinella: la stazione_sede stessa NON deve essere in whitelist
     per logica di consumo (la whitelist sono "vicine"). Anche se per
