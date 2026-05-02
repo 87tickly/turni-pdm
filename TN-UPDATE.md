@@ -10,6 +10,81 @@
 
 ---
 
+## 2026-05-02 (72) — Mini-fix UX modal "Genera giri": rimosso lo scegli-periodo (opzione A)
+
+### Contesto
+
+Smoke utente post-MR3: il modal "Genera giri materiale" mostrava 3
+opzioni periodo (Periodo intero / Da una data / Range parziale) +
+data inizio + dropdown sede + hint con gergo tecnico
+("whitelist di chiusura giro (km_cap raggiunto + treno vicino sede)").
+L'utente ha detto "non capisco questa schermata" — confermando
+opzione A: usare sempre il periodo intero del programma (default
+backend Sprint 7.5 MR 4) e ridurre il modal a un singolo campo.
+
+Decisione utente 2026-05-02: opzione (a) — il dropdown sede resta,
+così il pianificatore sceglie esplicitamente quale sede generare.
+NB: la possibilità di processare tutte le sedi in un click (opzione b)
+è stata scartata per ora — il pianificatore preferisce controllo
+puntuale.
+
+### Modifiche
+
+**Frontend** (1 file modificato):
+
+- `src/routes/pianificatore-giro/GeneraGiriDialog.tsx`:
+  - Rimossa interfaccia `Modalita = "intero" | "da_data" | "range"` e
+    componente `ModalitaRadio`.
+  - Rimosse import inutili (`Input`, icone, ecc).
+  - Rimosso `daysBetweenInclusive` (non più usato).
+  - `FormState` ridotto a `{localita_codice, force}` (era 5 campi).
+  - `submit()` non invia più `data_inizio` / `n_giornate` — il
+    backend usa il default Sprint 7.5 MR 4 (= periodo intero del
+    programma).
+  - `isValid = form.localita_codice.length > 0` (era validazione
+    multi-modalità).
+  - DialogContent rimpicciolito a `max-w-md` (era `max-w-xl`).
+  - Header description riformulata: "Costruisce i giri delle corse
+    del programma per la sede selezionata. Periodo: tutto il
+    programma (dal X al Y)" — senza gergo tecnico.
+  - Hint sotto il dropdown sede aggiornato (allineato MR3.1
+    cumulativo): "Per coprire più sedi, lancia la generazione una
+    volta per ogni sede: i giri delle altre sedi del programma non
+    vengono toccati." Niente più "whitelist...km_cap..."
+  - Checkbox `force` (visibile solo dopo 409): testo riformulato
+    "Rigenera questa sede. Cancella e ricostruisce i giri della
+    sede selezionata. I giri delle altre sedi del programma NON
+    vengono toccati." Allineato a MR3.1 (force ora scoped).
+
+### Verifiche
+
+- `pnpm typecheck`: ✅ clean
+- `pnpm test --run`: ✅ **53 passed** (regressioni 0 — il dialog
+  non aveva test specifici)
+- `pnpm build` (Vite production): ✅ 1757 modules, 389KB bundle
+  (113KB gzip), 975ms
+
+### TODO post-MR3 collezionati durante questo smoke
+
+- **`project_km_cap_per_regola_TODO.md`** aggiornato con **Fix C
+  rientro intelligente**: il giro va costruito perché l'ultima
+  giornata termini in whitelist sede, mai vuoti lunghi tipo
+  COLICO→CERTOSA. Sleghiamo `genera_rientro_sede` da `modo_dinamico`
+  e applichiamo solo quando l'ultima destinazione è già vicino sede.
+- **`project_refactor_varianti_giri_separati_TODO.md`** (nuovo):
+  ogni variante calendario di giornata diventa un giro a sé,
+  etichette parlanti tipo "Giornata 7 del 04/05/2026" o
+  "Giornata festiva". Prerequisito: tabella `calendario_ufficiale`
+  con festività italiane. Sprint 7.7/7.8 dedicato.
+
+### Prossimo step
+
+Riprendere il TODO post-MR3 (km_cap per regola + Fix C rientro
+intelligente). Successivamente: refactor varianti + calendario
+ufficiale.
+
+---
+
 ## 2026-05-02 (71) — Sprint 7.6 MR 3: genera-giri cumulativo + km per giornata + Fix B vuoto iniziale
 
 ### Contesto

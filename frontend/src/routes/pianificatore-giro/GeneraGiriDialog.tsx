@@ -11,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/Dialog";
-import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
 import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
@@ -23,61 +22,43 @@ import { formatNumber } from "@/lib/format";
 
 interface GeneraGiriDialogProps {
   programmaId: number;
-  /** `programma.valido_da` (ISO date `YYYY-MM-DD`). Usato per default backend e anteprima. */
+  /** `programma.valido_da` (ISO date `YYYY-MM-DD`). Mostrato come info di contesto. */
   validoDa: string;
-  /** `programma.valido_a` (ISO date `YYYY-MM-DD`). Usato per default backend e anteprima. */
+  /** `programma.valido_a` (ISO date `YYYY-MM-DD`). Mostrato come info di contesto. */
   validoA: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCompleted?: (result: BuilderResult) => void;
 }
 
-/**
- * Modalità di selezione del range temporale (Step A).
- *
- * - `intero`: nessun parametro inviato → backend usa `valido_da..valido_a`.
- * - `da_data`: solo `data_inizio` inviato → backend estende fino a `valido_a`.
- * - `range`: entrambi inviati → range esatto scelto dal pianificatore.
- */
-type Modalita = "intero" | "da_data" | "range";
-
 interface FormState {
-  modalita: Modalita;
-  data_inizio: string;
-  n_giornate: string;
   localita_codice: string;
   force: boolean;
 }
 
 const INITIAL: FormState = {
-  modalita: "intero",
-  data_inizio: "",
-  n_giornate: "14",
   localita_codice: "",
   force: false,
 };
 
 /**
- * Differenza di giorni inclusiva fra due date ISO `YYYY-MM-DD`
- * (convenzione del backend: `n_giornate = (valido_a - valido_da).days + 1`).
- */
-function daysBetweenInclusive(fromIso: string, toIso: string): number {
-  const from = new Date(`${fromIso}T00:00:00Z`).getTime();
-  const to = new Date(`${toIso}T00:00:00Z`).getTime();
-  if (Number.isNaN(from) || Number.isNaN(to) || to < from) return 0;
-  return Math.round((to - from) / 86_400_000) + 1;
-}
-
-/**
  * Dialog di lancio dell'algoritmo `POST /api/programmi/{id}/genera-giri`.
  *
+ * Sprint 7.6 (post-MR3, decisione utente 2026-05-02 "non capisco questa
+ * schermata"): semplificato a un unico campo (sede) + bottone Avvia.
+ * Il backend usa di default il **periodo intero del programma** (vedi
+ * Sprint 7.5 MR 4 default = `valido_da..valido_a`). Niente più scelte
+ * "periodo intero / da data / range parziale" — il pianificatore vuole
+ * click-and-go.
+ *
  * Tre stati nel dialog:
- * 1. form (default): scegli data_inizio + n_giornate + località
+ * 1. form: scegli la sede materiale → "Avvia generazione"
  * 2. running: spinner durante la chiamata
  * 3. done: stats restituite dal builder (n_giri_creati, residue, warnings)
  *
- * Il programma deve essere in stato 'attivo'. Se ha già giri persistiti
- * il backend ritorna 409 — riprovare con `force: true`.
+ * Anti-rigenerazione (MR 3.1): se la sede ha già giri persistiti il
+ * backend ritorna 409 — il dialog mostra una checkbox "Sovrascrivi"
+ * scoped per sede. Le altre sedi del programma NON vengono toccate.
  */
 export function GeneraGiriDialog({
   programmaId,
@@ -107,20 +88,12 @@ export function GeneraGiriDialog({
 
   const submit = async (forceFlag: boolean) => {
     setError(null);
-    // Step A: parametri temporali inviati solo nei rami che li richiedono.
-    // - "intero":  nessuno → backend usa valido_da..valido_a
-    // - "da_data": solo data_inizio → backend estende fino a valido_a
-    // - "range":   entrambi → range esatto
+    // Periodo intero del programma sempre — niente data_inizio/n_giornate
+    // (backend default Sprint 7.5 MR 4 = valido_da..valido_a).
     const params: GeneraGiriParams = {
       localita_codice: form.localita_codice,
       force: forceFlag,
     };
-    if (form.modalita === "da_data" || form.modalita === "range") {
-      params.data_inizio = form.data_inizio;
-    }
-    if (form.modalita === "range") {
-      params.n_giornate = Number.parseInt(form.n_giornate, 10) || 7;
-    }
     try {
       const r = await generaMutation.mutateAsync({ programmaId, params });
       setResult(r);
@@ -141,13 +114,7 @@ export function GeneraGiriDialog({
     }
   };
 
-  const isValid =
-    form.localita_codice.length > 0 &&
-    (form.modalita === "intero" ||
-      (form.modalita === "da_data" && form.data_inizio.length > 0) ||
-      (form.modalita === "range" &&
-        form.data_inizio.length > 0 &&
-        form.n_giornate.length > 0));
+  const isValid = form.localita_codice.length > 0;
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -156,96 +123,24 @@ export function GeneraGiriDialog({
   };
 
   const localita = localitaQuery.data ?? [];
-  const giorniTotaliProgramma = daysBetweenInclusive(validoDa, validoA);
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-md">
         {result === null ? (
           <>
             <DialogHeader>
               <DialogTitle>Genera giri materiale</DialogTitle>
               <DialogDescription>
-                Lancia l'algoritmo di costruzione giri su un range di giornate, partendo da una
-                località manutenzione (sede). Le corse del PdE vengono assegnate alle composizioni
-                materiali secondo le regole del programma.
+                Costruisce i giri delle corse del programma per la sede selezionata. Periodo:
+                tutto il programma (dal <strong>{validoDa}</strong> al{" "}
+                <strong>{validoA}</strong>).
               </DialogDescription>
             </DialogHeader>
 
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-              <fieldset className="flex flex-col gap-2" disabled={generaMutation.isPending}>
-                <legend className="text-sm font-semibold">Periodo</legend>
-                <p className="text-xs text-muted-foreground">
-                  Programma valido dal <strong>{validoDa}</strong> al{" "}
-                  <strong>{validoA}</strong> ({giorniTotaliProgramma} giorni totali).
-                </p>
-                <div className="flex flex-col gap-1.5">
-                  <ModalitaRadio
-                    name="gg-modalita"
-                    value="intero"
-                    current={form.modalita}
-                    onChange={(m) => setForm((p) => ({ ...p, modalita: m }))}
-                    label="Periodo intero del programma"
-                    hint="Default: nessun limite, processa tutto."
-                  />
-                  <ModalitaRadio
-                    name="gg-modalita"
-                    value="da_data"
-                    current={form.modalita}
-                    onChange={(m) => setForm((p) => ({ ...p, modalita: m }))}
-                    label="Da una data fino a fine programma"
-                    hint="Specifica solo la data di inizio."
-                  />
-                  <ModalitaRadio
-                    name="gg-modalita"
-                    value="range"
-                    current={form.modalita}
-                    onChange={(m) => setForm((p) => ({ ...p, modalita: m }))}
-                    label="Range parziale (data inizio + numero giornate)"
-                    hint="Sotto-finestra esatta del programma."
-                  />
-                </div>
-              </fieldset>
-
-              {(form.modalita === "da_data" || form.modalita === "range") && (
-                <div
-                  className={
-                    form.modalita === "range" ? "grid grid-cols-2 gap-4" : "flex flex-col gap-4"
-                  }
-                >
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="gg-data">Data inizio</Label>
-                    <Input
-                      id="gg-data"
-                      type="date"
-                      min={validoDa}
-                      max={validoA}
-                      value={form.data_inizio}
-                      onChange={(e) => setForm((p) => ({ ...p, data_inizio: e.target.value }))}
-                      disabled={generaMutation.isPending}
-                      required
-                    />
-                  </div>
-                  {form.modalita === "range" && (
-                    <div className="flex flex-col gap-1.5">
-                      <Label htmlFor="gg-n">N. giornate (1-400)</Label>
-                      <Input
-                        id="gg-n"
-                        type="number"
-                        min={1}
-                        max={400}
-                        value={form.n_giornate}
-                        onChange={(e) => setForm((p) => ({ ...p, n_giornate: e.target.value }))}
-                        disabled={generaMutation.isPending}
-                        required
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
-
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="gg-loc">Località manutenzione (sede materiale)</Label>
+                <Label htmlFor="gg-loc">Sede materiale</Label>
                 <Select
                   id="gg-loc"
                   value={form.localita_codice}
@@ -253,7 +148,7 @@ export function GeneraGiriDialog({
                   disabled={generaMutation.isPending || localitaQuery.isLoading}
                   required
                 >
-                  <option value="">— seleziona —</option>
+                  <option value="">— seleziona una sede —</option>
                   {localita.map((l) => (
                     <option key={l.codice} value={l.codice}>
                       {l.codice_breve ?? l.codice} — {l.nome_canonico}
@@ -261,8 +156,8 @@ export function GeneraGiriDialog({
                   ))}
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  La sede determina la whitelist di chiusura giro (km_cap raggiunto + treno vicino
-                  sede).
+                  Per coprire più sedi, lancia la generazione una volta per ogni sede: i giri
+                  delle altre sedi del programma non vengono toccati.
                 </p>
               </div>
 
@@ -275,8 +170,9 @@ export function GeneraGiriDialog({
                     className="mt-0.5"
                   />
                   <span>
-                    <strong>Sovrascrivi giri esistenti.</strong> Cancella tutti i giri persistiti di
-                    questo programma e ricostruiscili da zero.
+                    <strong>Rigenera questa sede.</strong> Cancella e ricostruisce i giri
+                    della sede selezionata. I giri delle altre sedi del programma NON vengono
+                    toccati.
                   </span>
                 </label>
               )}
@@ -385,38 +281,5 @@ function Stat({ label, value, warn = false }: { label: string; value: string; wa
       </span>
       <span className={warn ? "text-amber-700" : "text-foreground"}>{value}</span>
     </div>
-  );
-}
-
-interface ModalitaRadioProps {
-  name: string;
-  value: Modalita;
-  current: Modalita;
-  onChange: (m: Modalita) => void;
-  label: string;
-  hint: string;
-}
-
-function ModalitaRadio({ name, value, current, onChange, label, hint }: ModalitaRadioProps) {
-  const checked = current === value;
-  return (
-    <label
-      className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
-        checked ? "border-primary bg-primary/5" : "border-border hover:bg-secondary/40"
-      }`}
-    >
-      <input
-        type="radio"
-        name={name}
-        value={value}
-        checked={checked}
-        onChange={() => onChange(value)}
-        className="mt-0.5"
-      />
-      <span className="flex flex-col gap-0.5">
-        <span className="font-medium">{label}</span>
-        <span className="text-xs text-muted-foreground">{hint}</span>
-      </span>
-    </label>
   );
 }
