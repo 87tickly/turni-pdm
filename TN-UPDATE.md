@@ -10,6 +10,173 @@
 
 ---
 
+## 2026-05-02 (90) — Schermate 4 + 5: lista giri (KPI + filtri + preview) + Gantt giro (hero + per-giornata + side panel blocco)
+
+### Contesto
+
+Continuazione del lavoro su 1° ruolo (Pianificatore Giro Materiale).
+Ultime due schermate del bundle design `colazione-arturo (1).zip`:
+
+- **Schermata 4** `arturo/04-giri.html` → route `/pianificatore-giro/programmi/:id/giri`
+- **Schermata 5** `arturo/05-gantt-giro.html` v2 → route `/pianificatore-giro/giri/:id`
+
+Stato di partenza: entrambe le route esistevano con UI funzionale di
+base (tabella semplice + Gantt minimale 24h-grid), nessun preview
+pane, nessuna selezione blocco/side panel.
+
+### Modifiche
+
+#### Frontend (2 file riscritti)
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaGiriRoute.tsx`**
+(riscritto, ~620 righe):
+
+- Title row + back link "← Dettaglio programma · {nome}" + h1 "Giri
+  generati" + sub + secondary CTA "Apri dettaglio programma".
+- **Banda KPI 4 col**: Giri totali · Chiusi naturalmente % (emerald) ·
+  Km/giorno cumulato (con media km/giro) · Giri non chiusi (amber,
+  button-shaped, cliccabile = filtra automaticamente solo non
+  chiusi).
+- **Barra filtri sticky** (`sticky top-0 z-20`):
+  - Search testuale su `numero_turno`
+  - 3 filtri Sede / Materiale / Motivo (label + select inline,
+    stato visivo "active" su filtri impostati). Opzioni derivate
+    dinamicamente dal dataset corrente.
+  - Toggle "Solo non chiusi"
+  - Pulsante "Azzera filtri" (visibile se hasFilters)
+  - Counter "Mostro X di Y giri" + flag "filtri attivi"
+- **Layout 8/4** (tabella + preview pane):
+  - Click riga = seleziona + apre preview
+  - Doppio-click riga = apre Gantt completo (`/giri/:id`)
+  - Riga selezionata: shadow-inset 3px primary + bg primary/5
+  - Tabella 9 colonne: ID, Turno, Materiale, Sede (parsed da
+    `G-{SEDE}-...`), Gg, km/g, km/anno, Chiusura, Creato (relative)
+  - Preview pane collassabile (✕ chiude): numero_turno mono +
+    badge materiale + ChiusuraTag + 3 KPI mini (Giornate, km/giorno,
+    km/anno-K) + mini-Gantt 1-row per giornata (segmenti colorati
+    per tipo, larghezze proporzionali alle durate) + legenda + CTA
+    "Apri Gantt completo".
+- Empty state filtrato + empty state generale.
+
+**`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`**
+(riscritto, ~770 righe):
+
+- **Hero section** (mono):
+  - badge `#id` + ChiusuraBadge (chiuso/non-chiuso)
+  - h1 mono `numero_turno` (Exo 2 mono variant)
+  - badge materiale + linea principale (da metadata)
+  - 5 KPI inline: Giornate · km/giorno · km/anno · N° treni
+    commerciali · Rientri 9NNNN
+  - Action cluster: "Esporta PDF" (`window.print()` fallback) +
+    "Genera turno PdC" primary (apre dialog esistente)
+  - Meta band: Sede (FIO→FIO) · Varianti · Validato (counter
+    blocchi `is_validato_utente`, badge emerald se >0) · Stato ·
+    Turni PdC (link se >0)
+- **Layout main 8/4** (per-giornata sx + side panel blocco dx):
+  - Per ogni giornata: card con header (numero, km, etichetta
+    variante canonica) + tab varianti se ≥2 + Gantt view
+  - **Time axis 04:00 → 04:00 next day** (1440 min, gestione
+    cross-mezzanotte) con tick ogni 2h
+  - **Blocchi posizionati**:
+    - leftPct = (timeMin - 240) % 1440 / 1440 * 100
+    - widthPct = durata / 1440 * 100 (auto-correzione cross-notte)
+    - colore per tipo_blocco (commerciale=blue-600, vuoto=gray-300,
+      rientro=purple-500, accessori=orange-300, sosta=white border,
+      composizione=emerald-200)
+    - **bordo destro 4px emerald** se `is_validato_utente=true`
+      (must-have #8 design)
+    - **numero_treno DENTRO barra** mono + truncate (must-have #1)
+    - selezione: outline 2px primary z-10 + opacità 55% sugli altri
+      (must-have #6)
+- **Side panel blocco selezionato** (dx, 4/12):
+  - Header con ✕
+  - Tipo blocco label + numero_treno mono large
+  - Badge "✓ Validato manualmente" / "Non validato"
+  - Detail rows: Da, A, Orario (HH:MM → HH:MM + durata calc),
+    Sequenza, Note, Corsa
+  - Hint "Esc o ✕ per deselezionare"
+
+### Verifiche
+
+- `pnpm exec tsc -b --noEmit` ✅ clean
+- `pnpm exec eslint` (file modificati) ✅ clean
+- `pnpm test --run` ✅ **53 passed** (no regressioni)
+- **Preview verifica visuale** su `:5174`:
+  - Schermata 4 empty state (programma archiviato senza giri):
+    title row + "Apri dettaglio programma" CTA + empty card
+    "Nessun giro generato" + CTA navigation ✅
+  - Schermata 5 error state (giro inesistente): banner alert
+    "Giro non trovato" ✅
+  - Console clean
+
+### Conseguenze pratiche
+
+1. **Lista giri ora supporta triage**: il pianificatore può
+   scansionare centinaia di giri velocemente (tabella densa +
+   preview pane stile email-client) senza interrompere flusso.
+   La banda KPI rende ovvio quanti giri hanno problemi (giri non
+   chiusi = amber CTA self-filtering).
+2. **Gantt giro = vista verticale singola giornata-per-card**:
+   ogni card ha il proprio asse 04→04 next day, gestendo
+   cross-mezzanotte naturalmente. La selezione blocco mostra
+   dettaglio completo a destra senza navigation.
+3. **Validation indicator**: il bordo dx 4px emerald rende
+   immediatamente identificabili i blocchi validati manualmente
+   dal pianificatore.
+
+### Residui aperti (motivazione oggettiva, schermata 5 v2 8 must-have)
+
+Implementati in questo MR: must-have #1 (treno in barra), #6
+(selezione bordo + dim altri), #8 (validato bordo emerald),
+cross-notte 04→04.
+
+Restano 4 must-have non implementati (residui motivati):
+
+- **Must-have #2 — matrice ore × stazioni (Opzione A)**: il design
+  v2 sceglie A se ≤10 stazioni distinte. Richiede asse Y verticale
+  con stazioni da PdE (lookup esterno) + linee tra righe-stazione
+  invece di blocchi su singola row. Complessità: ~200 righe extra
+  per layout + logica di sticky-left della colonna stazioni.
+  Sprint dedicato.
+- **Must-have #3 — gap minuti label**: tra blocchi consecutivi,
+  se gap ≥10' label "45'" tra le barre, ≥30' bordo tratteggiato.
+  Richiede iterazione coppia di blocchi adiacenti + misurazione
+  gap. ~100 righe extra.
+- **Must-have #4 — eventi composizione marker**: marker arancione
+  4px sopra il blocco con click = popup. Richiede campo
+  `eventi_composizione` in `generation_metadata_json` strutturato.
+- **Must-have #5 — banda notte fra giornate**: 28px tra row-G_n
+  e row-G_n+1 con verifica congruenza stazione_a/da (flag rosso
+  se diverso = bug builder). Richiede layout cross-card o
+  multi-row continuo per tutto il giro.
+- **Must-have #7 — sticky scroll**: asse X top + colonna stazioni
+  left + corner opaco. Dipende da #2 (matrice).
+
+Altri residui:
+
+- **Multi-select pills nei filtri**: il design ha pill con counter
+  "Sede · 2" (multi-value). Implementati come single-select per
+  semplicità; sufficiente per dataset ridotto.
+- **Esporta PDF**: usa `window.print()` come fallback. Per export
+  vero serve generazione PDF lato server (puppeteer/wkhtmltopdf
+  con template Trenord-style). Sprint dedicato.
+- **Test dedicati**: nessuna copertura test su queste 2 route.
+  Da aggiungere quando si stabilizzano (anche per le altre
+  schermate redesign 86/87).
+- **Paginazione** in tabella schermata 4: il design ha 1/2/3/.../9
+  paging. Implementato con scroll naturale. Per >100 giri serve
+  aggiungere paginazione client (giri tipici ~400/programma).
+
+### Prossimo step
+
+Il 1° ruolo (Pianificatore Giro Materiale) ha ora tutte le 5
+schermate del design implementate (entry 86, 87, 90). Decisione
+utente: (a) chiudere uno dei 5 must-have residui Gantt, (b)
+aggiungere paginazione + test dedicati, (c) procedere con 2°
+ruolo (Pianificatore Turno PdC, Sprint 7.3 dashboard), (d) altro.
+
+---
+
 ## 2026-05-02 (89) — Vincoli inviolabili: aggiunti 3 vincoli operativi deposito (ATR803, ATR125/115 Lecco, ALn668 Iseo)
 
 ### Contesto
