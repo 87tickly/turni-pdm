@@ -48,7 +48,10 @@ class GiroMateriale(Base):
     programma_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("programma_materiale.id", ondelete="CASCADE")
     )
-    numero_turno: Mapped[str] = mapped_column(String(20))
+    # Sprint 7.7 MR 4 (migration 0017): allargato a 40 char per
+    # accogliere il suffisso ``-{materiale_tipo_codice}``
+    # (formato ``G-{LOC_BREVE}-{SEQ}-{MAT}``).
+    numero_turno: Mapped[str] = mapped_column(String(40))
     validita_codice: Mapped[str | None] = mapped_column(String(10))
     tipo_materiale: Mapped[str] = mapped_column(Text)
     descrizione_materiale: Mapped[str | None] = mapped_column(Text)

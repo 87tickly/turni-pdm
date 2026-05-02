@@ -67,6 +67,7 @@ from colazione.domain.builder_giro.persister import (
     GiroDaPersistere,
     LocalitaNonTrovataError,
     persisti_giri,
+    primo_tipo_materiale,
 )
 from colazione.domain.builder_giro.posizionamento import (
     CatenaPosizionata,
@@ -883,9 +884,18 @@ async def genera_giri(
             (g.dates_apply_or_data for g in giro_a.giornate),
             festivita,
         )
+        # Sprint 7.7 MR 4 (decisione utente 2026-05-02): suffisso
+        # ``-{materiale}`` al numero turno, es. ``G-FIO-001-ETR204``.
+        # Aiuta il pianificatore a capire al volo "che convoglio è
+        # questo giro". Per giri senza composizione assegnata
+        # (residui) il fallback è "MISTO".
+        materiale_codice = primo_tipo_materiale(giro_a) or "MISTO"
+        numero_turno = (
+            f"G-{localita.codice_breve}-{idx:03d}-{materiale_codice}"
+        )
         giri_da_persistere.append(
             GiroDaPersistere(
-                numero_turno=f"G-{localita.codice_breve}-{idx:03d}",
+                numero_turno=numero_turno,
                 giro=giro_a,
                 etichetta_tipo=etichetta_tipo,
                 etichetta_dettaglio=etichetta_dettaglio,

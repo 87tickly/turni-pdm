@@ -252,14 +252,14 @@ async def test_happy_path_1_corsa_1_giro(azienda_id: int) -> None:
     assert result.n_giri_chiusi == 1
     assert result.n_giri_non_chiusi == 0
 
-    # Verifica numero_turno
+    # Verifica numero_turno (Sprint 7.7 MR 4: include suffisso materiale)
     async with session_scope() as session:
         gm = (
             await session.execute(
                 select(GiroMateriale).where(GiroMateriale.id == result.giri_ids[0])
             )
         ).scalar_one()
-        assert gm.numero_turno == "G-TBLD-001"
+        assert gm.numero_turno == "G-TBLD-001-ALe711"
         assert gm.materiale_tipo_codice == "ALe711"
         # generation_metadata_json contiene programma_id
         assert gm.generation_metadata_json["programma_id"] == prog_id
@@ -365,15 +365,17 @@ async def test_force_true_wipe_e_rigenera(azienda_id: int) -> None:
 
     # I giri di result2 sono nuovi (id diversi)
     assert result1.giri_ids != result2.giri_ids
-    # Ed esistono solo i nuovi (count totale = 1)
+    # Ed esistono solo i nuovi (count totale = 1).
+    # Sprint 7.7 MR 4 (cleanup C3): query via colonna FK programma_id
+    # (sfrutta l'indice della migration 0010), non più via JSON path.
     async with session_scope() as session:
         n = (
             await session.execute(
                 text(
                     "SELECT COUNT(*) FROM giro_materiale "
-                    "WHERE generation_metadata_json->>'programma_id' = :pid"
+                    "WHERE programma_id = :pid"
                 ),
-                {"pid": str(prog_id)},
+                {"pid": prog_id},
             )
         ).scalar_one()
         assert n == 1

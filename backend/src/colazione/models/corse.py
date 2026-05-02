@@ -131,7 +131,9 @@ class CorsaMaterialeVuoto(Base):
     azienda_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("azienda.id", ondelete="RESTRICT")
     )
-    numero_treno_vuoto: Mapped[str] = mapped_column(String(20))
+    # Sprint 7.7 MR 4 (migration 0017): allargato a 40 char per coerenza
+    # con ``giro_materiale.numero_turno`` (formato ``V-{numero_turno}-{NNN}``).
+    numero_treno_vuoto: Mapped[str] = mapped_column(String(40))
     codice_origine: Mapped[str] = mapped_column(String(20), ForeignKey("stazione.codice"))
     codice_destinazione: Mapped[str] = mapped_column(String(20), ForeignKey("stazione.codice"))
     ora_partenza: Mapped[time] = mapped_column(Time)

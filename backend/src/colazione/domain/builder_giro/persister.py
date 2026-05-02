@@ -288,7 +288,7 @@ async def _next_numero_rientro_sede(session: AsyncSession) -> str:
     return f"9{(int(last) + 1):04d}"
 
 
-def _primo_tipo_materiale(giro: GiroAssegnato) -> str | None:
+def primo_tipo_materiale(giro: GiroAssegnato) -> str | None:
     """Primo ``materiale_tipo_codice`` usato dal giro, ``None`` se nessun
     blocco assegnato (giro tutto in corse residue).
 
@@ -296,13 +296,18 @@ def _primo_tipo_materiale(giro: GiroAssegnato) -> str | None:
     blocco. Per regole single-material la lista ha 1 elemento; per
     composizioni doppie prende il primo (es. ETR526 da [ETR526, ETR425]).
     Usato per popolare ``GiroMateriale.tipo_materiale`` (denormalizzato
-    leggibile per UI).
+    leggibile per UI) e per costruire ``numero_turno`` con suffisso
+    materiale (Sprint 7.7 MR 4).
     """
     for giornata in giro.giornate:
         for blocco in giornata.blocchi_assegnati:
             if blocco.assegnazione.composizione:
                 return blocco.assegnazione.composizione[0].materiale_tipo_codice
     return None
+
+
+# Alias privato per backward-compat con i call-site interni del modulo.
+_primo_tipo_materiale = primo_tipo_materiale
 
 
 def _build_metadata_giro(

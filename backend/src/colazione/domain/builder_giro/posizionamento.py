@@ -258,15 +258,17 @@ def posiziona_su_localita(
             generato.
         params: ``ParamPosizionamento``.
         forza_vuoto_iniziale: Sprint 7.6 MR 3.3 (Fix B). Se ``True``,
-            il vuoto di testa viene generato anche quando
-            ``prima.codice_origine`` NON è in whitelist (modello
-            "il treno parte fisicamente dalla sede"). Usato per le
-            catene del primo giorno cronologico della prima
-            generazione di una sede del programma — quando il
-            convoglio esce realmente dalla sede e non c'è una
-            "giornata K-1" del ciclo che lo abbia portato a
-            destinazione. Se la stazione di partenza è uguale alla
-            sede o la stazione è già in whitelist, il flag è inerte.
+            attiva la generazione del vuoto di testa anche per il
+            primo giorno cronologico della prima generazione di una
+            sede del programma. **Sprint 7.7 MR 4 (decisione utente
+            2026-05-02)**: il flag si applica SOLO se la stazione di
+            partenza è in whitelist sede. Una catena con
+            ``prima.codice_origine`` fuori whitelist viene rigettata
+            con ``PosizionamentoImpossibileError`` (non è una catena
+            di questa sede — appartiene a un'altra). Esempio
+            anti-pattern: per FIO, una catena che parte da CADORNA è
+            scartata; CADORNA è whitelist NOV, quel convoglio è di
+            NOVATE.
 
     Returns:
         ``CatenaPosizionata``: catena originale + 0/1/2 vuoti +
@@ -275,8 +277,9 @@ def posiziona_su_localita(
     Raises:
         ValueError: catena vuota.
         LocalitaSenzaStazioneError: località senza stazione collegata.
-        PosizionamentoImpossibileError: vuoto di testa partirebbe prima
-            di 00:00.
+        PosizionamentoImpossibileError: vuoto di testa partirebbe
+            prima di 00:00, oppure la prima corsa parte fuori
+            whitelist sede (catena di sede sbagliata).
     """
     if not catena.corse:
         raise ValueError("catena vuota: niente da posizionare")
@@ -289,13 +292,36 @@ def posiziona_su_localita(
     ultima = catena.corse[-1]
 
     # ---- Vuoto di testa: solo se prima.origine ∈ whitelist e ≠ sede ----
-    # Sprint 7.6 MR 3.3 (Fix B): con forza_vuoto_iniziale=True il vuoto
-    # è generato anche con origine fuori whitelist (caso "primo giorno
-    # del primo giro del programma per la sede").
+    # Sprint 7.7 MR 4 (decisione utente 2026-05-02 "se scelgo Fiorenza
+    # non voglio vedere materiali che arrivano a Cadorna"): rivisto il
+    # Fix B di MR 7.6.3. Quando ``forza_vuoto_iniziale=True`` (= primo
+    # giorno cronologico della prima generazione sede, il convoglio
+    # esce davvero dal deposito) E l'origine è FUORI whitelist sede,
+    # scartiamo la catena: significa che è di un'altra sede
+    # manutentiva (es. CADORNA è whitelist NOV, non FIO). Senza scarto
+    # il builder generava vuoti lunghi spuri tipo CERTOSA→CADORNA.
+    #
+    # Per le giornate K≥2 del giro (``forza_vuoto_iniziale=False``)
+    # l'origine fuori whitelist è invece NORMALE: la catena continua
+    # cross-notte da dove K-1 era finita, niente vuoto da generare,
+    # il treno è già lì.
     vuoto_testa: BloccoMaterialeVuoto | None = None
-    if prima.codice_origine != s and (
-        prima.codice_origine in whitelist_stazioni or forza_vuoto_iniziale
+    origine_in_whitelist = prima.codice_origine in whitelist_stazioni
+    if (
+        prima.codice_origine != s
+        and not origine_in_whitelist
+        and forza_vuoto_iniziale
     ):
+        raise PosizionamentoImpossibileError(
+            f"Catena scartata: la prima corsa parte da {prima.codice_origine!r} "
+            f"che è FUORI dalla whitelist della sede {localita.codice} "
+            f"(uscita reale dal deposito alla prima generazione). "
+            f"Probabilmente questa catena appartiene a un'altra sede "
+            f"manutentiva — verifica `localita_stazione_vicina` o crea "
+            f"un programma per la sede appropriata."
+        )
+
+    if prima.codice_origine != s and origine_in_whitelist:
         arrivo_min = _time_to_min(prima.ora_partenza) - params.gap_min
         partenza_min = arrivo_min - params.durata_vuoto_default_min
 

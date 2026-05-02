@@ -305,9 +305,7 @@ function GanttBlocco({ blocco }: { blocco: GiroBlocco }) {
   const a = stazioneLabel(blocco.stazione_a_nome, blocco.stazione_a_codice);
   const tipoLabel = tipoBloccoLabel(blocco.tipo_blocco);
   const trenoLine =
-    blocco.numero_treno !== null
-      ? `\nTreno ${blocco.numero_treno}${varianteSuffix(blocco)}`
-      : "";
+    blocco.numero_treno !== null ? `\nTreno ${blocco.numero_treno}` : "";
   const tooltip = `${tipoLabel} · ${blocco.ora_inizio ?? "?"}→${blocco.ora_fine ?? "?"}\n${da} → ${a}${trenoLine}`;
   return (
     <div
@@ -330,13 +328,6 @@ function bloccoLabel(b: GiroBlocco): string {
   const da = b.stazione_da_nome ?? b.stazione_da_codice ?? "?";
   const a = b.stazione_a_nome ?? b.stazione_a_codice ?? "?";
   return `${da}→${a}`;
-}
-
-function varianteSuffix(b: GiroBlocco): string {
-  const idx = b.numero_treno_variante_indice;
-  const tot = b.numero_treno_variante_totale;
-  if (idx === null || tot === null || tot <= 1) return "";
-  return ` · variante ${idx}/${tot}`;
 }
 
 function stazioneLabel(nome: string | null, codice: string | null): string {
@@ -416,22 +407,7 @@ function BlocchiList({ blocchi }: { blocchi: GiroBlocco[] }) {
 
 function TrenoCell({ blocco }: { blocco: GiroBlocco }) {
   if (blocco.numero_treno === null) return <span>—</span>;
-  const idx = blocco.numero_treno_variante_indice;
-  const tot = blocco.numero_treno_variante_totale;
-  const showVariante = idx !== null && tot !== null && tot > 1;
-  return (
-    <div className="flex flex-col leading-tight">
-      <span className="font-mono font-medium">{blocco.numero_treno}</span>
-      {showVariante && (
-        <span
-          className="text-[10px] text-muted-foreground"
-          title={`Questa corsa ha ${tot} varianti (origini/orari/periodi diversi)`}
-        >
-          variante {idx}/{tot}
-        </span>
-      )}
-    </div>
-  );
+  return <span className="font-mono font-medium">{blocco.numero_treno}</span>;
 }
 
 function StazioneCell({ nome, codice }: { nome: string | null; codice: string | null }) {

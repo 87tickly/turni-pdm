@@ -386,22 +386,21 @@ def test_solo_destinazione_in_whitelist_solo_vuoto_coda() -> None:
     assert res.chiusa_a_localita is True
 
 
-def test_forza_vuoto_iniziale_genera_anche_fuori_whitelist() -> None:
-    """Sprint 7.6 MR 3.3 (Fix B): con forza_vuoto_iniziale=True il vuoto
-    di testa è generato anche se l'origine è fuori whitelist (caso
-    "primo giorno cronologico della prima generazione per la sede").
-    Smoke utente 2026-05-02: giro FIO che parte da MALPENSA T1
-    (S01139, fuori whitelist FIO) ora include il vuoto CERTOSA→MALPENSA T1.
+def test_forza_vuoto_iniziale_origine_fuori_whitelist_raises_MR4() -> None:
+    """Sprint 7.7 MR 4 (decisione utente 2026-05-02 "se scelgo
+    Fiorenza non voglio vedere materiali che arrivano a Cadorna"):
+    quando ``forza_vuoto_iniziale=True`` (primo giorno cronologico,
+    convoglio esce davvero dal deposito) E l'origine è FUORI
+    whitelist sede, la catena è di un'altra sede manutentiva e va
+    scartata. Niente più vuoti lunghi spuri tipo CERTOSA→MALPENSA T1
+    su programmi sede FIO.
     """
-    # MALPENSA non in WL, ma forza_vuoto_iniziale=True → vuoto generato
+    # MALPENSA non in WL: prima dell'MR4 il Fix B di MR 3.3 generava
+    # comunque il vuoto FIO→MALPENSA, ora deve rifiutare la catena.
     a = _c("MALPENSA_T1", "MI_CADORNA", (8, 0), (8, 40))
     cat = Catena(corse=(a,))
-    res = posiziona_su_localita(
-        cat, LOC_FIORENZA, _WL, forza_vuoto_iniziale=True
-    )
-    assert res.vuoto_testa is not None
-    assert res.vuoto_testa.codice_origine == "MI_FIO"
-    assert res.vuoto_testa.codice_destinazione == "MALPENSA_T1"
+    with pytest.raises(PosizionamentoImpossibileError, match="FUORI dalla whitelist"):
+        posiziona_su_localita(cat, LOC_FIORENZA, _WL, forza_vuoto_iniziale=True)
 
 
 def test_forza_vuoto_iniziale_inerte_se_origine_uguale_sede() -> None:
@@ -415,31 +414,47 @@ def test_forza_vuoto_iniziale_inerte_se_origine_uguale_sede() -> None:
     assert res.vuoto_testa is None
 
 
-def test_forza_vuoto_iniziale_corsa_alle_00_01_no_crash() -> None:
-    """Sprint 7.7 hotfix: bug pre-esistente esposto dal Fix B (MR 3.3).
-    Quando una corsa parte entro `gap_min` minuti dalla mezzanotte (es.
-    MALPENSA T1 alle 00:01 con gap=5 → arrivo_min = -4), il vuoto
-    deve essere interamente la notte K-1, non crashare con
-    `_min_to_time(-4)` "hour must be in 0..23".
+def test_forza_vuoto_iniziale_origine_in_whitelist_genera_vuoto_MR4() -> None:
+    """Sprint 7.7 MR 4: se l'origine è in whitelist, il vuoto è
+    generato come prima (caso normale). Esempio: catena del primo
+    giorno parte da MI_CADORNA (in _WL del test) → vuoto CERTOSA→CADORNA.
+
+    NB: nei test usiamo `_WL = {"MI_CADORNA", "BG", ...}` come whitelist
+    fittizia di sede; nel DB reale Cadorna è whitelist NOV non FIO,
+    ma qui contestualizziamo solo la meccanica posizionamento.
     """
-    a = _c("MALPENSA_T1", "MI_CADORNA", (0, 1), (0, 40))
+    a = _c("MI_CADORNA", "BG", (8, 0), (9, 0))
     cat = Catena(corse=(a,))
     res = posiziona_su_localita(
-        cat,
-        LOC_FIORENZA,
-        _WL,
-        forza_vuoto_iniziale=True,
+        cat, LOC_FIORENZA, _WL, forza_vuoto_iniziale=True
     )
     assert res.vuoto_testa is not None
-    assert res.vuoto_testa.cross_notte_giorno_precedente is True
-    # Sia partenza che arrivo in K-1 (notte serale, dopo le 22)
-    assert res.vuoto_testa.ora_partenza.hour >= 22
-    assert res.vuoto_testa.ora_arrivo.hour >= 22
+    assert res.vuoto_testa.codice_origine == "MI_FIO"
+    assert res.vuoto_testa.codice_destinazione == "MI_CADORNA"
+
+
+def test_giornata_K2_con_origine_fuori_whitelist_no_raise_MR4() -> None:
+    """Sprint 7.7 MR 4: per le giornate K≥2 del giro, ``forza_vuoto_iniziale=False``
+    è il caso normale (la catena continua cross-notte da dove K-1 è
+    finita). L'origine fuori whitelist NON deve sollevare errore: il
+    treno è lì da multi-giornata, niente vuoto da generare.
+    """
+    # Catena del giorno K=2 che parte da CREMONA (fuori WL FIO),
+    # continuazione di una giornata K=1 che terminava a Cremona.
+    a = _c("CREMONA", "MI_FIO", (8, 0), (10, 0))
+    cat = Catena(corse=(a,))
+    res = posiziona_su_localita(cat, LOC_FIORENZA, _WL)  # default flag=False
+    assert res.vuoto_testa is None  # niente vuoto, ma niente errore
+    # vuoto_coda generato perché ultima dest = sede (chiusura naturale)
+    assert res.chiusa_a_localita is True
 
 
 def test_forza_vuoto_iniziale_default_false_compat_legacy() -> None:
     """Sprint 7.6 MR 3.3: il flag default è False — comportamento
-    storico invariato (vuoto solo se origine in whitelist)."""
+    storico invariato (vuoto solo se origine in whitelist).
+
+    Sprint 7.7 MR 4: questo caso continua a NON sollevare errore
+    perché ``forza_vuoto_iniziale=False`` (= giornata K≥2 normale)."""
     a = _c("MALPENSA_T1", "MI_CADORNA", (8, 0), (8, 40))
     cat = Catena(corse=(a,))
     res = posiziona_su_localita(cat, LOC_FIORENZA, _WL)  # niente flag

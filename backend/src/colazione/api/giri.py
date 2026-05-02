@@ -296,8 +296,9 @@ async def list_giri_programma(
     user: CurrentUser = _authz,
     session: AsyncSession = Depends(get_session),
 ) -> list[GiroMaterialeListItem]:
-    """Ritorna i giri persistiti per il programma. Filtro per
-    `generation_metadata_json->>'programma_id'` (no FK diretta).
+    """Ritorna i giri persistiti per il programma. Filtro per la colonna
+    FK ``programma_id`` (introdotta dalla migration 0010, sfrutta
+    l'indice ``idx_giro_materiale_programma_id``).
     """
     # Sprint 7.3 fix: usa la colonna esplicita programma_id (migration
     # 0010) invece del cast da generation_metadata_json. Più veloce

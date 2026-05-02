@@ -10,6 +10,156 @@
 
 ---
 
+## 2026-05-02 (78) — Sprint 7.7 MR 4: fix bug FIO/CADORNA + numero turno con materiale + cleanup
+
+### Contesto
+
+Smoke utente post-MR3 sul programma "prova" (4359, sede FIO):
+nei 911 giri generati l'utente nota un giro con vuoto serale K-1
+da CERTOSA → CADORNA. Cadorna è whitelist NOV (Novate), non FIO.
+Il convoglio non dovrebbe stare in un giro FIO: la catena
+appartiene a un'altra sede manutentiva.
+
+Decisioni utente 2026-05-02 (post-MR3):
+
+> "se scelgo Fiorenza non voglio vedere materiali che arrivano a
+> Cadorna o in altre località non stabilite da noi"
+
+> "quando generi un giri inserisci si G-FIO-001 questa dicitura,
+> ma aggiungi anche il materiale che stiamo usando, es:
+> G-FIO-001-204"
+
+> "rimuovi la variante 1/2 [tooltip numero treno], non serve"
+
+### Modifiche
+
+#### Backend (5 file modificati, 1 nuovo migration)
+
+- **Migration alembic 0017** `0017_numero_turno_40.py`
+  (revision `1a4d6e92c8b3`, down_revision `f7c2b189e405`):
+  - `giro_materiale.numero_turno` da `VARCHAR(20)` a `VARCHAR(40)`.
+  - `corsa_materiale_vuoto.numero_treno_vuoto` da `VARCHAR(20)` a
+    `VARCHAR(40)` (per coerenza, formato
+    `V-{numero_turno}-{NNN}`).
+  - Casi limite: `G-FIO-001-ALe245_treno` (22 char) → vuoto
+    `V-G-FIO-001-ALe245_treno-000` (28 char).
+
+- `domain/builder_giro/posizionamento.py` **fix bug FIO/CADORNA**:
+  - Riscritta la condizione del vuoto di testa. Quando
+    `forza_vuoto_iniziale=True` (= primo giorno cronologico della
+    prima generazione sede) e l'origine è FUORI whitelist sede,
+    ora alziamo `PosizionamentoImpossibileError` invece di generare
+    il vuoto. Significa "questa catena non è di questa sede".
+  - Per le giornate K≥2 (`forza_vuoto_iniziale=False`) il
+    comportamento legacy resta intatto: origine fuori whitelist =
+    no vuoto, treno è lì da continuazione cross-notte.
+  - Risolve il bug "vuoti spuri CERTOSA → CADORNA" del Fix B di
+    MR 7.6.3 quando la catena in realtà apparteneva a un'altra sede.
+
+- `domain/builder_giro/persister.py`:
+  - `_primo_tipo_materiale` rinominato `primo_tipo_materiale`
+    (alias privato preservato per back-compat). Esportato per uso
+    nel builder orchestrator.
+
+- `domain/builder_giro/builder.py`:
+  - **Numero turno con materiale**: il formato passa da
+    `G-{LOC}-{SEQ:03d}` a `G-{LOC}-{SEQ:03d}-{materiale_tipo_codice}`
+    (fallback `MISTO` per giri senza composizione assegnata).
+    Il pianificatore vede subito di che convoglio si tratta in lista.
+  - Cleanup C3 (review 2026-05-01): docstring aggiornato che
+    riflette l'uso della colonna FK `programma_id` invece del
+    JSON path `generation_metadata_json->>'programma_id'` —
+    funzionalità già migrata in MR precedenti, era rimasto solo
+    il commento obsoleto.
+
+- `models/giri.py` + `models/corse.py`: campi `String(20)` →
+  `String(40)` per allinearsi alla migration 0017.
+
+- `api/giri.py`: rimosso commento docstring obsoleto sulla query
+  `generation_metadata_json` (il codice usa già la colonna FK).
+
+#### Test backend (3 file modificati)
+
+- `tests/test_posizionamento.py`:
+  - Sostituiti 3 test legacy del Fix B con test che riflettono il
+    nuovo comportamento MR 4:
+    - `test_forza_vuoto_iniziale_origine_fuori_whitelist_raises_MR4`
+      (era `test_forza_vuoto_iniziale_genera_anche_fuori_whitelist`):
+      ora deve sollevare `PosizionamentoImpossibileError`.
+    - `test_forza_vuoto_iniziale_origine_in_whitelist_genera_vuoto_MR4`
+      (nuovo): origine in whitelist → vuoto generato (caso normale).
+    - `test_giornata_K2_con_origine_fuori_whitelist_no_raise_MR4`
+      (nuovo): catene K≥2 con origine fuori whitelist non sollevano
+      errore (continuazione cross-notte normale).
+  - Mantenuti `test_forza_vuoto_iniziale_inerte_se_origine_uguale_sede`
+    e `test_forza_vuoto_iniziale_default_false_compat_legacy`.
+
+- `tests/test_builder_giri.py`:
+  - Aggiornata asserzione `numero_turno`: era `"G-TBLD-001"`, ora
+    `"G-TBLD-001-ALe711"`.
+  - Cleanup C3: query di verifica anti-rigenerazione passa dal JSON
+    path alla colonna FK `programma_id`.
+
+- `tests/test_persister.py`: nessuna modifica (i test passano
+  `numero_turno` come parametro fittizio, formato non vincolato).
+
+#### Frontend (1 file modificato)
+
+- `routes/pianificatore-giro/GiroDettaglioRoute.tsx`:
+  - Rimossa funzione `varianteSuffix` orfana.
+  - `TrenoCell` semplificato: niente più sotto-label
+    "variante {idx}/{tot}" sulle corse PdE con N varianti
+    (utente: "non serve, confonde col concetto di varianti del
+    giro"). I campi `numero_treno_variante_indice/totale`
+    restano nei tipi API per compatibilità ma non sono più
+    visualizzati.
+  - Tooltip Gantt blocchi senza più suffisso variante.
+
+### Verifiche
+
+- DB `alembic upgrade head`: ✅ `f7c2b189e405 → 1a4d6e92c8b3`.
+- `uv run mypy --strict src`: ✅ 54 source files clean.
+- `uv run pytest --tb=line`: ✅ **469 passed, 12 skipped in 19.34s**
+  (baseline 468 → +1 nuovo test K≥2 MR 4; +2 nuovi test MR 4 - 1
+  rimosso legacy).
+- Frontend `pnpm typecheck`: ✅ clean.
+- Frontend `pnpm test --run`: ✅ **53 passed**.
+- Frontend `pnpm build`: ✅ 1757 modules, 389KB bundle (114KB gzip),
+  1.07s.
+
+### Conseguenze pratiche
+
+1. **Bug FIO/CADORNA risolto**: ri-generando i giri del programma
+   4359, le catene con origine fuori whitelist FIO (es. partenze da
+   Cadorna) verranno scartate con warning chiaro. Il giro G-FIO-001
+   spurio sparirà; restano gli altri 910 giri legittimi.
+2. **Numero turno leggibile**: il pianificatore distingue al volo
+   `G-FIO-001-ETR204` da `G-FIO-002-ATR803`. Aiuta nella vista
+   lista (911 righe).
+3. **UI dettaglio più pulita**: senza il sotto-label "variante 1/2"
+   sui blocchi corsa, l'utente non confonde le varianti del PdE
+   (stesso numero treno con N varianti) con le varianti calendario
+   (concetto separato, da reintrodurre nel MR 7.7.5).
+
+### Limitazioni note / aperti
+
+- **MR 7.7.5 in arrivo**: ripristino del concetto "varianti per
+  giornata" come letto dal PDF Trenord turno 1134 (giornata 8 con
+  2 varianti, giornata 9 con 4 varianti). Il MR 7.7.3 era andato
+  troppo lontano nel collassare le varianti — questo MR 4 ha
+  rimosso l'evidenza confusa (etichetta giro inutile + tooltip
+  variante 1/2), il MR 5 sistema il modello dati.
+- **C2 (cap notturno 00:00-00:59)**, **C4 (preriscaldo ACCp
+  dic-feb)**, **C6 (TIRANO match DB)**: aperti, dominio
+  builder_pdc, follow-up dedicati.
+
+### Prossimo step
+
+MR 7.7.5 — ripristino varianti per giornata con etichetta
+parlante (turno Trenord 1134 style).
+
+---
+
 ## 2026-05-02 (77) — Sprint 7.7 MR 3: refactor varianti → giri separati con etichetta
 
 ### Contesto
