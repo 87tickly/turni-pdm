@@ -779,6 +779,132 @@ Layout proposto:
    `dates_apply_json` come chip date ("15/06, 16/06, 17/06 +12
    altre"), e `validita_testo` come citazione.
 
+### Dettagli del Gantt (must-have)
+
+Questi 8 punti sono **non-negoziabili** per la leggibilità. Senza
+di questi il Gantt è uno scheletro che non sostituisce il PDF
+Trenord che gli utenti usano oggi.
+
+#### 1. Numero treno DENTRO la barra del blocco
+
+- Se la barra è larga **≥ 60px** → mostra `numero_treno` come testo
+  bianco, font-mono, weight semibold (es. `28335`, `U28330`,
+  `90001`). Troncato con ellipsis se serve.
+- Se la barra è < 60px → niente testo dentro, `numero_treno` solo
+  nel tooltip.
+- I prefissi sono significativi: `U` = vuoto tecnico, `9NNNN` =
+  rientro a sede. Mostra il numero così com'è.
+- Blocchi `sosta` e `accessori_partenza/arrivo` non hanno
+  numero_treno: mostra label corta (es. `ACCp 40'`, `sosta 45'`).
+
+#### 2. Stazioni di transito sempre visibili (stile PDF Trenord)
+
+Due opzioni, scegli in base alla complessità:
+
+- **Opzione A (preferita, fedele al PDF Trenord)**: matrice
+  **ore × stazioni**. Colonna a sinistra con elenco stazioni
+  distinte del giro (es. Fiorenza, Mi.Centrale, Lecco, Sondrio,
+  Tirano). Ogni blocco-corsa è una linea diagonale o orizzontale
+  che parte dalla riga `stazione_da` e finisce alla riga
+  `stazione_a`. Le soste sono cerchi sulla riga. Le giornate sono
+  separatori verticali della matrice.
+- **Opzione B (semplificata)**: timeline orizzontale come già
+  descritta, con sopra ogni blocco la notazione "Mi.CLE → Tirano"
+  (font 10-11px) e sotto gli orari "06:14 — 07:42".
+
+Decidi in base alle stazioni distinte del giro: **≤ 10 stazioni →
+Opzione A**, **> 10 → Opzione B**. Annota la scelta nel commento
+HTML in cima.
+
+I dati stazione sono in `Blocco.stazione_da_nome` /
+`stazione_a_nome` (umane, es. "MILANO CENTRALE") e
+`stazione_da_codice` / `stazione_a_codice` (compatte, es. "MI.CLE").
+
+#### 3. Gap fra blocchi: minuti annotati
+
+- Spazio bianco fra `blocco[N].ora_fine` e `blocco[N+1].ora_inizio`
+- Se gap **≥ 10 min** → label centrale `45'` (font 10px,
+  `text-muted-foreground`)
+- Se gap **≥ 30 min** → label + sottile bordo tratteggiato sotto
+  per evidenziare la sosta lunga (è un caso attenzionato dal
+  pianificatore)
+- Se gap **≥ 6h** = notte fra giornate → vedi punto 5
+
+#### 4. Eventi di composizione (cambio materiale mid-giro)
+
+I dati arrivano da `generation_metadata_json.eventi_composizione`:
+lista di `{seq, ora, stazione, composizione_da, composizione_a}`.
+
+- Mostra ogni evento come **marker verticale arancione spesso
+  (3-4px wide) sopra il blocco** corrispondente, lungo l'asse Y
+  della giornata.
+- Click sul marker → popup con: ora, stazione, composizione_da →
+  composizione_a (es. `ETR526×2 → ETR526×1 a Lecco · 17:30`)
+- Servono perché il pianificatore deve capire **dove e quando** il
+  convoglio cambia composizione (aggancio/sgancio carrozze,
+  sostituzione materiale).
+
+#### 5. Transizione multi-giornata: notte in mezzo
+
+Fra l'ultima ora di **G1** (es. 23:50) e la prima ora di **G2**
+(es. 04:30) c'è una pausa lunga di sosta notturna. Va resa
+**esplicita visivamente**:
+
+- **Banda separatrice** fra le due righe-giornata: altezza 24-32px,
+  `bg-gray-50` o pattern diagonale soft, etichetta
+  `notte · sosta a Tirano · 4h40` (durata calcolata).
+- La stazione di sosta notturna = `stazione_a` dell'ultimo blocco
+  di G1. Verifica che corrisponda a `stazione_da` del primo blocco
+  di G2:
+  - Se **sì** → label normale "notte · sosta a [stazione]"
+  - Se **no** → flag rosso `⚠ discontinuità: G1 finisce a X, G2
+    inizia a Y` (è un caso anomalo, probabile bug del builder, il
+    pianificatore deve vederlo subito).
+
+NB: questo è **diverso dal cross-notte** dentro una singola
+giornata (vedi sotto), che è quando un singolo blocco attraversa
+mezzanotte (es. corsa 23:30 → 01:15 nella stessa giornata).
+
+#### 6. Selezione blocco
+
+- Click su un blocco → **selezionato** (apri side panel destro come
+  già descritto + highlight visivo)
+- Highlight: **bordo 2px solido `primary` (`#0062CC`)** sul blocco
+  selezionato + tutti gli altri blocchi al **60% di opacità** (dim)
+- Esc o click fuori → deseleziona, blocco torna normale + side
+  panel si chiude
+
+#### 7. Sticky scroll (asse temporale + etichette giornate)
+
+Il Gantt è quasi certamente più largo della viewport (24h × tick
+fini = molti px) e con 5-7 giornate è anche alto.
+
+- **Asse X temporale in alto**: `position: sticky; top: 0` durante
+  scroll verticale
+- **Etichette giornata a sinistra** (`G1 · feriale`, ecc.):
+  `position: sticky; left: 0` durante scroll orizzontale
+- All'incrocio top-left: blocco bianco opaco per coprire l'overlap
+  fra i due sticky
+- Per Opzione A del punto 2 (matrice ore × stazioni): la colonna
+  stazioni a sinistra è sticky-left
+
+#### 8. Blocchi validati manualmente: colore differente
+
+Se `blocco.is_validato_utente === true`:
+
+- Sopra il colore base del tipo_blocco, aggiungi un **bordo destro
+  spesso 4px verde** (`border-r-4 border-emerald-500`)
+- Tooltip: prima riga `✓ Validato manualmente` in verde
+- Side panel del blocco selezionato: badge `VALIDATO` (variant
+  success) accanto al titolo
+
+L'idea: il blocco resta riconoscibile come tipo (commerciale =
+blu, ecc.), ma a colpo d'occhio il pianificatore vede quali sono
+stati toccati manualmente vs lasciati come l'algoritmo li ha
+generati.
+
+---
+
 Considera che le **giornate possono essere 1-7**: con 7 il Gantt
 sta verticale comodo, con 1 è disteso. Pensa al responsive.
 

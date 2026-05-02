@@ -10,6 +10,88 @@
 
 ---
 
+## 2026-05-02 (84) — docs: brief design 1° ruolo - dettagli Gantt (8 must-have)
+
+### Contesto
+
+Review utente sulla schermata 5 del brief (Visualizzatore Gantt
+giro): la sezione esistente copriva layout generale, codice colore,
+schema entità, side panel — ma lasciava aperti dettagli decisivi
+per la leggibilità. Identificati 8 buchi proposti all'utente come
+domanda di chiusura, risposte raccolte:
+
+1. Numero treno → DENTRO la barra (se larghezza lo consente)
+2. Stazioni transito → SEMPRE visibili (preferenza stile PDF Trenord)
+3. Gap tra blocchi → minuti annotati
+4. Eventi composizione (cambio materiale mid-giro) → marker dedicato
+5. Transizione multi-giornata → "notte in mezzo" come banda
+6. Selezione blocco → highlight (bordo + dim degli altri)
+7. Sticky scroll → l'utente non sapeva, decisione mia: ON di default
+8. `is_validato_utente` → colore differente (bordo verde)
+
+### Modifiche
+
+#### `docs/PROMPT-DESIGN-1RUOLO.md`
+
+Nuova **sotto-sezione "### Dettagli del Gantt (must-have)"** dentro
+"## Schermata 5", subito dopo il "Layout proposto" enumerato 1-6
+e prima dei 2 paragrafi "Considera...". Contiene gli 8 punti
+specificati:
+
+1. **Numero treno DENTRO la barra**: ≥60px → testo bianco font-mono
+   semibold, <60px → solo tooltip; prefissi U/9NNNN preservati;
+   sosta/accessori → label tipo (`ACCp 40'`, `sosta 45'`).
+2. **Stazioni di transito**: 2 opzioni. **A** (preferita, fedele
+   PDF Trenord) = matrice ore×stazioni con colonna stazioni a
+   sinistra, blocchi come linee fra righe-stazione. **B**
+   (semplificata) = sopra ogni barra notazione "Mi.CLE → Tirano"
+   + orari sotto. Soglia: ≤10 stazioni distinte → A, >10 → B.
+3. **Gap fra blocchi**: ≥10' label "45'", ≥30' label + bordo
+   tratteggiato, ≥6h = notte (vedi punto 5).
+4. **Eventi composizione**: marker verticale arancione 3-4px sopra
+   il blocco, click → popup con `composizione_da → composizione_a`
+   (es. "ETR526×2 → ETR526×1 a Lecco · 17:30"). Source dati:
+   `generation_metadata_json.eventi_composizione`.
+5. **Notte fra giornate**: banda separatrice 24-32px tra righe-G,
+   bg-gray-50 o pattern diagonale, etichetta "notte · sosta a
+   [stazione] · [durata]". Verifica congruenza: stazione_a
+   ultimo blocco G_n vs stazione_da primo blocco G_n+1; se
+   diverse → flag rosso "discontinuità" (probabile bug builder).
+   Distinto dal cross-notte intra-giornata.
+6. **Selezione blocco**: bordo 2px primary `#0062CC` + altri al 60%
+   opacità; Esc o click fuori = deseleziona.
+7. **Sticky scroll**: asse X sticky-top + etichette giornata
+   sticky-left + opacizzazione angolo top-left per coprire
+   overlap. Per Opzione A del punto 2: anche colonna stazioni
+   sticky-left.
+8. **Validato utente**: bordo destro 4px emerald-500 sopra colore
+   base + tooltip "✓ Validato manualmente" + badge VALIDATO nel
+   side panel.
+
+Premessa esplicita: questi 8 punti sono **non-negoziabili**, senza
+di questi il Gantt è "uno scheletro che non sostituisce il PDF
+Trenord che gli utenti usano oggi".
+
+### Stato
+
+File aggiornato: ora 813 righe (+114). Schermata 5 è la più ricca
+del brief — coerente col fatto che è la più densa per l'operatore.
+
+Verifiche:
+
+- File modificato: `docs/PROMPT-DESIGN-1RUOLO.md`.
+- TN-UPDATE.md aggiornato con questa entry.
+- Niente test (file documentazione).
+
+### Prossimo step
+
+Brief design ora completo per il 1° ruolo, incluso branding +
+dettagli Gantt. Utente lo allega al designer e procede schermata
+per schermata. In parallelo, sviluppo backend continua su MR 7.7.6
+(entry 82, etichetta categorica per variante).
+
+---
+
 ## 2026-05-02 (83) — docs: brief design 1° ruolo - sezione Branding (logo + font + palette)
 
 ### Contesto
