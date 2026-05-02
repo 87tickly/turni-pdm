@@ -10,6 +10,106 @@
 
 ---
 
+## 2026-05-03 (95) — Vincoli inviolabili V3: lista stazioni esplicita dal DB (AND match)
+
+### Contesto
+
+Iterazione finale dopo entry 89 (pattern bidir capolinea-capolinea →
+falsi positivi sub-tratte), entry 93 (rimossi vincoli operativi →
+builder genera giri assurdi: ATR803 a Locarno/Domodossola/Bergamo).
+
+Screenshot utente: ATR803 con deposito Cremona finiva a Biasca
+(Svizzera) e Locarno. Decisione: ripristinare vincoli operativi MA
+con approccio **lista stazioni esplicita** dal DB (no più pattern
+regex bidir/gruppo).
+
+> "non funziona. mi continui a mandare in giro ovunque l 803, [...]
+> aggiungi che piadena esce il materiale vuoto da cremona. se si
+> inizia dal deposito di cremona perchè me lo ritrovo a biasca?"
+
+### Modifiche
+
+#### `domain/vincoli/inviolabili.py`
+
+- Nuovo campo `Vincolo.stazioni_ammesse_lista: frozenset[str]`.
+- Match logic per whitelist: se `stazioni_ammesse_lista` è non vuota,
+  ENTRAMBE origine e destinazione devono essere nella lista (AND).
+  Altrimenti ricade su `stazioni_ammesse_pattern` (OR semantics, usato
+  da TILO).
+- Loader aggiornato per leggere il nuovo campo dal JSON.
+
+#### `data/vincoli_materiale_inviolabili.json` (2 → 7 vincoli)
+
+Estratte dal DB le stazioni di ciascuna direttrice operativa
+(direttrici: BRESCIA-PIADENA-PARMA, PAVIA-CODOGNO, PAVIA-MORTARA-VERCELLI,
+PAVIA-TORREBERETTI-ALESSANDRIA, MANTOVA-CREMONA-LODI-MILANO,
+LECCO-MOLTENO-COMO, LECCO-MOLTENO-MONZA-MILANO, BRESCIA-ISEO-EDOLO).
+
+5 vincoli operativi nuovi/ricostruiti:
+
+- **`operativo_atr803_linee_assegnate`** (18 stazioni):
+  BRESCIA, CANNETO SULL'OGLIO, S.GIOVANNI IN CROCE, PIADENA, PARMA,
+  PAVIA, BELGIOIOSO, CORTEOLONA, CASALPUSTERLENGO, CODOGNO, CREMONA,
+  BOZZOLO, TORRE DE' PICENARDI, CAVA TIGOZZI, MORTARA, VERCELLI,
+  TORREBERETTI, ALESSANDRIA. Include la sub Cremona-Piadena su
+  richiesta utente (vuoto materiale).
+- **`operativo_atr115_deposito_lecco`** (6 stazioni Brianza).
+- **`operativo_atr125_deposito_lecco_e_iseo`** (13 stazioni:
+  Brianza + Valcamonica).
+- **`operativo_aln668_deposito_iseo`** (7 stazioni Valcamonica).
+- **`operativo_treno_dei_sapori_d520`** (7 stazioni Valcamonica).
+
+#### Test (`test_vincoli_inviolabili.py`)
+
+20 test:
+- 4 test elettrico/diesel (esistenti, aggiornati: ATR803 ora
+  violazione su Brescia-Iseo perché deposito Iseo).
+- 4 test TILO (esistenti).
+- 9 test nuovi vincoli operativi: ATR803 brescia-parma OK,
+  sub-tratte Pavia-Codogno-Cremona-Casalpusterlengo OK,
+  ATR803 Locarno KO, ATR803 Bergamo KO, ATR125 multi-deposito,
+  ATR115 solo Lecco, D520 Brescia-Iseo OK, ALn668 Bergamo KO.
+- 3 edge cases (filtri giorno_tipo ignorati, ecc.).
+
+### Verifiche
+
+- `uv run mypy --strict src` ✅ 58 file clean.
+- `uv run pytest -q` ✅ **519 passed, 12 skipped** (era 511,
+  +8 nuovi test).
+- **Smoke API**:
+  - ATR803 origine PAVIA → **400** (cattura PAVIA→ASTI,
+    PAVIA→MI.BOVISA: corse non Coleoni, giustamente rifiutate).
+  - ATR803 origine BERGAMO → **400** ✓.
+  - ATR125 origine ISEO → **201** ✓ (multi-deposito).
+  - ATR115 origine ISEO → **400** ✓ (no deposito Iseo).
+
+### Conseguenze pratiche
+
+1. **Builder protetto**: il pianificatore non può più creare regole
+   ATR803 che catturano corse fuori dotazione (Locarno, Bergamo,
+   Domodossola, ecc.). Quindi il builder non genera più giri
+   ATR803 con destinazioni assurde.
+2. **Sub-tratte legittime ammesse**: tutte le 18 stazioni della
+   linea ATR803 sono ammesse per qualsiasi coppia (es. CORTEOLONA-CREMONA,
+   BRESCIA-PIADENA, BELGIOIOSO-CASALPUSTERLENGO).
+3. **Approccio scalabile**: lista esplicita dal DB. Quando si
+   importerà nuovo PdE o nuove direttrici, le liste vengono
+   ricalcolate via query SQL (1 minuto di lavoro).
+
+### Limitazioni note
+
+- **Filtro `codice_origine=PAVIA`** cattura ANCHE corse non-ATR803
+  (PAVIA→ASTI, PAVIA→Mi.Bovisa, ecc.). Il sistema rifiuta ⇒ il
+  pianificatore deve usare filtri più specifici (es.
+  `codice_destinazione=CREMONA` o `direttrice=PAVIA-CODOGNO`).
+
+### Prossimo step
+
+Decisione utente: rigenerare i giri esistenti dopo aver corretto le
+regole, oppure UX miglioramento (suggerimenti filtri).
+
+---
+
 ## 2026-05-02 (94) — Chiusura must-have #3 Gantt giro: gap minuti label + tratteggio ≥30'
 
 ### Contesto

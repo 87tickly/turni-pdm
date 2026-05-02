@@ -66,16 +66,28 @@ def _resolve_vincoli_path() -> Path:
 
 @dataclass(frozen=True)
 class Vincolo:
-    """Un vincolo inviolabile dichiarato nel JSON."""
+    """Un vincolo inviolabile dichiarato nel JSON.
+
+    Match logic per modalità whitelist:
+    - Se ``stazioni_ammesse_lista`` non vuota: ENTRAMBE origine e
+      destinazione della corsa devono essere nella lista (AND match).
+      Più preciso, evita falsi positivi su stazioni ambigue.
+    - Altrimenti, ``stazioni_ammesse_pattern`` matcha l'haystack
+      "origine | destinazione" con OR semantics.
+
+    Per modalità blacklist usa solo ``stazioni_vietate_pattern`` (OR
+    su singola stazione).
+    """
 
     id: str
     nome: str
-    tipo: str  # tecnico_alimentazione | contrattuale_omologazione | operativo_turistico
+    tipo: str  # tecnico_alimentazione | contrattuale_omologazione | operativo_*
     modalita: str  # whitelist | blacklist
     descrizione: str
     materiale_tipo_codici_target: frozenset[str]
     materiale_tipo_codici_esenti: frozenset[str] = frozenset()
     stazioni_ammesse_pattern: tuple[re.Pattern[str], ...] = ()
+    stazioni_ammesse_lista: frozenset[str] = frozenset()
     stazioni_vietate_pattern: tuple[re.Pattern[str], ...] = ()
     linee_descrizione: tuple[str, ...] = ()
 
@@ -130,6 +142,9 @@ def carica_vincoli(path: Path | None = None) -> list[Vincolo]:
                     v.get("materiale_tipo_codici_esenti", [])
                 ),
                 stazioni_ammesse_pattern=ammesse,
+                stazioni_ammesse_lista=frozenset(
+                    v.get("stazioni_ammesse_lista", [])
+                ),
                 stazioni_vietate_pattern=vietate,
                 linee_descrizione=linee,
             )
@@ -181,9 +196,19 @@ def _corsa_matcha_stazioni_ammesse(
     corsa: _CorsaLike,
     stazioni_lookup: dict[str, str],
     pattern_ammesse: Sequence[re.Pattern[str]],
+    lista_ammesse: frozenset[str] = frozenset(),
 ) -> bool:
-    """True se almeno una stazione (origine O destinazione) matcha un pattern ammesso."""
+    """True se la corsa è ammessa dalla whitelist.
+
+    Se ``lista_ammesse`` non è vuota: AND match — ENTRAMBE origine e
+    destinazione devono essere nella lista. Pattern_regex ignorati.
+
+    Altrimenti: OR su pattern_regex contro haystack "origine | destinazione".
+    """
     nomi = _stazioni_della_corsa(corsa, stazioni_lookup)
+    if lista_ammesse:
+        # AND match: tutte le stazioni della corsa devono essere nella lista
+        return all(nome in lista_ammesse for nome in nomi)
     haystack = " | ".join(nomi)
     return any(p.search(haystack) for p in pattern_ammesse)
 
@@ -271,7 +296,10 @@ def valida_regola(
                 # matchano sono problematiche.
                 for corsa in corse_catturate:
                     if not _corsa_matcha_stazioni_ammesse(
-                        corsa, stazioni_lookup, vincolo.stazioni_ammesse_pattern
+                        corsa,
+                        stazioni_lookup,
+                        vincolo.stazioni_ammesse_pattern,
+                        vincolo.stazioni_ammesse_lista,
                     ):
                         corse_problematiche.append(corsa)
 
