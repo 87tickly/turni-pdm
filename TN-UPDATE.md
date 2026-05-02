@@ -10,6 +10,117 @@
 
 ---
 
+## 2026-05-02 (89) — Vincoli inviolabili: aggiunti 3 vincoli operativi deposito (ATR803, ATR125/115 Lecco, ALn668 Iseo)
+
+### Contesto
+
+L'utente ha notato un buco nei vincoli HARD dell'entry 85: ad es.
+selezionando `ATR803 + filtro Cremona`, il sistema accettava la regola
+e poi il builder mandava ATR803 "in giro per tutta la Lombardia"
+(perché ATR803 non aveva alcun vincolo geografico, era solo nella lista
+`famiglie_esenti` del vincolo elettrico).
+
+Decisioni utente in chat 2026-05-02:
+
+> "ATR 803: Brescia-Parma, Pavia-Alessandria, Pavia-Vercelli,
+> Pavia-Codogno-Cremona, in alcuni casi Codogno-Cremona. questo è HARD."
+>
+> "ATR125-115: Lecco-Molteno-Milano porta garibaldi, Lecco-Molteno-Como,
+> Molteno-Como questi sono del deposito di Lecco."
+>
+> "Deposito ISEO: BRESCIA-ISEO-EDOLO. QUESTO è HARD."
+
+### Modifiche
+
+#### Bug semantico risolto: pattern di rotta bidirezionali
+
+I vincoli aggiunti hanno stazioni capolinea **ambigue** (es. `BRESCIA`
+è capolinea sia di `Brescia-Parma` (deposito ATR803) sia di
+`Brescia-Iseo-Edolo` (deposito Iseo) sia di `Brescia-Milano`).
+Pattern singoli del tipo `\bBRESCIA\b` non bastano: matcherebbero
+qualsiasi corsa con BRESCIA in origine/destinazione.
+
+Soluzione: pattern di **rotta bidirezionali** che richiedono ENTRAMBE
+le stazioni-chiave nella stringa "origine | destinazione" della corsa,
+es. `(?i)\bBRESCIA\b.*\bPARMA\b|\bPARMA\b.*\bBRESCIA\b`. Il pattern
+matcha sia "BRESCIA → PARMA" sia "PARMA → BRESCIA", ma NON
+"BRESCIA → EDOLO" (che è un'altra linea).
+
+#### `data/vincoli_materiale_inviolabili.json` (3 vincoli nuovi → totale 6)
+
+- `operativo_atr803_linee_assegnate` (whitelist):
+  - target `["ATR803"]`
+  - 6 pattern bidir di rotta: Brescia-Parma, Pavia-Alessandria,
+    Pavia-Vercelli, Pavia-Cremona, Pavia-Codogno, Codogno-Cremona.
+
+- `operativo_atr125_atr115_deposito_lecco` (whitelist):
+  - target `["ATR125", "ATR115"]`
+  - 5 pattern bidir di rotta: Lecco-Molteno, Lecco-Como,
+    Molteno-Como, Lecco-Mi.PortaGaribaldi, Molteno-Mi.PortaGaribaldi.
+
+- `operativo_aln668_deposito_iseo` (whitelist):
+  - target `["ALn668(1000)"]`
+  - 3 pattern bidir su gruppo stazioni Valcamonica
+    (BRESCIA + ISEO/EDOLO/PISOGNE/DARFO/SULZANO/MARONE/PARATICO/CEDEGOLO/BRENO).
+
+Aggiornato anche `operativo_treno_dei_sapori_d520` con la stessa
+logica bidir.
+
+#### Test backend (`test_vincoli_inviolabili.py`)
+
+- 1 test esistente aggiornato (`test_diesel_atr803_su_brescia_iseo_ok`
+  → `_violazione`: era OK perché esente, ora viola whitelist).
+- `test_carica_vincoli_dal_json_reale`: assertion da 3 a 6 vincoli.
+- 9 test nuovi: ATR803 (brescia-parma OK, pavia-codogno-cremona OK,
+  brescia-milano KO, bergamo KO), ATR125/ATR115 (lecco-molteno OK,
+  brescia-iseo KO), ALn668 (brescia-iseo OK, brescia-parma KO).
+- Lookup stazioni esteso con PAVIA, CODOGNO, CREMONA, VERCELLI,
+  ALESSANDRIA, PARMA, MOLTENO, MILANO PORTA GARIBALDI.
+
+### Verifiche
+
+- `uv run mypy --strict src` ✅ 58 file clean.
+- `uv run pytest -q` ✅ **521 passed, 12 skipped** in 43s
+  (era 513, +8 nuovi test; -1 rinominato).
+- **Smoke API end-to-end** su Docker stack:
+  1. `ATR803` senza filtro → **400** vincolo
+     `operativo_atr803_linee_assegnate` (corse Mi.Cadorna→Laveno).
+  2. `ATR125` filtro `codice_linea=R3` (cattura Brescia-Edolo) → **400**
+     vincolo `operativo_atr125_atr115_deposito_lecco` (corse Brescia-Cedegolo).
+  3. `ATR803` filtro `codice_origine=PAVIA` → **400** vincolo ATR803
+     (corse Pavia→Mortara/Asti, sub-tratte non in whitelist).
+
+### Conseguenze pratiche
+
+1. Il pianificatore non può creare regole che assegnino ATR803 fuori
+   da Brescia-Parma/Pavia-{Alessandria/Vercelli/Cremona/Codogno},
+   ATR125/115 fuori dalle 3 linee Brianza, ALn668(1000) fuori
+   Valcamonica.
+2. Caso "ATR803 + Cremona": ora rifiutato se il filtro cattura corse
+   non-Coleoni (Cremona-Mantova, ecc.).
+3. Multi-tenant: i nuovi vincoli sono `operativo_deposito_assegnamento`,
+   scope Trenord; per altre aziende vanno reimpostati.
+
+### Limitazioni note / aperti
+
+- **Sub-tratte**: pattern bidir capolinea-capolinea NON copre
+  automaticamente sub-tratte (es. corsa Pavia-Mortara non viene
+  matchata dal pattern `PAVIA.*ALESSANDRIA`). Il pianificatore deve
+  usare filtri più stretti (es. anche `codice_destinazione`).
+  Espandere i pattern a tutte le coppie stazioni della linea sarebbe
+  esplosione combinatoria; soluzione semantica futura (mappa
+  codice_linea → linea logica).
+- **TILO Flirt** (entry 85) ha ancora pattern singolari, non bidir.
+  Funziona perché le stazioni TILO sono distintive (CHIASSO,
+  MALPENSA, LUINO). Lasciato così; rifinire se servirà.
+
+### Prossimo step
+
+Decisione utente: UI consumer dei vincoli (dropdown filtrato),
+oppure altre richieste.
+
+---
+
 ## 2026-05-02 (88) — Chiusura residuo "user lookup": `created_by_username` via JOIN backend
 
 ### Contesto

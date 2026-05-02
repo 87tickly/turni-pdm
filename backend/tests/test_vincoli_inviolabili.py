@@ -64,12 +64,22 @@ _STAZIONI = {
     "ST_GALLARATE": "GALLARATE",
     # Linea Tirano (elettrificata, NO TILO)
     "ST_MICLE": "MILANO CENTRALE",
-    "ST_LECCO": "LECCO",
     "ST_TIRANO": "TIRANO",
     "ST_SONDRIO": "SONDRIO",
     # Linea Bergamo (elettrificata)
     "ST_BERGAMO": "BERGAMO",
     "ST_TREVIGLIO": "TREVIGLIO",
+    # ATR803 deposito (Pavia-Codogno-Cremona-Vercelli-Alessandria-Parma)
+    "ST_PAVIA": "PAVIA",
+    "ST_CODOGNO": "CODOGNO",
+    "ST_CREMONA": "CREMONA",
+    "ST_VERCELLI": "VERCELLI",
+    "ST_ALESSANDRIA": "ALESSANDRIA",
+    "ST_PARMA": "PARMA",
+    # Deposito Lecco (Lecco-Molteno-Como/Mi.P.Gar)
+    "ST_LECCO": "LECCO",
+    "ST_MOLTENO": "MOLTENO",
+    "ST_MIPGAR": "MILANO PORTA GARIBALDI",
 }
 
 
@@ -121,8 +131,10 @@ def test_elettrico_su_brescia_iseo_violazione(vincoli: list[Vincolo]) -> None:
     assert {c["numero_treno"] for c in v.corse_problematiche} == {"R5-001", "R5-002"}
 
 
-def test_diesel_atr803_su_brescia_iseo_ok(vincoli: list[Vincolo]) -> None:
-    """ATR803 (esente: ibrido) su Brescia-Iseo → nessuna violazione."""
+def test_diesel_atr803_su_brescia_iseo_violazione(vincoli: list[Vincolo]) -> None:
+    """ATR803 su Brescia-Iseo (linea del deposito Iseo, NON Coleoni) → violazione
+    del vincolo `operativo_atr803_linee_assegnate` (ATR803 ammesso solo su
+    Brescia-Parma, Pavia-Alessandria, Pavia-Vercelli, Pavia-Codogno-Cremona)."""
     corse = [CorsaMock("R5-100", "ST_BS", "ST_EDOLO")]
     violazioni = valida_regola(
         corse_programma=corse,
@@ -131,7 +143,9 @@ def test_diesel_atr803_su_brescia_iseo_ok(vincoli: list[Vincolo]) -> None:
         filtri=[],
         vincoli=vincoli,
     )
-    assert violazioni == []
+    assert len(violazioni) == 1
+    assert violazioni[0].vincolo_id == "operativo_atr803_linee_assegnate"
+    assert violazioni[0].materiale_tipo_codice == "ATR803"
 
 
 # =====================================================================
@@ -324,14 +338,17 @@ def test_lookup_stazione_mancante_usa_codice_grezzo(
 
 
 def test_carica_vincoli_dal_json_reale() -> None:
-    """Verifica che i 3 vincoli si caricano correttamente dal file canonico."""
+    """Verifica che i 6 vincoli si caricano correttamente dal file canonico."""
     vincoli = carica_vincoli()
-    assert len(vincoli) == 3
+    assert len(vincoli) == 6
     ids = {v.id for v in vincoli}
     assert ids == {
         "tecnico_elettrico_no_linee_diesel",
         "contrattuale_tilo_flirt_524",
         "operativo_treno_dei_sapori_d520",
+        "operativo_atr803_linee_assegnate",
+        "operativo_atr125_atr115_deposito_lecco",
+        "operativo_aln668_deposito_iseo",
     }
     # Vincolo elettrico è blacklist con materiali esenti
     elettrico = next(v for v in vincoli if v.id == "tecnico_elettrico_no_linee_diesel")
@@ -342,3 +359,155 @@ def test_carica_vincoli_dal_json_reale() -> None:
     tilo = next(v for v in vincoli if v.id == "contrattuale_tilo_flirt_524")
     assert tilo.modalita == "whitelist"
     assert tilo.materiale_tipo_codici_target == frozenset({"ETR524"})
+    # Vincolo ATR803 (operativo deposito assegnamento)
+    atr803 = next(v for v in vincoli if v.id == "operativo_atr803_linee_assegnate")
+    assert atr803.materiale_tipo_codici_target == frozenset({"ATR803"})
+    # Vincolo ATR125+ATR115 deposito Lecco
+    lecco = next(v for v in vincoli if v.id == "operativo_atr125_atr115_deposito_lecco")
+    assert lecco.materiale_tipo_codici_target == frozenset({"ATR125", "ATR115"})
+    # Vincolo ALn668 deposito Iseo
+    iseo = next(v for v in vincoli if v.id == "operativo_aln668_deposito_iseo")
+    assert iseo.materiale_tipo_codici_target == frozenset({"ALn668(1000)"})
+
+
+# =====================================================================
+# 4. Vincolo ATR803 (whitelist deposito assegnamento)
+# =====================================================================
+
+
+def test_atr803_su_brescia_parma_ok(vincoli: list[Vincolo]) -> None:
+    """ATR803 su Brescia-Parma (linea ammessa) → nessuna violazione."""
+    corse = [
+        CorsaMock("R-001", "ST_BS", "ST_PARMA"),
+        CorsaMock("R-002", "ST_PARMA", "ST_BS"),
+    ]
+    violazioni = valida_regola(
+        corse_programma=corse,
+        stazioni_lookup=_STAZIONI,
+        composizione=[{"materiale_tipo_codice": "ATR803", "n_pezzi": 1}],
+        filtri=[],
+        vincoli=vincoli,
+    )
+    assert violazioni == []
+
+
+def test_atr803_su_pavia_codogno_cremona_ok(vincoli: list[Vincolo]) -> None:
+    """ATR803 su sub-rotte di Pavia-Codogno-Cremona → tutte ammesse."""
+    corse = [
+        CorsaMock("R-100", "ST_PAVIA", "ST_CREMONA"),
+        CorsaMock("R-101", "ST_PAVIA", "ST_CODOGNO"),
+        CorsaMock("R-102", "ST_CODOGNO", "ST_CREMONA"),
+        CorsaMock("R-103", "ST_PAVIA", "ST_ALESSANDRIA"),
+        CorsaMock("R-104", "ST_PAVIA", "ST_VERCELLI"),
+    ]
+    violazioni = valida_regola(
+        corse_programma=corse,
+        stazioni_lookup=_STAZIONI,
+        composizione=[{"materiale_tipo_codice": "ATR803", "n_pezzi": 1}],
+        filtri=[],
+        vincoli=vincoli,
+    )
+    assert violazioni == []
+
+
+def test_atr803_su_brescia_milano_violazione(vincoli: list[Vincolo]) -> None:
+    """ATR803 su Brescia-Milano (NON in whitelist) → violazione operativa.
+
+    BRESCIA è capolinea ambiguo: appare nel vincolo Brescia-Parma (ammessa),
+    ma una corsa Brescia-Milano deve essere rifiutata. Il pattern bidir
+    'BRESCIA.*PARMA|PARMA.*BRESCIA' garantisce questa precisione."""
+    corse = [CorsaMock("R-X", "ST_BS", "ST_MICLE")]
+    violazioni = valida_regola(
+        corse_programma=corse,
+        stazioni_lookup=_STAZIONI,
+        composizione=[{"materiale_tipo_codice": "ATR803", "n_pezzi": 1}],
+        filtri=[],
+        vincoli=vincoli,
+    )
+    assert len(violazioni) == 1
+    assert violazioni[0].vincolo_id == "operativo_atr803_linee_assegnate"
+
+
+def test_atr803_su_bergamo_violazione(vincoli: list[Vincolo]) -> None:
+    """ATR803 su Bergamo (mai usato lì) → violazione."""
+    corse = [CorsaMock("R-Y", "ST_BERGAMO", "ST_TREVIGLIO")]
+    violazioni = valida_regola(
+        corse_programma=corse,
+        stazioni_lookup=_STAZIONI,
+        composizione=[{"materiale_tipo_codice": "ATR803", "n_pezzi": 1}],
+        filtri=[],
+        vincoli=vincoli,
+    )
+    assert len(violazioni) == 1
+    assert violazioni[0].vincolo_id == "operativo_atr803_linee_assegnate"
+
+
+# =====================================================================
+# 5. Vincolo ATR125 + ATR115 deposito Lecco (whitelist)
+# =====================================================================
+
+
+def test_atr125_su_lecco_molteno_ok(vincoli: list[Vincolo]) -> None:
+    """ATR125 su Lecco-Molteno (deposito Lecco) → nessuna violazione."""
+    corse = [
+        CorsaMock("R-200", "ST_LECCO", "ST_MOLTENO"),
+        CorsaMock("R-201", "ST_MOLTENO", "ST_COMO"),
+        CorsaMock("R-202", "ST_LECCO", "ST_MIPGAR"),
+    ]
+    violazioni = valida_regola(
+        corse_programma=corse,
+        stazioni_lookup=_STAZIONI,
+        composizione=[{"materiale_tipo_codice": "ATR125", "n_pezzi": 1}],
+        filtri=[],
+        vincoli=vincoli,
+    )
+    assert violazioni == []
+
+
+def test_atr115_su_brescia_iseo_violazione(vincoli: list[Vincolo]) -> None:
+    """ATR115 (deposito Lecco) su Brescia-Iseo (deposito Iseo) → violazione."""
+    corse = [CorsaMock("R-300", "ST_BS", "ST_EDOLO")]
+    violazioni = valida_regola(
+        corse_programma=corse,
+        stazioni_lookup=_STAZIONI,
+        composizione=[{"materiale_tipo_codice": "ATR115", "n_pezzi": 1}],
+        filtri=[],
+        vincoli=vincoli,
+    )
+    assert len(violazioni) == 1
+    assert violazioni[0].vincolo_id == "operativo_atr125_atr115_deposito_lecco"
+
+
+# =====================================================================
+# 6. Vincolo ALn668 deposito Iseo (whitelist)
+# =====================================================================
+
+
+def test_aln668_su_brescia_iseo_ok(vincoli: list[Vincolo]) -> None:
+    """ALn668(1000) su Brescia-Iseo (deposito Iseo) → ammesso."""
+    corse = [
+        CorsaMock("R-400", "ST_BS", "ST_EDOLO"),
+        CorsaMock("R-401", "ST_BS", "ST_PISOGNE"),
+    ]
+    violazioni = valida_regola(
+        corse_programma=corse,
+        stazioni_lookup=_STAZIONI,
+        composizione=[{"materiale_tipo_codice": "ALn668(1000)", "n_pezzi": 1}],
+        filtri=[],
+        vincoli=vincoli,
+    )
+    assert violazioni == []
+
+
+def test_aln668_su_brescia_parma_violazione(vincoli: list[Vincolo]) -> None:
+    """ALn668 (deposito Iseo) su Brescia-Parma (deposito ATR803) → violazione."""
+    corse = [CorsaMock("R-500", "ST_BS", "ST_PARMA")]
+    violazioni = valida_regola(
+        corse_programma=corse,
+        stazioni_lookup=_STAZIONI,
+        composizione=[{"materiale_tipo_codice": "ALn668(1000)", "n_pezzi": 1}],
+        filtri=[],
+        vincoli=vincoli,
+    )
+    assert len(violazioni) == 1
+    assert violazioni[0].vincolo_id == "operativo_aln668_deposito_iseo"
