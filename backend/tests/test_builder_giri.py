@@ -565,9 +565,11 @@ async def test_default_solo_n_giornate_omesso(azienda_id: int) -> None:
             session=session,
             azienda_id=azienda_id,
         )
-    # Entrambe le corse cadono in [2026-04-27, 2026-12-31] → 2 giri
-    # (uno per pattern, A1-strict).
-    assert result.n_giri_creati == 2
+    # Sprint 7.7 MR 5: entrambe le corse cadono in [2026-04-27,
+    # 2026-12-31] e producono 2 cluster A1 distinti (sequenze diverse),
+    # ma stessa chiave A2 (materiale, sede, n_giornate=1) → vengono
+    # FUSI in 1 solo giro aggregato con 2 varianti per la giornata 1.
+    assert result.n_giri_creati == 1
 
 
 async def test_giro_scartato_se_nessuna_giornata_in_whitelist(

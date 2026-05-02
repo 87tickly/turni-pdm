@@ -51,6 +51,7 @@ from typing import Any
 from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from colazione.domain.builder_giro.aggregazione_a2 import aggrega_a2
 from colazione.domain.builder_giro.catena import costruisci_catene
 from colazione.domain.builder_giro.composizione import (
     GiroAssegnato,
@@ -67,7 +68,6 @@ from colazione.domain.builder_giro.persister import (
     GiroDaPersistere,
     LocalitaNonTrovataError,
     persisti_giri,
-    primo_tipo_materiale,
 )
 from colazione.domain.builder_giro.posizionamento import (
     CatenaPosizionata,
@@ -860,49 +860,43 @@ async def genera_giri(
     #    accoppiamenti via callback)
     giri_assegnati = assegna_e_rileva_eventi(giri_dom, regole, is_accoppiamento_ammesso)
 
-    # 6. Strict mode pre-persistenza
+    # 6. Strict mode pre-persistenza (sui giri pre-aggregazione)
     _check_strict_mode(programma, giri_assegnati)
 
-    # 7. Genera numero_turno + persisti.
-    # Sprint 7.7 MR 1 (Fix C "rientro intelligente"): genera_rientro_sede è
-    # ora SEMPRE True. La logica di chiusura "naturale vs vuoto breve vs
-    # giro non chiuso" è demandata al persister, che decide in base alla
-    # destinazione dell'ultima giornata:
-    # - se in whitelist sede ≠ stazione_sede → genera vuoto BREVE di
-    #   rientro (es. CADORNA → CERTOSA);
-    # - se = stazione_sede → niente vuoto (chiusura naturale);
-    # - se fuori whitelist → niente vuoto, giro resta "non chiuso"
-    #   con motivo `non_chiuso` + warning. MAI vuoti lunghi tipo
-    #   COLICO → CERTOSA (decisione utente 2026-05-02).
-    # Sprint 7.7 MR 3: per ogni giro calcoliamo l'etichetta parlante
-    # (feriale/sabato/domenica/festivo/data_specifica/personalizzata)
-    # dalle date di applicazione del giro intero. Il persister la
-    # popola in ``GiroMateriale.etichetta_tipo`` + ``etichetta_dettaglio``.
+    # 7. Aggregazione A2 (Sprint 7.7 MR 5, decisione utente "B1"):
+    #    fonde più cluster A1 in cicli materiali aggregati per chiave
+    #    ``(materiale_tipo_codice, localita_codice, n_giornate)``.
+    #    Le sequenze diverse di una stessa giornata-tipo emergono come
+    #    varianti calendariali per quella giornata.
+    giri_aggregati = aggrega_a2(giri_assegnati)
+
+    # 8. Genera numero_turno + persisti.
+    # Sprint 7.7 MR 1 (Fix C "rientro intelligente"): genera_rientro_sede
+    # è SEMPRE True; il persister decide in base alla destinazione
+    # dell'ultima variante dell'ultima giornata (vedi persister.py).
+    # Sprint 7.7 MR 4: numero_turno include il materiale
+    # (``G-{LOC}-{SEQ}-{MAT}``).
     giri_da_persistere: list[GiroDaPersistere] = []
-    for idx, giro_a in enumerate(giri_assegnati, start=1):
-        etichetta_tipo, etichetta_dettaglio = calcola_etichetta_giro(
-            (g.dates_apply_or_data for g in giro_a.giornate),
-            festivita,
-        )
-        # Sprint 7.7 MR 4 (decisione utente 2026-05-02): suffisso
-        # ``-{materiale}`` al numero turno, es. ``G-FIO-001-ETR204``.
-        # Aiuta il pianificatore a capire al volo "che convoglio è
-        # questo giro". Per giri senza composizione assegnata
-        # (residui) il fallback è "MISTO".
-        materiale_codice = primo_tipo_materiale(giro_a) or "MISTO"
+    for idx, giro_agg in enumerate(giri_aggregati, start=1):
         numero_turno = (
-            f"G-{localita.codice_breve}-{idx:03d}-{materiale_codice}"
+            f"G-{localita.codice_breve}-{idx:03d}-{giro_agg.materiale_tipo_codice}"
         )
         giri_da_persistere.append(
             GiroDaPersistere(
                 numero_turno=numero_turno,
-                giro=giro_a,
-                etichetta_tipo=etichetta_tipo,
-                etichetta_dettaglio=etichetta_dettaglio,
+                giro=giro_agg,
                 genera_rientro_sede=True,
                 whitelist_sede=whitelist,
             )
         )
+    # Sprint 7.7 MR 3 reimpiegato (etichetta calcolata sull'AGGREGATO):
+    # oggi non più persistita (modello varianti per giornata supersede
+    # l'etichetta-su-giro). ``calcola_etichetta_giro`` resta esposta ma
+    # inutilizzata in questo orchestrator. Le festività restano caricate
+    # per consumi futuri (es. annotazioni varianti UI).
+    _ = festivita  # noqa: F841 (reservato per uso futuro)
+    _ = calcola_etichetta_giro  # noqa: F841 (export pubblico mantenuto)
+
     giro_ids = await persisti_giri(
         giri_da_persistere,
         session,
@@ -913,12 +907,16 @@ async def genera_giri(
     )
     await session.commit()
 
-    # 8. Stats
-    n_corse_processate = sum(len(gg.blocchi_assegnati) for g in giri_assegnati for gg in g.giornate)
+    # 9. Stats: sui giri AGGREGATI per il count "giri creati", e sui
+    #    giri ASSEGNATI (pre-aggregazione) per metriche di produzione
+    #    (corse processate, residue, eventi).
+    n_corse_processate = sum(
+        len(gg.blocchi_assegnati) for g in giri_assegnati for gg in g.giornate
+    )
     n_corse_residue = sum(len(g.corse_residue) for g in giri_assegnati)
-    n_giri_chiusi = sum(1 for g in giri_assegnati if g.chiuso)
-    n_giri_non_chiusi = sum(1 for g in giri_assegnati if not g.chiuso)
-    n_giri_km_cap = sum(1 for g in giri_assegnati if g.motivo_chiusura == "km_cap")
+    n_giri_chiusi = sum(1 for g in giri_aggregati if g.chiuso)
+    n_giri_non_chiusi = sum(1 for g in giri_aggregati if not g.chiuso)
+    n_giri_km_cap = sum(1 for g in giri_aggregati if g.motivo_chiusura == "km_cap")
     n_eventi = sum(len(gg.eventi_composizione) for g in giri_assegnati for gg in g.giornate)
     n_incompat = sum(len(g.incompatibilita_materiale) for g in giri_assegnati)
 

@@ -45,10 +45,11 @@ from colazione.domain.builder_giro import (
     GiroDaPersistere,
     LocalitaNonTrovataError,
     persisti_giri,
+    wrap_assegnato_in_aggregato,
 )
 from colazione.models.anagrafica import LocalitaManutenzione, Stazione
 from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
-from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale
+from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
 from colazione.models.programmi import ProgrammaMateriale
 
 pytestmark = pytest.mark.skipif(
@@ -326,7 +327,7 @@ async def test_un_giro_una_corsa_ORM_creati(
             corse_orm=(corsa,),
         )
         ids = await persisti_giri(
-            [GiroDaPersistere(numero_turno="G-FIO-001", giro=giro)],
+            [GiroDaPersistere(numero_turno="G-FIO-001", giro=wrap_assegnato_in_aggregato(giro))],
             session,
             programma_id=programma_test_id,
             azienda_id=azienda_id,
@@ -347,13 +348,13 @@ async def test_un_giro_una_corsa_ORM_creati(
         assert gm.localita_manutenzione_arrivo_id == loc_id
         assert gm.stato == "bozza"
         # generation_metadata_json popolato
-        assert gm.generation_metadata_json["persister_version"] == "7.7.3"
+        assert gm.generation_metadata_json["persister_version"] == "7.7.5"
         assert gm.generation_metadata_json["motivo_chiusura"] == "naturale"
         assert gm.generation_metadata_json["chiuso"] is True
-        # Sprint 7.7 MR 3: etichetta calcolata. Per il default
-        # `GiroDaPersistere(...)` (senza specificare etichetta_tipo) il
-        # builder mette `personalizzata`.
-        assert gm.etichetta_tipo == "personalizzata"
+        # Sprint 7.7 MR 5: niente più etichetta_tipo sul giro;
+        # tracciabilità varianti via metadata_json.
+        assert gm.generation_metadata_json["n_cluster_a1"] == 1
+        assert gm.generation_metadata_json["n_varianti_per_giornata"] == [1]
 
         gg = (
             (
@@ -366,15 +367,26 @@ async def test_un_giro_una_corsa_ORM_creati(
         )
         assert len(gg) == 1
         assert gg[0].numero_giornata == 1
-        # Sprint 7.7 MR 3: validità ora vivono su giornata.
-        assert gg[0].dates_apply_json == ["2026-04-27"]
-        assert gg[0].dates_skip_json == []
+        # Sprint 7.7 MR 5: validità su variante (non più su giornata).
+        gv = (
+            (
+                await session.execute(
+                    select(GiroVariante).where(GiroVariante.giro_giornata_id == gg[0].id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(gv) == 1
+        assert gv[0].variant_index == 0
+        assert gv[0].dates_apply_json == ["2026-04-27"]
+        assert gv[0].dates_skip_json == []
 
         blocchi = (
             (
                 await session.execute(
                     select(GiroBlocco)
-                    .where(GiroBlocco.giro_giornata_id == gg[0].id)
+                    .where(GiroBlocco.giro_variante_id == gv[0].id)
                     .order_by(GiroBlocco.seq)
                 )
             )
@@ -400,7 +412,7 @@ async def test_localita_non_trovata_raises(
     async with session_scope() as session:
         with pytest.raises(LocalitaNonTrovataError) as exc_info:
             await persisti_giri(
-                [GiroDaPersistere(numero_turno="G-X-001", giro=giro)],
+                [GiroDaPersistere(numero_turno="G-X-001", giro=wrap_assegnato_in_aggregato(giro))],
                 session,
                 programma_id=programma_test_id,
                 azienda_id=azienda_id,
@@ -441,7 +453,7 @@ async def test_vuoto_testa_genera_corsa_materiale_vuoto_e_blocco(
             vuoto_testa=vuoto_testa,
         )
         ids = await persisti_giri(
-            [GiroDaPersistere(numero_turno="G-FIO-002", giro=giro)],
+            [GiroDaPersistere(numero_turno="G-FIO-002", giro=wrap_assegnato_in_aggregato(giro))],
             session,
             programma_id=programma_test_id,
             azienda_id=azienda_id,
@@ -472,7 +484,8 @@ async def test_vuoto_testa_genera_corsa_materiale_vuoto_e_blocco(
             (
                 await session.execute(
                     select(GiroBlocco)
-                    .join(GiroGiornata, GiroBlocco.giro_giornata_id == GiroGiornata.id)
+                    .join(GiroVariante, GiroBlocco.giro_variante_id == GiroVariante.id)
+                    .join(GiroGiornata, GiroVariante.giro_giornata_id == GiroGiornata.id)
                     .where(GiroGiornata.giro_materiale_id == gm_id)
                     .order_by(GiroBlocco.seq)
                 )
@@ -513,7 +526,7 @@ async def test_vuoto_coda_genera_corsa_materiale_vuoto_e_blocco(
             vuoto_coda=vuoto_coda,
         )
         ids = await persisti_giri(
-            [GiroDaPersistere(numero_turno="G-FIO-003", giro=giro)],
+            [GiroDaPersistere(numero_turno="G-FIO-003", giro=wrap_assegnato_in_aggregato(giro))],
             session,
             programma_id=programma_test_id,
             azienda_id=azienda_id,
@@ -525,7 +538,8 @@ async def test_vuoto_coda_genera_corsa_materiale_vuoto_e_blocco(
             (
                 await session.execute(
                     select(GiroBlocco)
-                    .join(GiroGiornata, GiroBlocco.giro_giornata_id == GiroGiornata.id)
+                    .join(GiroVariante, GiroBlocco.giro_variante_id == GiroVariante.id)
+                    .join(GiroGiornata, GiroVariante.giro_giornata_id == GiroGiornata.id)
                     .where(GiroGiornata.giro_materiale_id == gm_id)
                     .order_by(GiroBlocco.seq)
                 )
@@ -573,7 +587,7 @@ async def test_evento_aggancio_3_a_6_inserito_tra_blocchi(
             pezzi_per_corsa=(3, 6),
         )
         ids = await persisti_giri(
-            [GiroDaPersistere(numero_turno="G-FIO-004", giro=giro)],
+            [GiroDaPersistere(numero_turno="G-FIO-004", giro=wrap_assegnato_in_aggregato(giro))],
             session,
             programma_id=programma_test_id,
             azienda_id=azienda_id,
@@ -585,7 +599,8 @@ async def test_evento_aggancio_3_a_6_inserito_tra_blocchi(
             (
                 await session.execute(
                     select(GiroBlocco)
-                    .join(GiroGiornata, GiroBlocco.giro_giornata_id == GiroGiornata.id)
+                    .join(GiroVariante, GiroBlocco.giro_variante_id == GiroVariante.id)
+                    .join(GiroGiornata, GiroVariante.giro_giornata_id == GiroGiornata.id)
                     .where(GiroGiornata.giro_materiale_id == gm_id)
                     .order_by(GiroBlocco.seq)
                 )
@@ -634,7 +649,7 @@ async def test_sequenza_3_6_3_genera_aggancio_e_sgancio(
             pezzi_per_corsa=(3, 6, 3),
         )
         ids = await persisti_giri(
-            [GiroDaPersistere(numero_turno="G-FIO-005", giro=giro)],
+            [GiroDaPersistere(numero_turno="G-FIO-005", giro=wrap_assegnato_in_aggregato(giro))],
             session,
             programma_id=programma_test_id,
             azienda_id=azienda_id,
@@ -646,7 +661,8 @@ async def test_sequenza_3_6_3_genera_aggancio_e_sgancio(
             (
                 await session.execute(
                     select(GiroBlocco)
-                    .join(GiroGiornata, GiroBlocco.giro_giornata_id == GiroGiornata.id)
+                    .join(GiroVariante, GiroBlocco.giro_variante_id == GiroVariante.id)
+                    .join(GiroGiornata, GiroVariante.giro_giornata_id == GiroGiornata.id)
                     .where(GiroGiornata.giro_materiale_id == gm_id)
                     .order_by(GiroBlocco.seq)
                 )
@@ -745,7 +761,7 @@ async def test_due_giornate_due_GiroGiornata_con_dates_apply(
             motivo_chiusura="naturale",
         )
         ids = await persisti_giri(
-            [GiroDaPersistere(numero_turno="G-FIO-006", giro=giro)],
+            [GiroDaPersistere(numero_turno="G-FIO-006", giro=wrap_assegnato_in_aggregato(giro))],
             session,
             programma_id=programma_test_id,
             azienda_id=azienda_id,
@@ -773,10 +789,19 @@ async def test_due_giornate_due_GiroGiornata_con_dates_apply(
         assert giornate[0].numero_giornata == 1
         assert giornate[1].numero_giornata == 2
 
-        # Sprint 7.7 MR 3: ogni giornata ha le sue dates_apply_json
-        # direttamente (no più step intermedio variante).
-        assert giornate[0].dates_apply_json == ["2026-04-27"]
-        assert giornate[1].dates_apply_json == ["2026-04-28"]
+        # Sprint 7.7 MR 5: ogni giornata ha la sua variante canonica
+        # con le date di applicazione.
+        for gg, expected_date in zip(
+            giornate, ["2026-04-27", "2026-04-28"], strict=True
+        ):
+            gv = (
+                await session.execute(
+                    select(GiroVariante).where(
+                        GiroVariante.giro_giornata_id == gg.id
+                    )
+                )
+            ).scalar_one()
+            assert gv.dates_apply_json == [expected_date]
 
 
 # =====================================================================
@@ -815,8 +840,8 @@ async def test_due_giri_due_id_in_ordine(
         )
         ids = await persisti_giri(
             [
-                GiroDaPersistere(numero_turno="G-FIO-007", giro=giro1),
-                GiroDaPersistere(numero_turno="G-FIO-008", giro=giro2),
+                GiroDaPersistere(numero_turno="G-FIO-007", giro=wrap_assegnato_in_aggregato(giro1)),
+                GiroDaPersistere(numero_turno="G-FIO-008", giro=wrap_assegnato_in_aggregato(giro2)),
             ],
             session,
             programma_id=programma_test_id,
@@ -868,7 +893,7 @@ async def test_giro_senza_blocchi_assegnati_tipo_materiale_misto(
     )
     async with session_scope() as session:
         ids = await persisti_giri(
-            [GiroDaPersistere(numero_turno="G-FIO-009", giro=giro)],
+            [GiroDaPersistere(numero_turno="G-FIO-009", giro=wrap_assegnato_in_aggregato(giro))],
             session,
             programma_id=programma_test_id,
             azienda_id=azienda_id,
@@ -891,8 +916,8 @@ async def test_giro_senza_blocchi_assegnati_tipo_materiale_misto(
 async def test_persister_version_costante() -> None:
     from colazione.domain.builder_giro.persister import PERSISTER_VERSION
 
-    # Sprint 7.7 MR 3: bumped da "4.4.5a" a "7.7.3" col refactor varianti.
-    assert PERSISTER_VERSION == "7.7.3"
+    # Sprint 7.7 MR 5: bumped a "7.7.5" (re-introduzione varianti A2).
+    assert PERSISTER_VERSION == "7.7.5"
 
 
 async def test_giro_da_persistere_dataclass_smoke() -> None:
@@ -903,9 +928,13 @@ async def test_giro_da_persistere_dataclass_smoke() -> None:
         chiuso=False,
         motivo_chiusura="non_chiuso",
     )
-    entry = GiroDaPersistere(numero_turno="G-X-001", giro=giro)
+    aggregato = wrap_assegnato_in_aggregato(giro)
+    entry = GiroDaPersistere(numero_turno="G-X-001", giro=aggregato)
     assert entry.numero_turno == "G-X-001"
-    assert entry.giro is giro
+    # Sprint 7.7 MR 5: il giro persistito è ``GiroAggregato``, non più
+    # ``GiroAssegnato``.
+    assert entry.giro is aggregato
+    assert entry.giro.localita_codice == "X"
     assert entry.genera_rientro_sede is False  # default Sprint 5.6
 
 
@@ -985,7 +1014,7 @@ async def test_persister_popola_km_media_giornaliera(azienda_id: int) -> None:
             chiusa=True,
         )
         await persisti_giri(
-            [GiroDaPersistere(numero_turno="G-TST-001", giro=giro)],
+            [GiroDaPersistere(numero_turno="G-TST-001", giro=wrap_assegnato_in_aggregato(giro))],
             session,
             prog_id,
             azienda_id,
@@ -1003,23 +1032,19 @@ async def test_persister_popola_km_media_giornaliera(azienda_id: int) -> None:
 
 
 async def test_persister_popola_km_media_annua(azienda_id: int) -> None:
-    """Sprint 5.6 R3: km_media_annua = km_giornaliera * n_giorni_validi
-    nel periodo del programma. Calcolato intersecando `valido_in_date_json`
-    della prima corsa di ogni giornata con [periodo_valido_da, ..._a]."""
+    """Sprint 7.7 MR 5: km_media_annua = somma su tutte le varianti di
+    ``km_giornata × len(dates_apply ∩ periodo)``. Test: 1 giornata con
+    1 variante che si applica a 5 date → 100 km × 5 = 500 km/anno.
+    """
     await _crea_stazione("S99001", azienda_id)
     await _crea_stazione("S99002", azienda_id)
     await _crea_localita("TEST_LOC_FIO", "S99001", azienda_id)
     c1 = await _crea_corsa("TEST_AN_001", "S99001", "S99002", (8, 0), (9, 0), azienda_id)
 
-    # Inietto km_tratta + valido_in_date_json (5 lunedì)
+    # Inietto km_tratta sulla corsa.
     async with session_scope() as session:
         await session.execute(
-            text(
-                "UPDATE corsa_commerciale SET km_tratta = 100, "
-                "valido_in_date_json = '[\"2026-01-05\",\"2026-01-12\",\"2026-01-19\","
-                "\"2026-01-26\",\"2026-02-02\"]'::jsonb "
-                "WHERE id = :c1"
-            ),
+            text("UPDATE corsa_commerciale SET km_tratta = 100 WHERE id = :c1"),
             {"c1": c1},
         )
 
@@ -1033,8 +1058,28 @@ async def test_persister_popola_km_media_annua(azienda_id: int) -> None:
             corse_orm=(c1_orm,),
             chiusa=True,
         )
+        # Sprint 7.7 MR 5: la variante deve avere `dates_apply` esplicito
+        # con le 5 date del calendario (post-clustering A1). Costruisco
+        # manualmente il GiroAggregato.
+        gnata_origine = giro.giornate[0]
+        gnata_con_dates = dataclasses.replace(
+            gnata_origine,
+            dates_apply=(
+                date(2026, 1, 5),
+                date(2026, 1, 12),
+                date(2026, 1, 19),
+                date(2026, 1, 26),
+                date(2026, 2, 2),
+            ),
+        )
+        giro_con_dates = dataclasses.replace(giro, giornate=(gnata_con_dates,))
         await persisti_giri(
-            [GiroDaPersistere(numero_turno="G-TST-AN", giro=giro)],
+            [
+                GiroDaPersistere(
+                    numero_turno="G-TST-AN",
+                    giro=wrap_assegnato_in_aggregato(giro_con_dates),
+                )
+            ],
             session,
             prog_id,
             azienda_id,
@@ -1049,7 +1094,7 @@ async def test_persister_popola_km_media_annua(azienda_id: int) -> None:
                 select(GiroMateriale).where(GiroMateriale.numero_turno == "G-TST-AN")
             )
         ).scalar_one()
-        # 100 km/giornata × 5 giorni applicabili = 500 km/anno
+        # 100 km/giornata × 5 date applicabili = 500 km/anno
         assert gm.km_media_annua == 500.0
 
 
@@ -1077,7 +1122,7 @@ async def test_persister_corsa_rientro_9xxxx_se_genera_rientro_sede(azienda_id: 
             [
                 GiroDaPersistere(
                     numero_turno="G-TST-R9",
-                    giro=giro,
+                    giro=wrap_assegnato_in_aggregato(giro),
                     genera_rientro_sede=True,
                     # Sprint 7.7 MR 1 (Fix C): la whitelist DEVE includere
                     # l'ultima destinazione del giro per permettere il
@@ -1173,7 +1218,7 @@ async def test_dates_apply_post_cluster_persistito_in_validita_dates_apply_json(
         )
 
         ids = await persisti_giri(
-            [GiroDaPersistere(numero_turno="G-DA-001", giro=giro)],
+            [GiroDaPersistere(numero_turno="G-DA-001", giro=wrap_assegnato_in_aggregato(giro))],
             session,
             programma_id=programma_test_id,
             azienda_id=azienda_id,
@@ -1186,7 +1231,12 @@ async def test_dates_apply_post_cluster_persistito_in_validita_dates_apply_json(
                 select(GiroGiornata).where(GiroGiornata.giro_materiale_id == gm_id)
             )
         ).scalar_one()
-        assert gg.dates_apply_json == [
+        gv = (
+            await session.execute(
+                select(GiroVariante).where(GiroVariante.giro_giornata_id == gg.id)
+            )
+        ).scalar_one()
+        assert gv.dates_apply_json == [
             "2026-04-27",
             "2026-05-04",
             "2026-05-11",
@@ -1216,7 +1266,7 @@ async def test_dates_apply_vuoto_pre_cluster_fallback_a_data_giorno(
             data_giorno=date(2026, 6, 1),
         )
         ids = await persisti_giri(
-            [GiroDaPersistere(numero_turno="G-DB-001", giro=giro)],
+            [GiroDaPersistere(numero_turno="G-DB-001", giro=wrap_assegnato_in_aggregato(giro))],
             session,
             programma_id=programma_test_id,
             azienda_id=azienda_id,
@@ -1229,4 +1279,9 @@ async def test_dates_apply_vuoto_pre_cluster_fallback_a_data_giorno(
                 select(GiroGiornata).where(GiroGiornata.giro_materiale_id == gm_id)
             )
         ).scalar_one()
-        assert gg.dates_apply_json == ["2026-06-01"]
+        gv = (
+            await session.execute(
+                select(GiroVariante).where(GiroVariante.giro_giornata_id == gg.id)
+            )
+        ).scalar_one()
+        assert gv.dates_apply_json == ["2026-06-01"]

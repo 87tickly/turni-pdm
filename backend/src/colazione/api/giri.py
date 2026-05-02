@@ -44,7 +44,7 @@ from colazione.domain.builder_giro.persister import LocalitaNonTrovataError
 from colazione.domain.builder_giro.risolvi_corsa import RegolaAmbiguaError
 from colazione.models.anagrafica import Stazione
 from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
-from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale
+from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
 from colazione.schemas.security import CurrentUser
 
 router = APIRouter(prefix="/api/programmi", tags=["giri"])
@@ -186,7 +186,13 @@ async def genera_giri_endpoint(
 
 
 class GiroMaterialeListItem(BaseModel):
-    """Item della lista giri di un programma (compatto, per tabella UI)."""
+    """Item della lista giri di un programma (compatto, per tabella UI).
+
+    Sprint 7.7 MR 5: rimossi ``etichetta_tipo``/``etichetta_dettaglio``
+    (concetto MR 3 superseded — ora le etichette vivono per variante).
+    Nuovo campo ``n_varianti_totale`` come hint UI per "questo giro ha
+    varianti calendariali per giornata".
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -200,11 +206,9 @@ class GiroMaterialeListItem(BaseModel):
     motivo_chiusura: str | None
     chiuso: bool
     stato: str
-    # Sprint 7.7 MR 3: etichetta parlante calcolata dal builder
-    # (feriale | sabato | domenica | festivo | data_specifica |
-    # personalizzata) + dettaglio leggibile (es. data DD/MM/YYYY).
-    etichetta_tipo: str
-    etichetta_dettaglio: str | None
+    # Sprint 7.7 MR 5: somma di tutte le varianti del giro
+    # (= sum(len(varianti) for giornata in giornate)).
+    n_varianti_totale: int
     created_at: datetime
 
 
@@ -227,12 +231,6 @@ class GiroBloccoRead(BaseModel):
     stazione_da_nome: str | None
     stazione_a_nome: str | None
     numero_treno: str | None
-    # Sprint 7.3: trasparenza varianti. Trenord usa lo stesso numero_treno
-    # per N corse "varianti" (origini/orari/periodi diversi). Qui esponiamo
-    # quale variante è questa (1-based per `valido_da`) e il totale, così
-    # la UI può mostrare "treno 2413 · variante 5/16".
-    numero_treno_variante_indice: int | None
-    numero_treno_variante_totale: int | None
     ora_inizio: time | None
     ora_fine: time | None
     descrizione: str | None
@@ -240,26 +238,43 @@ class GiroBloccoRead(BaseModel):
     metadata_json: dict[str, Any]
 
 
+class GiroVarianteRead(BaseModel):
+    """Sprint 7.7 MR 5: una variante calendariale di una giornata-tipo.
+
+    Più varianti per la stessa giornata significano "in periodi diversi
+    il convoglio fa percorsi diversi" (modello PDF Trenord 1134).
+    L'``etichetta_parlante`` è calcolata server-side da
+    ``validita_testo`` + ``len(dates_apply_json)``, esempio:
+    ``"LV 1:5 · 12 date"``.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    variant_index: int
+    validita_testo: str | None
+    dates_apply_json: list[Any]
+    dates_skip_json: list[Any]
+    etichetta_parlante: str
+    blocchi: list[GiroBloccoRead]
+
+
 class GiroGiornataRead(BaseModel):
     """Giornata di un giro (1..numero_giornate).
 
-    Sprint 7.7 MR 3: assorbe i campi di validità che stavano su
-    GiroVariante (oggetto rimosso). I blocchi sono direttamente sotto
-    la giornata.
+    Sprint 7.7 MR 5: ``varianti`` torna come lista ordinata per
+    ``variant_index`` (canonica = index 0).
     """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     numero_giornata: int
-    # Sprint 7.6 MR 3.2: somma km_tratta delle corse commerciali della
-    # giornata. None se nessuna corsa con km_tratta o giornata pre-MR3.2.
+    # Sprint 7.6 MR 3.2 / 7.7 MR 5: somma km_tratta della VARIANTE
+    # CANONICA (= variant_index=0) della giornata. None se nessuna
+    # corsa con km.
     km_giornata: float | None = None
-    # Sprint 7.7 MR 3: campi era-su-variante.
-    validita_testo: str | None = None
-    dates_apply_json: list[Any] = []
-    dates_skip_json: list[Any] = []
-    blocchi: list[GiroBloccoRead]
+    varianti: list[GiroVarianteRead]
 
 
 class GiroMaterialeDettaglioRead(BaseModel):
@@ -277,9 +292,6 @@ class GiroMaterialeDettaglioRead(BaseModel):
     localita_manutenzione_partenza_id: int | None
     localita_manutenzione_arrivo_id: int | None
     stato: str
-    # Sprint 7.7 MR 3: etichetta parlante.
-    etichetta_tipo: str
-    etichetta_dettaglio: str | None
     generation_metadata_json: dict[str, Any]
     created_at: datetime
     updated_at: datetime
@@ -315,6 +327,14 @@ async def list_giri_programma(
     out: list[GiroMaterialeListItem] = []
     for g in rows:
         meta = g.generation_metadata_json or {}
+        # Sprint 7.7 MR 5: leggo il count delle varianti dal metadata
+        # tracciato dal persister; fallback 0 se assente.
+        n_varianti_per_giornata = meta.get("n_varianti_per_giornata") or []
+        n_varianti_totale = (
+            sum(int(x) for x in n_varianti_per_giornata)
+            if isinstance(n_varianti_per_giornata, list)
+            else 0
+        )
         out.append(
             GiroMaterialeListItem(
                 id=g.id,
@@ -327,8 +347,7 @@ async def list_giri_programma(
                 motivo_chiusura=meta.get("motivo_chiusura"),
                 chiuso=bool(meta.get("chiuso", False)),
                 stato=g.stato,
-                etichetta_tipo=g.etichetta_tipo,
-                etichetta_dettaglio=g.etichetta_dettaglio,
+                n_varianti_totale=n_varianti_totale,
                 created_at=g.created_at,
             )
         )
@@ -387,6 +406,12 @@ async def list_giri_azienda(
     out: list[GiroMaterialeListItem] = []
     for g in rows:
         meta = g.generation_metadata_json or {}
+        n_varianti_per_giornata = meta.get("n_varianti_per_giornata") or []
+        n_varianti_totale = (
+            sum(int(x) for x in n_varianti_per_giornata)
+            if isinstance(n_varianti_per_giornata, list)
+            else 0
+        )
         out.append(
             GiroMaterialeListItem(
                 id=g.id,
@@ -401,8 +426,7 @@ async def list_giri_azienda(
                 motivo_chiusura=meta.get("motivo_chiusura"),
                 chiuso=bool(meta.get("chiuso", False)),
                 stato=g.stato,
-                etichetta_tipo=g.etichetta_tipo,
-                etichetta_dettaglio=g.etichetta_dettaglio,
+                n_varianti_totale=n_varianti_totale,
                 created_at=g.created_at,
             )
         )
@@ -439,14 +463,25 @@ async def get_giro_dettaglio(
     giornate_orm = (await session.execute(gg_stmt)).scalars().all()
     giornata_ids = [gg.id for gg in giornate_orm]
 
-    # Sprint 7.7 MR 3: i blocchi puntano direttamente alla giornata
-    # (drop di GiroVariante). 1 query con order_by (giornata, seq).
-    blocchi_orm: list[GiroBlocco] = []
+    # Sprint 7.7 MR 5: schema giro→giornate→varianti→blocchi.
+    # Step 1: carica le varianti di tutte le giornate.
+    varianti_orm: list[GiroVariante] = []
     if giornata_ids:
+        gv_stmt = (
+            select(GiroVariante)
+            .where(GiroVariante.giro_giornata_id.in_(giornata_ids))
+            .order_by(GiroVariante.giro_giornata_id, GiroVariante.variant_index)
+        )
+        varianti_orm = list((await session.execute(gv_stmt)).scalars().all())
+    variante_ids = [gv.id for gv in varianti_orm]
+
+    # Step 2: carica i blocchi di tutte le varianti.
+    blocchi_orm: list[GiroBlocco] = []
+    if variante_ids:
         gb_stmt = (
             select(GiroBlocco)
-            .where(GiroBlocco.giro_giornata_id.in_(giornata_ids))
-            .order_by(GiroBlocco.giro_giornata_id, GiroBlocco.seq)
+            .where(GiroBlocco.giro_variante_id.in_(variante_ids))
+            .order_by(GiroBlocco.giro_variante_id, GiroBlocco.seq)
         )
         blocchi_orm = list((await session.execute(gb_stmt)).scalars().all())
 
@@ -473,48 +508,6 @@ async def get_giro_dettaglio(
         )
         numero_treno_corsa = dict((await session.execute(cc_stmt)).tuples().all())
 
-    # Sprint 7.3: trasparenza varianti. Per i numero_treno coinvolti nei
-    # blocchi del giro, calcola (totale_varianti, indice_variante) di
-    # ogni corsa via window function. Lo stesso `numero_treno` può
-    # avere N corse con origine/orario/periodo diversi (Trenord); qui
-    # ordiniamo per (valido_da, id) e numeriamo 1-based.
-    varianti_per_corsa: dict[int, tuple[int, int]] = {}
-    if numero_treno_corsa:
-        numeri_treno = set(numero_treno_corsa.values())
-        cnt_subq = (
-            select(
-                CorsaCommerciale.numero_treno,
-                func.count().label("totale"),
-            )
-            .where(
-                CorsaCommerciale.azienda_id == user.azienda_id,
-                CorsaCommerciale.numero_treno.in_(numeri_treno),
-            )
-            .group_by(CorsaCommerciale.numero_treno)
-            .subquery()
-        )
-        var_stmt = (
-            select(
-                CorsaCommerciale.id,
-                cnt_subq.c.totale,
-                func.row_number()
-                .over(
-                    partition_by=CorsaCommerciale.numero_treno,
-                    order_by=(CorsaCommerciale.valido_da, CorsaCommerciale.id),
-                )
-                .label("indice"),
-            )
-            .join(cnt_subq, cnt_subq.c.numero_treno == CorsaCommerciale.numero_treno)
-            .where(
-                CorsaCommerciale.azienda_id == user.azienda_id,
-                CorsaCommerciale.numero_treno.in_(numeri_treno),
-            )
-        )
-        for row in (await session.execute(var_stmt)).all():
-            cid, tot, idx = row
-            if cid in corsa_ids:
-                varianti_per_corsa[cid] = (int(idx), int(tot))
-
     vuoto_ids = {
         b.corsa_materiale_vuoto_id for b in blocchi_orm if b.corsa_materiale_vuoto_id is not None
     }
@@ -527,13 +520,8 @@ async def get_giro_dettaglio(
 
     def _to_blocco_read(b: GiroBlocco) -> GiroBloccoRead:
         num: str | None = None
-        idx_var: int | None = None
-        tot_var: int | None = None
         if b.corsa_commerciale_id is not None:
             num = numero_treno_corsa.get(b.corsa_commerciale_id)
-            par = varianti_per_corsa.get(b.corsa_commerciale_id)
-            if par is not None:
-                idx_var, tot_var = par
         elif b.corsa_materiale_vuoto_id is not None:
             num = numero_treno_vuoto.get(b.corsa_materiale_vuoto_id)
         return GiroBloccoRead(
@@ -551,8 +539,6 @@ async def get_giro_dettaglio(
                 nome_stazione.get(b.stazione_a_codice) if b.stazione_a_codice else None
             ),
             numero_treno=num,
-            numero_treno_variante_indice=idx_var,
-            numero_treno_variante_totale=tot_var,
             ora_inizio=b.ora_inizio,
             ora_fine=b.ora_fine,
             descrizione=b.descrizione,
@@ -560,20 +546,46 @@ async def get_giro_dettaglio(
             metadata_json=dict(b.metadata_json or {}),
         )
 
-    # Sprint 7.7 MR 3: blocchi raggruppati direttamente per giornata.
-    blocchi_per_giornata: dict[int, list[GiroBloccoRead]] = {}
+    def _etichetta_parlante(v: GiroVariante) -> str:
+        """Etichetta variante calcolata server-side.
+
+        Format: ``"{validita_testo} · {n_dates} date"``. Per
+        ``validita_testo`` vuoto/None usa fallback ``"GG"``.
+        Singolo giorno → "1 data" (senza "e" finale).
+        """
+        testo = (v.validita_testo or "").strip() or "GG"
+        n_dates = len(v.dates_apply_json or [])
+        if n_dates == 0:
+            return testo
+        unita = "data" if n_dates == 1 else "date"
+        return f"{testo} · {n_dates} {unita}"
+
+    # Sprint 7.7 MR 5: blocchi raggruppati per variante; varianti
+    # raggruppate per giornata.
+    blocchi_per_variante: dict[int, list[GiroBloccoRead]] = {}
     for b in blocchi_orm:
-        blocchi_per_giornata.setdefault(b.giro_giornata_id, []).append(_to_blocco_read(b))
+        blocchi_per_variante.setdefault(b.giro_variante_id, []).append(_to_blocco_read(b))
+
+    varianti_per_giornata: dict[int, list[GiroVarianteRead]] = {}
+    for gv in varianti_orm:
+        varianti_per_giornata.setdefault(gv.giro_giornata_id, []).append(
+            GiroVarianteRead(
+                id=gv.id,
+                variant_index=gv.variant_index,
+                validita_testo=gv.validita_testo,
+                dates_apply_json=list(gv.dates_apply_json or []),
+                dates_skip_json=list(gv.dates_skip_json or []),
+                etichetta_parlante=_etichetta_parlante(gv),
+                blocchi=blocchi_per_variante.get(gv.id, []),
+            )
+        )
 
     giornate_out = [
         GiroGiornataRead(
             id=gg.id,
             numero_giornata=gg.numero_giornata,
             km_giornata=float(gg.km_giornata) if gg.km_giornata is not None else None,
-            validita_testo=gg.validita_testo,
-            dates_apply_json=list(gg.dates_apply_json or []),
-            dates_skip_json=list(gg.dates_skip_json or []),
-            blocchi=blocchi_per_giornata.get(gg.id, []),
+            varianti=varianti_per_giornata.get(gg.id, []),
         )
         for gg in giornate_orm
     ]
@@ -589,8 +601,6 @@ async def get_giro_dettaglio(
         localita_manutenzione_partenza_id=g.localita_manutenzione_partenza_id,
         localita_manutenzione_arrivo_id=g.localita_manutenzione_arrivo_id,
         stato=g.stato,
-        etichetta_tipo=g.etichetta_tipo,
-        etichetta_dettaglio=g.etichetta_dettaglio,
         generation_metadata_json=dict(g.generation_metadata_json or {}),
         created_at=g.created_at,
         updated_at=g.updated_at,

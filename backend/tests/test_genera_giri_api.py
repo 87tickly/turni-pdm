@@ -370,11 +370,11 @@ async def test_get_giri_programma_dopo_genera(client: TestClient) -> None:
 
 
 async def test_get_giro_dettaglio(client: TestClient) -> None:
-    """GET /api/giri/{id} ritorna giornate + blocchi.
+    """GET /api/giri/{id} ritorna giornate → varianti → blocchi.
 
-    Sprint 7.7 MR 3: schema piatto. Niente più step intermedio
-    ``varianti`` — i blocchi sono direttamente sotto ``giornate[i]``.
-    Il giro ha l'``etichetta_tipo`` calcolata dal builder.
+    Sprint 7.7 MR 5: schema giro→giornate→varianti→blocchi. La
+    variante porta ``etichetta_parlante`` (calcolata server-side da
+    ``validita_testo`` + ``len(dates_apply_json)``).
     """
     prog_id = await _setup_db_completo()
     token = _login(client, "pianificatore_giro_demo", "demo12345")
@@ -389,23 +389,20 @@ async def test_get_giro_dettaglio(client: TestClient) -> None:
     body = res.json()
     assert body["id"] == giro_id
     assert body["numero_giornate"] == 1
-    assert "etichetta_tipo" in body
-    assert body["etichetta_tipo"] in {
-        "feriale",
-        "sabato",
-        "domenica",
-        "festivo",
-        "data_specifica",
-        "personalizzata",
-    }
+    # Sprint 7.7 MR 5: niente più etichetta_tipo sul giro.
+    assert "etichetta_tipo" not in body
     assert "giornate" in body
     assert len(body["giornate"]) == 1
     g0 = body["giornate"][0]
     assert g0["numero_giornata"] == 1
-    assert "blocchi" in g0
-    assert "dates_apply_json" in g0
+    assert "varianti" in g0
+    assert len(g0["varianti"]) >= 1
+    v0 = g0["varianti"][0]
+    assert "etichetta_parlante" in v0
+    assert "dates_apply_json" in v0
+    assert "blocchi" in v0
     # Almeno 2 blocchi corsa (setup ha 2 corse)
-    blocchi_corsa = [b for b in g0["blocchi"] if b["tipo_blocco"] == "corsa_commerciale"]
+    blocchi_corsa = [b for b in v0["blocchi"] if b["tipo_blocco"] == "corsa_commerciale"]
     assert len(blocchi_corsa) == 2
 
 

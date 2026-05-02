@@ -22,11 +22,18 @@ Sub-moduli:
 - `etichetta.py` (Sprint 7.7 MR 3) — funzione pura
   ``calcola_etichetta_giro`` che classifica un giro come
   ``feriale | sabato | domenica | festivo | data_specifica |
-  personalizzata`` a partire dalle date di applicazione.
-- `persister.py` (Sprint 4.4.5a → 7.7 MR 3) — bridge dataclass dominio
-  → ORM: ``persisti_giri()`` async che scrive ``GiroMateriale +
-  GiroGiornata + GiroBlocco + CorsaMaterialeVuoto``. Solo INSERT,
-  no commit (lo decide il caller).
+  personalizzata``. **Sprint 7.7 MR 5**: non più usato dal
+  persister (varianti per giornata supersede l'etichetta-su-giro);
+  resta esposto per consumi futuri.
+- `aggregazione_a2.py` (Sprint 7.7 MR 5) — funzione pura
+  ``aggrega_a2`` che fonde ``GiroAssegnato`` per chiave
+  ``(materiale, sede, n_giornate)`` in ``GiroAggregato`` con
+  varianti calendariali per giornata.
+- `persister.py` (Sprint 4.4.5a → 7.7 MR 5) — bridge dataclass
+  dominio → ORM: ``persisti_giri()`` async che scrive
+  ``GiroMateriale + GiroGiornata + GiroVariante + GiroBlocco +
+  CorsaMaterialeVuoto``. Solo INSERT, no commit (lo decide il
+  caller).
 - `builder.py` (Sprint 4.4.5b) — loader DB + orchestrator end-to-end
   ``genera_giri()``. Endpoint API in ``api/giri.py``.
 
@@ -59,6 +66,12 @@ from colazione.domain.builder_giro.composizione import (
     assegna_materiali,
     rileva_eventi_composizione,
 )
+from colazione.domain.builder_giro.aggregazione_a2 import (
+    GiornataAggregata,
+    GiroAggregato,
+    VarianteGiornata,
+    aggrega_a2,
+)
 from colazione.domain.builder_giro.etichetta import (
     ETICHETTE_AMMESSE,
     calcola_etichetta_giro,
@@ -75,6 +88,8 @@ from colazione.domain.builder_giro.persister import (
     GiroDaPersistere,
     LocalitaNonTrovataError,
     persisti_giri,
+    primo_tipo_materiale,
+    wrap_assegnato_in_aggregato,
 )
 from colazione.domain.builder_giro.posizionamento import (
     BloccoMaterialeVuoto,
@@ -110,7 +125,9 @@ __all__ = [
     "ComposizioneNonAmmessaError",
     "CorsaResidua",
     "EventoComposizione",
+    "GiornataAggregata",
     "GiriEsistentiError",
+    "GiroAggregato",
     "Giro",
     "GiornataAssegnata",
     "GiornataGiro",
@@ -130,6 +147,8 @@ __all__ = [
     "RegolaAmbiguaError",
     "StrictModeViolation",
     "TipoEvento",
+    "VarianteGiornata",
+    "aggrega_a2",
     "assegna_e_rileva_eventi",
     "assegna_materiali",
     "calcola_etichetta_giro",
@@ -142,6 +161,8 @@ __all__ = [
     "matches_filtro",
     "persisti_giri",
     "posiziona_su_localita",
+    "primo_tipo_materiale",
     "rileva_eventi_composizione",
     "risolvi_corsa",
+    "wrap_assegnato_in_aggregato",
 ]

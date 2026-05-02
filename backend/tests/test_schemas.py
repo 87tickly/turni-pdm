@@ -19,7 +19,7 @@ from colazione.models.corse import CorsaCommerciale
 from colazione.schemas.anagrafica import AziendaRead, LocalitaManutenzioneRead
 from colazione.schemas.corse import CorsaCommercialeRead
 
-EXPECTED_SCHEMA_COUNT = 38  # 39 - 1 (drop GiroVarianteRead, Sprint 7.7 MR 3)
+EXPECTED_SCHEMA_COUNT = 39  # +1 ri-aggiunto GiroVarianteRead in Sprint 7.7 MR 5
 
 
 def test_schemas_all_exported() -> None:

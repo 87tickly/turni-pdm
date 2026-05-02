@@ -10,6 +10,267 @@
 
 ---
 
+## 2026-05-02 (79) — Sprint 7.7 MR 5: aggregazione A2 — varianti calendariali per giornata (modello Trenord 1134)
+
+### Contesto
+
+Smoke utente post-MR3/MR4 sul programma "prova" 4359 (911 giri ETR204
+FIO 8-giornate). Confronto col PDF Trenord turno 1134 (allegato dal
+pianificatore): la giornata 9 ha **4 varianti calendariali** con
+periodicità diverse (`LV 1:5`, `F`, `LV 6 escl. 21-28/3, 11/4`,
+`Si eff. 21-28/3, 11/4`), tutte parte dello **stesso turno 1134**.
+Il MR 7.7.3 aveva collassato il concetto varianti pensando di
+sostituirlo con "etichetta-su-giro" (6 valori), ma il modello Trenord
+richiede l'opposto: le varianti **dentro la giornata** sono
+fondamentali, vanno solo etichettate in modo parlante.
+
+Decisione utente "B1" (2026-05-02):
+
+> "B1: è lo stesso turno, ma in determinate giornate il materiale fa
+> giri diversi perché in quei giorni quei treni non ci sono."
+
+> "Vai con il 7.7.5, fallo bene che questo è fondamentale."
+
+Chiave A2 scelta: ``(materiale_tipo_codice, localita_manutenzione,
+n_giornate)``. Massima aggregazione possibile da B1: tutti i cluster
+A1 con stesso materiale-sede-numero giornate diventano UN giro
+aggregato; le varianti emergono naturalmente per giornata.
+
+### Modifiche
+
+#### Backend (10 file modificati, 2 nuovi modulo + migration + test)
+
+- **Migration alembic 0018** `0018_varianti_per_giornata.py`
+  (revision `b6f9c4a82dd1`, down_revision `1a4d6e92c8b3`):
+  - Wipe giri esistenti (rigenerazione da zero — modello cambia
+    nettamente).
+  - Drop colonne `giro_materiale.etichetta_tipo`/
+    `etichetta_dettaglio` (concetto MR 3 superseded).
+  - Drop colonne `giro_giornata.validita_testo`/`dates_apply_json`/
+    `dates_skip_json` (tornano su variante).
+  - Re-create tabella `giro_variante` (`id, giro_giornata_id,
+    variant_index, validita_testo, dates_apply_json, dates_skip_json`)
+    + UNIQUE `(giro_giornata_id, variant_index)` + index su
+    `giro_giornata_id`.
+  - `giro_blocco.giro_giornata_id` → `giro_variante_id` (FK CASCADE)
+    + UNIQUE `(giro_variante_id, seq)`.
+  - `downgrade()` rollback completo verso schema MR 0016/0017.
+
+- **Nuovo `domain/builder_giro/aggregazione_a2.py`**: funzione pura
+  `aggrega_a2(list[GiroAssegnato]) → list[GiroAggregato]`:
+  - Dataclass nuovi: `VarianteGiornata`, `GiornataAggregata`,
+    `GiroAggregato`. `GiroAggregato.materiale_tipo_codice` è
+    obbligatorio (la chiave A2 richiede materiale determinabile);
+    giri orfani (= solo corse residue) vengono scartati con warning
+    nel call-site.
+  - Algoritmo: raggruppa per chiave A2; ordina canonico per
+    data-partenza-minima (`variant_index=0` = ciclo che inizia
+    prima); per ciascun numero giornata K=1..N raccoglie le
+    `GiornataAssegnata[K-1]` di tutti i cluster del gruppo come
+    varianti.
+  - Stats aggregate: `chiuso`/`motivo_chiusura`/`km_cumulati`
+    ereditati dal canonico; `corse_residue` e
+    `incompatibilita_materiale` concatenate da TUTTI i cluster.
+  - Output ordinato deterministicamente per chiave A2.
+
+- `domain/builder_giro/persister.py` riscritto:
+  - `PERSISTER_VERSION = "7.7.5"`.
+  - `GiroDaPersistere.giro: GiroAggregato` (non più
+    `GiroAssegnato`); rimossi i campi `etichetta_tipo`/
+    `etichetta_dettaglio` di MR 3.
+  - Nuovo helper `wrap_assegnato_in_aggregato(GiroAssegnato) ->
+    GiroAggregato` per i test diretti del persister con `MISTO`
+    sentinella per giri senza composizione.
+  - `_persisti_un_giro` scrive la struttura piramide: 1
+    GiroMateriale + N GiroGiornata + M GiroVariante per giornata
+    + K GiroBlocco per variante. `MISTO` sentinella sul
+    `materiale_tipo_codice` viene tradotto a `NULL` in DB
+    (FK su `materiale_tipo`).
+  - Rientro 9XXXX a sede attaccato all'**ultima variante**
+    dell'ultima giornata (decisione conservativa MR 5: futura
+    estensione potrà replicare il rientro per ogni variante).
+  - `_km_media_annua_giro` riformulato: somma su tutte le varianti
+    di `km_giornata × len(dates_apply ∩ periodo)`. Più preciso
+    della stima MR 0 che leggeva `valido_in_date_json` delle corse.
+  - Metadata tracciabilità: aggiunti `n_cluster_a1` +
+    `n_varianti_per_giornata`.
+
+- `domain/builder_giro/builder.py` orchestrator:
+  - Pipeline aggiornata: `posizionamento → multi_giornata
+    → assegnazione → A2_aggregazione → persister`.
+  - `numero_turno = G-{LOC}-{SEQ}-{materiale_tipo_codice}`
+    (formato MR 4) generato direttamente da `GiroAggregato`.
+  - Strict mode resta sui `GiroAssegnato` pre-aggregazione.
+  - Rimossa logica "etichetta calcolata e popolata sul giro" del
+    MR 3 (inutile col modello A2): `calcola_etichetta_giro` resta
+    esposta ma non più applicata dal persister.
+
+- `domain/builder_pdc/builder.py` (2° ruolo):
+  - Carica le varianti delle giornate del giro, prende la
+    **canonica** (`variant_index=0`) per generare il turno PdC.
+  - `validita_per_giornata: dict[int, str | None]` passato a
+    `_genera_un_turno_pdc` (era letto da `gg.validita_testo` pre-
+    MR 5). Decisione: il turno PdC della canonica è il MVP del
+    MR 5; la generazione di N turni PdC distinti per N varianti
+    della stessa giornata è scope futuro.
+  - `builder_version` bumpato a `mvp-7.7.5`.
+
+- `models/giri.py` + `models/__init__.py`: re-introdotta
+  `GiroVariante`, rimossi campi MR 3/4 da `GiroMateriale` /
+  `GiroGiornata`. Tornata a 6 entità Strato 2.
+
+- `schemas/giri.py` + `schemas/__init__.py`: re-introdotto
+  `GiroVarianteRead`, rimossi campi MR 3/4 dalle Read.
+  Tornati a 39 schemi.
+
+- `api/giri.py`:
+  - `GiroMaterialeListItem` → drop etichetta + add
+    `n_varianti_totale: int` (sum delle varianti per giornata).
+  - `GiroVarianteRead` (response) con `etichetta_parlante` calcolata
+    server-side (`f"{validita_testo} · {n} dat[a|e]"`).
+  - `GiroGiornataRead.varianti: list[GiroVarianteRead]`,
+    `GiroBloccoRead.giro_variante_id`.
+  - Endpoint `get_giro_dettaglio` riassembla l'albero: 1 query per
+    giornate + 1 per varianti + 1 per blocchi. Rimossa la window
+    function `numero_treno_variante_indice/totale` (era MR 7.3,
+    già rimossa lato UI in MR 4).
+
+#### Test backend (5 file modificati, 1 nuovo)
+
+- **Nuovo `tests/test_aggregazione_a2.py`** — 8 test puri (no DB)
+  della funzione `aggrega_a2`:
+  - input vuoto, 1 giro = 1 aggregato 1 variante.
+  - 2 giri stessa chiave A2 → 1 aggregato 2 varianti per giornata
+    (caso utente "stesso materiale, percorsi diversi LV vs F").
+  - chiavi diverse → aggregati distinti (materiali diversi,
+    n_giornate diversi).
+  - giro orfano senza composizione → scartato.
+  - canonico eredita `chiuso`/`motivo_chiusura` (data partenza
+    minima vince).
+  - output ordinato deterministicamente.
+
+- `tests/test_persister.py`: i 17+ test esistenti continuano a
+  costruire `GiroAssegnato` direttamente; vengono wrappati con
+  `wrap_assegnato_in_aggregato(giro)` prima di passarli al
+  persister (chirurgico, niente refactor invasivo dei test).
+  Aggiornati: `PERSISTER_VERSION = "7.7.5"`, asserzioni etichetta
+  rimpiazzate con asserzioni metadata `n_cluster_a1`/
+  `n_varianti_per_giornata`, join `GiroBlocco → GiroVariante →
+  GiroGiornata`, calcolo km_media_annua via `dates_apply` esplicito
+  (test usa `dataclasses.replace` per popolare 5 date).
+
+- `tests/test_builder_giri.py`:
+  - `test_default_solo_n_giornate_omesso`: l'assert `n_giri_creati
+    == 2` diventa `== 1` (i 2 cluster A1 con stessa chiave A2 si
+    fondono).
+  - `numero_turno`: `G-TBLD-001` → `G-TBLD-001-ALe711` (suffisso
+    materiale già attivo da MR 4).
+
+- `tests/test_genera_giri_api.py::test_get_giro_dettaglio`:
+  schema atteso giornata→varianti→blocchi, asserisce
+  `etichetta_parlante` su variante.
+
+- `tests/test_models.py`: `EXPECTED_TABLE_COUNT` 35 → 36
+  (re-aggiunta `giro_variante`).
+
+- `tests/test_schemas.py`: `EXPECTED_SCHEMA_COUNT` 38 → 39
+  (re-aggiunto `GiroVarianteRead`).
+
+#### Frontend (3 file modificati)
+
+- `lib/api/giri.ts`:
+  - Rimosso `EtichettaTipo` e i campi `etichetta_*`.
+  - Re-introdotto `interface GiroVariante` con campo
+    `etichetta_parlante: string` (calcolato server-side).
+  - `GiroGiornata.varianti: GiroVariante[]`,
+    `GiroBlocco` senza più `numero_treno_variante_*`.
+  - `GiroListItem.n_varianti_totale: number`.
+
+- `routes/pianificatore-giro/GiroDettaglioRoute.tsx` riscritto:
+  - Header con badge "N varianti" (visibile solo se
+    `n_varianti_totale > numero_giornate` = il giro ha varianti
+    multiple per almeno una giornata).
+  - `GiornataPanel` con tab varianti (riproposto, ma con
+    `etichetta_parlante` server-side: es. `"LV 1:5 · 12 date"`).
+  - Stats aggiornate: "km/giorno (canonica)" + nuovo "Varianti
+    totali".
+
+- `routes/pianificatore-giro/ProgrammaGiriRoute.tsx`:
+  - Rimossa colonna "Categoria" (MR 3) + relativo `EtichettaBadge`.
+  - Nuova colonna "Varianti" con `VariantiCell` che evidenzia
+    in grassetto i giri con varianti multiple.
+
+- `routes/pianificatore-pdc/GiriRoute.test.tsx`: fixture
+  `makeGiro` aggiornata (rimosso `etichetta_*`, aggiunto
+  `n_varianti_totale: 5`).
+
+### Verifiche
+
+- DB `alembic upgrade head`: ✅ `1a4d6e92c8b3 → b6f9c4a82dd1`.
+- `uv run mypy --strict src`: ✅ 55 source files clean
+  (era 54, +1 nuovo `aggregazione_a2.py`).
+- `uv run pytest --tb=line`: ✅ **477 passed, 12 skipped in
+  37.96s** (baseline 469 → +8 nuovi `test_aggregazione_a2`).
+- Frontend `pnpm typecheck`: ✅ clean.
+- Frontend `pnpm test --run`: ✅ **53 passed**.
+- Frontend `pnpm build`: ✅ 1757 modules, 389KB bundle (114KB
+  gzip), 1.75s.
+
+### Conseguenze pratiche
+
+1. **Aggregazione massiva**: ri-generando il programma "prova"
+   4359, i 911 giri pre-MR 5 dovrebbero collassare in pochi
+   aggregati per chiave (materiale, sede, n_giornate). Per il
+   programma reale Trenord ETR204 FIO 8-giornate ne emergerà
+   verosimilmente UNO solo, con tante varianti per giornata.
+2. **UI Trenord-style**: il dettaglio giro mostra le varianti
+   per giornata come tab con etichette parlanti
+   (`"LV 1:5 · 12 date"`, `"F · 8 date"`, ecc.) — esattamente
+   come il PDF turno 1134.
+3. **builder PdC su variante canonica**: il turno PdC è
+   generato sulla `variant_index=0` di ciascuna giornata. Le
+   altre varianti restano persistite ma non producono turni
+   PdC distinti — futura estensione (e/o configurazione utente
+   "scegli quale variante usare").
+4. **`materiale_tipo_codice = MISTO` sentinella** per giri
+   senza composizione: persistito come `tipo_materiale="MISTO"`
+   (text leggibile) ma `materiale_tipo_codice=NULL` (FK
+   nullable) per non rompere il vincolo FK.
+
+### Limitazioni note
+
+- **Variante canonica per turno PdC**: il MR 5 genera 1 turno
+  per giro, sulla `variant_index=0`. Generare N turni distinti
+  (uno per variante) richiede una decisione di pianificazione
+  (es. "il convoglio è lo stesso ma in dicembre fa il percorso
+  X, in marzo fa Y → due turni PdC distinti?") — scope futuro.
+- **`km_media_giornaliera`** del giro materiale eredita la
+  variante canonica: i giri con varianti km-diverse hanno una
+  media non ponderata. Refactor `media ponderata su dates_apply`
+  rimandato.
+- **Limitazione MR 7.7.1 ancora aperta**: troncamento giri non
+  chiusi agisce per giornata, non per singola corsa dentro
+  catena. Indipendente da questo MR.
+
+### Prossimo step
+
+Sprint 7.7 chiuso a 5 MR (1 km_max + 2 calendario + 3 etichetta-
+collasso + 4 fix CADORNA + 5 aggregazione A2). Pipeline PdE →
+giro materiale ora completa: import PdE, programma+regole,
+builder con clustering A1+A2, varianti calendariali per giornata,
+etichetta parlante, generazione turno PdC base.
+
+Possibili direzioni successive:
+- **Smoke utente** sul programma reale: verificare che
+  l'aggregazione A2 produca il numero atteso di giri (non più
+  centinaia ma decine, come Trenord).
+- **C2 + C6** (cap notturno builder_pdc + TIRANO match) — MR
+  follow-up dedicato.
+- **Sprint 7.3** (dashboard 2° ruolo Pianificatore PdC) — atteso
+  da prima del MR 5.
+
+---
+
 ## 2026-05-02 (78) — Sprint 7.7 MR 4: fix bug FIO/CADORNA + numero turno con materiale + cleanup
 
 ### Contesto

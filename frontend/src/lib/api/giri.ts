@@ -41,19 +41,6 @@ export interface GeneraGiriParams {
   force?: boolean;
 }
 
-/**
- * Sprint 7.7 MR 3 — etichetta calcolata dal builder. Enum chiuso a 6
- * valori (decisione utente 2026-05-02 opzione "b"): niente codici PdE
- * alias (LV/SF/FX/GG).
- */
-export type EtichettaTipo =
-  | "feriale"
-  | "sabato"
-  | "domenica"
-  | "festivo"
-  | "data_specifica"
-  | "personalizzata";
-
 export interface GiroListItem {
   id: number;
   numero_turno: string;
@@ -65,14 +52,13 @@ export interface GiroListItem {
   motivo_chiusura: string | null;
   chiuso: boolean;
   stato: string;
-  /** Sprint 7.7 MR 3: etichetta parlante (feriale/sabato/.../personalizzata). */
-  etichetta_tipo: EtichettaTipo;
   /**
-   * Dettaglio leggibile: per `data_specifica` è "DD/MM/YYYY"; per
-   * `personalizzata` è il breakdown ordinato dei tipi giorno
-   * (es. "feriale+festivo"). null per le 4 categorie monotipo.
+   * Sprint 7.7 MR 5: somma di tutte le varianti del giro
+   * (= sum(len(varianti) per giornata)). Equivale a `numero_giornate`
+   * per giri senza varianti calendariali per giornata; può essere
+   * maggiore se almeno una giornata ha varianti multiple.
    */
-  etichetta_dettaglio: string | null;
+  n_varianti_totale: number;
   created_at: string;
 }
 
@@ -87,8 +73,6 @@ export interface GiroBlocco {
   stazione_da_nome: string | null;
   stazione_a_nome: string | null;
   numero_treno: string | null;
-  numero_treno_variante_indice: number | null;
-  numero_treno_variante_totale: number | null;
   ora_inizio: string | null;
   ora_fine: string | null;
   descrizione: string | null;
@@ -97,21 +81,29 @@ export interface GiroBlocco {
 }
 
 /**
- * Sprint 7.7 MR 3: assorbe i campi che stavano su GiroVariante (rimosso).
- * I blocchi sono direttamente sotto la giornata.
+ * Sprint 7.7 MR 5: una variante calendariale di una giornata-tipo.
+ * Più varianti per la stessa giornata significano "in periodi diversi
+ * il convoglio fa percorsi diversi" (PDF Trenord turno 1134).
  */
+export interface GiroVariante {
+  id: number;
+  variant_index: number;
+  validita_testo: string | null;
+  dates_apply_json: string[];
+  dates_skip_json: string[];
+  /**
+   * Etichetta parlante calcolata server-side (es. `"LV 1:5 · 12 date"`).
+   */
+  etichetta_parlante: string;
+  blocchi: GiroBlocco[];
+}
+
 export interface GiroGiornata {
   id: number;
   numero_giornata: number;
-  /** Sprint 7.6 MR 3.2: km commerciali della giornata. null se nessuna corsa con km. */
+  /** Sprint 7.6 MR 3.2 / 7.7 MR 5: km della variante canonica. */
   km_giornata: number | null;
-  /** Periodicità testuale del PdE (era su giro_variante.validita_testo). */
-  validita_testo: string | null;
-  /** Date in cui la giornata-tipo si applica. */
-  dates_apply_json: string[];
-  /** Date escluse (sospensioni). Riservato a sviluppi futuri. */
-  dates_skip_json: string[];
-  blocchi: GiroBlocco[];
+  varianti: GiroVariante[];
 }
 
 export interface GiroDettaglio {
@@ -125,9 +117,6 @@ export interface GiroDettaglio {
   localita_manutenzione_partenza_id: number | null;
   localita_manutenzione_arrivo_id: number | null;
   stato: string;
-  /** Sprint 7.7 MR 3: etichetta parlante. */
-  etichetta_tipo: EtichettaTipo;
-  etichetta_dettaglio: string | null;
   generation_metadata_json: Record<string, unknown>;
   created_at: string;
   updated_at: string;

@@ -1,12 +1,13 @@
 """Schemas Pydantic — Strato 2 (giro materiale).
 
 Schemi `Read` per giri materiale, versioni, finestre validità,
-giornate e blocchi. Vedi `models/giri.py`.
+giornate, varianti e blocchi. Vedi `models/giri.py`.
 
-Sprint 7.7 MR 3 (migration 0016): rimosso ``GiroVarianteRead``
-(droppato a livello DB). Le date di applicazione e la validità
-testuale stanno ora su ``GiroGiornataRead``; l'etichetta del giro
-sta su ``GiroMaterialeRead``.
+Sprint 7.7 MR 5 (migration 0018, decisione utente "B1"):
+re-introdotto ``GiroVarianteRead`` come "varianti calendariali della
+giornata-tipo" (modello PDF Trenord turno 1134). Etichetta non
+persistita: si calcola server-side dai campi ``validita_testo`` e
+``len(dates_apply_json)``.
 """
 
 from datetime import date, datetime, time
@@ -34,8 +35,6 @@ class GiroMaterialeRead(BaseModel):
     localita_manutenzione_partenza_id: int
     localita_manutenzione_arrivo_id: int
     stato: str
-    etichetta_tipo: str
-    etichetta_dettaglio: str | None = None
     generation_metadata_json: dict[str, Any]
     created_at: datetime
     updated_at: datetime
@@ -67,6 +66,14 @@ class GiroGiornataRead(BaseModel):
     id: int
     giro_materiale_id: int
     numero_giornata: int
+
+
+class GiroVarianteRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    giro_giornata_id: int
+    variant_index: int
     validita_testo: str | None = None
     dates_apply_json: list[Any] = []
     dates_skip_json: list[Any] = []
@@ -76,7 +83,7 @@ class GiroBloccoRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    giro_giornata_id: int
+    giro_variante_id: int
     seq: int
     tipo_blocco: str
     corsa_commerciale_id: int | None = None

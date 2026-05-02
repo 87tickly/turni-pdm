@@ -1,34 +1,32 @@
 """Persister — bridge dataclass dominio → ORM giri.
 
-Funzione async che mappa una lista di `GiroAssegnato` (output della
-pipeline pure 4.4.1→4.4.4) sulle entità ORM persistenti:
+Sprint 7.7 MR 5 (decisione utente "B1"): scrive ``GiroAggregato``
+(output di ``aggregazione_a2``) sulle entità ORM:
 
-- ``GiroMateriale`` (top-level, con etichetta calcolata dal builder)
-- ``GiroGiornata`` (1 per giornata, contiene ``validita_testo`` +
-  ``dates_apply_json`` + ``dates_skip_json``)
-- ``GiroBlocco`` (sequenza: vuoto_testa? + [evento? + corsa]* +
-  vuoto_coda? + eventuale rientro sede; FK diretta su giornata)
-- ``CorsaMaterialeVuoto`` (1 per ogni `BloccoMaterialeVuoto` testa/coda)
+- ``GiroMateriale`` (top-level, 1 per chiave A2)
+- ``GiroGiornata`` (1 per numero giornata 1..N)
+- ``GiroVariante`` (1+ per giornata, ognuna con la sua sequenza di
+  blocchi e ``dates_apply``)
+- ``GiroBlocco`` (sequenza per variante: ``vuoto_testa? → [evento? →
+  corsa]* → vuoto_coda? → eventuale rientro 9XXXX``)
+- ``CorsaMaterialeVuoto`` (1 per ogni vuoto tecnico)
 
-Sprint 7.7 MR 3 (migration 0016): drop di ``GiroVariante``. Il
-persister scrive blocchi direttamente sotto la giornata (1 giornata
-= 1 sequenza canonica). I campi di validità calendariale che stavano
-sulla variante stanno ora sulla giornata.
-
-Spec: ``docs/SCHEMA-DATI-NATIVO.md`` §5 (entità giro),
-``docs/PROGRAMMA-MATERIALE.md`` §5.4 (eventi composizione persistenza).
+Spec: ``docs/SCHEMA-DATI-NATIVO.md`` §5,
+``docs/PROGRAMMA-MATERIALE.md`` §5.4.
 
 Limiti:
 
-- **Solo INSERT**: niente UPDATE/DELETE. Il caller (`builder.py`) si
+- **Solo INSERT**: niente UPDATE/DELETE. Il caller (``builder.py``) si
   occupa del wipe pre-rigenerazione.
 - **`numero_turno` è parametro**: il persister non sa come si chiamano
-  i giri. La convenzione ``G-{LOC_BREVE}-{SEQ:03d}`` è nel caller.
-- **Niente commit**: il persister fa solo `add` + `flush`. Il caller
-  decide quando committare la transazione.
+  i giri. La convenzione ``G-{LOC_BREVE}-{SEQ:03d}-{MAT}`` è nel
+  caller (Sprint 7.7 MR 4).
+- **Niente commit**: ``add`` + ``flush`` solo. Il caller gestisce la
+  transazione.
 
-Si **assume** che ogni ``corsa`` in `BloccoAssegnato.corsa` sia un ORM
-``CorsaCommerciale`` con `.id` valorizzato (caricato dal loader).
+Helper ``wrap_assegnato_in_aggregato()`` esposto per i test diretti
+del persister che operano con un singolo ``GiroAssegnato``: lo
+trasforma in ``GiroAggregato`` con 1 sola variante per giornata.
 """
 
 from __future__ import annotations
@@ -40,9 +38,13 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from colazione.domain.builder_giro.aggregazione_a2 import (
+    GiornataAggregata,
+    GiroAggregato,
+    VarianteGiornata,
+)
 from colazione.domain.builder_giro.composizione import (
     EventoComposizione,
-    GiornataAssegnata,
     GiroAssegnato,
 )
 from colazione.domain.builder_giro.posizionamento import BloccoMaterialeVuoto
@@ -52,11 +54,12 @@ from colazione.models.giri import (
     GiroBlocco,
     GiroGiornata,
     GiroMateriale,
+    GiroVariante,
 )
 
 # Versione persister, salvata in `generation_metadata_json` per
-# tracciabilità (utile quando bumperemo l'algoritmo).
-PERSISTER_VERSION = "7.7.3"
+# tracciabilità.
+PERSISTER_VERSION = "7.7.5"
 
 
 # =====================================================================
@@ -65,13 +68,8 @@ PERSISTER_VERSION = "7.7.3"
 
 
 class LocalitaNonTrovataError(LookupError):
-    """La località riferita da ``GiroAssegnato.localita_codice`` non
-    esiste nel DB per l'azienda data.
-
-    Indica errore di config: il programma materiale ha generato giri
-    per una località che non è in anagrafica. Va corretta config o
-    aggiunta la località prima di rigenerare.
-    """
+    """La località riferita da ``GiroAggregato.localita_codice`` non
+    esiste nel DB per l'azienda data."""
 
     def __init__(self, codice: str, azienda_id: int) -> None:
         super().__init__(
@@ -89,38 +87,68 @@ class LocalitaNonTrovataError(LookupError):
 
 @dataclass(frozen=True)
 class GiroDaPersistere:
-    """Coppia ``(numero_turno, GiroAssegnato)`` + etichetta da persistere.
+    """Coppia ``(numero_turno, GiroAggregato)`` da persistere.
 
-    Il caller (orchestrator ``builder.py``) genera il ``numero_turno``
-    con la convenzione ``G-{LOC_BREVE}-{SEQ:03d}`` e calcola l'etichetta
-    via ``calcola_etichetta_giro``. Il persister tratta entrambi come
-    opachi.
+    Il caller (``builder.py``) genera il ``numero_turno`` nel formato
+    ``G-{LOC_BREVE}-{SEQ:03d}-{materiale_tipo_codice}`` (Sprint 7.7
+    MR 4) e l'aggregato dal clustering A2 (Sprint 7.7 MR 5).
 
-    Sprint 5.6 Feature 4: ``genera_rientro_sede`` (default False) attiva
-    la creazione automatica della corsa virtuale 9XXXX a fine giro.
-
-    Sprint 7.7 MR 1 (Fix C "rientro intelligente"): l'attivazione del
-    rientro è SOGGETTA al check whitelist sede — il vuoto di rientro
-    si genera SOLO se l'ultima destinazione è in whitelist (vicino
-    sede). Mai vuoti lunghi tipo COLICO → CERTOSA. Decisione utente
-    2026-05-02. ``whitelist_sede`` deve essere passata dal caller
-    (oggi ``builder.py:_carica_whitelist_stazioni``).
-
-    Sprint 7.7 MR 3 (refactor varianti → giri separati):
-    ``etichetta_tipo`` e ``etichetta_dettaglio`` sono il risultato di
-    ``calcola_etichetta_giro(giro, festivita)`` lato builder.
+    Sprint 5.6 Feature 4 + Sprint 7.7 MR 1 (Fix C "rientro
+    intelligente"): ``genera_rientro_sede=True`` attiva il vuoto di
+    rientro 9XXXX a fine giro, ma SOLO se l'ultima destinazione della
+    variante CANONICA è in ``whitelist_sede``.
     """
 
     numero_turno: str
-    giro: GiroAssegnato
-    etichetta_tipo: str = "personalizzata"
-    etichetta_dettaglio: str | None = None
+    giro: GiroAggregato
     genera_rientro_sede: bool = False
-    # Sprint 7.7 MR 1 (Fix C): codici stazione "vicini sede" (whitelist
-    # `localita_stazione_vicina` della sede del giro). Se vuota o se
-    # `ultima_dest` non vi appartiene, il rientro NON viene generato
-    # (giro resta non chiuso → warning, mai vuoti lunghi).
     whitelist_sede: frozenset[str] = field(default_factory=frozenset)
+
+
+# =====================================================================
+# Helper di conversione (per test legacy e callers che hanno solo un
+# GiroAssegnato singolo a disposizione)
+# =====================================================================
+
+
+def wrap_assegnato_in_aggregato(giro: GiroAssegnato) -> GiroAggregato:
+    """Wrappa un singolo ``GiroAssegnato`` in ``GiroAggregato`` (1 sola
+    variante per giornata).
+
+    Utile per:
+    - test diretti del persister che costruiscono manualmente
+      ``GiroAssegnato`` (la maggior parte dei test esistenti).
+    - call-site che producono giri non aggregati (es. test
+      end-to-end pre-A2 mantenuti per regressione).
+    """
+    materiale = _primo_tipo_materiale(giro)
+    if materiale is None:
+        # Caso degenere: giro senza composizione → fallback "MISTO".
+        # Non dovrebbe arrivare al persister, ma se ci arriva manteniamo
+        # un valore plausibile.
+        materiale = "MISTO"
+    giornate_agg: list[GiornataAggregata] = []
+    for k, gnata in enumerate(giro.giornate, start=1):
+        variante = VarianteGiornata(
+            catena_posizionata=gnata.catena_posizionata,
+            blocchi_assegnati=gnata.blocchi_assegnati,
+            eventi_composizione=gnata.eventi_composizione,
+            dates_apply=gnata.dates_apply_or_data,
+        )
+        giornate_agg.append(
+            GiornataAggregata(numero_giornata=k, varianti=(variante,))
+        )
+    return GiroAggregato(
+        localita_codice=giro.localita_codice,
+        materiale_tipo_codice=materiale,
+        giornate=tuple(giornate_agg),
+        chiuso=giro.chiuso,
+        motivo_chiusura=giro.motivo_chiusura,
+        km_cumulati=giro.km_cumulati,
+        corse_residue=giro.corse_residue,
+        incompatibilita_materiale=giro.incompatibilita_materiale,
+        n_cluster_a1=1,
+    )
 
 
 # =====================================================================
@@ -145,126 +173,93 @@ async def _carica_localita(
     return loc
 
 
-def _km_totali_giro(giro: GiroAssegnato) -> float:
-    """Somma ``km_tratta`` di tutte le corse di tutte le giornate del giro.
-
-    Sprint 5.6 (km fondamentali): popola ``GiroMateriale.km_media_giornaliera``.
-    Conta SOLO le corse commerciali (i vuoti tecnici non hanno km del PdE).
-    Corse senza ``km_tratta`` contribuiscono 0 (duck-typed).
-    """
+def _km_variante(variante: VarianteGiornata) -> float:
+    """Somma ``km_tratta`` delle corse commerciali di una variante."""
     total = 0.0
-    for giornata in giro.giornate:
-        total += _km_giornata(giornata)
-    return total
-
-
-def _km_giornata(giornata: GiornataAssegnata) -> float:
-    """Somma ``km_tratta`` delle corse commerciali di una singola giornata.
-
-    Sprint 7.6 MR 3.2 (migration 0013): popola
-    ``GiroGiornata.km_giornata`` per il riepilogo per-giornata nella
-    vista dettaglio del giro. Stessa convenzione di `_km_totali_giro`
-    (vuoti tecnici esclusi, corse senza km contribuiscono 0).
-    """
-    total = 0.0
-    for c in giornata.catena_posizionata.catena.corse:
+    for c in variante.catena_posizionata.catena.corse:
         km = getattr(c, "km_tratta", None)
         if km is not None:
             total += float(km)
     return total
 
 
-def _estrai_validita_giornata(
-    giornata: GiornataAssegnata,
-) -> tuple[str, list[str]]:
-    """Estrae validità testuale + date concrete applicabili a una giornata.
+def _km_totali_canonica(giro: GiroAggregato) -> float:
+    """Somma km_tratta di tutte le giornate del giro, prendendo per
+    ciascuna la VARIANTE CANONICA (variant_index=0).
+
+    Usato per popolare ``GiroMateriale.km_media_giornaliera``.
+    Approssimazione: i giri con varianti multiple per giornata avranno
+    km medio basato sulla canonica; raffinamento (media ponderata su
+    `dates_apply`) rimandato a MR successivo.
+    """
+    total = 0.0
+    for giornata in giro.giornate:
+        if giornata.varianti:
+            total += _km_variante(giornata.varianti[0])
+    return total
+
+
+def _km_giornata_canonica(giornata: GiornataAggregata) -> float:
+    """Somma km_tratta della variante canonica della giornata."""
+    if not giornata.varianti:
+        return 0.0
+    return _km_variante(giornata.varianti[0])
+
+
+def _estrai_validita_variante(
+    variante: VarianteGiornata,
+) -> tuple[str | None, list[str]]:
+    """Estrae validità testuale + date concrete da una variante.
 
     **Testo** (``validita_testo``): ``periodicita_breve`` della prima
-    corsa della giornata che ne abbia una valorizzata, oppure ``"GG"``
-    fallback. Coerente con feedback utente "PdE testo Periodicità =
-    verità letterale" (memoria persistente
-    ``feedback_pde_periodicita_verita.md``): mostriamo letteralmente
-    quello che il PdE dice, niente parser DSL.
+    corsa della variante con valore non vuoto, oppure ``None``.
+    Letterale dal PdE (memoria ``feedback_pde_periodicita_verita.md``).
 
-    **Date** (``dates_apply_json``): Sprint 7.5 — usa
-    ``giornata.dates_apply_or_data``, che dopo il clustering A1
-    contiene le date REALI in cui la giornata-tipo si applica
-    (= date di partenza dei filoni del cluster). Pre-cluster fallback
-    a ``(giornata.data,)`` via property.
-
-    Returns:
-        Coppia ``(testo, dates_iso)``. ``testo`` è String/Text
-        compatibile con ``GiroGiornata.validita_testo``. ``dates_iso``
-        è lista ordinata di stringhe ``YYYY-MM-DD``.
+    **Date** (``dates_apply_json``): ``variante.dates_apply`` come
+    lista ordinata di stringhe ISO ``YYYY-MM-DD``.
     """
-    corse = giornata.catena_posizionata.catena.corse
-    if not corse:
-        return ("GG", [giornata.data.isoformat()])
-
-    testo = "GG"
+    corse = variante.catena_posizionata.catena.corse
+    testo: str | None = None
     for c in corse:
         p = getattr(c, "periodicita_breve", None)
         if p is not None and str(p).strip():
             testo = str(p).strip()
             break
 
-    # Sprint 7.5: leggi le date dal pass-through del clustering A1
-    # invece di calcolare un'intersezione "menzogna" sulle valido_in_date
-    # delle singole corse. `dates_apply_or_data` torna `(giornata.data,)`
-    # se il clustering non è stato applicato (es. test diretti del
-    # persister con GiornataAssegnata costruita a mano), preservando il
-    # comportamento legacy con singola data.
-    dates_iso = [d.isoformat() for d in giornata.dates_apply_or_data]
-    return (testo, sorted(set(dates_iso)))
+    dates_iso = sorted({d.isoformat() for d in variante.dates_apply})
+    return (testo, dates_iso)
 
 
 def _km_media_annua_giro(
-    giro: GiroAssegnato,
+    giro: GiroAggregato,
     valido_da: date,
     valido_a: date,
 ) -> float | None:
-    """Stima km annui del giro materiale (Sprint 5.6 R3).
+    """Stima km annui del giro materiale.
 
-    Algoritmo:
-    1. Per ogni giornata K del giro, prendi la prima corsa e leggi il
-       suo ``valido_in_date_json`` (lista di date in cui la corsa è
-       applicabile).
-    2. Conta le date che cadono nel periodo
-       ``[valido_da, valido_a]`` del programma → ``n_giorni_K``.
-    3. Stima km annui di K = ``km_giornata_K * n_giorni_K``.
-    4. Somma su tutte le giornate.
-
-    Approssimazione: assume che la prima corsa di K sia
-    rappresentativa della periodicità di tutta la giornata. Per
-    giornate con corse a periodicità mista, è una stima al rialzo
-    o al ribasso a seconda del mix. Sufficiente per dashboard
-    manutenzione (Sprint 7); raffinabile.
+    Sprint 7.7 MR 5: per ciascuna giornata, somma sui contributi di
+    TUTTE le varianti (ogni variante porta `km_giornata * len(dates_apply ∩ periodo)`).
 
     Returns:
-        Stima `float` km/anno del giro. ``None`` se nessuna corsa
-        ha ``valido_in_date_json``, oppure se nessuna data cade in
-        ``[valido_da, valido_a]``.
+        Stima `float` km/anno del giro. ``None`` se nessuna variante
+        ha date di applicazione nel periodo richiesto.
     """
     valido_da_iso = valido_da.isoformat()
     valido_a_iso = valido_a.isoformat()
     km_anno = 0.0
     qualcosa_calcolato = False
     for giornata in giro.giornate:
-        corse = giornata.catena_posizionata.catena.corse
-        if not corse:
-            continue
-        prima = corse[0]
-        valido_dates = getattr(prima, "valido_in_date_json", None)
-        if not valido_dates:
-            continue
-        n_giorni = sum(1 for d in valido_dates if valido_da_iso <= str(d) <= valido_a_iso)
-        if n_giorni == 0:
-            continue
-        km_giornata = sum(
-            float(c.km_tratta) for c in corse if getattr(c, "km_tratta", None) is not None
-        )
-        km_anno += km_giornata * n_giorni
-        qualcosa_calcolato = True
+        for variante in giornata.varianti:
+            n_giorni = sum(
+                1
+                for d in variante.dates_apply
+                if valido_da_iso <= d.isoformat() <= valido_a_iso
+            )
+            if n_giorni == 0:
+                continue
+            km = _km_variante(variante)
+            km_anno += km * n_giorni
+            qualcosa_calcolato = True
 
     return km_anno if qualcosa_calcolato else None
 
@@ -273,9 +268,7 @@ async def _next_numero_rientro_sede(session: AsyncSession) -> str:
     """Prossimo `numero_treno_vuoto` per la corsa rientro a sede.
 
     Sprint 5.6 Feature 4: convenzione **5 cifre, prefisso 9** (placeholder
-    Trenord; in produzione RFI/FNM emette i numeri reali). Sequenziale
-    globale su `corsa_materiale_vuoto` (lookup MAX numero_treno_vuoto
-    matching ``9NNNN``).
+    Trenord). Sequenziale globale su `corsa_materiale_vuoto`.
     """
     from sqlalchemy import text
 
@@ -290,14 +283,10 @@ async def _next_numero_rientro_sede(session: AsyncSession) -> str:
 
 def primo_tipo_materiale(giro: GiroAssegnato) -> str | None:
     """Primo ``materiale_tipo_codice`` usato dal giro, ``None`` se nessun
-    blocco assegnato (giro tutto in corse residue).
+    blocco assegnato.
 
-    Sprint 5.5: legge il primo elemento della ``composizione`` del primo
-    blocco. Per regole single-material la lista ha 1 elemento; per
-    composizioni doppie prende il primo (es. ETR526 da [ETR526, ETR425]).
-    Usato per popolare ``GiroMateriale.tipo_materiale`` (denormalizzato
-    leggibile per UI) e per costruire ``numero_turno`` con suffisso
-    materiale (Sprint 7.7 MR 4).
+    Sprint 7.7 MR 4: usato dal builder per costruire ``numero_turno``
+    con suffisso materiale.
     """
     for giornata in giro.giornate:
         for blocco in giornata.blocchi_assegnati:
@@ -311,13 +300,10 @@ _primo_tipo_materiale = primo_tipo_materiale
 
 
 def _build_metadata_giro(
-    numero_turno: str, programma_id: int, giro: GiroAssegnato
+    numero_turno: str, programma_id: int, giro: GiroAggregato
 ) -> dict[str, Any]:
-    """Metadata di tracciabilità salvati su ``generation_metadata_json``.
-
-    Permette debug/audit: chi ha generato il giro, con quale algoritmo,
-    quando, con quanti warning.
-    """
+    """Metadata di tracciabilità su ``generation_metadata_json``."""
+    n_varianti_per_giornata = [len(g.varianti) for g in giro.giornate]
     return {
         "persister_version": PERSISTER_VERSION,
         "generato_at": datetime.now(UTC).isoformat(),
@@ -327,22 +313,19 @@ def _build_metadata_giro(
         "chiuso": giro.chiuso,
         "n_corse_residue": len(giro.corse_residue),
         "n_incompatibilita_materiale": len(giro.incompatibilita_materiale),
+        # Sprint 7.7 MR 5: tracciabilità clustering A2.
+        "n_cluster_a1": giro.n_cluster_a1,
+        "n_varianti_per_giornata": n_varianti_per_giornata,
     }
 
 
 def _build_metadata_evento(ev: EventoComposizione) -> dict[str, Any]:
-    """Metadata di un blocco aggancio/sgancio (vedi PROGRAMMA-MATERIALE.md §5.4).
-
-    Sprint 5.5: include ``materiale_tipo_codice`` per identificare quale
-    rotabile entra/esce nell'evento (utile per editor giro UI).
-    """
+    """Metadata di un blocco aggancio/sgancio."""
     return {
         "materiale_tipo_codice": ev.materiale_tipo_codice,
         "pezzi_delta": ev.pezzi_delta,
         "note_builder": ev.note_builder,
         "stazione_proposta_originale": ev.stazione_proposta,
-        # `stazione_finale` parte uguale all'originale; l'editor giro
-        # la cambia se l'utente sposta l'evento in un'altra stazione.
         "stazione_finale": ev.stazione_proposta,
     }
 
@@ -355,10 +338,7 @@ async def _crea_corsa_materiale_vuoto(
     seq_vuoto_giro: int,
     session: AsyncSession,
 ) -> int:
-    """Inserisce ``CorsaMaterialeVuoto`` ORM e ritorna il suo id.
-
-    ``numero_treno_vuoto`` è generato come ``V-{numero_turno}-{NNN}``.
-    """
+    """Inserisce ``CorsaMaterialeVuoto`` ORM e ritorna il suo id."""
     cmv = CorsaMaterialeVuoto(
         azienda_id=azienda_id,
         numero_treno_vuoto=f"V-{numero_turno}-{seq_vuoto_giro:03d}",
@@ -366,7 +346,7 @@ async def _crea_corsa_materiale_vuoto(
         codice_destinazione=blocco_vuoto.codice_destinazione,
         ora_partenza=blocco_vuoto.ora_partenza,
         ora_arrivo=blocco_vuoto.ora_arrivo,
-        min_tratta=None,  # stima non disponibile in 4.4.2
+        min_tratta=None,
         km_tratta=None,
         origine="generato_da_giro_materiale",
         giro_materiale_id=giro_materiale_id,
@@ -380,31 +360,28 @@ async def _crea_corsa_materiale_vuoto(
     return cmv_id
 
 
-async def _persisti_blocchi_giornata(
-    giornata: GiornataAssegnata,
-    giro_giornata_id: int,
+async def _persisti_blocchi_variante(
+    variante: VarianteGiornata,
+    giro_variante_id: int,
     giro_materiale_id: int,
     azienda_id: int,
     numero_turno: str,
     seq_vuoto_giro_inizio: int,
     session: AsyncSession,
 ) -> tuple[int, int]:
-    """Persiste i blocchi della giornata in ordine sequenziale.
+    """Persiste i blocchi di una variante in ordine sequenziale.
 
-    Sequenza: ``vuoto_testa? → [evento? → corsa]* → vuoto_coda?``.
-
-    Sprint 7.7 MR 3: la FK punta a ``giro_giornata`` (era a
-    ``giro_variante``).
+    Sprint 7.7 MR 5: ogni variante ha la sua sequenza di blocchi
+    (vuoto_testa? → [evento? → corsa]* → vuoto_coda?). La FK punta a
+    ``giro_variante_id``.
 
     Returns:
-        ``(seq_vuoto_giro, seq_blocco_next)``. ``seq_vuoto_giro``
-        aggiornato (incrementa di 0/1/2 a seconda dei vuoti generati).
-        ``seq_blocco_next`` è il prossimo seq libero dentro la giornata
-        (utile per inserire blocchi extra come il rientro 9XXXX dopo).
+        ``(seq_vuoto_giro, seq_blocco_next)`` per propagazione fra
+        varianti dello stesso giro.
     """
-    seq_blocco = 1  # progressivo dentro la giro_giornata (CHECK seq >= 1)
-    seq_vuoto = seq_vuoto_giro_inizio  # progressivo per CorsaMaterialeVuoto del giro
-    cat_pos = giornata.catena_posizionata
+    seq_blocco = 1  # progressivo dentro la variante (CHECK seq >= 1)
+    seq_vuoto = seq_vuoto_giro_inizio
+    cat_pos = variante.catena_posizionata
 
     # ---- Vuoto di testa ----
     if cat_pos.vuoto_testa is not None:
@@ -419,7 +396,7 @@ async def _persisti_blocchi_giornata(
         seq_vuoto += 1
         session.add(
             GiroBlocco(
-                giro_giornata_id=giro_giornata_id,
+                giro_variante_id=giro_variante_id,
                 seq=seq_blocco,
                 tipo_blocco="materiale_vuoto",
                 corsa_commerciale_id=None,
@@ -436,9 +413,6 @@ async def _persisti_blocchi_giornata(
                 is_validato_utente=True,
                 metadata_json={
                     "motivo": cat_pos.vuoto_testa.motivo,
-                    # Sprint 5.6 R2: il vuoto è materializzato la sera prima
-                    # (es. parte 23:30 di K-1) per essere pronto a inizio
-                    # servizio di K. Solo per vuoti di USCITA dal deposito.
                     "cross_notte_giorno_precedente": cat_pos.vuoto_testa.cross_notte_giorno_precedente,
                 },
             )
@@ -446,18 +420,19 @@ async def _persisti_blocchi_giornata(
         seq_blocco += 1
 
     # ---- Eventi composizione: indicizzati per "posizione_dopo_blocco" ----
-    eventi_per_pos = {e.posizione_dopo_blocco: e for e in giornata.eventi_composizione}
+    eventi_per_pos = {
+        e.posizione_dopo_blocco: e for e in variante.eventi_composizione
+    }
 
     # ---- Blocchi corsa con eventi inseriti PRIMA del blocco corrente ----
-    for idx, blocco in enumerate(giornata.blocchi_assegnati):
-        # Evento "dopo blocco idx-1" → va inserito PRIMA del blocco idx
+    for idx, blocco in enumerate(variante.blocchi_assegnati):
         if (idx - 1) in eventi_per_pos:
             ev = eventi_per_pos[idx - 1]
             session.add(
                 GiroBlocco(
-                    giro_giornata_id=giro_giornata_id,
+                    giro_variante_id=giro_variante_id,
                     seq=seq_blocco,
-                    tipo_blocco=ev.tipo,  # 'aggancio' | 'sgancio'
+                    tipo_blocco=ev.tipo,
                     corsa_commerciale_id=None,
                     corsa_materiale_vuoto_id=None,
                     stazione_da_codice=ev.stazione_proposta,
@@ -465,8 +440,6 @@ async def _persisti_blocchi_giornata(
                     ora_inizio=blocco.corsa.ora_partenza,
                     ora_fine=blocco.corsa.ora_partenza,
                     descrizione=ev.note_builder,
-                    # is_validato_utente=False: PROPOSTA del builder, va
-                    # confermata in editor giro UI (PROGRAMMA-MATERIALE.md §5.2).
                     is_validato_utente=ev.is_validato_utente,
                     metadata_json=_build_metadata_evento(ev),
                 )
@@ -476,7 +449,7 @@ async def _persisti_blocchi_giornata(
         # Blocco corsa commerciale
         session.add(
             GiroBlocco(
-                giro_giornata_id=giro_giornata_id,
+                giro_variante_id=giro_variante_id,
                 seq=seq_blocco,
                 tipo_blocco="corsa_commerciale",
                 corsa_commerciale_id=blocco.corsa.id,
@@ -488,8 +461,6 @@ async def _persisti_blocchi_giornata(
                 descrizione=str(blocco.corsa.numero_treno),
                 is_validato_utente=True,
                 metadata_json={
-                    # Sprint 5.5: composizione completa serializzata,
-                    # sostituisce i campi singoli legacy.
                     "composizione": [
                         {
                             "materiale_tipo_codice": item.materiale_tipo_codice,
@@ -517,7 +488,7 @@ async def _persisti_blocchi_giornata(
         seq_vuoto += 1
         session.add(
             GiroBlocco(
-                giro_giornata_id=giro_giornata_id,
+                giro_variante_id=giro_variante_id,
                 seq=seq_blocco,
                 tipo_blocco="materiale_vuoto",
                 corsa_commerciale_id=None,
@@ -549,26 +520,29 @@ async def _persisti_un_giro(
     periodo_valido_da: date | None = None,
     periodo_valido_a: date | None = None,
 ) -> int:
-    """Persiste un singolo giro: GiroMateriale + giornate + varianti + blocchi.
+    """Persiste un singolo giro aggregato.
 
-    Sprint 5.6:
-    - Popola ``km_media_giornaliera`` (Feature 2): somma km_tratta /
-      numero_giornate.
-    - Se ``motivo_chiusura='naturale'`` E l'ultima corsa NON arriva alla
-      ``stazione_collegata`` della sede, aggiunge un blocco
-      ``materiale_vuoto`` con numero ``9NNNN`` (placeholder rientro
-      manutentivo, Feature 4).
+    Schema scritto:
+    GiroMateriale → N GiroGiornata → M GiroVariante per giornata →
+    K GiroBlocco per variante.
     """
     loc = await _carica_localita(session, entry.giro.localita_codice, azienda_id)
-    materiale_tipo = _primo_tipo_materiale(entry.giro)
+    materiale_tipo = entry.giro.materiale_tipo_codice
+    # Sprint 7.7 MR 5: ``"MISTO"`` è la sentinella usata da
+    # ``wrap_assegnato_in_aggregato`` quando il giro non ha alcuna
+    # composizione assegnata (= tutto in corse residue). In DB:
+    # ``tipo_materiale = "MISTO"`` (text, leggibile in UI) ma
+    # ``materiale_tipo_codice = NULL`` (FK su ``materiale_tipo``).
+    materiale_tipo_codice_db: str | None = (
+        None if materiale_tipo == "MISTO" else materiale_tipo
+    )
 
     n_giornate = len(entry.giro.giornate)
-    km_totali = _km_totali_giro(entry.giro)
-    km_media_giornaliera = round(km_totali / n_giornate, 2) if n_giornate > 0 else 0.0
+    km_totali_canonica = _km_totali_canonica(entry.giro)
+    km_media_giornaliera = (
+        round(km_totali_canonica / n_giornate, 2) if n_giornate > 0 else 0.0
+    )
 
-    # Sprint 5.6 R3: km_media_annua = intersezione `valido_in_date_json`
-    # delle prime corse di ogni giornata × km giornaliera. Richiede il
-    # periodo del programma (fornito dal builder.py orchestrator).
     km_media_annua: float | None = None
     if periodo_valido_da is not None and periodo_valido_a is not None:
         km_media_annua = _km_media_annua_giro(
@@ -580,9 +554,9 @@ async def _persisti_un_giro(
         programma_id=programma_id,
         numero_turno=entry.numero_turno,
         validita_codice=None,
-        tipo_materiale=materiale_tipo if materiale_tipo is not None else "MISTO",
+        tipo_materiale=materiale_tipo,
         descrizione_materiale=None,
-        materiale_tipo_codice=materiale_tipo,
+        materiale_tipo_codice=materiale_tipo_codice_db,
         numero_giornate=n_giornate,
         km_media_giornaliera=km_media_giornaliera,
         km_media_annua=km_media_annua,
@@ -591,86 +565,89 @@ async def _persisti_un_giro(
         localita_manutenzione_partenza_id=loc.id,
         localita_manutenzione_arrivo_id=loc.id,
         stato="bozza",
-        # Sprint 7.7 MR 3: etichetta calcolata dal builder via
-        # ``calcola_etichetta_giro``.
-        etichetta_tipo=entry.etichetta_tipo,
-        etichetta_dettaglio=entry.etichetta_dettaglio,
-        generation_metadata_json=_build_metadata_giro(entry.numero_turno, programma_id, entry.giro),
+        generation_metadata_json=_build_metadata_giro(
+            entry.numero_turno, programma_id, entry.giro
+        ),
     )
     session.add(gm)
     await session.flush()
     gm_id: int = gm.id
 
-    seq_vuoto_giro = 0  # progressivo per CorsaMaterialeVuoto del giro intero
-    last_gg_id: int | None = None
+    seq_vuoto_giro = 0  # progressivo per CorsaMaterialeVuoto del giro
+    last_gv_id: int | None = None  # ultima variante dell'ultima giornata
     last_seq_blocco: int = 1
-    for idx, giornata in enumerate(entry.giro.giornate, start=1):
-        km_g = _km_giornata(giornata)
-
-        # Sprint 7.7 MR 3: i campi validità (era su GiroVariante) ora
-        # vivono su GiroGiornata. Testo = `periodicita_breve` PdE della
-        # prima corsa (verità letterale); dates_apply = output del
-        # clustering A1 multi-giornata.
-        testo_val, dates_val = _estrai_validita_giornata(giornata)
+    for giornata in entry.giro.giornate:
+        km_g = _km_giornata_canonica(giornata)
         gg = GiroGiornata(
             giro_materiale_id=gm_id,
-            numero_giornata=idx,
+            numero_giornata=giornata.numero_giornata,
             km_giornata=round(km_g, 2) if km_g > 0 else None,
-            validita_testo=testo_val,
-            dates_apply_json=dates_val,
-            dates_skip_json=[],
         )
         session.add(gg)
         await session.flush()
-        last_gg_id = gg.id
 
-        seq_vuoto_giro, last_seq_blocco = await _persisti_blocchi_giornata(
-            giornata,
-            gg.id,
-            gm_id,
-            azienda_id,
-            entry.numero_turno,
-            seq_vuoto_giro,
-            session,
-        )
+        # Sprint 7.7 MR 5: persisti N varianti per la giornata.
+        for variant_index, variante in enumerate(giornata.varianti):
+            testo_val, dates_val = _estrai_validita_variante(variante)
+            gv = GiroVariante(
+                giro_giornata_id=gg.id,
+                variant_index=variant_index,
+                validita_testo=testo_val,
+                dates_apply_json=dates_val,
+                dates_skip_json=[],
+            )
+            session.add(gv)
+            await session.flush()
+            seq_vuoto_giro, last_seq_blocco = await _persisti_blocchi_variante(
+                variante,
+                gv.id,
+                gm_id,
+                azienda_id,
+                entry.numero_turno,
+                seq_vuoto_giro,
+                session,
+            )
+            last_gv_id = gv.id
 
-    # Sprint 5.6 Feature 4 + Sprint 7.7 MR 1 (Fix C): corsa rientro
-    # a sede 9XXXX. SOLO se l'ultima destinazione del giro è già
-    # vicino sede (in whitelist `localita_stazione_vicina`). Mai
-    # vuoti lunghi tipo COLICO → CERTOSA. Decisione utente
-    # 2026-05-02:
-    # - ultima_dest == stazione_sede → niente vuoto (chiusura naturale)
-    # - ultima_dest in whitelist & != stazione_sede → vuoto BREVE
-    #   (es. CADORNA → CERTOSA, ~5km)
-    # - ultima_dest fuori whitelist → niente vuoto, giro resta non
-    #   chiuso (warning visibile in `motivo_chiusura`).
-    # NB: la condizione `motivo_chiusura == 'naturale'` non e' più
-    # vincolante per Fix C — anche giri che chiudono per `km_cap`
-    # possono avere il vuoto di rientro se l'ultima dest è in
-    # whitelist (significa che il builder e' riuscito a far terminare
-    # la corsa in zona sede pur raggiungendo il cap).
+    # Sprint 5.6 Feature 4 + Sprint 7.7 MR 1 (Fix C): rientro 9XXXX a
+    # sede. Il rientro si attacca all'ULTIMA variante dell'ULTIMA
+    # giornata (= variante che chiude effettivamente il ciclo). Sprint
+    # 7.7 MR 5: nel modello A2 la "variante canonica" della giornata N
+    # è quella con variant_index più alto NON necessariamente — ma
+    # tutte le varianti della giornata N rappresentano modi diversi
+    # di chiudere il ciclo, quindi attaccare il rientro all'ULTIMA
+    # creata è il pattern più conservativo.
+    # NB: questo è un raffinamento del modello — in futuro il rientro
+    # potrebbe essere replicato su OGNI variante dell'ultima giornata,
+    # con variazione della destinazione in base all'ultima corsa di
+    # quella variante. Per il MR 5 manteniamo la logica MR 1: rientro
+    # solo se l'ultima dest della variante FINALE è in whitelist.
     if (
         entry.genera_rientro_sede
-        and last_gg_id is not None
+        and last_gv_id is not None
         and loc.stazione_collegata_codice is not None
+        and entry.giro.giornate
     ):
         ultima_giornata = entry.giro.giornate[-1]
-        ultima_corsa = ultima_giornata.catena_posizionata.catena.corse[-1]
-        ultima_dest = ultima_corsa.codice_destinazione
-        if (
-            ultima_dest != loc.stazione_collegata_codice
-            and ultima_dest in entry.whitelist_sede
-        ):
-            await _crea_blocco_rientro_sede(
-                session=session,
-                giro_giornata_id=last_gg_id,
-                giro_materiale_id=gm_id,
-                azienda_id=azienda_id,
-                seq=last_seq_blocco,
-                stazione_da=ultima_dest,
-                stazione_a=loc.stazione_collegata_codice,
-                ora_inizio=ultima_corsa.ora_arrivo,
-            )
+        if ultima_giornata.varianti:
+            ultima_variante = ultima_giornata.varianti[-1]
+            corse_ultima = ultima_variante.catena_posizionata.catena.corse
+            if corse_ultima:
+                ultima_dest = corse_ultima[-1].codice_destinazione
+                if (
+                    ultima_dest != loc.stazione_collegata_codice
+                    and ultima_dest in entry.whitelist_sede
+                ):
+                    await _crea_blocco_rientro_sede(
+                        session=session,
+                        giro_variante_id=last_gv_id,
+                        giro_materiale_id=gm_id,
+                        azienda_id=azienda_id,
+                        seq=last_seq_blocco,
+                        stazione_da=ultima_dest,
+                        stazione_a=loc.stazione_collegata_codice,
+                        ora_inizio=corse_ultima[-1].ora_arrivo,
+                    )
 
     return gm_id
 
@@ -678,7 +655,7 @@ async def _persisti_un_giro(
 async def _crea_blocco_rientro_sede(
     *,
     session: AsyncSession,
-    giro_giornata_id: int,
+    giro_variante_id: int,
     giro_materiale_id: int,
     azienda_id: int,
     seq: int,
@@ -686,17 +663,10 @@ async def _crea_blocco_rientro_sede(
     stazione_a: str,
     ora_inizio: Any,
 ) -> None:
-    """Crea CorsaMaterialeVuoto + GiroBlocco per il rientro 9XXXX a sede.
-
-    Sprint 5.6 Feature 4: convenzione Trenord placeholder
-    (5 cifre, prefisso 9). Si appoggia all'ultima variante dell'ultima
-    giornata come blocco aggiuntivo dopo la coda commerciale.
-    """
+    """Crea CorsaMaterialeVuoto + GiroBlocco per il rientro 9XXXX a sede."""
     from datetime import time as _time
 
     numero = await _next_numero_rientro_sede(session)
-    # Per `ora_arrivo` non abbiamo stima: usiamo ora_inizio + 30' come
-    # default (sostituibile dal pianificatore in editor giro).
     h, m = ora_inizio.hour, ora_inizio.minute
     arrivo_min = (h * 60 + m + 30) % (24 * 60)
     ora_fine = _time(arrivo_min // 60, arrivo_min % 60)
@@ -721,7 +691,7 @@ async def _crea_blocco_rientro_sede(
 
     session.add(
         GiroBlocco(
-            giro_giornata_id=giro_giornata_id,
+            giro_variante_id=giro_variante_id,
             seq=seq,
             tipo_blocco="materiale_vuoto",
             corsa_commerciale_id=None,
@@ -731,7 +701,7 @@ async def _crea_blocco_rientro_sede(
             ora_inizio=ora_inizio,
             ora_fine=ora_fine,
             descrizione=f"Rientro sede {numero}: {stazione_da} → {stazione_a}",
-            is_validato_utente=False,  # placeholder, RFI/FNM emette numero reale
+            is_validato_utente=False,
             metadata_json={"motivo": "rientro_sede", "numero_treno_placeholder": numero},
         )
     )
@@ -752,28 +722,22 @@ async def persisti_giri(
     periodo_valido_da: date | None = None,
     periodo_valido_a: date | None = None,
 ) -> list[int]:
-    """Persiste una lista di giri assegnati nel DB. Ritorna i loro ``id``.
+    """Persiste una lista di giri aggregati nel DB. Ritorna i loro ``id``.
 
-    Algoritmo:
-
-    1. Per ogni giro: crea ``GiroMateriale`` (con etichetta) +
-       N ``GiroGiornata`` (con validità) + M ``GiroBlocco`` (sequenza:
-       ``vuoto_testa? → [evento? → corsa]* → vuoto_coda?``) +
-       eventuali ``CorsaMaterialeVuoto``.
-    2. Il persister fa solo ``add`` + ``flush``: **nessun commit**.
-       Il caller gestisce la transazione.
+    Schema: GiroMateriale + N GiroGiornata + M GiroVariante per giornata
+    + K GiroBlocco per variante + eventuali CorsaMaterialeVuoto.
 
     Args:
         giri_da_persistere: lista di ``GiroDaPersistere`` (numero_turno
-            generato dal caller + ``GiroAssegnato`` dalla pipeline pure).
+            + ``GiroAggregato`` dal clustering A2).
         session: ``AsyncSession`` SQLAlchemy.
-        programma_id: id del ``ProgrammaMateriale`` di riferimento (per
-            tracciabilità in metadata).
-        azienda_id: id dell'``Azienda`` (per FK su località e vuoti).
+        programma_id: id ``ProgrammaMateriale`` (per tracciabilità).
+        azienda_id: id ``Azienda`` (per FK su località e vuoti).
+        periodo_valido_da, periodo_valido_a: opzionali, per stima km
+            annua.
 
     Returns:
-        Lista ``GiroMateriale.id`` creati (nello stesso ordine
-        dell'input).
+        Lista ``GiroMateriale.id`` creati (nello stesso ordine).
 
     Raises:
         LocalitaNonTrovataError: località riferita non esiste in

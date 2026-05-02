@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.models.anagrafica import LocalitaManutenzione
 from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
-from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale
+from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
 from colazione.models.turni_pdc import TurnoPdc, TurnoPdcBlocco, TurnoPdcGiornata
 
 # Sprint 7.4 MR 2: split CV intermedio.
@@ -479,21 +479,40 @@ async def genera_turno_pdc(
 
     giornata_ids = [gg.id for gg in giornate_giro]
 
-    # Sprint 7.7 MR 3 (refactor varianti → giri separati): la FK dei
-    # blocchi punta direttamente alla giornata. Niente più step
-    # intermedio "variante" né prodotto cartesiano di combinazioni —
-    # il giro materiale è ora UNO specifico pattern calendariale
-    # (etichetta_tipo) e ha una sola sequenza canonica per giornata.
-    blocchi_per_giornata: dict[int, list[GiroBlocco]] = {}
+    # Sprint 7.7 MR 5 (re-introduzione varianti A2): ogni giornata ha
+    # M varianti calendariali. Il builder PdC genera il turno sulla
+    # VARIANTE CANONICA (= ``variant_index=0``) di ciascuna giornata;
+    # per il MVP è una scelta semplice e deterministica. In futuro il
+    # pianificatore potrà scegliere quale variante usare per generare
+    # il turno PdC, o generare N turni (uno per variante).
+    canonica_per_giornata: dict[int, GiroVariante] = {}
     if giornata_ids:
+        for v in (
+            await session.execute(
+                select(GiroVariante)
+                .where(GiroVariante.giro_giornata_id.in_(giornata_ids))
+                .order_by(GiroVariante.giro_giornata_id, GiroVariante.variant_index)
+            )
+        ).scalars():
+            # Prima occorrenza per giornata = variant_index più basso
+            # (= canonica) grazie al sort.
+            canonica_per_giornata.setdefault(v.giro_giornata_id, v)
+
+    blocchi_per_giornata: dict[int, list[GiroBlocco]] = {}
+    canonica_ids = [v.id for v in canonica_per_giornata.values()]
+    if canonica_ids:
+        # Mapping inverso variante_id → giornata_id per riassegnare i
+        # blocchi alla giornata d'origine.
+        var_to_gg = {v.id: v.giro_giornata_id for v in canonica_per_giornata.values()}
         for b in (
             await session.execute(
                 select(GiroBlocco)
-                .where(GiroBlocco.giro_giornata_id.in_(giornata_ids))
-                .order_by(GiroBlocco.giro_giornata_id, GiroBlocco.seq)
+                .where(GiroBlocco.giro_variante_id.in_(canonica_ids))
+                .order_by(GiroBlocco.giro_variante_id, GiroBlocco.seq)
             )
         ).scalars():
-            blocchi_per_giornata.setdefault(b.giro_giornata_id, []).append(b)
+            gg_id = var_to_gg[b.giro_variante_id]
+            blocchi_per_giornata.setdefault(gg_id, []).append(b)
 
     # Stazione sede del PdC: collegata alla località di manutenzione di
     # partenza del giro. Calcolata una volta per tutto il loop.
@@ -541,14 +560,20 @@ async def genera_turno_pdc(
 
     stazioni_cv = await lista_stazioni_cv_ammesse(session, azienda_id)
 
-    # Sprint 7.7 MR 3: 1 giro = 1 turno PdC (più eventuali rami split CV).
-    # Niente più prodotto cartesiano di varianti.
+    # Sprint 7.7 MR 5: 1 giro = 1 turno PdC (più eventuali rami split
+    # CV). Il turno è generato sulla variante CANONICA di ogni giornata
+    # (variant_index=0). Le altre varianti calendariali esistono ma per
+    # ora non producono turni PdC distinti — futura estensione.
+    validita_per_giornata: dict[int, str | None] = {
+        gg_id: v.validita_testo for gg_id, v in canonica_per_giornata.items()
+    }
     risultati = await _genera_un_turno_pdc(
         session=session,
         azienda_id=azienda_id,
         giro=giro,
         giornate_giro=giornate_giro,
         blocchi_per_giornata=blocchi_per_giornata,
+        validita_per_giornata=validita_per_giornata,
         stazione_sede=stazione_sede,
         stazioni_cv=stazioni_cv,
         valido_da_eff=valido_da_eff,
@@ -570,16 +595,18 @@ async def _genera_un_turno_pdc(
     giro: GiroMateriale,
     giornate_giro: list[GiroGiornata],
     blocchi_per_giornata: dict[int, list[GiroBlocco]],
+    validita_per_giornata: dict[int, str | None],
     stazione_sede: str | None,
     stazioni_cv: set[str],
     valido_da_eff: date,
 ) -> list[BuilderTurnoPdcResult]:
     """Persiste i `TurnoPdc` per il giro indicato.
 
-    Sprint 7.7 MR 3 (refactor varianti → giri separati): un giro
-    materiale ha ora una sola sequenza canonica per giornata —
-    nessun prodotto cartesiano di varianti. Il giro stesso è UN
-    pattern calendariale specifico (etichetta_tipo).
+    Sprint 7.7 MR 5 (re-introduzione varianti A2): per ogni giornata
+    del giro, il turno PdC è generato sulla VARIANTE CANONICA
+    (``variant_index=0``). ``validita_per_giornata`` associa a ogni
+    ``giro_giornata.id`` il ``validita_testo`` della variante canonica,
+    usato per popolare ``TurnoPdcGiornata.variante_calendario``.
 
     Sprint 7.4 MR 2 (split CV intermedio): produce in generale **N**
     TurnoPdc:
@@ -612,9 +639,12 @@ async def _genera_un_turno_pdc(
     drafts_per_giornata: list[list[_GiornataPdcDraft]] = []
     for gg in giornate_giro:
         blocchi = blocchi_per_giornata.get(gg.id, [])
+        # Sprint 7.7 MR 5: validita_testo dalla variante canonica
+        # (era su giornata stessa pre-MR 5).
+        validita = validita_per_giornata.get(gg.id) or "GG"
         rami = split_e_build_giornata(
             numero_giornata=gg.numero_giornata,
-            variante_calendario=gg.validita_testo or "GG",
+            variante_calendario=validita,
             blocchi_giro=blocchi,
             stazioni_cv=stazioni_cv,
         )
