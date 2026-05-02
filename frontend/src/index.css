@@ -52,3 +52,78 @@ body {
   );
   border: 1px solid #9ca3af;
 }
+
+/* ===================================================================
+   Gantt giro v3 — schermata 5, design `arturo/05-gantt-giro.html` v3
+   Single-line PDF Trenord stile, asse 04→04 next day, 1h=60px, 1440px.
+   =================================================================== */
+
+/* Linea base commerciale (rosso robusto, contrast white text). */
+.seg-comm {
+  background: #dc2626;
+}
+/* Vuoto tecnico: rosso chiaro tratteggiato (sottile h-1, no etichette). */
+.seg-vuoto {
+  background-image: repeating-linear-gradient(
+    90deg,
+    #ef4444 0 6px,
+    transparent 6px 10px
+  );
+}
+/* Rientro 9NNNN: viola. */
+.seg-rientro {
+  background: #8b5cf6;
+}
+/* Accessori (ACCp/ACCa): arancione. */
+.seg-acc {
+  background: #fb923c;
+}
+/* Sosta: bianco con bordo grigio (placeholder visivo, raramente usato
+   come blocco esplicito; più spesso il "gap" tra blocchi). */
+.seg-sosta {
+  background: #fff;
+  border: 1px solid #d1d5db;
+}
+
+/* Validato manualmente: bordo destro 4px emerald via inset shadow
+   (compatibile con position:absolute + dimensione fissa del segmento). */
+.validato {
+  box-shadow: inset -4px 0 0 0 #10b981;
+}
+
+/* Gap "long" (≥30'): tratteggio orizzontale leggero. */
+.gap-long {
+  background-image: repeating-linear-gradient(
+    90deg,
+    #9ca3af 0 4px,
+    transparent 4px 8px
+  );
+}
+
+/* Tick verticali sull'asse X timeline (mezz'ora più sottile, ora più
+   marcato). */
+.ticks-bg {
+  background-image:
+    repeating-linear-gradient(90deg, #f3f4f6 0 1px, transparent 1px 30px),
+    repeating-linear-gradient(90deg, #e5e7eb 0 1px, transparent 1px 60px);
+}
+
+/* Banda notte fra giornate: tratteggio diagonale tenue. */
+.night-band {
+  background: repeating-linear-gradient(
+    45deg,
+    #f3f4f6 0 6px,
+    #fafafa 6px 12px
+  );
+}
+
+/* Selezione blocco: outline e dim degli altri.
+   Il container `.selecting` viene applicato all'avvolgimento Gantt
+   quando un blocco è selezionato; gli altri vengono dimmati. */
+.gantt-selecting .blk:not(.is-selected) {
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+.gantt-selecting .blk.is-selected {
+  z-index: 5;
+}

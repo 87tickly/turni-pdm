@@ -2,62 +2,65 @@ import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AlertCircle, ArrowLeft, FileDown, Users, X } from "lucide-react";
 
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { useGiroDettaglio } from "@/hooks/useGiri";
 import { useTurniPdcGiro } from "@/hooks/useTurniPdc";
 import { ApiError } from "@/lib/api/client";
-import type { GiroBlocco, GiroDettaglio, GiroGiornata, GiroVariante } from "@/lib/api/giri";
-import { formatNumber } from "@/lib/format";
+import type {
+  GiroBlocco,
+  GiroDettaglio,
+  GiroGiornata,
+  GiroVariante,
+} from "@/lib/api/giri";
+import { formatDateIt, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdcDialog";
 
 /**
- * Schermata 5 — Visualizzatore Gantt giro materiale.
- * Design: `arturo/05-gantt-giro.html` v2.
+ * Schermata 5 v3 — Visualizzatore Gantt giro materiale.
+ * Design: `arturo/05-gantt-giro.html` v3 (handoff bundle 2026-05-03).
  *
- * Struttura: Hero header (mono) + Meta band + per-giornata Gantt
- * (asse 04:00→04:00 next day, 1440 min) + side panel blocco selezionato.
+ * Layout single-line PDF Trenord (NO matrice multi-row): per ogni
+ * giornata-variante una sola riga timeline con stazioni come label
+ * testo, numero treno dentro il segmento rosso, gap minuti, banda
+ * notte fra giornate, eventi composizione marker, side panel destro
+ * sul blocco selezionato, sotto-Gantt con date di applicazione.
  *
- * Must-have implementati (entry 90 + 92 + 93):
- *   1. ✅ numero_treno DENTRO barra ≥60px (mono semibold bianco)
- *   2. ✅ matrice ore × stazioni (Opzione A, ≤10 stazioni — entry 92)
- *   3. ✅ gap minuti label tra blocchi consecutivi + tratteggio se ≥30'
- *      (entry 93)
- *   6. ✅ selezione blocco: bordo + side panel + dim altri 55%
- *   7. ✅ sticky scroll: asse X top + colonna stazioni left + corner opaco
- *      (parziale, attivo solo in matrice — entry 92)
- *   8. ✅ is_validato_utente: bordo dx 4px emerald + badge in panel
- *   ✅ cross-mezzanotte: span 04:00→04:00 next day
- * Restano residui: eventi composizione marker (#4), banda notte fra
- * giornate con verifica congruenza (#5).
+ * Must-have v2 brief implementati cumulativamente (entry 90, 92, 94, 95):
+ *   1. ✅ numero_treno DENTRO barra (mono semibold bianco)
+ *   2. ✅ stazioni come label testo verde sopra/sotto i segmenti
+ *      (sostituisce la matrice ore × stazioni di entry 92)
+ *   3. ✅ gap minuti label + tratteggio se ≥30'
+ *   4. ✅ eventi composizione marker arancione 4px (entry 95)
+ *   5. ✅ banda notte fra giornate + verifica congruenza stazione
+ *      (entry 95)
+ *   6. ✅ selezione blocco: outline + side panel + dim altri 55%
+ *   7. ✅ sticky scroll: asse X top + Giornata col left + Per/Km dx
+ *   8. ✅ is_validato_utente: bordo dx 4px emerald (via .validato)
+ *   ✅ cross-mezzanotte: span 04:00→04:00 next day, marker 24:00
  */
 
 // =====================================================================
-// Constants — time axis 04:00 → 04:00 next day (24h, 1440 min)
+// Constants — time axis 04:00 → 04:00 next day (24h, 1440 min, 1440px)
 // =====================================================================
 
-const AXIS_START_MIN = 4 * 60; // 04:00
+const AXIS_START_MIN = 4 * 60; // 04:00 reference
 const AXIS_TOTAL_MIN = 24 * 60; // 1440 min
-/** Tick ogni 2 ore: 04, 06, 08, ..., 02. */
-const TICK_HOURS = [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 0, 2];
 
-// =====================================================================
-// Constants — matrice (Opzione A) layout
-// =====================================================================
+const TIMELINE_WIDTH_PX = 1440;
+const GIORNATA_LABEL_COL_PX = 100;
+const PER_KM_COL_PX = 120;
+const TIMELINE_ROW_HEIGHT_PX = 88;
+const NOTTE_ROW_HEIGHT_PX = 24;
 
-/** Soglia design: ≤ MATRICE_MAX_STAZIONI → matrice, > → timeline. */
-const MATRICE_MAX_STAZIONI = 10;
-/** Larghezza colonna stazioni sticky-left (px). */
-const MATRICE_STATION_COL_PX = 180;
-/** Larghezza asse X tempo: 1h = 60px → 24h = 1440px. */
-const MATRICE_AXIS_WIDTH_PX = 1440;
-/** Altezza riga stazione (px). */
-const MATRICE_ROW_HEIGHT_PX = 56;
-/** Altezza riga header X axis (px). */
-const MATRICE_HEADER_HEIGHT_PX = 40;
+/** Soglia gap "long" (tratteggio aggiuntivo). */
+const GAP_LONG_THRESHOLD = 30;
+/** Soglia minima per renderizzare un gap. */
+const GAP_MIN_THRESHOLD = 10;
+/** Sopra questa soglia il gap è una "notte" (separato in NotteRow). */
+const GAP_NIGHT_THRESHOLD = 6 * 60;
 
 // =====================================================================
 // Route component
@@ -70,6 +73,14 @@ export function GiroDettaglioRoute() {
 
   const [selectedBlocco, setSelectedBlocco] = useState<GiroBlocco | null>(null);
   const [pdcDialogOpen, setPdcDialogOpen] = useState(false);
+  /**
+   * Per ogni giornata l'utente sceglie quale variante mostrare. Default:
+   * indice 0 (canonica). Stato esposto qui per resilienza ai re-render
+   * tipo selezione blocco.
+   */
+  const [activeVariantByGiornata, setActiveVariantByGiornata] = useState<
+    Record<number, number>
+  >({});
 
   if (giroId === undefined || Number.isNaN(giroId)) {
     return <ErrorBlock message="ID giro non valido nell'URL." />;
@@ -117,24 +128,30 @@ export function GiroDettaglioRoute() {
         className={cn("grid grid-cols-1 gap-4", showSide ? "lg:grid-cols-12" : "lg:grid-cols-1")}
       >
         <div className={cn("flex flex-col gap-4", showSide && "lg:col-span-8")}>
-          {giro.giornate.map((g) => (
-            <GiornataGanttCard
-              key={g.id}
-              giornata={g}
-              selectedBloccoId={selectedBlocco?.id ?? null}
-              onSelectBlocco={setSelectedBlocco}
-            />
-          ))}
+          <GanttSection
+            giro={giro}
+            selectedBlocco={selectedBlocco}
+            onSelectBlocco={setSelectedBlocco}
+            activeVariantByGiornata={activeVariantByGiornata}
+            onChangeActiveVariant={(giornataId, idx) =>
+              setActiveVariantByGiornata((prev) => ({ ...prev, [giornataId]: idx }))
+            }
+          />
         </div>
+
         {showSide && selectedBlocco !== null && (
           <aside className="self-start lg:col-span-4">
             <BloccoSidePanel
               blocco={selectedBlocco}
+              giro={giro}
+              activeVariantByGiornata={activeVariantByGiornata}
               onClose={() => setSelectedBlocco(null)}
             />
           </aside>
         )}
       </section>
+
+      <DateApplicazioneSection giro={giro} />
 
       <GeneraTurnoPdcDialog
         giroId={giro.id}
@@ -183,9 +200,7 @@ function HeroSection({
               {giro.materiale_tipo_codice ?? giro.tipo_materiale}
             </span>
             {typeof meta.linea_principale === "string" && (
-              <span className="text-xs text-muted-foreground">
-                {meta.linea_principale}
-              </span>
+              <span className="text-xs text-muted-foreground">{meta.linea_principale}</span>
             )}
           </div>
 
@@ -219,8 +234,7 @@ function HeroSection({
             <FileDown className="mr-2 h-4 w-4" aria-hidden /> Esporta PDF
           </Button>
           <Button variant="primary" size="md" onClick={onGeneraPdc}>
-            <Users className="mr-2 h-4 w-4" aria-hidden />
-            Genera turno PdC
+            <Users className="mr-2 h-4 w-4" aria-hidden /> Genera turno PdC
           </Button>
         </div>
       </div>
@@ -250,16 +264,18 @@ function HeroSection({
         <MetaItem label="Stato">
           <span className="font-mono text-foreground">{giro.stato}</span>
         </MetaItem>
-        {turni.length > 0 && (
-          <MetaItem label="Turni PdC">
+        <MetaItem label="Turni PdC">
+          {turni.length > 0 ? (
             <Link
               to={`/pianificatore-giro/giri/${giro.id}/turni-pdc`}
               className="text-primary hover:underline"
             >
               {turni.length} generat{turni.length === 1 ? "o" : "i"} →
             </Link>
-          </MetaItem>
-        )}
+          ) : (
+            <span className="text-muted-foreground">non generati</span>
+          )}
+        </MetaItem>
       </div>
     </Card>
   );
@@ -362,503 +378,340 @@ function ChiusuraBadge({ motivo, chiuso }: { motivo: string | null; chiuso: bool
 }
 
 // =====================================================================
-// Per-giornata Gantt card
+// Gantt section — wrapper sticky-top axis + per-giornata rows + totali
 // =====================================================================
 
-function GiornataGanttCard({
-  giornata,
-  selectedBloccoId,
+function GanttSection({
+  giro,
+  selectedBlocco,
   onSelectBlocco,
+  activeVariantByGiornata,
+  onChangeActiveVariant,
 }: {
-  giornata: GiroGiornata;
-  selectedBloccoId: number | null;
-  onSelectBlocco: (b: GiroBlocco) => void;
+  giro: GiroDettaglio;
+  selectedBlocco: GiroBlocco | null;
+  onSelectBlocco: (b: GiroBlocco | null) => void;
+  activeVariantByGiornata: Record<number, number>;
+  onChangeActiveVariant: (giornataId: number, idx: number) => void;
 }) {
-  const [activeIdx, setActiveIdx] = useState(0);
-  const varianti = giornata.varianti;
-  const hasMultiple = varianti.length > 1;
-  const active = varianti[activeIdx] ?? varianti[0];
-
-  // Calcolo stazioni distinte della variante attiva (dopo aver selezionato active).
-  const stazioni = useMemo(
-    () => (active !== undefined ? buildStazioniRows(active) : []),
-    [active],
-  );
-  // Default view: matrice se ≤10 stazioni distinte (design v2 must-have #2).
-  const defaultView: GanttViewMode =
-    stazioni.length > 0 && stazioni.length <= MATRICE_MAX_STAZIONI ? "stazioni" : "timeline";
-  const [viewMode, setViewMode] = useState<GanttViewMode>(defaultView);
-
-  if (active === undefined) {
-    return (
-      <Card className="p-5">
-        <div className="text-sm text-muted-foreground italic">
-          Giornata {giornata.numero_giornata} senza varianti.
-        </div>
-      </Card>
-    );
-  }
+  const stats = useMemo(() => computeGiroKpi(giro), [giro]);
+  const innerWidth = GIORNATA_LABEL_COL_PX + TIMELINE_WIDTH_PX + PER_KM_COL_PX;
 
   return (
-    <Card className="overflow-hidden">
-      {/* Header giornata */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-2">
-        <div className="flex items-baseline gap-3">
-          <span className="text-sm font-semibold text-foreground">
-            Giornata {giornata.numero_giornata}
-          </span>
-          {giornata.km_giornata !== null && (
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {formatNumber(Math.round(giornata.km_giornata))} km
-            </span>
-          )}
-          <span className="text-xs italic text-muted-foreground">
-            {active.etichetta_parlante}
+    <Card className={cn("overflow-hidden", selectedBlocco !== null && "gantt-selecting")}>
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-2.5 text-xs">
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <span className="font-medium uppercase tracking-wide text-foreground">Gantt giro</span>
+          <span className="text-border">·</span>
+          <span>
+            {giro.giornate.length} giornat{giro.giornate.length === 1 ? "a" : "e"} ·{" "}
+            {stats.nVariantiTotale} variant{stats.nVariantiTotale === 1 ? "e" : "i"} calendarial
+            {stats.nVariantiTotale === 1 ? "e" : "i"}
           </span>
         </div>
-        <span className="text-xs text-muted-foreground">
-          {hasMultiple ? `${varianti.length} varianti calendariali` : "1 variante"}
-        </span>
+        <div className="text-muted-foreground/80">
+          Asse 04:00 → 04:00 (giorno seguente) · 1h = 60px · stile PDF Trenord
+        </div>
       </div>
 
-      {/* Variant tabs (se ≥ 2) */}
-      {hasMultiple && (
-        <div
-          role="tablist"
-          aria-label={`Varianti giornata ${giornata.numero_giornata}`}
-          className="flex flex-wrap gap-1 border-b border-border bg-muted/20 px-3 py-1.5"
-        >
-          {varianti.map((v, idx) => {
-            const isActive = idx === activeIdx;
+      {/* Scroll wrapper */}
+      <div className="relative overflow-auto" style={{ maxHeight: "700px" }}>
+        <div className="relative" style={{ width: `${innerWidth}px` }}>
+          {/* Sticky header X axis */}
+          <AxisHeader />
+
+          {/* Per giornata: header row + variante row + (notte band se non ultima) */}
+          {giro.giornate.map((g, idx) => {
+            const activeIdx = activeVariantByGiornata[g.id] ?? 0;
+            const active = g.varianti[activeIdx] ?? g.varianti[0];
+            const next = giro.giornate[idx + 1];
             return (
-              <button
-                key={v.id}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => setActiveIdx(idx)}
-                className={cn(
-                  "rounded px-2 py-1 text-[11px] font-medium transition-colors",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-white text-muted-foreground hover:bg-muted",
+              <div key={g.id}>
+                <GiornataHeaderRow
+                  giornata={g}
+                  activeIdx={activeIdx}
+                  onChangeActive={(i) => onChangeActiveVariant(g.id, i)}
+                />
+                {active !== undefined && (
+                  <VarianteRow
+                    giornata={g}
+                    variante={active}
+                    selectedBloccoId={selectedBlocco?.id ?? null}
+                    onSelectBlocco={onSelectBlocco}
+                  />
                 )}
-                title={`${v.etichetta_parlante}${idx === 0 ? " (canonica)" : ""}`}
-              >
-                {truncateLabel(v.etichetta_parlante)}
-              </button>
+                {next !== undefined && (
+                  <NotteRow giornataPrev={g} giornataNext={next} activeVariantByGiornata={activeVariantByGiornata} />
+                )}
+              </div>
             );
           })}
+
+          {/* Totali */}
+          <TotaliRow giro={giro} stats={stats} />
         </div>
-      )}
+      </div>
 
-      {/* Toolbar: switch view + counter stazioni */}
-      <GanttToolbar
-        viewMode={viewMode}
-        onChange={setViewMode}
-        nStazioni={stazioni.length}
-        nBlocchi={active.blocchi.length}
-      />
-
-      {/* Body: matrice o timeline */}
-      {viewMode === "stazioni" ? (
-        <MatriceView
-          variante={active}
-          stazioni={stazioni}
-          selectedBloccoId={selectedBloccoId}
-          onSelectBlocco={onSelectBlocco}
-        />
-      ) : (
-        <TimelineView
-          variante={active}
-          selectedBloccoId={selectedBloccoId}
-          onSelectBlocco={onSelectBlocco}
-        />
-      )}
+      {/* Legenda */}
+      <Legenda />
     </Card>
   );
 }
 
 // =====================================================================
-// Gantt toolbar — switch matrice ↔ timeline
+// Sticky-top axis header
 // =====================================================================
 
-type GanttViewMode = "stazioni" | "timeline";
+const HOUR_TICKS = [
+  4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3,
+];
 
-function GanttToolbar({
-  viewMode,
-  onChange,
-  nStazioni,
-  nBlocchi,
-}: {
-  viewMode: GanttViewMode;
-  onChange: (m: GanttViewMode) => void;
-  nStazioni: number;
-  nBlocchi: number;
-}) {
+function AxisHeader() {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-2 text-xs">
-      <div className="flex items-center gap-3 text-muted-foreground">
-        <span className="font-medium uppercase tracking-wide">Vista</span>
-        <div className="inline-flex items-center rounded border border-border bg-white p-0.5">
-          <button
-            type="button"
-            onClick={() => onChange("stazioni")}
-            className={cn(
-              "rounded px-2 py-1 text-[11px] font-medium",
-              viewMode === "stazioni"
-                ? "bg-foreground text-white"
-                : "text-muted-foreground hover:bg-muted",
-            )}
-            title="Matrice ore × stazioni (Opzione A)"
-          >
-            Stazioni
-          </button>
-          <button
-            type="button"
-            onClick={() => onChange("timeline")}
-            className={cn(
-              "rounded px-2 py-1 text-[11px] font-medium",
-              viewMode === "timeline"
-                ? "bg-foreground text-white"
-                : "text-muted-foreground hover:bg-muted",
-            )}
-            title="Timeline lineare (tutti i blocchi su una riga)"
-          >
-            Solo timeline
-          </button>
-        </div>
-        <span className="text-border">·</span>
-        <span className="tabular-nums">
-          {nStazioni} stazion{nStazioni === 1 ? "e" : "i"} · {nBlocchi} blocch
-          {nBlocchi === 1 ? "i" : "i"}
-        </span>
+    <div
+      className="sticky top-0 z-30 flex border-b border-border bg-white"
+      style={{ height: 36 }}
+    >
+      {/* Corner top-left (above giornata col) */}
+      <div
+        className="sticky left-0 z-40 flex items-end border-r border-border bg-white px-3 pb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground"
+        style={{ width: GIORNATA_LABEL_COL_PX }}
+      >
+        Giornata
       </div>
-      <div className="text-[11px] text-muted-foreground/80">
-        Asse: 04:00 → 04:00 (giorno seguente) · 1h = 60px
+      {/* 24 tick orari */}
+      <div className="relative" style={{ width: TIMELINE_WIDTH_PX }}>
+        <div className="absolute inset-0 flex">
+          {HOUR_TICKS.map((h, i) => (
+            <div key={`${h}-${i}`} className="relative" style={{ width: 60 }}>
+              <span
+                className={cn(
+                  "absolute left-1 top-1 font-mono text-[10px] tabular-nums",
+                  i % 2 === 0 ? "text-foreground" : "text-muted-foreground/70",
+                )}
+              >
+                {String(h).padStart(2, "0")}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* Corner top-right (Per/Km cols) */}
+      <div
+        className="sticky right-0 z-40 flex border-l border-border bg-white"
+        style={{ width: PER_KM_COL_PX }}
+      >
+        <div className="flex w-1/2 items-end justify-center border-r border-border pb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+          Per
+        </div>
+        <div className="flex w-1/2 items-end justify-center pb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+          Km
+        </div>
       </div>
     </div>
   );
 }
 
 // =====================================================================
-// Matrice ore × stazioni (Opzione A — must-have #2 design v2)
+// Header riga giornata (numero grande + tab varianti + Per/Km vuota)
 // =====================================================================
 
-interface StazioneRow {
-  codice: string;
-  nome: string | null;
-  /** Per ordinamento: minuti dall'inizio giornata della prima apparizione. */
-  firstAppearMin: number;
-}
+function GiornataHeaderRow({
+  giornata,
+  activeIdx,
+  onChangeActive,
+}: {
+  giornata: GiroGiornata;
+  activeIdx: number;
+  onChangeActive: (idx: number) => void;
+}) {
+  const varianti = giornata.varianti;
+  const hasMultiple = varianti.length > 1;
+  const active = varianti[activeIdx] ?? varianti[0];
+  const giornataLabel = bloccoCategoryFromVariant(active);
 
-/**
- * Estrae stazioni distinte dalla variante e le ordina per prima
- * apparizione (proxy "ordine geografico/route order"). Se due stazioni
- * appaiono nello stesso minuto, fallback al codice alfabetico.
- */
-function buildStazioniRows(variante: GiroVariante): StazioneRow[] {
-  const map = new Map<string, StazioneRow>();
-  for (const b of variante.blocchi) {
-    const startMin = parseTimeToMin(b.ora_inizio) ?? 0;
-    const candidates: { codice: string | null; nome: string | null }[] = [
-      { codice: b.stazione_da_codice, nome: b.stazione_da_nome },
-      { codice: b.stazione_a_codice, nome: b.stazione_a_nome },
-    ];
-    for (const s of candidates) {
-      if (s.codice !== null && !map.has(s.codice)) {
-        map.set(s.codice, {
-          codice: s.codice,
-          nome: s.nome,
-          firstAppearMin: startMin,
-        });
-      }
-    }
-  }
-  return Array.from(map.values()).sort((a, b) => {
-    if (a.firstAppearMin !== b.firstAppearMin) return a.firstAppearMin - b.firstAppearMin;
-    return a.codice.localeCompare(b.codice);
-  });
-}
-
-/**
- * Decide su quale row stazione un blocco viene renderizzato:
- *   - corsa_commerciale, materiale_vuoto: stazione_a (destinazione)
- *   - rientro_sede: stazione_da (origine = sede target)
- *   - sosta, accessori: stazione_da (= stazione_a tipicamente)
- *   - default: stazione_da
- *
- * Semplificazione del design v2: in produzione "il blocco scivola
- * diagonalmente" tra stazione_da e stazione_a; qui rendiamo come
- * barra orizzontale singola sulla row terminal/origine. Coerente
- * col mock-up del designer.
- */
-function pickRowForBlocco(b: GiroBlocco): string | null {
-  switch (b.tipo_blocco) {
-    case "corsa_commerciale":
-    case "materiale_vuoto":
-      return b.stazione_a_codice ?? b.stazione_da_codice;
-    case "rientro_sede":
-      return b.stazione_da_codice ?? b.stazione_a_codice;
-    default:
-      return b.stazione_da_codice ?? b.stazione_a_codice;
-  }
-}
-
-// =====================================================================
-// Gap fra blocchi (must-have #3 design v2 — entry 93)
-// =====================================================================
-
-interface GapInfo {
-  /** Minuti dall'inizio giornata (00:00) a cui inizia il gap. */
-  startMin: number;
-  /** Minuti a cui termina il gap. */
-  endMin: number;
-  /** Durata del gap in minuti. */
-  durationMin: number;
-}
-
-/** Soglia minima per renderizzare un gap (≥10', design v2). */
-const GAP_MIN_THRESHOLD = 10;
-/** Sopra questa soglia il gap è una "notte" (must-have #5, fuori scope #3). */
-const GAP_NIGHT_THRESHOLD = 6 * 60;
-/** Soglia per rendere il gap come tratteggio "long" oltre al label. */
-const GAP_LONG_THRESHOLD = 30;
-
-/**
- * Calcola i gap fra blocchi consecutivi (ordinati per start time).
- * Filtra: gap ≥ 10' e < 6h (≥6h è "notte" e va in must-have #5).
- * Gestisce cross-mezzanotte: se end < start, somma 1440 alla fine.
- */
-function computeGaps(blocchi: GiroBlocco[]): GapInfo[] {
-  const sorted = blocchi
-    .map((b) => {
-      const start = parseTimeToMin(b.ora_inizio);
-      const end = parseTimeToMin(b.ora_fine);
-      if (start === null || end === null) return null;
-      let endAdj = end;
-      if (endAdj < start) endAdj += AXIS_TOTAL_MIN;
-      return { start, end: endAdj };
-    })
-    .filter((x): x is { start: number; end: number } => x !== null)
-    .sort((a, b) => a.start - b.start);
-
-  const gaps: GapInfo[] = [];
-  for (let i = 0; i < sorted.length - 1; i += 1) {
-    const cur = sorted[i];
-    const next = sorted[i + 1];
-    const gapDur = next.start - cur.end;
-    if (gapDur >= GAP_MIN_THRESHOLD && gapDur < GAP_NIGHT_THRESHOLD) {
-      gaps.push({ startMin: cur.end, endMin: next.start, durationMin: gapDur });
-    }
-  }
-  return gaps;
-}
-
-/** Formatta una durata in minuti come "45'" o "1h 15'". */
-function formatGap(min: number): string {
-  if (min < 60) return `${min}'`;
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return m === 0 ? `${h}h` : `${h}h ${m}'`;
-}
-
-/**
- * Marker gap per matrice (px-based). Renderizza:
- * - label "45'" / "1h" sopra il gap, font tabular-nums
- * - linea tratteggiata orizzontale al centro-bassa del row se ≥30'
- *   (segnale visivo di "lunga sosta" da indagare)
- */
-function GapMarkerPx({ gap }: { gap: GapInfo }) {
-  const startPx = minToPx(gap.startMin);
-  const endPx = minToPx(gap.endMin);
-  const widthPx = Math.max(1, endPx - startPx);
-  const showDashed = gap.durationMin >= GAP_LONG_THRESHOLD;
   return (
-    <>
-      <span
-        className="pointer-events-none absolute font-mono text-[10px] tabular-nums text-muted-foreground"
-        style={{ left: `${startPx + 2}px`, top: "16px" }}
-        title={`Gap ${formatGap(gap.durationMin)}`}
+    <div className="flex border-b border-border bg-muted/30">
+      <div
+        className="sticky left-0 z-20 flex items-center gap-2 border-r border-border bg-muted/30 px-3 py-2"
+        style={{ width: GIORNATA_LABEL_COL_PX }}
       >
-        {formatGap(gap.durationMin)}
-      </span>
-      {showDashed && (
-        <div
-          className="pointer-events-none absolute h-px"
-          style={{
-            left: `${startPx}px`,
-            width: `${widthPx}px`,
-            top: "34px",
-            backgroundImage:
-              "repeating-linear-gradient(90deg, #9ca3af 0 4px, transparent 4px 8px)",
-          }}
-        />
-      )}
-    </>
+        <span className="font-mono text-2xl font-bold leading-none text-foreground">
+          {giornata.numero_giornata}
+        </span>
+        <div className="text-[10px] uppercase leading-tight tracking-wide text-muted-foreground">
+          G{giornata.numero_giornata}
+          {giornataLabel !== null && <><br />{giornataLabel}</>}
+        </div>
+      </div>
+      <div
+        className="flex flex-1 items-center gap-1.5 overflow-x-auto px-3 py-2"
+        style={{ width: TIMELINE_WIDTH_PX }}
+      >
+        {varianti.map((v, idx) => {
+          const isActive = idx === activeIdx;
+          return (
+            <button
+              key={v.id}
+              type="button"
+              onClick={() => onChangeActive(idx)}
+              title={`${v.etichetta_parlante}${idx === 0 ? " (canonica)" : ""}`}
+              className={cn(
+                "whitespace-nowrap rounded px-2.5 py-1 text-[11px] font-medium transition-colors",
+                isActive
+                  ? "bg-foreground text-white"
+                  : "border border-border bg-white text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {truncateLabel(v.etichetta_parlante)}
+            </button>
+          );
+        })}
+        {hasMultiple && (
+          <span className="ml-2 text-[10px] italic text-muted-foreground/70">
+            {varianti.length} varianti · stai vedendo "{truncateLabel(active?.etichetta_parlante ?? "")}"
+          </span>
+        )}
+      </div>
+      <div
+        className="sticky right-0 z-20 border-l border-border bg-muted/30"
+        style={{ width: PER_KM_COL_PX }}
+      />
+    </div>
   );
 }
 
-/**
- * Variante percentage-based per timeline view (single row).
- */
-function GapMarkerPct({ gap }: { gap: GapInfo }) {
-  const startPct = minToPct(gap.startMin);
-  const endPct = minToPct(gap.endMin);
-  const widthPct = Math.max(0.1, endPct - startPct);
-  const showDashed = gap.durationMin >= GAP_LONG_THRESHOLD;
-  return (
-    <>
-      <span
-        className="pointer-events-none absolute font-mono text-[10px] tabular-nums text-muted-foreground"
-        style={{ left: `calc(${startPct}% + 2px)`, top: "2px" }}
-        title={`Gap ${formatGap(gap.durationMin)}`}
-      >
-        {formatGap(gap.durationMin)}
-      </span>
-      {showDashed && (
-        <div
-          className="pointer-events-none absolute h-px"
-          style={{
-            left: `${startPct}%`,
-            width: `${widthPct}%`,
-            top: "calc(50% + 2px)",
-            backgroundImage:
-              "repeating-linear-gradient(90deg, #9ca3af 0 4px, transparent 4px 8px)",
-          }}
-        />
-      )}
-    </>
-  );
+function truncateLabel(testo: string): string {
+  const MAX = 36;
+  return testo.length <= MAX ? testo : testo.substring(0, MAX - 1) + "…";
 }
 
-function MatriceView({
+/**
+ * Categoria semantica della variante, derivata dal nome (heuristic per
+ * UI). Es. "LV 1:5" → "feriale", "F" → "festivo".
+ */
+function bloccoCategoryFromVariant(v: GiroVariante | undefined): string | null {
+  if (v === undefined) return null;
+  const e = v.etichetta_parlante.toLowerCase();
+  if (e.startsWith("lv")) return "feriale";
+  if (e === "f" || e.includes("festiv")) return "festivo";
+  if (e === "s" || e.includes("sabato")) return "sabato";
+  if (e.startsWith("solo")) return "specifica";
+  return null;
+}
+
+// =====================================================================
+// Variante row — single-line timeline
+// =====================================================================
+
+function VarianteRow({
+  giornata,
   variante,
-  stazioni,
   selectedBloccoId,
   onSelectBlocco,
 }: {
+  giornata: GiroGiornata;
   variante: GiroVariante;
-  stazioni: StazioneRow[];
   selectedBloccoId: number | null;
   onSelectBlocco: (b: GiroBlocco) => void;
 }) {
-  const totalWidth = MATRICE_STATION_COL_PX + MATRICE_AXIS_WIDTH_PX;
-  const innerHeight =
-    MATRICE_HEADER_HEIGHT_PX + stazioni.length * MATRICE_ROW_HEIGHT_PX;
-  const maxScrollHeight = Math.min(innerHeight + 16, 640);
+  const blocchi = variante.blocchi;
+  const gaps = useMemo(() => computeGaps(blocchi), [blocchi]);
+  const eventi = useMemo(() => extractEventiComposizione(variante), [variante]);
+
+  // Per/Km per giornata: usiamo km_giornata se presente; "Per" è
+  // un campo non ancora persistito nel backend (vedi residui TN-UPDATE).
+  const km =
+    giornata.km_giornata !== null ? formatNumber(Math.round(giornata.km_giornata)) : "—";
+  const per = "—"; // personale per giornata: non popolato dal builder
 
   return (
-    <div
-      className="relative overflow-auto"
-      style={{ maxHeight: `${maxScrollHeight}px` }}
-    >
-      <div className="relative" style={{ width: `${totalWidth}px` }}>
-        {/* Header sticky-top: corner + asse X */}
-        <div
-          className="sticky top-0 z-30 flex border-b border-border bg-white"
-          style={{ height: MATRICE_HEADER_HEIGHT_PX }}
-        >
-          {/* Corner sticky-left */}
-          <div
-            className="sticky left-0 z-40 border-r border-border bg-white"
-            style={{ width: MATRICE_STATION_COL_PX }}
-          >
-            <div className="flex h-full items-end px-3 pb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-              Stazione · ora
-            </div>
-          </div>
-          {/* Asse X */}
-          <div className="relative" style={{ width: MATRICE_AXIS_WIDTH_PX }}>
-            {TICK_HOURS.map((h) => {
-              const px = hourToPx(h);
-              return (
-                <span
-                  key={`axis-${h}`}
-                  className="absolute top-2 font-mono text-[11px] tabular-nums text-foreground"
-                  style={{ left: `${px}px` }}
-                >
-                  {String(h).padStart(2, "0")}
-                </span>
-              );
-            })}
-          </div>
+    <div className="relative flex border-b border-border">
+      {/* Label col sticky-left */}
+      <div
+        className="sticky left-0 z-20 flex flex-col justify-center border-r border-border bg-white px-3 py-3"
+        style={{ width: GIORNATA_LABEL_COL_PX }}
+      >
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {truncateLabel(variante.etichetta_parlante)}
         </div>
+        {variante.dates_apply_json.length > 0 && (
+          <div className="text-[9px] italic text-muted-foreground/70">
+            {variante.dates_apply_json.length} dat
+            {variante.dates_apply_json.length === 1 ? "a" : "e"}
+          </div>
+        )}
+      </div>
 
-        {/* Rows stazioni */}
-        {stazioni.map((s) => {
-          const blocchiRow = variante.blocchi.filter(
-            (b) => pickRowForBlocco(b) === s.codice,
-          );
-          const gapsRow = computeGaps(blocchiRow);
-          return (
-            <div
-              key={s.codice}
-              className="relative flex border-b border-border/40"
-              style={{ height: MATRICE_ROW_HEIGHT_PX }}
-            >
-              {/* Stazione label sticky-left */}
-              <div
-                className="sticky left-0 z-20 flex flex-col justify-center border-r border-border bg-white px-3"
-                style={{ width: MATRICE_STATION_COL_PX }}
-              >
-                <div className="truncate text-[12px] font-medium text-foreground">
-                  {s.nome ?? s.codice}
-                </div>
-                <div className="font-mono text-[10px] text-muted-foreground">
-                  {s.codice}
-                </div>
-              </div>
+      {/* Timeline */}
+      <div
+        className="ticks-bg relative"
+        style={{ width: TIMELINE_WIDTH_PX, height: TIMELINE_ROW_HEIGHT_PX }}
+      >
+        {/* Linea base sottile centrata */}
+        <div
+          className="pointer-events-none absolute left-0 right-0 h-px bg-border"
+          style={{ top: 44 }}
+        />
 
-              {/* Track con grid orario + blocchi + gap markers */}
-              <div className="relative" style={{ width: MATRICE_AXIS_WIDTH_PX }}>
-                {/* Hourly grid lines */}
-                {TICK_HOURS.map((h) => {
-                  const px = hourToPx(h);
-                  return (
-                    <div
-                      key={`grid-${s.codice}-${h}`}
-                      className="pointer-events-none absolute top-0 h-full w-px bg-border/30"
-                      style={{ left: `${px}px` }}
-                    />
-                  );
-                })}
-                {/* Gap markers (must-have #3 — sotto ai blocchi z-default) */}
-                {gapsRow.map((g, i) => (
-                  <GapMarkerPx key={`gap-${s.codice}-${i}`} gap={g} />
-                ))}
-                {/* Blocchi su questa row stazione */}
-                {blocchiRow.map((b) => (
-                  <BloccoBarPx
-                    key={b.id}
-                    blocco={b}
-                    selected={b.id === selectedBloccoId}
-                    dimmed={selectedBloccoId !== null && b.id !== selectedBloccoId}
-                    onSelect={() => onSelectBlocco(b)}
-                  />
-                ))}
-              </div>
-            </div>
-          );
-        })}
+        {/* Marker mezzanotte se esistono blocchi cross-mezzanotte */}
+        {blocchi.some((b) => isCrossMidnight(b)) && (
+          <div
+            className="pointer-events-none absolute top-0 bottom-0 w-px bg-blue-200"
+            style={{ left: minToPx(24 * 60) }}
+            title="mezzanotte"
+          />
+        )}
+
+        {/* Eventi composizione (markers verticali arancio) */}
+        {eventi.map((e, i) => (
+          <EventoCompMarker key={`evt-${i}`} evento={e} />
+        ))}
+
+        {/* Gap markers (sotto ai blocchi z-default) */}
+        {gaps.map((g, i) => (
+          <GapMarker key={`gap-${variante.id}-${i}`} gap={g} />
+        ))}
+
+        {/* Blocchi posizionati */}
+        {blocchi.map((b) => (
+          <BloccoSegment
+            key={b.id}
+            blocco={b}
+            selected={b.id === selectedBloccoId}
+            onSelect={() => onSelectBlocco(b)}
+          />
+        ))}
+      </div>
+
+      {/* Per + Km sticky-right */}
+      <div
+        className="sticky right-0 z-20 flex border-l border-border bg-white"
+        style={{ width: PER_KM_COL_PX }}
+      >
+        <div className="flex w-1/2 items-center justify-center border-r border-border font-mono text-sm tabular-nums text-foreground">
+          {per}
+        </div>
+        <div className="flex w-1/2 items-center justify-center font-mono text-sm tabular-nums text-foreground">
+          {km}
+        </div>
       </div>
     </div>
   );
 }
 
-/**
- * Variante px-based del BloccoBar per la matrice (left/width assoluti
- * in px, non %). Riutilizza colorForTipo + bloccoLabel + bloccoTooltip.
- */
-function BloccoBarPx({
+// =====================================================================
+// Blocco segment — render diverso per tipo
+// =====================================================================
+
+function BloccoSegment({
   blocco,
   selected,
-  dimmed,
   onSelect,
 }: {
   blocco: GiroBlocco;
   selected: boolean;
-  dimmed: boolean;
   onSelect: () => void;
 }) {
   const inizio = parseTimeToMin(blocco.ora_inizio);
@@ -870,199 +723,222 @@ function BloccoBarPx({
   if (endPx < startPx) endPx = minToPx(fine + AXIS_TOTAL_MIN);
   const widthPx = Math.max(8, endPx - startPx);
 
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      title={bloccoTooltip(blocco)}
-      className={cn(
-        "absolute top-3 flex h-8 items-center overflow-hidden rounded text-[11px] font-medium transition-opacity",
-        colorForTipo(blocco.tipo_blocco),
-        selected && "outline outline-2 outline-primary z-10",
-        dimmed && "opacity-55",
-        blocco.is_validato_utente && "border-r-4 border-emerald-500",
-      )}
-      style={{ left: `${startPx}px`, width: `${widthPx}px` }}
-      aria-pressed={selected}
-    >
-      <span className="truncate px-1.5 font-mono">{bloccoLabel(blocco)}</span>
-    </button>
-  );
-}
-
-function truncateLabel(testo: string): string {
-  const MAX = 40;
-  return testo.length <= MAX ? testo : testo.substring(0, MAX - 1) + "…";
-}
-
-function TimelineView({
-  variante,
-  selectedBloccoId,
-  onSelectBlocco,
-}: {
-  variante: GiroVariante;
-  selectedBloccoId: number | null;
-  onSelectBlocco: (b: GiroBlocco) => void;
-}) {
-  const gaps = computeGaps(variante.blocchi);
-  return (
-    <div className="overflow-x-auto p-4">
-      <div className="min-w-[960px]">
-        {/* Time axis */}
-        <div className="relative h-6 border-b border-border">
-          {TICK_HOURS.map((h) => {
-            const pct = hourToPct(h);
-            return (
-              <div
-                key={h}
-                className="absolute -translate-x-1/2 text-[10px] tabular-nums text-muted-foreground"
-                style={{ left: `${pct}%` }}
-              >
-                {String(h).padStart(2, "0")}
-              </div>
-            );
-          })}
-          {/* Vertical tick lines */}
-          {TICK_HOURS.map((h) => {
-            const pct = hourToPct(h);
-            return (
-              <div
-                key={`tick-${h}`}
-                className="pointer-events-none absolute bottom-0 h-1 w-px bg-border"
-                style={{ left: `${pct}%` }}
-              />
-            );
-          })}
-        </div>
-
-        {/* Gantt row */}
-        <div className="relative mt-2 h-14 rounded bg-muted/20">
-          {/* Hourly grid lines */}
-          {TICK_HOURS.map((h) => {
-            const pct = hourToPct(h);
-            return (
-              <div
-                key={`grid-${h}`}
-                className="pointer-events-none absolute top-0 h-full w-px bg-border/50"
-                style={{ left: `${pct}%` }}
-              />
-            );
-          })}
-
-          {/* Gap markers (must-have #3, sotto ai blocchi z-default) */}
-          {gaps.map((g, i) => (
-            <GapMarkerPct key={`gap-tl-${i}`} gap={g} />
-          ))}
-
-          {variante.blocchi.map((b) => (
-            <BloccoBar
-              key={b.id}
-              blocco={b}
-              selected={b.id === selectedBloccoId}
-              dimmed={selectedBloccoId !== null && b.id !== selectedBloccoId}
-              onSelect={() => onSelectBlocco(b)}
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function BloccoBar({
-  blocco,
-  selected,
-  dimmed,
-  onSelect,
-}: {
-  blocco: GiroBlocco;
-  selected: boolean;
-  dimmed: boolean;
-  onSelect: () => void;
-}) {
-  const inizio = parseTimeToMin(blocco.ora_inizio);
-  const fine = parseTimeToMin(blocco.ora_fine);
-  if (inizio === null || fine === null) return null;
-
-  const startPct = minToPct(inizio);
-  let endPct = minToPct(fine);
-  // Cross-mezzanotte: se end < start, sommiamo 1440
-  if (endPct < startPct) endPct = minToPct(fine + AXIS_TOTAL_MIN);
-  const widthPct = Math.max(0.3, endPct - startPct);
-
-  const bgColor = colorForTipo(blocco.tipo_blocco);
-  const labelText = bloccoLabel(blocco);
+  const tipo = blocco.tipo_blocco;
   const tooltip = bloccoTooltip(blocco);
 
+  // Commerciale: layout completo (stazioni sopra, treno+freccia dentro,
+  // minuti sotto, validato emerald se applicabile).
+  if (tipo === "corsa_commerciale") {
+    return (
+      <CommercialeBlocco
+        blocco={blocco}
+        startPx={startPx}
+        widthPx={widthPx}
+        selected={selected}
+        onSelect={onSelect}
+        tooltip={tooltip}
+      />
+    );
+  }
+
+  // Vuoto: linea sottile rosso tratteggiato (h-1) sulla mid-line, no etichette.
+  if (tipo === "materiale_vuoto") {
+    return (
+      <button
+        type="button"
+        onClick={onSelect}
+        title={tooltip}
+        aria-pressed={selected}
+        className={cn(
+          "blk absolute",
+          selected && "is-selected",
+        )}
+        style={{ left: startPx, top: 42, width: widthPx }}
+      >
+        <div className="seg-vuoto h-1" />
+      </button>
+    );
+  }
+
+  // Rientro 9NNNN: viola con label
+  if (tipo === "rientro_sede") {
+    return (
+      <button
+        type="button"
+        onClick={onSelect}
+        title={tooltip}
+        aria-pressed={selected}
+        className={cn("blk absolute", selected && "is-selected")}
+        style={{ left: startPx, top: 42, width: widthPx }}
+      >
+        <div
+          className={cn(
+            "seg-rientro h-3 rounded-sm",
+            blocco.is_validato_utente && "validato",
+            selected && "ring-2 ring-primary ring-offset-2",
+          )}
+        />
+        <div className="mt-0.5 font-mono text-[9px] tabular-nums text-purple-700">
+          ⟵ {blocco.numero_treno ?? "rientro"}
+        </div>
+      </button>
+    );
+  }
+
+  // Accessori (ACCp/ACCa) o sosta_notturna o "accessori_p"/"_a": arancio sottile
+  if (
+    tipo === "accessori_p" ||
+    tipo === "accessori_a" ||
+    tipo === "accp" ||
+    tipo === "acca" ||
+    tipo === "sosta_notturna" ||
+    tipo === "sosta"
+  ) {
+    const isAcc =
+      tipo === "accessori_p" ||
+      tipo === "accessori_a" ||
+      tipo === "accp" ||
+      tipo === "acca";
+    const label =
+      tipo === "accessori_p" || tipo === "accp"
+        ? `ACCp ${formatGap(Math.max(0, fine - inizio))}`
+        : tipo === "accessori_a" || tipo === "acca"
+          ? `ACCa ${formatGap(Math.max(0, fine - inizio))}`
+          : "sosta";
+    return (
+      <button
+        type="button"
+        onClick={onSelect}
+        title={tooltip}
+        aria-pressed={selected}
+        className={cn("blk absolute", selected && "is-selected")}
+        style={{ left: startPx, top: 54, width: widthPx }}
+      >
+        <div
+          className={cn(
+            "h-3 rounded-sm",
+            isAcc ? "seg-acc" : "seg-sosta",
+            blocco.is_validato_utente && "validato",
+            selected && "ring-2 ring-primary ring-offset-2",
+          )}
+        />
+        <div
+          className={cn(
+            "mt-0.5 font-mono text-[9px] tabular-nums",
+            isAcc ? "text-orange-700" : "text-muted-foreground",
+          )}
+        >
+          {label}
+        </div>
+      </button>
+    );
+  }
+
+  // Manutenzione MA-30 o altri tipi: barra grigia ampia con label
   return (
     <button
       type="button"
       onClick={onSelect}
       title={tooltip}
-      className={cn(
-        "absolute top-1.5 flex h-11 items-center overflow-hidden rounded text-[11px] font-medium transition-opacity",
-        bgColor,
-        selected && "outline outline-2 outline-primary z-10",
-        dimmed && "opacity-55",
-        blocco.is_validato_utente && "border-r-4 border-emerald-500",
-      )}
-      style={{
-        left: `${startPct}%`,
-        width: `${widthPct}%`,
-      }}
       aria-pressed={selected}
+      className={cn("blk absolute", selected && "is-selected")}
+      style={{ left: startPx, top: 24, width: widthPx }}
     >
-      <span className="truncate px-1.5 font-mono">{labelText}</span>
+      <div className="flex items-center gap-1 text-[10px] font-semibold leading-none text-foreground">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+        <span className="font-mono">{tipoBloccoLabel(tipo)}</span>
+      </div>
+      <div
+        className={cn(
+          "mt-1.5 h-3 rounded-sm border border-border bg-muted",
+          blocco.is_validato_utente && "validato",
+          selected && "ring-2 ring-primary ring-offset-2",
+        )}
+      />
+      <div className="mt-1 flex justify-between font-mono text-[9px] leading-none tabular-nums text-muted-foreground">
+        <span>{formatTimeShort(blocco.ora_inizio)}</span>
+        <span>{formatTimeShort(blocco.ora_fine)}</span>
+      </div>
     </button>
   );
 }
 
-function bloccoLabel(b: GiroBlocco): string {
-  if (b.numero_treno !== null && b.numero_treno.length > 0) return b.numero_treno;
-  const meta =
-    typeof b.metadata_json?.numero_treno === "string"
-      ? (b.metadata_json.numero_treno as string)
-      : null;
-  if (meta !== null) return meta;
-  // fallback: tipo abbreviato
-  return tipoBloccoShort(b.tipo_blocco);
+function CommercialeBlocco({
+  blocco,
+  startPx,
+  widthPx,
+  selected,
+  onSelect,
+  tooltip,
+}: {
+  blocco: GiroBlocco;
+  startPx: number;
+  widthPx: number;
+  selected: boolean;
+  onSelect: () => void;
+  tooltip: string;
+}) {
+  const direction = inferDirection(blocco);
+  const arrow = direction === "ret" ? "←" : "→";
+  const stazioneDa = stazioneShort(blocco.stazione_da_codice);
+  const stazioneA = stazioneShort(blocco.stazione_a_codice);
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title={tooltip}
+      aria-pressed={selected}
+      className={cn("blk absolute", selected && "is-selected")}
+      style={{ left: startPx, top: 24, width: widthPx }}
+    >
+      {/* Stazioni sopra */}
+      <div className="flex justify-between font-mono text-[10px] font-semibold leading-none text-emerald-700">
+        <span>{stazioneDa}</span>
+        <span>{stazioneA}</span>
+      </div>
+      {/* Linea + numero treno */}
+      <div
+        className={cn(
+          "seg-line seg-comm relative mt-1.5 flex h-3 items-center justify-center rounded-sm",
+          blocco.is_validato_utente && "validato",
+          selected && "outline outline-2 outline-primary outline-offset-2",
+        )}
+      >
+        <span className="font-mono text-[11px] font-semibold tabular-nums text-white">
+          {arrow} {blocco.numero_treno ?? "—"}
+        </span>
+      </div>
+      {/* Minuti sotto */}
+      <div className="mt-1 flex justify-between font-mono text-[9px] leading-none tabular-nums text-muted-foreground">
+        <span>{formatTimeShort(blocco.ora_inizio)}</span>
+        <span>{formatTimeShort(blocco.ora_fine)}</span>
+      </div>
+    </button>
+  );
 }
 
-function tipoBloccoShort(tipo: string): string {
-  switch (tipo) {
-    case "corsa_commerciale":
-      return "treno";
-    case "materiale_vuoto":
-      return "vuoto";
-    case "cambio_composizione":
-    case "evento_composizione":
-      return "comp.";
-    case "sosta_notturna":
-      return "sosta n.";
-    case "sosta":
-      return "sosta";
-    case "rientro_sede":
-      return "rientro";
-    case "accessori_p":
-    case "accp":
-      return "ACCp";
-    case "accessori_a":
-    case "acca":
-      return "ACCa";
-    default:
-      return tipo;
-  }
+function inferDirection(b: GiroBlocco): "out" | "ret" {
+  // Heuristic: se la stazione_a è la "sede target" (es. FIO, NOV) → ret.
+  // Altrimenti → out. In assenza di info univoca, fallback: confronto
+  // alfabetico stazione_da vs stazione_a.
+  const seStr = b.stazione_a_codice ?? "";
+  const isSede = /^(FIO|NOV|CAM|LEC|CRE|ISE)$/i.test(seStr);
+  if (isSede) return "ret";
+  return "out";
 }
 
-function bloccoTooltip(b: GiroBlocco): string {
-  const tipo = tipoBloccoLabel(b.tipo_blocco);
-  const inizio = b.ora_inizio ?? "?";
-  const fine = b.ora_fine ?? "?";
-  const da = b.stazione_da_nome ?? b.stazione_da_codice ?? "—";
-  const a = b.stazione_a_nome ?? b.stazione_a_codice ?? "—";
-  const treno = b.numero_treno !== null ? `\nTreno ${b.numero_treno}` : "";
-  const validato = b.is_validato_utente ? "\n✓ Validato" : "";
-  return `${tipo} · ${inizio} → ${fine}\n${da} → ${a}${treno}${validato}`;
+function stazioneShort(codice: string | null): string {
+  if (codice === null) return "—";
+  // Trenord codici stazione tipici: "MI.CLE", "TIR", "BRE", "FIO", ecc.
+  // Tronca a 6 char per mantenere leggibilità nel design v3.
+  return codice.length <= 7 ? codice : codice.substring(0, 6) + "…";
+}
+
+function formatTimeShort(t: string | null): string {
+  if (t === null) return "— —";
+  const m = t.match(/^(\d{2}):(\d{2})/);
+  if (m === null) return t;
+  return `${m[1]} ${m[2]}`;
 }
 
 function tipoBloccoLabel(tipo: string): string {
@@ -1080,53 +956,387 @@ function tipoBloccoLabel(tipo: string): string {
       return "Sosta";
     case "rientro_sede":
       return "Rientro sede";
+    case "manutenzione":
+      return "MA-30";
     default:
       return tipo;
   }
 }
 
-function colorForTipo(tipo: string): string {
-  switch (tipo) {
-    case "corsa_commerciale":
-      return "bg-blue-600 text-white";
-    case "materiale_vuoto":
-      return "bg-gray-300 text-foreground border border-gray-400";
-    case "cambio_composizione":
-    case "evento_composizione":
-      return "bg-emerald-200 text-emerald-900";
-    case "sosta_notturna":
-    case "sosta":
-      return "bg-white text-foreground border border-border";
-    case "rientro_sede":
-      return "bg-purple-500 text-white";
-    case "accessori_p":
-    case "accessori_a":
-    case "accp":
-    case "acca":
-      return "bg-orange-300 text-foreground";
-    default:
-      return "bg-muted text-foreground";
-  }
+function bloccoTooltip(b: GiroBlocco): string {
+  const tipo = tipoBloccoLabel(b.tipo_blocco);
+  const inizio = b.ora_inizio ?? "?";
+  const fine = b.ora_fine ?? "?";
+  const da = b.stazione_da_nome ?? b.stazione_da_codice ?? "—";
+  const a = b.stazione_a_nome ?? b.stazione_a_codice ?? "—";
+  const treno = b.numero_treno !== null ? `\nTreno ${b.numero_treno}` : "";
+  const validato = b.is_validato_utente ? "\n✓ Validato manualmente" : "";
+  return `${tipo} · ${inizio} → ${fine}\n${da} → ${a}${treno}${validato}`;
+}
+
+function isCrossMidnight(b: GiroBlocco): boolean {
+  const start = parseTimeToMin(b.ora_inizio);
+  const end = parseTimeToMin(b.ora_fine);
+  if (start === null || end === null) return false;
+  return end < start;
 }
 
 // =====================================================================
-// Side panel — dettaglio blocco selezionato
+// Gap markers (must-have #3)
+// =====================================================================
+
+interface GapInfo {
+  startMin: number;
+  endMin: number;
+  durationMin: number;
+}
+
+function computeGaps(blocchi: GiroBlocco[]): GapInfo[] {
+  const sorted = blocchi
+    .map((b) => {
+      const start = parseTimeToMin(b.ora_inizio);
+      const end = parseTimeToMin(b.ora_fine);
+      if (start === null || end === null) return null;
+      let endAdj = end;
+      if (endAdj < start) endAdj += AXIS_TOTAL_MIN;
+      return { start, end: endAdj };
+    })
+    .filter((x): x is { start: number; end: number } => x !== null)
+    .sort((a, b) => a.start - b.start);
+  const gaps: GapInfo[] = [];
+  for (let i = 0; i < sorted.length - 1; i += 1) {
+    const cur = sorted[i];
+    const next = sorted[i + 1];
+    const gapDur = next.start - cur.end;
+    if (gapDur >= GAP_MIN_THRESHOLD && gapDur < GAP_NIGHT_THRESHOLD) {
+      gaps.push({ startMin: cur.end, endMin: next.start, durationMin: gapDur });
+    }
+  }
+  return gaps;
+}
+
+function formatGap(min: number): string {
+  if (min < 60) return `${min}'`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m === 0 ? `${h}h` : `${h}h${m}'`;
+}
+
+function GapMarker({ gap }: { gap: GapInfo }) {
+  const startPx = minToPx(gap.startMin);
+  const endPx = minToPx(gap.endMin);
+  const widthPx = Math.max(1, endPx - startPx);
+  const showDashed = gap.durationMin >= GAP_LONG_THRESHOLD;
+  return (
+    <div
+      className="pointer-events-none absolute"
+      style={{ left: startPx, top: 42, width: widthPx }}
+    >
+      <div className="text-center font-mono text-[9px] tabular-nums text-muted-foreground">
+        {formatGap(gap.durationMin)}
+      </div>
+      {showDashed && <div className="gap-long mt-0.5 h-px" />}
+    </div>
+  );
+}
+
+// =====================================================================
+// Eventi composizione marker (must-have #4)
+// =====================================================================
+
+interface EventoComposizione {
+  /** minuti dall'inizio giornata. */
+  oraMin: number;
+  composizioneDa: string;
+  composizioneA: string;
+  stazione: string | null;
+}
+
+/**
+ * Estrae eventi composizione dal `metadata_json` di ogni variante o
+ * dal `descrizione` del blocco quando tipo = "evento_composizione".
+ * Se il backend non popola eventi strutturati, accetta anche blocchi
+ * tipo "evento_composizione" come marker.
+ */
+function extractEventiComposizione(variante: GiroVariante): EventoComposizione[] {
+  const out: EventoComposizione[] = [];
+  for (const b of variante.blocchi) {
+    if (b.tipo_blocco !== "evento_composizione" && b.tipo_blocco !== "cambio_composizione") {
+      continue;
+    }
+    const min = parseTimeToMin(b.ora_inizio);
+    if (min === null) continue;
+    const compDa =
+      typeof b.metadata_json?.composizione_da === "string"
+        ? (b.metadata_json.composizione_da as string)
+        : "?";
+    const compA =
+      typeof b.metadata_json?.composizione_a === "string"
+        ? (b.metadata_json.composizione_a as string)
+        : "?";
+    out.push({
+      oraMin: min,
+      composizioneDa: compDa,
+      composizioneA: compA,
+      stazione: b.stazione_da_codice ?? b.stazione_a_codice,
+    });
+  }
+  return out;
+}
+
+function EventoCompMarker({ evento }: { evento: EventoComposizione }) {
+  const px = minToPx(evento.oraMin);
+  const stazioneSeg = evento.stazione !== null ? ` ${evento.stazione}` : "";
+  const orario = formatTimeShort(minToTime(evento.oraMin));
+  return (
+    <div
+      className="pointer-events-none absolute z-10"
+      style={{ left: px, top: 14, width: 4, height: 74, background: "#f97316" }}
+      title={`Composizione · ${orario}${stazioneSeg} · ${evento.composizioneDa} → ${evento.composizioneA}`}
+    />
+  );
+}
+
+// =====================================================================
+// Notte fra giornate (must-have #5)
+// =====================================================================
+
+function NotteRow({
+  giornataPrev,
+  giornataNext,
+  activeVariantByGiornata,
+}: {
+  giornataPrev: GiroGiornata;
+  giornataNext: GiroGiornata;
+  activeVariantByGiornata: Record<number, number>;
+}) {
+  const prevVar =
+    giornataPrev.varianti[activeVariantByGiornata[giornataPrev.id] ?? 0] ??
+    giornataPrev.varianti[0];
+  const nextVar =
+    giornataNext.varianti[activeVariantByGiornata[giornataNext.id] ?? 0] ??
+    giornataNext.varianti[0];
+
+  const sostaInfo = computeSostaNotturna(prevVar, nextVar);
+
+  return (
+    <div className="flex" style={{ height: NOTTE_ROW_HEIGHT_PX }}>
+      <div
+        className="night-band sticky left-0 z-20 flex items-center border-r border-border px-3"
+        style={{ width: GIORNATA_LABEL_COL_PX }}
+      >
+        <span
+          className={cn(
+            "text-[10px] uppercase tracking-wide",
+            sostaInfo.discontinua ? "font-semibold text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {sostaInfo.discontinua ? "⚠ notte" : "notte"}
+        </span>
+      </div>
+      <div
+        className={cn(
+          "flex items-center px-3",
+          sostaInfo.discontinua ? "border-y border-destructive/30 bg-destructive/5" : "night-band",
+        )}
+        style={{ width: TIMELINE_WIDTH_PX }}
+      >
+        {sostaInfo.stazione !== null ? (
+          <>
+            <span className="text-[10px] text-muted-foreground">
+              notte · sosta a{" "}
+              <span className="font-mono text-foreground">{sostaInfo.stazione}</span>
+              {sostaInfo.duration !== null && ` · ${formatGap(sostaInfo.duration)}`}
+            </span>
+            {sostaInfo.discontinua && (
+              <span
+                className="ml-3 inline-flex items-center gap-1 rounded bg-destructive/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-destructive"
+                title={`Anomalia: G${giornataPrev.numero_giornata} termina a ${sostaInfo.terminaA ?? "?"}, G${giornataNext.numero_giornata} inizia a ${sostaInfo.iniziaDa ?? "?"} — verificare congruenza`}
+              >
+                ⚠ congruenza
+              </span>
+            )}
+          </>
+        ) : (
+          <span className="text-[10px] italic text-muted-foreground/70">
+            notte · stazione di sosta non determinabile
+          </span>
+        )}
+      </div>
+      <div
+        className="night-band sticky right-0 z-20 border-l border-border"
+        style={{ width: PER_KM_COL_PX }}
+      />
+    </div>
+  );
+}
+
+interface SostaNotturnaInfo {
+  stazione: string | null;
+  /** Durata in minuti, se calcolabile. */
+  duration: number | null;
+  /** True se stazione_a (G_n) ≠ stazione_da (G_n+1). */
+  discontinua: boolean;
+  terminaA: string | null;
+  iniziaDa: string | null;
+}
+
+function computeSostaNotturna(
+  prev: GiroVariante | undefined,
+  next: GiroVariante | undefined,
+): SostaNotturnaInfo {
+  if (prev === undefined || next === undefined) {
+    return { stazione: null, duration: null, discontinua: false, terminaA: null, iniziaDa: null };
+  }
+  const lastBlock = [...prev.blocchi]
+    .filter((b) => parseTimeToMin(b.ora_fine) !== null)
+    .sort((a, b) => (parseTimeToMin(b.ora_fine) ?? 0) - (parseTimeToMin(a.ora_fine) ?? 0))[0];
+  const firstBlock = [...next.blocchi]
+    .filter((b) => parseTimeToMin(b.ora_inizio) !== null)
+    .sort((a, b) => (parseTimeToMin(a.ora_inizio) ?? 0) - (parseTimeToMin(b.ora_inizio) ?? 0))[0];
+  if (lastBlock === undefined || firstBlock === undefined) {
+    return { stazione: null, duration: null, discontinua: false, terminaA: null, iniziaDa: null };
+  }
+  const terminaA = lastBlock.stazione_a_codice;
+  const iniziaDa = firstBlock.stazione_da_codice;
+  const discontinua =
+    terminaA !== null && iniziaDa !== null && terminaA !== iniziaDa;
+  // Calcolo durata: assumiamo il giro continui giorno-dopo, quindi
+  // notte = (24h - ora_fine_prev) + ora_inizio_next.
+  const fine = parseTimeToMin(lastBlock.ora_fine) ?? 0;
+  const inizio = parseTimeToMin(firstBlock.ora_inizio) ?? 0;
+  const duration = 24 * 60 - fine + inizio;
+  return {
+    stazione: terminaA ?? iniziaDa,
+    duration: duration > 0 ? duration : null,
+    discontinua,
+    terminaA,
+    iniziaDa,
+  };
+}
+
+// =====================================================================
+// Totali row
+// =====================================================================
+
+function TotaliRow({ giro, stats }: { giro: GiroDettaglio; stats: GiroKpiStats }) {
+  const totalKm =
+    giro.km_media_giornaliera !== null && giro.km_media_giornaliera > 0
+      ? formatNumber(Math.round(giro.km_media_giornaliera * giro.numero_giornate))
+      : "—";
+  return (
+    <div className="flex bg-muted/40 font-semibold">
+      <div
+        className="sticky left-0 z-20 border-r border-border bg-muted/40 px-3 py-2 text-[11px] uppercase tracking-wide text-foreground"
+        style={{ width: GIORNATA_LABEL_COL_PX }}
+      >
+        Totale
+      </div>
+      <div
+        className="px-3 py-2 text-[11px] text-muted-foreground"
+        style={{ width: TIMELINE_WIDTH_PX }}
+      >
+        {giro.numero_giornate} giornat{giro.numero_giornate === 1 ? "a" : "e"} ·{" "}
+        {stats.nBlocchi} blocch{stats.nBlocchi === 1 ? "o" : "i"} · {stats.nVariantiTotale}{" "}
+        variant{stats.nVariantiTotale === 1 ? "e" : "i"} calendarial
+        {stats.nVariantiTotale === 1 ? "e" : "i"}
+      </div>
+      <div
+        className="sticky right-0 z-20 flex border-l border-border bg-muted/40"
+        style={{ width: PER_KM_COL_PX }}
+      >
+        <div className="flex w-1/2 items-center justify-center border-r border-border font-mono text-sm tabular-nums text-foreground">
+          —
+        </div>
+        <div className="flex w-1/2 items-center justify-center font-mono text-sm tabular-nums text-foreground">
+          {totalKm}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
+// Legenda
+// =====================================================================
+
+function Legenda() {
+  return (
+    <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-border px-4 py-3 text-[11px] text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5">
+        <span className="seg-comm inline-block h-2 w-4" /> commerciale
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="seg-vuoto inline-block h-1 w-4" /> vuoto tecnico
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="seg-rientro inline-block h-2 w-4" /> rientro 9NNNN
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="seg-acc inline-block h-2 w-4" /> accessori
+      </span>
+      <span className="text-border">|</span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="font-mono font-semibold text-emerald-700">CREMONA</span> stazione
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="font-mono font-semibold text-blue-700">→ 28335</span> n° treno · direzione
+      </span>
+      <span className="inline-flex items-center gap-1.5 font-mono tabular-nums text-muted-foreground">
+        14 52 minuti arrivo/partenza
+      </span>
+      <span className="text-border">|</span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="seg-comm validato inline-block h-2 w-4" /> validato manualmente
+      </span>
+    </div>
+  );
+}
+
+// =====================================================================
+// Side panel — dettaglio blocco selezionato (redesign v3)
 // =====================================================================
 
 function BloccoSidePanel({
   blocco,
+  giro,
+  activeVariantByGiornata,
   onClose,
 }: {
   blocco: GiroBlocco;
+  giro: GiroDettaglio;
+  activeVariantByGiornata: Record<number, number>;
   onClose: () => void;
 }) {
   const tipoLabel = tipoBloccoLabel(blocco.tipo_blocco);
-  const inizio = blocco.ora_inizio?.slice(0, 5) ?? "—";
-  const fine = blocco.ora_fine?.slice(0, 5) ?? "—";
+  const direction = inferDirection(blocco);
+  const arrow = direction === "ret" ? "←" : "→";
+  const inizioMin = parseTimeToMin(blocco.ora_inizio);
+  const fineMin = parseTimeToMin(blocco.ora_fine);
   const durata =
-    parseTimeToMin(blocco.ora_inizio) !== null && parseTimeToMin(blocco.ora_fine) !== null
-      ? formatDurataMin(blocco)
+    inizioMin !== null && fineMin !== null
+      ? formatGap(fineMin >= inizioMin ? fineMin - inizioMin : 24 * 60 - inizioMin + fineMin)
       : "—";
+  const isCommerciale = blocco.tipo_blocco === "corsa_commerciale";
+
+  // Localizza il blocco nel giro (giornata + variante + posizione).
+  const location = useMemo(() => {
+    for (const g of giro.giornate) {
+      const activeIdx = activeVariantByGiornata[g.id] ?? 0;
+      const v = g.varianti[activeIdx];
+      if (v === undefined) continue;
+      const idx = v.blocchi.findIndex((b) => b.id === blocco.id);
+      if (idx !== -1) {
+        return {
+          giornata: g.numero_giornata,
+          varianteEtichetta: v.etichetta_parlante,
+          blockIdx: idx + 1,
+          totalBlocks: v.blocchi.length,
+        };
+      }
+    }
+    return null;
+  }, [giro, blocco.id, activeVariantByGiornata]);
 
   return (
     <Card className="overflow-hidden">
@@ -1146,105 +1356,238 @@ function BloccoSidePanel({
       </div>
 
       <div className="p-5">
-        <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
-          {tipoLabel}
+        <div className="mb-1 flex items-center gap-2">
+          <span
+            className={cn(
+              "inline-flex items-center rounded px-2 py-0.5 text-[10px] uppercase tracking-wide",
+              isCommerciale
+                ? "bg-blue-100 text-primary"
+                : "bg-muted text-muted-foreground",
+            )}
+          >
+            {tipoLabel}
+          </span>
+          {blocco.is_validato_utente && (
+            <span className="inline-flex items-center rounded bg-emerald-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-emerald-800">
+              VALIDATO
+            </span>
+          )}
         </div>
-        <h3 className="mb-3 font-mono text-2xl font-semibold text-foreground">
+        <h3 className="font-mono text-2xl font-semibold text-foreground">
           {blocco.numero_treno ?? "—"}
         </h3>
+        {location !== null && (
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            G{location.giornata} · variante "{truncateLabel(location.varianteEtichetta)}" ·
+            blocco {location.blockIdx} di {location.totalBlocks} · seq{" "}
+            <span className="font-mono">#{blocco.seq}</span>
+          </p>
+        )}
 
-        <div className="mb-4 flex flex-wrap gap-1.5">
-          {blocco.is_validato_utente ? (
-            <Badge
-              variant="success"
-              className="border-emerald-200 bg-emerald-50 text-emerald-800"
-            >
-              ✓ Validato manualmente
-            </Badge>
-          ) : (
-            <Badge variant="muted">Non validato</Badge>
-          )}
+        {/* O → D */}
+        <div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+          <div className="text-right">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Da</div>
+            <div className="text-sm font-medium text-foreground">
+              {blocco.stazione_da_nome ?? blocco.stazione_da_codice ?? "—"}
+            </div>
+            <div className="font-mono text-[10px] text-muted-foreground">
+              {blocco.stazione_da_codice ?? "—"} · {formatTimeShort(blocco.ora_inizio)}
+            </div>
+          </div>
+          <span aria-hidden className="text-muted-foreground">
+            {arrow}
+          </span>
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">A</div>
+            <div className="text-sm font-medium text-foreground">
+              {blocco.stazione_a_nome ?? blocco.stazione_a_codice ?? "—"}
+            </div>
+            <div className="font-mono text-[10px] text-muted-foreground">
+              {blocco.stazione_a_codice ?? "—"} · {formatTimeShort(blocco.ora_fine)}
+            </div>
+          </div>
         </div>
 
-        <div className="space-y-3 border-t border-border pt-4">
-          <DetailRow label="Da">
-            <StazioneDetail nome={blocco.stazione_da_nome} codice={blocco.stazione_da_codice} />
-          </DetailRow>
-          <DetailRow label="A">
-            <StazioneDetail nome={blocco.stazione_a_nome} codice={blocco.stazione_a_codice} />
-          </DetailRow>
-          <DetailRow label="Orario">
-            <span className="tabular-nums text-foreground">
-              {inizio} → {fine}
-              <span className="ml-2 text-xs text-muted-foreground">({durata})</span>
-            </span>
-          </DetailRow>
-          <DetailRow label="Sequenza">
-            <span className="font-mono text-foreground">#{blocco.seq}</span>
-          </DetailRow>
-          {blocco.descrizione !== null && blocco.descrizione !== "" && (
-            <DetailRow label="Note">
-              <span className="text-foreground">{blocco.descrizione}</span>
-            </DetailRow>
-          )}
-          {blocco.corsa_commerciale_id !== null && (
-            <DetailRow label="Corsa">
-              <span className="font-mono text-xs text-muted-foreground">
-                #{blocco.corsa_commerciale_id}
-              </span>
-            </DetailRow>
-          )}
+        {/* KPI mini: durata + tipo + sequenza */}
+        <div className="mt-5 grid grid-cols-3 gap-2 border-b border-border pb-4">
+          <KpiPanel label="Durata" value={durata} />
+          <KpiPanel
+            label="Direzione"
+            value={direction === "ret" ? "ret (←)" : "out (→)"}
+          />
+          <KpiPanel label="Tipo" value={tipoLabel.split(" ")[0]} />
         </div>
 
-        <p className="mt-4 text-[11px] text-muted-foreground">
-          Premi <kbd className="rounded border border-border bg-muted px-1 py-0.5 font-mono text-[10px]">Esc</kbd>{" "}
-          o clicca ✕ per deselezionare.
+        {/* Validazione block */}
+        {blocco.is_validato_utente && (
+          <div className="mt-4 flex items-start gap-2 rounded border border-emerald-200 bg-emerald-50 p-3">
+            <span className="text-sm text-emerald-700">✓</span>
+            <div className="text-[11px] leading-snug text-emerald-900">
+              <div className="font-semibold">Validato manualmente</div>
+              <div className="mt-0.5 text-emerald-700">
+                Il pianificatore ha confermato questo blocco.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Metadata */}
+        <BloccoMetadata blocco={blocco} />
+
+        {blocco.descrizione !== null && blocco.descrizione !== "" && (
+          <div className="mt-4 rounded border border-border bg-muted/40 p-3 text-[11px] italic text-muted-foreground">
+            Note: {blocco.descrizione}
+          </div>
+        )}
+
+        <p className="mt-4 text-center text-[10px] text-muted-foreground">
+          Premi{" "}
+          <kbd className="rounded border border-border bg-muted px-1 py-0.5 font-mono text-[10px]">
+            Esc
+          </kbd>{" "}
+          o ✕ per deselezionare.
         </p>
       </div>
     </Card>
   );
 }
 
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+function KpiPanel({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
-      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-        {label}
-      </span>
-      <div className="text-right text-sm">{children}</div>
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-base font-semibold tabular-nums text-foreground">{value}</div>
     </div>
   );
 }
 
-function StazioneDetail({ nome, codice }: { nome: string | null; codice: string | null }) {
-  if (nome === null && codice === null) return <span>—</span>;
+function BloccoMetadata({ blocco }: { blocco: GiroBlocco }) {
+  const items: Array<[string, string]> = [];
+  if (blocco.corsa_commerciale_id !== null) {
+    items.push(["corsa_commerciale_id", `#${blocco.corsa_commerciale_id}`]);
+  }
+  if (blocco.corsa_materiale_vuoto_id !== null) {
+    items.push(["corsa_materiale_vuoto_id", `#${blocco.corsa_materiale_vuoto_id}`]);
+  }
+  // Espone solo i metadata "leggibili" (string/number primitives).
+  for (const [k, v] of Object.entries(blocco.metadata_json)) {
+    if (typeof v === "string" || typeof v === "number") {
+      items.push([k, String(v)]);
+    }
+  }
+  if (items.length === 0) return null;
   return (
-    <div className="flex flex-col items-end leading-tight">
-      <span className="text-foreground">{nome ?? codice}</span>
-      {nome !== null && codice !== null && (
-        <span className="font-mono text-[10px] text-muted-foreground">{codice}</span>
-      )}
+    <div className="mt-5">
+      <div className="mb-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+        Metadata
+      </div>
+      <dl className="space-y-1.5 text-xs">
+        {items.map(([k, v]) => (
+          <div
+            key={k}
+            className="flex justify-between border-b border-border/50 pb-1 last:border-0 last:pb-0"
+          >
+            <dt className="text-muted-foreground">{k}</dt>
+            <dd className="font-mono text-foreground">{v}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
 
-function formatDurataMin(b: GiroBlocco): string {
-  const start = parseTimeToMin(b.ora_inizio);
-  const end = parseTimeToMin(b.ora_fine);
-  if (start === null || end === null) return "—";
-  let mins = end - start;
-  if (mins < 0) mins += 24 * 60;
-  if (mins < 60) return `${mins}'`;
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return m === 0 ? `${h}h` : `${h}h ${m}'`;
+// =====================================================================
+// Sotto-Gantt: date di applicazione (per variante)
+// =====================================================================
+
+function DateApplicazioneSection({ giro }: { giro: GiroDettaglio }) {
+  const items = useMemo(() => {
+    const out: Array<{
+      key: string;
+      label: string;
+      etichetta: string;
+      datesApply: string[];
+      datesSkip: string[];
+      validitaTesto: string | null;
+    }> = [];
+    for (const g of giro.giornate) {
+      for (const v of g.varianti) {
+        out.push({
+          key: `${g.id}-${v.id}`,
+          label: `G${g.numero_giornata} · ${truncateLabel(v.etichetta_parlante)}`,
+          etichetta: v.etichetta_parlante,
+          datesApply: v.dates_apply_json,
+          datesSkip: v.dates_skip_json,
+          validitaTesto: v.validita_testo,
+        });
+      }
+    }
+    return out;
+  }, [giro]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <Card className="p-5">
+      <div className="mb-3 text-[11px] uppercase tracking-wide text-muted-foreground">
+        Date di applicazione (per variante)
+      </div>
+      <div className="space-y-3">
+        {items.map((it) => (
+          <div key={it.key} className="grid grid-cols-[140px_1fr] gap-3 items-start">
+            <div className="pt-0.5 text-xs text-foreground">
+              <span className="font-mono font-semibold">{it.label}</span>
+            </div>
+            <div>
+              <div className="flex flex-wrap gap-1.5">
+                {it.datesApply.slice(0, 5).map((d) => (
+                  <span
+                    key={d}
+                    className="inline-flex rounded bg-muted px-2 py-0.5 font-mono text-[10px] text-foreground"
+                  >
+                    {formatDateShort(d)}
+                  </span>
+                ))}
+                {it.datesApply.length > 5 && (
+                  <span className="inline-flex rounded px-2 py-0.5 text-[10px] italic text-muted-foreground">
+                    + {it.datesApply.length - 5} altre
+                  </span>
+                )}
+                {it.datesSkip.slice(0, 3).map((d) => (
+                  <span
+                    key={`skip-${d}`}
+                    className="inline-flex rounded bg-destructive/10 px-2 py-0.5 font-mono text-[10px] text-destructive line-through"
+                    title="Saltata"
+                  >
+                    {formatDateShort(d)}
+                  </span>
+                ))}
+              </div>
+              {it.validitaTesto !== null && it.validitaTesto !== "" && (
+                <div className="mt-1.5 text-[11px] italic text-muted-foreground">
+                  "{it.validitaTesto}"
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function formatDateShort(iso: string): string {
+  // "2026-06-15" → "15/06"
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m === null) return formatDateIt(iso);
+  return `${m[3]}/${m[2]}`;
 }
 
 // =====================================================================
-// Time axis math
+// Time axis math (px-based, 1h = 60px)
 // =====================================================================
 
-/** Parse "HH:MM" o "HH:MM:SS" → minuti totali da 00:00. */
 function parseTimeToMin(t: string | null): number | null {
   if (t === null || t.length === 0) return null;
   const parts = t.split(":");
@@ -1255,28 +1598,19 @@ function parseTimeToMin(t: string | null): number | null {
   return h * 60 + m;
 }
 
-/** Minuti da 00:00 → percentuale sull'asse 04:00→04:00 (1440 min). */
-function minToPct(min: number): number {
-  let rel = min - AXIS_START_MIN;
-  if (rel < 0) rel += AXIS_TOTAL_MIN;
-  return (rel / AXIS_TOTAL_MIN) * 100;
-}
-
-/** Posizione X di un'ora (0-23) sull'asse. */
-function hourToPct(h: number): number {
-  return minToPct(h * 60);
-}
-
-/** Minuti da 00:00 → pixel sull'asse 04:00→04:00 (matrice mode). */
+/** Minuti da 00:00 → pixel sull'asse 04:00→04:00 (1440px totali). */
 function minToPx(min: number): number {
   let rel = min - AXIS_START_MIN;
   if (rel < 0) rel += AXIS_TOTAL_MIN;
-  return (rel / AXIS_TOTAL_MIN) * MATRICE_AXIS_WIDTH_PX;
+  return (rel / AXIS_TOTAL_MIN) * TIMELINE_WIDTH_PX;
 }
 
-/** Posizione X in px di un'ora sull'asse matrice. */
-function hourToPx(h: number): number {
-  return minToPx(h * 60);
+/** Minuti da 00:00 → "HH:MM" (per logging/tooltip). */
+function minToTime(min: number): string {
+  const m = ((min % AXIS_TOTAL_MIN) + AXIS_TOTAL_MIN) % AXIS_TOTAL_MIN;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 }
 
 /** Estrae sede da numero_turno tipo `G-FIO-001-ETR526` → `FIO`. */
@@ -1307,4 +1641,3 @@ function ErrorBlock({ message, onRetry }: { message: string; onRetry?: () => voi
     </div>
   );
 }
-

@@ -10,6 +10,191 @@
 
 ---
 
+## 2026-05-03 (96) — Schermata 5 Gantt giro v3: layout single-line PDF Trenord (chiusura must-have #4 + #5)
+
+### Contesto
+
+Feedback utente su entry 92 (matrice ore × stazioni Opzione A): la
+matrice multi-row era confusionaria — il pianificatore perde il filo
+del percorso quando lo stesso treno appare frammentato su righe
+diverse. Il PDF Trenord turno 1134 (`pasted-1777729185302-0.png`)
+mostra che il formato originale è **single-line per giornata**: una
+sola riga orizzontale, stazioni come label testo, numero treno blu
+dentro il segmento rosso, frecce di direzione, minuti arrivo/partenza
+in piccolo.
+
+L'utente ha iterato con Claude Design (chat 2026-05-02 in
+`colazione-arturo (4).zip`) ottenendo il design v3 di
+`arturo/05-gantt-giro.html` (1184 righe), che riscrive la zona Gantt
+in stile PDF Trenord faithful e include i 2 must-have residui:
+
+- **#4 eventi composizione** marker arancione 4px verticale sopra
+  il blocco con title popup `composizione_da → composizione_a`.
+- **#5 banda notte fra giornate** 24px tra G_n e G_n+1 con copy
+  "notte · sosta a [stazione] · [durata]" + verifica congruenza
+  stazione_a (ultimo blocco G_n) vs stazione_da (primo blocco G_n+1)
+  → flag rosso "⚠ congruenza" se anomalia.
+
+### Modifiche
+
+#### Frontend
+
+**`frontend/src/index.css`** — aggiunte CSS classes Gantt v3:
+- `.seg-comm` (rosso commerciale `#dc2626`)
+- `.seg-vuoto` (rosso chiaro tratteggiato 90deg, h-1)
+- `.seg-rientro` (viola `#8b5cf6`)
+- `.seg-acc` (arancione `#fb923c`)
+- `.seg-sosta` (bianco con bordo)
+- `.validato` (inset shadow -4px emerald `#10b981`)
+- `.gap-long` (tratteggio orizzontale per gap ≥30')
+- `.ticks-bg` (background tick mezz'ora `#f3f4f6` + ora `#e5e7eb`)
+- `.night-band` (tratteggio diagonale tenue per notte)
+- `.gantt-selecting .blk:not(.is-selected) { opacity: .55 }` per
+  must-have #6 dim altri durante selezione
+
+**`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`**
+(riscritto, ~1100 righe) — rimossa la matrice multi-row di entry 92,
+sostituita con layout v3:
+
+- **Constants px-based**: `TIMELINE_WIDTH_PX=1440` (24h × 60px),
+  `GIORNATA_LABEL_COL_PX=100`, `PER_KM_COL_PX=120`,
+  `TIMELINE_ROW_HEIGHT_PX=88`, `NOTTE_ROW_HEIGHT_PX=24`.
+- **`AxisHeader` sticky-top** con tick orari ogni 1h (NON 2h come
+  v2), 04→04 next day, corner sticky-left + sticky-right per
+  Per/Km cols.
+- **`GiornataHeaderRow`**: numero giornata grande (font-mono 2xl
+  bold) + categoria semantica derivata dal nome variante (feriale/
+  festivo/sabato) + tab varianti calendariali (sticky-left col +
+  Per/Km vuota dx).
+- **`VarianteRow`** (single-line h=88px):
+  - linea base sottile centrata a top:44 (asse visivo)
+  - blocchi posizionati assoluti via `minToPx` (1px = 1min)
+  - `BloccoSegment` con render diverso per tipo:
+    - **Commerciale** (`CommercialeBlocco`): stazioni come label
+      verde sopra (mono semibold, da `parseSedeFromTurno` codici),
+      linea rossa con freccia direzione (→ out / ← ret derivata
+      da `inferDirection` con heuristic sede target), numero treno
+      mono semibold dentro (white text), minuti arr/par mono sotto
+      (formato "HH MM"), bordo destro emerald se `is_validato_utente`
+    - **Vuoto** (`materiale_vuoto`): seg-vuoto sottile h-1, no
+      etichette
+    - **Rientro** (`rientro_sede`): seg-rientro viola h-3 con label
+      "⟵ {numero_treno}"
+    - **Accessori** (`accp/acca/accessori_p/_a`): seg-acc arancio
+      h-3 con label "ACCp/ACCa {durata}"
+    - **Sosta**: seg-sosta bianco con bordo
+    - **Manutenzione/altri**: barra grigia ampia con label
+  - `EventoCompMarker` (must-have #4): marker arancio 4px verticale
+    full-height per blocchi `evento_composizione`/`cambio_composizione`
+    con title popup `composizione_da → composizione_a` da metadata
+  - `GapMarker` (entry 94 ridotto al solo `.gap-long`): label
+    `formatGap(durata)` + tratteggio se ≥30'
+- **`NotteRow` fra giornate** (must-have #5): banda 24px con copy
+  "notte · sosta a [stazione] · [durata]". Helper
+  `computeSostaNotturna(prev, next)`:
+  - calcola last block (per ora_fine max) e first block (per
+    ora_inizio min)
+  - durata = (24h − ora_fine prev) + ora_inizio next
+  - **discontinua** se `terminaA !== iniziaDa` → bg destructive +
+    badge "⚠ congruenza" + tooltip esplicativo
+- **`TotaliRow`**: counter giornate + blocchi + varianti + Per/Km
+  totali (km = `km_media_giornaliera × numero_giornate`).
+- **`Legenda`**: chip colore per ogni tipo blocco + esempi stazione
+  + numero treno + minuti + validato.
+- **`BloccoSidePanel` redesign v3**:
+  - badge tipo + badge VALIDATO se applicabile
+  - h3 mono numero_treno large
+  - meta row con localizzazione (G{n} · variante "{etichetta}" ·
+    blocco {idx} di {N} · seq #{seq})
+  - O→D layout 3 colonne (Da | freccia | A) con stazione + codice
+    + orario
+  - 3 KPI mini (Durata, Direzione, Tipo)
+  - validazione card emerald se applicabile
+  - metadata `<dl>` con corsa_commerciale_id + chiavi primitive di
+    `metadata_json`
+  - note se presenti
+  - hint "Esc per deselezionare"
+- **`DateApplicazioneSection`** (sotto-Gantt nuovo): per ogni
+  variante (giornata × variante) mostra label `G{n} · {etichetta}`
+  + chip mono delle prime 5 dates_apply (formato `DD/MM`) + counter
+  "+ X altre" + chip line-through delle prime 3 dates_skip + copy
+  italic `validita_testo`.
+
+### Verifiche
+
+- `pnpm exec tsc -b --noEmit` ✅ clean
+- `pnpm exec eslint` (file modificato) ✅ clean
+- `pnpm test --run` ✅ **53 passed** (no regressioni)
+- Preview verifica: error state schermata 5 (giro inesistente) ok,
+  console clean. La verifica visuale del layout single-line richiede
+  giri reali in DB (oggi 0 persistiti dopo iterazione utente sui
+  vincoli) — apparirà appena il pianificatore genera giri.
+- Bundle handoff `/Users/spant87/Downloads/colazione-arturo (4).zip`
+  byte-identico a quello scaricato via API endpoint
+  `api.anthropic.com/v1/design/h/9Vw4MkXLlJpEau02h_Hu3A` (verifica
+  MD5 sui file `arturo/`).
+
+### Conseguenze pratiche
+
+1. **Curva di apprendimento ~zero**: il pianificatore Trenord
+   riconosce immediatamente il formato (single-line, stazioni
+   verde, treni blu, frecce, minuti) — è quello che usa da anni
+   sul PDF cartaceo.
+2. **Una giornata = una riga compatta**: visione "rotazione
+   giornaliera" a colpo d'occhio (es. "convoglio fa 4 viaggi A↔B
+   + rientro" vista in 2 secondi).
+3. **Confronto fra giornate banale**: scrollando verticalmente,
+   ogni giornata è una riga, le ore si allineano sull'asse X.
+4. **Banda notte + congruenza** trasforma un controllo manuale
+   ("ho lasciato il convoglio dove inizia il giorno dopo?") in
+   un assert visivo automatico.
+5. **Eventi composizione visibili**: il marker arancio 4px è un
+   landmark che attira lo sguardo senza essere invasivo.
+
+### Tutti i must-have del design v2/v3 ora chiusi
+
+Implementati cumulativamente (entry 90 + 92 + 94 + 96):
+- ✅ #1 numero_treno DENTRO la barra (mono semibold bianco)
+- ✅ #2 stazioni come label testo verde (entry 96 sostituisce
+  matrice di entry 92)
+- ✅ #3 gap minuti label + tratteggio ≥30' (entry 94)
+- ✅ #4 eventi composizione marker arancio 4px (entry 96, NUOVO)
+- ✅ #5 banda notte fra giornate + congruenza stazione (entry 96,
+  NUOVO)
+- ✅ #6 selezione + dim altri 55%
+- ✅ #7 sticky scroll: asse X top + Giornata/Per/Km cols
+- ✅ #8 is_validato_utente bordo dx 4px emerald
+- ✅ cross-mezzanotte: barra continua sull'asse esteso
+
+### Residui aperti
+
+- **Campo `personale_n_per_giornata`** (colonna "Per"): il design
+  ha la colonna ma il backend non popola questo dato. Mostriamo
+  "—". Sprint dedicato per estendere `GiroGiornata` o `metadata_json`.
+- **Eventi composizione strutturati**: il design assume
+  `metadata_json.composizione_da` e `composizione_a` per il popup
+  marker. Il builder può popolarli al momento del cambio
+  composizione; finché non lo fa, il marker mostra "?". Sprint
+  builder.
+- **Validazione user/timestamp**: il side panel design mostra
+  "validato da admin · 02/05 14:31"; oggi `is_validato_utente` è
+  bool puro senza tracciamento di chi/quando. Sprint backend per
+  estendere lo schema GiroBlocco.
+- **Test dedicati** per le 5 route redesign 1° ruolo (entry 86, 87,
+  90, 96): nessuna copertura ancora, solo verifiche tsc/eslint/preview.
+- **Verifica visuale completa** del layout single-line: richiede
+  giri reali in DB (0 al momento). Da fare appena il pianificatore
+  genera un programma + giri.
+
+### Prossimo step
+
+Decisione utente: (a) generare giri reali per validare visualmente
+v3 popolato, (b) chiudere uno dei residui aperti (Per col, eventi
+strutturati, audit validation), (c) test dedicati, (d) procedere
+con 2° ruolo (Sprint 7.3 dashboard PdC).
+
+---
+
 ## 2026-05-03 (95) — Vincoli inviolabili V3: lista stazioni esplicita dal DB (AND match)
 
 ### Contesto
