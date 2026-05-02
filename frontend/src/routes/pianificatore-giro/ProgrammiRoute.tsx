@@ -53,8 +53,9 @@ export function ProgrammiRoute() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Programmi materiale</h1>
           <p className="text-sm text-muted-foreground">
-            Lista programmi della tua azienda. Da qui crei nuovi programmi (in bozza), entri nel
-            dettaglio per configurare le regole, pubblichi o archivi.
+            Ogni programma è <strong>un turno materiale unico</strong> per la sua finestra di
+            validità: cresce aggiungendo regole/materiali. Da qui crei nuovi programmi (in bozza),
+            entri nel dettaglio per configurare le regole, pubblichi o archivi.
           </p>
         </div>
         <Button onClick={() => setDialogOpen(true)}>
@@ -142,7 +143,6 @@ function ProgrammiTable({ programmi, onOpen }: ProgrammiTableProps) {
           <TableHead>Nome</TableHead>
           <TableHead className="w-44">Periodo</TableHead>
           <TableHead className="w-24">Stato</TableHead>
-          <TableHead className="w-20 text-right">Giornate</TableHead>
           <TableHead className="w-28 text-right">km/ciclo</TableHead>
           <TableHead className="w-28">Aggiornato</TableHead>
           <TableHead className="w-44">Azioni</TableHead>
@@ -203,7 +203,6 @@ function ProgrammaRow({ programma, onOpen }: ProgrammaRowProps) {
       <TableCell>
         <ProgrammaStatoBadge stato={programma.stato} />
       </TableCell>
-      <TableCell className="text-right tabular-nums">{programma.n_giornate_default}</TableCell>
       <TableCell className="text-right tabular-nums">
         {formatNumber(programma.km_max_ciclo)}
       </TableCell>
@@ -263,8 +262,9 @@ function EmptyState({ hasFilters, onCreate, onClearFilters }: EmptyStateProps) {
     <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed border-border bg-white py-16 text-center">
       <h2 className="text-base font-semibold">Nessun programma materiale</h2>
       <p className="max-w-md text-sm text-muted-foreground">
-        Inizia creando il primo programma materiale della tua azienda. Ogni programma definisce un
-        periodo di validità + le regole di assegnazione tra corse e materiali.
+        Inizia creando il primo programma materiale della tua azienda. Ogni programma è un{" "}
+        <strong>turno materiale unico</strong>: definisce un periodo di validità + le regole di
+        assegnazione tra corse e materiali, e cresce ogni volta che aggiungi un materiale.
       </p>
       <Button onClick={onCreate}>
         <Plus className="mr-2 h-4 w-4" aria-hidden /> Crea il primo programma

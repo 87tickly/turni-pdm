@@ -205,7 +205,6 @@ function ConfigurazioneCard({ programma }: { programma: ProgrammaDettaglioRead }
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm md:grid-cols-4">
         <Field label="Periodo" value={formatPeriodo(programma.valido_da, programma.valido_a)} />
-        <Field label="N. giornate (safety)" value={programma.n_giornate_default.toString()} />
         <Field
           label="Tolleranza fascia oraria"
           value={`${programma.fascia_oraria_tolerance_min} min`}

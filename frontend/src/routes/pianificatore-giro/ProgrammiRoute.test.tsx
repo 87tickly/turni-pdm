@@ -195,11 +195,13 @@ describe("ProgrammiRoute", () => {
     });
     expect(postCall).toBeDefined();
     const body = JSON.parse((postCall![1] as RequestInit).body as string);
+    // Sprint 7.6 (mini-fix UX): n_giornate_default non e' piu' nel
+    // payload del create — il backend usa il default 1.
     expect(body).toMatchObject({
       nome: "Test prog",
       valido_da: "2026-01-01",
       valido_a: "2026-12-31",
-      n_giornate_default: 1,
     });
+    expect(body).not.toHaveProperty("n_giornate_default");
   });
 });

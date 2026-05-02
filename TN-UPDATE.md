@@ -10,6 +10,61 @@
 
 ---
 
+## 2026-05-02 (69) — Mini-fix UX programma materiale: rimuovi N. giornate (safety) + chiarisci "turno unico"
+
+### Contesto
+
+Smoke utente del modal "Nuovo programma materiale" (post Sprint 7.6 MR 1):
+il campo "N. giornate (safety)" era fuorviante perché induceva il
+pianificatore a pensare che dovesse dichiarare in anticipo le giornate
+del turno. La realtà operativa è opposta: il programma è un container,
+le giornate emergono dalla generazione dei giri (uno per
+materiale/regola) e si sommano nel programma.
+
+Inoltre la lista programmi non rendeva esplicito che ogni programma =
+UN turno materiale unico cumulativo. Rischio confusione: l'utente
+poteva pensare "creo N programmi per coprire N materiali" invece di
+"creo 1 programma e ci aggiungo N regole/materiali nel tempo".
+
+### Modifiche
+
+**Frontend** (4 file):
+
+- `src/routes/pianificatore-giro/CreaProgrammaDialog.tsx`:
+  - Rimosso campo "N. giornate (safety)" + state `n_giornate_default`
+  - Rimosso il valore dal payload del create (backend usa default 1)
+  - Aggiunta nota interna nel docstring sulla decisione utente
+- `src/routes/pianificatore-giro/ProgrammiRoute.tsx`:
+  - Header: descrizione esplicita "Ogni programma è **un turno
+    materiale unico** per la sua finestra di validità: cresce
+    aggiungendo regole/materiali."
+  - Tabella: rimossa colonna "Giornate" (mostrava `n_giornate_default`,
+    valore safety non output reale)
+  - EmptyState: stesso chiarimento sul turno unico
+- `src/routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`:
+  - Sezione Configurazione: rimosso Field "N. giornate (safety)"
+- `src/routes/pianificatore-giro/ProgrammiRoute.test.tsx`:
+  - Aggiornato matcher payload del POST /programmi: ora verifica
+    che `n_giornate_default` NON sia presente nel body
+
+### Verifiche
+
+- `pnpm typecheck`: ✅ clean
+- `pnpm test --run`: ✅ **53 passed** (regressioni 0)
+- Verifica visiva runtime: HMR del dev server utente ha pickup-ato.
+
+### Backend
+
+Nessuna modifica: `n_giornate_default` resta un campo di safety col
+default 1 lato schema/modello (`schemas/programmi.py:290`,
+`models/programmi.py:65`). Solo l'esposizione UI è stata tolta.
+
+### Prossimo step
+
+MR 2 (dato sedi: FIO=MILANO_CERTOSA, NOV multi-stazione).
+
+---
+
 ## 2026-05-02 (68) — Sprint 7.6 MR 1: UX modal regola di assegnazione
 
 ### Contesto
