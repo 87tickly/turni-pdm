@@ -10,6 +10,115 @@
 
 ---
 
+## 2026-05-02 (94) — Chiusura must-have #3 Gantt giro: gap minuti label + tratteggio ≥30'
+
+### Contesto
+
+Residuo aperto in entry 92 (matrice ore × stazioni): must-have #3 del
+design v2 specifica che fra blocchi consecutivi sulla stessa row vada
+mostrato un label testuale del gap di tempo (es. "45'") e un tratteggio
+orizzontale di enfasi se il gap è ≥30'. Esempio dal design: blocco
+28335 (07:12-09:57) → label "45'" → blocco 28336 (10:42-13:27) sulla
+row Tirano, con bordo tratteggiato a metà row.
+
+Funzione: dare al pianificatore una lettura immediata di quanto tempo
+il materiale resta inattivo a una stazione tra due movimenti, utile
+sia per validare le rotazioni sia per spottare gap anomali.
+
+### Modifiche
+
+#### Frontend (`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`)
+
+**Nuovi helper**:
+- `GapInfo` type: `{ startMin, endMin, durationMin }`
+- Soglie: `GAP_MIN_THRESHOLD=10` (sotto si nasconde, troppo rumore),
+  `GAP_LONG_THRESHOLD=30` (sopra rende anche tratteggio),
+  `GAP_NIGHT_THRESHOLD=360` (sopra è "notte fra giornate", scope
+  must-have #5).
+- `computeGaps(blocchi)` ordina i blocchi per start time, gestisce
+  cross-mezzanotte (end<start ⇒ +1440), itera coppie consecutive,
+  filtra `[10', 6h)`. Restituisce array di gap.
+- `formatGap(min)`: `45'`, `1h`, `1h 15'`, `4h`. Verificato con eval
+  in preview console.
+
+**Nuovi componenti `GapMarker`**:
+- `GapMarkerPx` (matrice — px-based): label `top:16px left:start+2px`
+  font-mono tabular-nums + linea tratteggiata `top:34px` con
+  `repeating-linear-gradient(90deg, #9ca3af 0 4px, transparent 4px 8px)`
+  se durata ≥30'. Match esatto del design HTML.
+- `GapMarkerPct` (timeline — percentage-based): variante % per
+  TimelineView (single-row, no fixed pixel width). Stesso
+  comportamento visuale, label `top:2px`, linea tratteggiata
+  `top:calc(50% + 2px)`.
+
+**Wiring**:
+- `MatriceView`: per ogni station row, dopo aver filtrato i blocchi
+  con `pickRowForBlocco`, calcola `computeGaps(blocchiRow)` e
+  renderizza `GapMarkerPx` per ognuno. I marker vanno renderizzati
+  PRIMA dei blocchi (z-default sotto), così se un blocco si sposta
+  o si seleziona, il marker resta sotto e visibile nel gap.
+- `TimelineView`: stesso pattern ma con `computeGaps(variante.blocchi)`
+  globalmente (single row, gap fra qualsiasi coppia consecutiva)
+  e `GapMarkerPct`.
+
+### Verifiche
+
+- `pnpm exec tsc -b --noEmit` ✅ clean
+- `pnpm exec eslint` (file modificato) ✅ clean
+- `pnpm test --run` ✅ **53 passed** (no regressioni)
+- Preview verifica: error state schermata 5 ancora ok. Console clean.
+  Test `formatGap` via eval JS in browser (replica della funzione):
+  10'→"10'", 45'→"45'", 60'→"1h", 75'→"1h 15'", 150'→"2h 30'",
+  240'→"4h". Match atteso.
+- Verifica visuale completa richiede giri reali in DB con blocchi
+  che presentano gap (oggi 0 giri persistiti). Apparirà appena il
+  pianificatore genera giri.
+
+### Conseguenze pratiche
+
+1. **Pianificatore vede a colpo d'occhio inattività materiale**: una
+   row stazione con un "1h 30'" tra due treni significa "il materiale
+   è fermo qui per 90 minuti". Se il gap è anomalo (es. dovrebbe
+   essere 5' standard), si seleziona il blocco a sinistra e si
+   indaga.
+2. **Tratteggio ≥30' come early warning**: visivamente attira
+   l'attenzione su gap "lunghi". Soglia 30' è un compromesso —
+   più piccola → troppo rumore, più grande → si perdono casi
+   interessanti.
+3. **Cross-mezzanotte**: i gap che attraversano 04:00 (es. blocco
+   23:30-02:00 seguito da 03:00-05:00) vengono calcolati
+   correttamente perché normalizziamo end+1440 quando end<start.
+
+### Residui aperti (Gantt v2 must-have)
+
+Implementati cumulativamente (entry 90 + 92 + 94): #1 (treno in
+barra), #2 (matrice stazioni), #3 (gap minuti label), #6 (selezione
++ dim), #7 (sticky scroll, parziale solo in matrice), #8 (validato
+emerald), + cross-mezzanotte.
+
+Restano:
+
+- **Must-have #4 — eventi composizione marker**: marker arancione
+  4px sopra il blocco con click = popup `composizione_da →
+  composizione_a`. Richiede campo `eventi_composizione` strutturato
+  in `generation_metadata_json` (oggi non popolato dal builder).
+  Sprint backend + frontend.
+- **Must-have #5 — banda notte fra giornate**: 28px tra G_n-end
+  e G_n+1-start, copy "notte · sosta a [stazione] · [durata]" con
+  verifica congruenza stazione. Richiede layout cross-card (tutte
+  le giornate in unico scrollable continuo) — riscrittura della
+  struttura attuale per-card. Sprint dedicato.
+
+### Prossimo step
+
+Decisione utente: (a) chiudere altro residuo (gli ultimi 2 sono
+significativamente più grandi: #4 richiede backend+frontend, #5
+richiede riscrittura cross-card), (b) generare giri reali per
+verificare visualmente matrice + gap, (c) procedere con altre
+attività.
+
+---
+
 ## 2026-05-02 (93) — Vincoli inviolabili: rimossi 5 vincoli operativi (HARD ingestibili sulle sub-tratte)
 
 ### Contesto

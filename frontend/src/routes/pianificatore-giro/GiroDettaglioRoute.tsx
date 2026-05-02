@@ -21,16 +21,18 @@ import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdc
  * Struttura: Hero header (mono) + Meta band + per-giornata Gantt
  * (asse 04:00→04:00 next day, 1440 min) + side panel blocco selezionato.
  *
- * Must-have implementati (entry 90 + 91):
+ * Must-have implementati (entry 90 + 92 + 93):
  *   1. ✅ numero_treno DENTRO barra ≥60px (mono semibold bianco)
- *   2. ✅ matrice ore × stazioni (Opzione A, ≤10 stazioni — entry 91)
+ *   2. ✅ matrice ore × stazioni (Opzione A, ≤10 stazioni — entry 92)
+ *   3. ✅ gap minuti label tra blocchi consecutivi + tratteggio se ≥30'
+ *      (entry 93)
  *   6. ✅ selezione blocco: bordo + side panel + dim altri 55%
  *   7. ✅ sticky scroll: asse X top + colonna stazioni left + corner opaco
- *      (parziale, attivo solo in matrice — entry 91)
+ *      (parziale, attivo solo in matrice — entry 92)
  *   8. ✅ is_validato_utente: bordo dx 4px emerald + badge in panel
  *   ✅ cross-mezzanotte: span 04:00→04:00 next day
- * Restano residui: gap minuti label (#3), eventi composizione marker (#4),
- * banda notte fra giornate con verifica congruenza (#5).
+ * Restano residui: eventi composizione marker (#4), banda notte fra
+ * giornate con verifica congruenza (#5).
  */
 
 // =====================================================================
@@ -603,6 +605,133 @@ function pickRowForBlocco(b: GiroBlocco): string | null {
   }
 }
 
+// =====================================================================
+// Gap fra blocchi (must-have #3 design v2 — entry 93)
+// =====================================================================
+
+interface GapInfo {
+  /** Minuti dall'inizio giornata (00:00) a cui inizia il gap. */
+  startMin: number;
+  /** Minuti a cui termina il gap. */
+  endMin: number;
+  /** Durata del gap in minuti. */
+  durationMin: number;
+}
+
+/** Soglia minima per renderizzare un gap (≥10', design v2). */
+const GAP_MIN_THRESHOLD = 10;
+/** Sopra questa soglia il gap è una "notte" (must-have #5, fuori scope #3). */
+const GAP_NIGHT_THRESHOLD = 6 * 60;
+/** Soglia per rendere il gap come tratteggio "long" oltre al label. */
+const GAP_LONG_THRESHOLD = 30;
+
+/**
+ * Calcola i gap fra blocchi consecutivi (ordinati per start time).
+ * Filtra: gap ≥ 10' e < 6h (≥6h è "notte" e va in must-have #5).
+ * Gestisce cross-mezzanotte: se end < start, somma 1440 alla fine.
+ */
+function computeGaps(blocchi: GiroBlocco[]): GapInfo[] {
+  const sorted = blocchi
+    .map((b) => {
+      const start = parseTimeToMin(b.ora_inizio);
+      const end = parseTimeToMin(b.ora_fine);
+      if (start === null || end === null) return null;
+      let endAdj = end;
+      if (endAdj < start) endAdj += AXIS_TOTAL_MIN;
+      return { start, end: endAdj };
+    })
+    .filter((x): x is { start: number; end: number } => x !== null)
+    .sort((a, b) => a.start - b.start);
+
+  const gaps: GapInfo[] = [];
+  for (let i = 0; i < sorted.length - 1; i += 1) {
+    const cur = sorted[i];
+    const next = sorted[i + 1];
+    const gapDur = next.start - cur.end;
+    if (gapDur >= GAP_MIN_THRESHOLD && gapDur < GAP_NIGHT_THRESHOLD) {
+      gaps.push({ startMin: cur.end, endMin: next.start, durationMin: gapDur });
+    }
+  }
+  return gaps;
+}
+
+/** Formatta una durata in minuti come "45'" o "1h 15'". */
+function formatGap(min: number): string {
+  if (min < 60) return `${min}'`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}'`;
+}
+
+/**
+ * Marker gap per matrice (px-based). Renderizza:
+ * - label "45'" / "1h" sopra il gap, font tabular-nums
+ * - linea tratteggiata orizzontale al centro-bassa del row se ≥30'
+ *   (segnale visivo di "lunga sosta" da indagare)
+ */
+function GapMarkerPx({ gap }: { gap: GapInfo }) {
+  const startPx = minToPx(gap.startMin);
+  const endPx = minToPx(gap.endMin);
+  const widthPx = Math.max(1, endPx - startPx);
+  const showDashed = gap.durationMin >= GAP_LONG_THRESHOLD;
+  return (
+    <>
+      <span
+        className="pointer-events-none absolute font-mono text-[10px] tabular-nums text-muted-foreground"
+        style={{ left: `${startPx + 2}px`, top: "16px" }}
+        title={`Gap ${formatGap(gap.durationMin)}`}
+      >
+        {formatGap(gap.durationMin)}
+      </span>
+      {showDashed && (
+        <div
+          className="pointer-events-none absolute h-px"
+          style={{
+            left: `${startPx}px`,
+            width: `${widthPx}px`,
+            top: "34px",
+            backgroundImage:
+              "repeating-linear-gradient(90deg, #9ca3af 0 4px, transparent 4px 8px)",
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * Variante percentage-based per timeline view (single row).
+ */
+function GapMarkerPct({ gap }: { gap: GapInfo }) {
+  const startPct = minToPct(gap.startMin);
+  const endPct = minToPct(gap.endMin);
+  const widthPct = Math.max(0.1, endPct - startPct);
+  const showDashed = gap.durationMin >= GAP_LONG_THRESHOLD;
+  return (
+    <>
+      <span
+        className="pointer-events-none absolute font-mono text-[10px] tabular-nums text-muted-foreground"
+        style={{ left: `calc(${startPct}% + 2px)`, top: "2px" }}
+        title={`Gap ${formatGap(gap.durationMin)}`}
+      >
+        {formatGap(gap.durationMin)}
+      </span>
+      {showDashed && (
+        <div
+          className="pointer-events-none absolute h-px"
+          style={{
+            left: `${startPct}%`,
+            width: `${widthPct}%`,
+            top: "calc(50% + 2px)",
+            backgroundImage:
+              "repeating-linear-gradient(90deg, #9ca3af 0 4px, transparent 4px 8px)",
+          }}
+        />
+      )}
+    </>
+  );
+}
+
 function MatriceView({
   variante,
   stazioni,
@@ -661,6 +790,7 @@ function MatriceView({
           const blocchiRow = variante.blocchi.filter(
             (b) => pickRowForBlocco(b) === s.codice,
           );
+          const gapsRow = computeGaps(blocchiRow);
           return (
             <div
               key={s.codice}
@@ -680,7 +810,7 @@ function MatriceView({
                 </div>
               </div>
 
-              {/* Track con grid orario + blocchi */}
+              {/* Track con grid orario + blocchi + gap markers */}
               <div className="relative" style={{ width: MATRICE_AXIS_WIDTH_PX }}>
                 {/* Hourly grid lines */}
                 {TICK_HOURS.map((h) => {
@@ -693,6 +823,10 @@ function MatriceView({
                     />
                   );
                 })}
+                {/* Gap markers (must-have #3 — sotto ai blocchi z-default) */}
+                {gapsRow.map((g, i) => (
+                  <GapMarkerPx key={`gap-${s.codice}-${i}`} gap={g} />
+                ))}
                 {/* Blocchi su questa row stazione */}
                 {blocchiRow.map((b) => (
                   <BloccoBarPx
@@ -770,6 +904,7 @@ function TimelineView({
   selectedBloccoId: number | null;
   onSelectBlocco: (b: GiroBlocco) => void;
 }) {
+  const gaps = computeGaps(variante.blocchi);
   return (
     <div className="overflow-x-auto p-4">
       <div className="min-w-[960px]">
@@ -813,6 +948,11 @@ function TimelineView({
               />
             );
           })}
+
+          {/* Gap markers (must-have #3, sotto ai blocchi z-default) */}
+          {gaps.map((g, i) => (
+            <GapMarkerPct key={`gap-tl-${i}`} gap={g} />
+          ))}
 
           {variante.blocchi.map((b) => (
             <BloccoBar
