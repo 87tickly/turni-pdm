@@ -10,6 +10,84 @@
 
 ---
 
+## 2026-05-02 (83) — docs: brief design 1° ruolo - sezione Branding (logo + font + palette)
+
+### Contesto
+
+Il designer esterno aveva prodotto, sopra al brief entry 81, un logo
+placeholder (quadrato blu con "A" bianca) + font sans-serif neutro,
+non allineati al branding reale di ARTURO Business. L'utente ha
+fornito screenshot del logo placeholder vs il logo attuale del
+prodotto e ha chiesto un prompt chirurgico per l'allineamento.
+
+Lettura del brand stack effettivo:
+
+- `frontend/src/components/brand/ArturoLogo.tsx` — wordmark
+  testuale a 3 elementi inline (ARTURO + pallino + Business)
+- `frontend/tailwind.config.ts` — palette esatta: `primary` =
+  `#0062CC` (blu ecosistema), `arturo-business` = `#B88B5C`
+  (terracotta del prodotto Business), `font-sans` sovrascritto a
+  `Exo 2`, animazione `pulse-dot` 1.6s su keyframe opacity+scale
+- `frontend/index.html` — Google Fonts Exo 2 weights
+  400/500/600/700/900 caricato via `<link>`
+
+Bug minore nel brief entry 81: avevo scritto "brand colour blu
+`#1d4ed8` circa" — valore approssimato e sbagliato. Il blu reale è
+`#0062CC`.
+
+### Modifiche
+
+#### `docs/PROMPT-DESIGN-1RUOLO.md`
+
+Aggiunta **sezione "Branding (logo, font, palette)"** subito dopo
+"Stack tecnico" e prima di "Glossario minimo". Contiene:
+
+- **Logo wordmark** "ARTURO • Business": specifica 3-elementi
+  inline (testo + pallino + testo), font Exo 2 weight 900
+  tracking-tight gap-1.5, snippet HTML+Tailwind copy-paste per
+  versione `sm` (text-xl, h-2 w-2) e `lg` (text-3xl, h-3 w-3),
+  CSS keyframes `pulse-dot` per il pallino animato. Sezione
+  "Cosa NON fare sul logo" (no quadrato/box/icona "A"/tagline
+  sotto).
+- **Font Exo 2 globale**: snippet `<head>` con preconnect Google
+  Fonts + `<link>` family Exo 2 + `<style>` `html, body
+  { font-family: 'Exo 2', ... }`. Pesi 400/500/600/700/900,
+  Tailwind `font-medium`/`bold`/`black` ereditano dal globale.
+- **Tabella palette brand** con valori hex esatti: `primary`
+  `#0062CC`, `arturo-business` `#B88B5C`, `border`
+  `hsl(214.3 31.8% 91.4%)`, `muted-foreground`
+  `hsl(215.4 16.3% 46.9%)`, `destructive` `hsl(0 84.2% 60.2%)`,
+  `background` bianco, `foreground` quasi-nero. Nota esplicita:
+  terracotta è ACCENTO del logo, non colore funzionale UI; per
+  bottoni/badge stato usa `primary` blu. Stati semantici
+  (success/warning/error) restano colori standard Tailwind
+  (emerald/amber/red).
+
+Corretto il bug del brief originale: il paragrafo che diceva "brand
+colour blu `#1d4ed8` circa" è stato sostituito con un rimando alla
+nuova sezione Branding (valore corretto `#0062CC`).
+
+### Stato
+
+File aggiornato a 622 righe (+102). Pronto da ri-allegare al
+designer. Designer ora ha tutto il contesto branding senza bisogno
+di un prompt chirurgico separato.
+
+Verifiche:
+
+- File modificato: `docs/PROMPT-DESIGN-1RUOLO.md`.
+- TN-UPDATE.md aggiornato con questa entry.
+- Niente test (è un file documentazione, non codice).
+
+### Prossimo step
+
+Utente ri-allega il file al designer (oppure incolla il prompt
+chirurgico mostrato in chat). Schermate da rifare: tutte e 5 le
+schermate prodotte fino ad ora con logo+font corretti. Poi avanti
+con l'iterazione di IA come da brief entry 81.
+
+---
+
 ## 2026-05-02 (82) — Sprint 7.7 MR 6: etichetta categorica per variante (Lavorativo/Prefestivo/Festivo)
 
 ### Contesto

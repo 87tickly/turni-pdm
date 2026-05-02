@@ -87,10 +87,108 @@ scansionarli velocemente.
 - **Italiano** nei testi UI (è un prodotto italiano)
 - Icon set: **lucide-react**
 
-Output che mi serve: **HTML + Tailwind**, mockup low-fi. I colori usa
-quelli neutri di Tailwind (gray/blue/amber/emerald come richiamo
-semantico). Il brand colour del prodotto è blu (`#1d4ed8` circa) —
-puoi assumerlo come `bg-primary`/`text-primary`.
+Output che mi serve: **HTML + Tailwind**, mockup low-fi. Per i colori
+funzionali usa quelli neutri di Tailwind (gray/amber/emerald come
+richiamo semantico). Per logo, font e palette brand vedi sezione
+**Branding** sotto.
+
+### Branding (logo, font, palette)
+
+Il prodotto si chiama **ARTURO Business** (è il fratello "operations"
+del gemello "Live"). Branding fissato — non improvvisare:
+
+#### Logo — wordmark testuale "ARTURO • Business"
+
+Il logo NON è un quadrato/box con icona o lettera "A" stilizzata. È
+un **wordmark inline a 3 elementi sulla stessa riga**:
+
+1. "**ARTURO**" — colore `#0062CC` (blu ecosistema)
+2. Un **pallino circolare** — colore `#B88B5C` (terracotta), con
+   animazione pulse (1.6s loop). Per i mockup low-fi puoi anche
+   lasciarlo fermo.
+3. "**Business**" — colore `#B88B5C` (terracotta)
+
+Font: **Exo 2**, weight **900** (black), `tracking-tight`. Gap fra
+elementi: `gap-1.5` (Tailwind).
+
+Snippet HTML+Tailwind da copiare (versione `sm` per sidebar/header,
+text-xl):
+
+```html
+<span class="inline-flex items-center gap-1.5 font-black tracking-tight text-xl"
+      style="font-family: 'Exo 2', system-ui, sans-serif;"
+      aria-label="ARTURO Business">
+  <span class="text-[#0062CC]">ARTURO</span>
+  <span class="inline-block h-2 w-2 rounded-full bg-[#B88B5C] animate-pulse-dot"></span>
+  <span class="text-[#B88B5C]">Business</span>
+</span>
+```
+
+Versione `lg` (per landing/hero, text-3xl): cambia `text-xl` →
+`text-3xl` e `h-2 w-2` → `h-3 w-3`.
+
+Animazione pulse del pallino (CSS, una volta nel `<style>`):
+
+```css
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.78); }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+```
+
+**Cosa NON fare sul logo**:
+
+- Niente quadrato/box/badge intorno al logo
+- Niente icona o lettera "A" stilizzata separata
+- Niente bordo, ombra, gradient — flat
+- Niente tagline "BUSINESS" sotto in piccolo: la parola "Business"
+  è già parte del logo, sulla stessa riga
+
+#### Font — Exo 2 globale
+
+Tutto il prodotto usa **Exo 2** (Google Fonts). Non solo il logo:
+`body`, headings, table cells, tutto il markup. È il `font-sans` di
+default dell'app.
+
+Da aggiungere al `<head>` di ogni mockup HTML:
+
+```html
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;900&display=swap"
+      rel="stylesheet" />
+<style>
+  html, body { font-family: 'Exo 2', system-ui, sans-serif; }
+</style>
+```
+
+Pesi disponibili: 400 (regular), 500 (medium), 600 (semibold), 700
+(bold), 900 (black/wordmark). Usa `font-medium` / `font-semibold` /
+`font-bold` di Tailwind come al solito — eredita Exo 2 dal globale.
+
+#### Palette brand (valori esatti)
+
+| Token | Hex | Uso |
+|---|---|---|
+| `primary` | `#0062CC` | Bottoni primary, link attivi, logo "ARTURO", focus ring, accenti del prodotto |
+| `arturo-business` | `#B88B5C` | Logo (pallino + "Business"), accenti rari del prodotto |
+| `border` | `hsl(214.3 31.8% 91.4%)` | Bordi card/tabella |
+| `muted-foreground` | `hsl(215.4 16.3% 46.9%)` | Testi secondari |
+| `destructive` | `hsl(0 84.2% 60.2%)` | Errori, alert critici |
+| `background` | `hsl(0 0% 100%)` | Sfondo pagina |
+| `foreground` | `hsl(222.2 84% 4.9%)` | Testo primario |
+
+Il colore terracotta `#B88B5C` è **un accento del logo**, non un
+colore funzionale dell'UI: NON usarlo per bottoni primary, badge
+stato, tab attivi, ecc. Per quelli usa `primary` (blu `#0062CC`).
+
+Per stati semantici nelle schermate (success / warning / error) usa
+i colori semantici di Tailwind: `emerald-600`, `amber-500/600`,
+`red-600`/`destructive`. Il brand è BLU + TERRACOTTA, gli stati sono
+i loro colori standard.
 
 ### Glossario minimo
 
