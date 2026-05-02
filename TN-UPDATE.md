@@ -10,6 +10,232 @@
 
 ---
 
+## 2026-05-02 (81) — docs: brief design 1° ruolo (5 schermate + master)
+
+### Contesto
+
+L'utente vuole ridisegnare la UI del Pianificatore Giro Materiale
+(1° ruolo). La dashboard attuale è 4 card descrittive statiche
+(`DashboardRoute.tsx`), zero dati live. L'azione "Genera giri" è
+nascosta dietro un dialog senza storico run. La lista programmi è
+solo tabellare, niente vista cross-programma con timeline annua.
+
+Un primo tentativo di redesign con un designer esterno (Claude
+Design via artifact HTML) aveva prodotto un mockup "tutto-in-uno"
+che mescolava concetti del 1° e 2° ruolo (cascading rev, 9NNNN
+BG-LE, errori cascading, build batch) e comprimeva 4 funzioni
+distinte in una sola pagina (hero programma + timeline annua + feed
+attività + mini-Gantt giro).
+
+Il designer stesso ha richiesto un brief più strutturato in 5
+sezioni: posizione in app, lavoro da svolgere, entità+stato,
+componenti riusabili, cosa NON deve esserci.
+
+### Modifiche
+
+#### Audit frontend (lettura)
+
+Mappata l'IA reale del 1° ruolo:
+
+- **5 route** in `frontend/src/routes/pianificatore-giro/`:
+  `dashboard`, `programmi`, `programmi/:id`, `programmi/:id/giri`,
+  `giri/:id` (più 2 route placeholder `giri/:id/turni-pdc` e
+  `turni-pdc/:turnoId` non in scope per il redesign).
+- **Sidebar oggi**: 2 voci (Home + Programmi) per il 1° ruolo.
+- **Componenti UI riusabili**: shadcn-style minimal in
+  `components/ui/` (Card, Button, Badge, Dialog, Input, Label,
+  Select, Spinner, Table, Textarea) + brand `ArturoLogo` + domain
+  `ProgrammaStatoBadge`.
+- **Componenti riusabili lato giro**: `RegolaCard`, `EtichettaBadge`
+  e `MotivoChiusuraBadge` (inline in `ProgrammaGiriRoute`).
+- **Schemi entità API**: `Programma` (stato bozza/attivo/archiviato,
+  km cap, strict_options, regole), `Regola` (filtri+composizione,
+  priorità, km_max_ciclo per regola), `Giro` (numero_turno
+  `G-{SEDE}-{NNN}-{MATERIALE}`, etichetta_tipo enum 6 valori,
+  motivo_chiusura, km_media_giornaliera/annua), `BuilderResult`
+  (n_giri_creati, corse_residue, eventi_composizione, warnings).
+
+#### Diagnosi UI attuale (5 problemi)
+
+1. Dashboard inutile (4 card descrittive, zero dati).
+2. GeneraGiri dentro dialog senza storia dei run precedenti.
+3. Stats bar lista giri inerte (4 numeri sommativi senza segnale).
+4. Niente vista cross-programma (3+ programmi attivi in parallelo
+   non si vedono insieme nel tempo).
+5. Configurazione programma piatta (`strict_options_json` 6 flag e
+   `stazioni_sosta_extra_json` nascosti dietro testo singola riga).
+
+#### Nuovo file `docs/PROMPT-DESIGN-1RUOLO.md`
+
+Brief autosufficiente per designer esterno (~500 righe). Contiene:
+
+- **Sezione "Come lavorare"** (per il designer): procedere una
+  schermata alla volta, mockup HTML+Tailwind low-fi focus IA, no
+  visual prima dell'approvazione IA.
+- **Contesto generale**: cos'è COLAZIONE, multi-tenant, 5 ruoli
+  separati, cosa fa il 1° ruolo, stack tecnico (React 18+TS+Vite,
+  Tailwind, shadcn-minimal, TanStack Query, lucide-react,
+  italiano), glossario minimo (programma, regola, giro, giornata,
+  blocco, sede, builder, motivo chiusura), cosa NON voglio mai
+  vedere (concetti PdC, termini inventati, numeri inventati,
+  layout tutto-in-uno), layout shell sidebar 240px + header h-14.
+- **5 prompt schermata**, ognuno autosufficiente:
+  1. Dashboard `/dashboard` — status page 30sec, banda alert +
+     card programmi attivi + card ultimo run + feed opzionale.
+  2. Lista programmi `/programmi` — tab Tabella + tab Calendario
+     (Gantt orizzontale annuale, default).
+  3. Dettaglio programma `/programmi/:id` — hero header + card
+     configurazione 2 colonne (scalari + strict_options come chip
+     toggle) + lista RegolaCard + storico run del builder.
+  4. Lista giri `/programmi/:id/giri` — banda KPI 4 colonne (con
+     n_giri_non_chiusi cliccabile = filtra) + barra filtri sticky
+     (sede, materiale, etichetta, motivo, ricerca, toggle non
+     chiusi) + tabella densa + opzionale preview pane laterale.
+  5. Visualizzatore Gantt `/giri/:id` — hero numero_turno + banda
+     meta + Gantt HTML+CSS pure (asse X 04→04 next day per
+     cross-notte, righe = giornate, barre = blocchi colorati per
+     tipo_blocco: commerciale blu / vuoto grigio tratteggiato /
+     rientro 9NNNN viola / sosta bianco con bordo / accessori
+     arancione piccolo) + side panel dettaglio blocco + chip date
+     applicate per giornata.
+
+### Stato
+
+File pronto da allegare a una nuova chat con designer. Nessuna
+modifica al codice prodotto/sorgente.
+
+Verifiche:
+
+- File creato: `docs/PROMPT-DESIGN-1RUOLO.md`.
+- TN-UPDATE.md aggiornato con questa entry.
+- Niente test da eseguire (è un file documentazione, non codice).
+
+### Prossimo step
+
+Utente allega il file alla chat con designer, raccoglie i mockup
+low-fi schermata per schermata. Iterazione di IA prima del visual
+polish. Dopo l'approvazione dei 5 mockup, valutare se aprire un MR
+di redesign per implementare l'IA approvata sostituendo le 5 route
+attuali.
+
+In parallelo resta il MR 7.7.5 (varianti per giornata, turno
+Trenord 1134 style) come prossimo step di sviluppo backend già
+pianificato in entry 78.
+
+---
+
+## 2026-05-02 (80) — Estrazione dati: Turno Materiale Trenord 2/3/26 → mapping linea↔materiale
+
+### Contesto
+
+Richiesta utente: leggere il PDF `Turno Materiale Trenord dal 2_3_26.pdf`
+(353 pagine, esterno al repo in `~/Downloads/`) e associare il
+materiale ad ogni linea, perché alcuni materiali sono vincolati
+(es. ATR803 Coleoni è diesel, può andare solo su linee
+non-elettrificate o linee miste, mai dove serve potenza elettrica
+piena). Serve a popolare le regole di compatibilità
+`programma_regola_assegnazione` con dati reali Trenord PdE 2026.
+
+Decisione utente: granularità per **famiglia materiale** (Vivalto,
+ETR526, ATR803, ...) non composizione esatta. Linea fisica + (se
+deducibile) commerciale.
+
+### Modifiche
+
+**Strategia di estrazione**: dopo il primo chunk Read del PDF
+(immagini decodificate ~30K token/20 pagine = 540K token totali su
+1M context), pivot a `pdftotext -layout` → 4.9MB di testo grezzo →
+parser Python in 1 file. Costo contesto ridotto di ~10×.
+
+**File generati in `data/`**:
+
+- `data/turni_materiale_2026_dump.json` (104K, 54 turni):
+  un record per turno con `numero_turno`, `composizione_raw`,
+  `famiglie_materiale`, `pr/ppf/metri`, `numero_giornate`,
+  `sede_manutenzione`, `linee_inferite` (lista `{fisica, commerciale}`),
+  `treni_count/min/max/sample`, `stazioni_capolinea`,
+  `pagina_copertina` + `pagine_gantt` per tracciabilità al PDF.
+  Header `_metadata` con sorgente/data/metodo.
+
+- `data/linee_materiali_compatibili_2026.md` (14K, 490 righe):
+  sintesi a 4 sezioni — (1) Linee → Materiali ammessi (24 linee),
+  (2) Materiali → Linee servite (23 famiglie), (3) Vincoli operativi
+  dedotti (linee non elettrificate solo diesel, linee specializzate,
+  linee polivalenti), (4) Riferimenti.
+
+**Memorie create/aggiornate**:
+
+- Nuova: `reference_pdf_turno_materiale_2026.md` — puntatore al dump
+  + mappa codici interni Trenord (`TN-Ale522` → ETR522 Stadler, ecc.)
+  + vincoli confermati dal dataset.
+- Aggiornata: `MEMORY.md` con la nuova entry.
+- **Non aggiornata** `project_direttrici_materiali_trenord.md`: la
+  memoria esistente raccomanda esplicitamente "non inserire
+  composizioni dedotte dal PDF Turno Materiale senza conferma
+  esplicita dell'utente". Le 3 righe "Confermate" restano com'erano;
+  il dump è disponibile come riferimento per quando l'utente decide
+  caso per caso quali popolare in `programma_regola_assegnazione`.
+
+### Risultati
+
+- **54 turni materiale** parsati (1100 → 1199 con buchi nella
+  numerazione e 4 varianti suffisso A/I per turni stagionali).
+- **23 famiglie materiale** identificate, dai vecchi `ALn668` ai
+  Caravaggio `ETR526`, passando per Stadler `ETR521/522/524`,
+  Donizetti `ETR421`, Jazz `ETR425`, TAF `ETR103/104/204/ALe711/760`,
+  TSR `ALe426/506`, Vivalto `npBBHW+nBBW+E464`, MDVE/MDVC
+  `npBDL/npBDCTE+nBC+E464`, diesel `ATR125/115/803`, locomotore
+  `D520`.
+- **24 linee** identificate, dalle linee elettrificate principali
+  (Bergamo-Pioltello-Milano 15 turni, Varese-Saronno-Milano 12
+  turni) alle non elettrificate (Brescia-Iseo-Edolo 4 turni:
+  esclusivamente diesel) al treno turistico stagionale
+  (Bergamo-Ventimiglia "Treno del Mare" 28/3-28/9: solo MDVE estiva).
+- **0 turni** con linee=[] o famiglia non classificata
+  (verificato finale).
+
+### Verifiche
+
+- `pdftotext -layout` completato senza warning, 33532 righe testo.
+- Parser Python: 354 pagine processate, 54 cover trovate, 299 Gantt.
+- Cross-check pagine 1-20 a vista (chunk Read PDF originale): turni
+  1100 (CREMONA-MI.GAR via Treviglio), 1101 (Vivalto Bergamo-Milano),
+  1102-1105 — tutti coerenti con il dump JSON.
+
+### Conseguenze pratiche
+
+1. Dataset di riferimento per popolare le regole linea→materiale
+   ammesse, allargando le 3 righe "Confermate" della memoria
+   `project_direttrici_materiali_trenord.md` quando l'utente decide
+   caso per caso (la tabella elencava 37 direttrici "da assegnare":
+   il dump copre 24 di queste con dati Trenord reali).
+2. Il MD di sintesi è leggibile dal pianificatore via UI futura
+   (sezione "Suggerisci composizioni per linea X").
+3. `data/` contiene ora 2 nuovi file dataset: il `.gitignore` non li
+   esclude (sono dati di analisi, non secret).
+
+### Limitazioni note / aperti
+
+- **Inferenza linea**: basata su capolinea Gantt + nomi stazioni. Non
+  copre con precisione i treni intermedi (es. il 1100 mostra anche
+  "Cremona-Codogno-Milano" perché c'è un vuoto via Codogno: è
+  posizionamento materiale, non servizio commerciale).
+- **Linea commerciale (R3, RE5, S6, ecc.)**: best-effort. Per la
+  mappatura definitiva al codice servizio Trenord servirebbe la
+  lista numero_treno → linea_commerciale (oggi non importata in DB,
+  l'orario PdE 2025-2026 è del periodo precedente).
+- **Note di servizio (`Si eff.`, `LV 1:5 escluso`, `F`, ecc.)** non
+  parsate: dicono *quando* il giro lavora, non *cosa*. Non
+  necessarie per la mappatura linea↔materiale.
+
+### Prossimo step
+
+Ritorno a Sprint 7.3 (Dashboard Pianificatore Turno PdC, 2° ruolo)
+salvo nuove richieste utente. Il dataset di oggi è disponibile
+quando si vorrà popolare le regole reali via UI.
+
+---
+
 ## 2026-05-02 (79) — Sprint 7.7 MR 5: aggregazione A2 — varianti calendariali per giornata (modello Trenord 1134)
 
 ### Contesto
