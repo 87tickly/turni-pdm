@@ -5,7 +5,7 @@ per strato del modello dati v0.5 (vedi `docs/MODELLO-DATI.md`):
 
 - Strato 0 — anagrafica (`anagrafica.py`): 8 entità
 - Strato 1 — corse PdE (`corse.py`): 4 entità
-- Strato 2 — giro materiale (`giri.py`): 6 entità
+- Strato 2 — giro materiale (`giri.py`): 5 entità
 - Strato 2bis — revisioni provvisorie (`revisioni.py`): 3 entità
 - Strato 3 — turno PdC (`turni_pdc.py`): 3 entità
 - Strato 4 — personale (`personale.py`): 3 entità
@@ -46,7 +46,6 @@ from colazione.models.giri import (
     GiroFinestraValidita,
     GiroGiornata,
     GiroMateriale,
-    GiroVariante,
     VersioneBaseGiro,
 )
 from colazione.models.personale import (
@@ -92,7 +91,6 @@ __all__ = [
     "GiroFinestraValidita",
     "GiroGiornata",
     "GiroMateriale",
-    "GiroVariante",
     "VersioneBaseGiro",
     # Strato 2bis — revisioni provvisorie
     "RevisioneProvvisoria",

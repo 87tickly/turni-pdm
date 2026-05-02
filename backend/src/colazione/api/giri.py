@@ -44,7 +44,7 @@ from colazione.domain.builder_giro.persister import LocalitaNonTrovataError
 from colazione.domain.builder_giro.risolvi_corsa import RegolaAmbiguaError
 from colazione.models.anagrafica import Stazione
 from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
-from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
+from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale
 from colazione.schemas.security import CurrentUser
 
 router = APIRouter(prefix="/api/programmi", tags=["giri"])
@@ -200,6 +200,11 @@ class GiroMaterialeListItem(BaseModel):
     motivo_chiusura: str | None
     chiuso: bool
     stato: str
+    # Sprint 7.7 MR 3: etichetta parlante calcolata dal builder
+    # (feriale | sabato | domenica | festivo | data_specifica |
+    # personalizzata) + dettaglio leggibile (es. data DD/MM/YYYY).
+    etichetta_tipo: str
+    etichetta_dettaglio: str | None
     created_at: datetime
 
 
@@ -235,21 +240,13 @@ class GiroBloccoRead(BaseModel):
     metadata_json: dict[str, Any]
 
 
-class GiroVarianteRead(BaseModel):
-    """Variante calendario di una giornata (Sprint 5.6: 1 variante 1:1)."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    variant_index: int
-    validita_testo: str | None
-    validita_dates_apply_json: list[Any]
-    validita_dates_skip_json: list[Any]
-    blocchi: list[GiroBloccoRead]
-
-
 class GiroGiornataRead(BaseModel):
-    """Giornata di un giro (1..numero_giornate)."""
+    """Giornata di un giro (1..numero_giornate).
+
+    Sprint 7.7 MR 3: assorbe i campi di validità che stavano su
+    GiroVariante (oggetto rimosso). I blocchi sono direttamente sotto
+    la giornata.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -258,7 +255,11 @@ class GiroGiornataRead(BaseModel):
     # Sprint 7.6 MR 3.2: somma km_tratta delle corse commerciali della
     # giornata. None se nessuna corsa con km_tratta o giornata pre-MR3.2.
     km_giornata: float | None = None
-    varianti: list[GiroVarianteRead]
+    # Sprint 7.7 MR 3: campi era-su-variante.
+    validita_testo: str | None = None
+    dates_apply_json: list[Any] = []
+    dates_skip_json: list[Any] = []
+    blocchi: list[GiroBloccoRead]
 
 
 class GiroMaterialeDettaglioRead(BaseModel):
@@ -276,6 +277,9 @@ class GiroMaterialeDettaglioRead(BaseModel):
     localita_manutenzione_partenza_id: int | None
     localita_manutenzione_arrivo_id: int | None
     stato: str
+    # Sprint 7.7 MR 3: etichetta parlante.
+    etichetta_tipo: str
+    etichetta_dettaglio: str | None
     generation_metadata_json: dict[str, Any]
     created_at: datetime
     updated_at: datetime
@@ -322,6 +326,8 @@ async def list_giri_programma(
                 motivo_chiusura=meta.get("motivo_chiusura"),
                 chiuso=bool(meta.get("chiuso", False)),
                 stato=g.stato,
+                etichetta_tipo=g.etichetta_tipo,
+                etichetta_dettaglio=g.etichetta_dettaglio,
                 created_at=g.created_at,
             )
         )
@@ -394,6 +400,8 @@ async def list_giri_azienda(
                 motivo_chiusura=meta.get("motivo_chiusura"),
                 chiuso=bool(meta.get("chiuso", False)),
                 stato=g.stato,
+                etichetta_tipo=g.etichetta_tipo,
+                etichetta_dettaglio=g.etichetta_dettaglio,
                 created_at=g.created_at,
             )
         )
@@ -430,24 +438,14 @@ async def get_giro_dettaglio(
     giornate_orm = (await session.execute(gg_stmt)).scalars().all()
     giornata_ids = [gg.id for gg in giornate_orm]
 
-    # Tutte le varianti del giro in una query
-    varianti_orm: list[GiroVariante] = []
-    if giornata_ids:
-        gv_stmt = (
-            select(GiroVariante)
-            .where(GiroVariante.giro_giornata_id.in_(giornata_ids))
-            .order_by(GiroVariante.giro_giornata_id, GiroVariante.variant_index)
-        )
-        varianti_orm = list((await session.execute(gv_stmt)).scalars().all())
-    variante_ids = [gv.id for gv in varianti_orm]
-
-    # Tutti i blocchi del giro in una query (ordine seq mantenuto per variante)
+    # Sprint 7.7 MR 3: i blocchi puntano direttamente alla giornata
+    # (drop di GiroVariante). 1 query con order_by (giornata, seq).
     blocchi_orm: list[GiroBlocco] = []
-    if variante_ids:
+    if giornata_ids:
         gb_stmt = (
             select(GiroBlocco)
-            .where(GiroBlocco.giro_variante_id.in_(variante_ids))
-            .order_by(GiroBlocco.giro_variante_id, GiroBlocco.seq)
+            .where(GiroBlocco.giro_giornata_id.in_(giornata_ids))
+            .order_by(GiroBlocco.giro_giornata_id, GiroBlocco.seq)
         )
         blocchi_orm = list((await session.execute(gb_stmt)).scalars().all())
 
@@ -561,30 +559,20 @@ async def get_giro_dettaglio(
             metadata_json=dict(b.metadata_json or {}),
         )
 
-    # Indici per riassemblare la struttura ad albero
-    blocchi_per_variante: dict[int, list[GiroBloccoRead]] = {}
+    # Sprint 7.7 MR 3: blocchi raggruppati direttamente per giornata.
+    blocchi_per_giornata: dict[int, list[GiroBloccoRead]] = {}
     for b in blocchi_orm:
-        blocchi_per_variante.setdefault(b.giro_variante_id, []).append(_to_blocco_read(b))
-
-    varianti_per_giornata: dict[int, list[GiroVarianteRead]] = {}
-    for gv in varianti_orm:
-        varianti_per_giornata.setdefault(gv.giro_giornata_id, []).append(
-            GiroVarianteRead(
-                id=gv.id,
-                variant_index=gv.variant_index,
-                validita_testo=gv.validita_testo,
-                validita_dates_apply_json=list(gv.validita_dates_apply_json or []),
-                validita_dates_skip_json=list(gv.validita_dates_skip_json or []),
-                blocchi=blocchi_per_variante.get(gv.id, []),
-            )
-        )
+        blocchi_per_giornata.setdefault(b.giro_giornata_id, []).append(_to_blocco_read(b))
 
     giornate_out = [
         GiroGiornataRead(
             id=gg.id,
             numero_giornata=gg.numero_giornata,
             km_giornata=float(gg.km_giornata) if gg.km_giornata is not None else None,
-            varianti=varianti_per_giornata.get(gg.id, []),
+            validita_testo=gg.validita_testo,
+            dates_apply_json=list(gg.dates_apply_json or []),
+            dates_skip_json=list(gg.dates_skip_json or []),
+            blocchi=blocchi_per_giornata.get(gg.id, []),
         )
         for gg in giornate_orm
     ]
@@ -600,6 +588,8 @@ async def get_giro_dettaglio(
         localita_manutenzione_partenza_id=g.localita_manutenzione_partenza_id,
         localita_manutenzione_arrivo_id=g.localita_manutenzione_arrivo_id,
         stato=g.stato,
+        etichetta_tipo=g.etichetta_tipo,
+        etichetta_dettaglio=g.etichetta_dettaglio,
         generation_metadata_json=dict(g.generation_metadata_json or {}),
         created_at=g.created_at,
         updated_at=g.updated_at,

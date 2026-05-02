@@ -15,7 +15,7 @@ import {
 import { useGiriProgramma } from "@/hooks/useGiri";
 import { useProgramma } from "@/hooks/useProgrammi";
 import { ApiError } from "@/lib/api/client";
-import type { GiroListItem } from "@/lib/api/giri";
+import type { EtichettaTipo, GiroListItem } from "@/lib/api/giri";
 import { formatDateIt, formatNumber } from "@/lib/format";
 
 export function ProgrammaGiriRoute() {
@@ -120,6 +120,7 @@ function GiriTable({ giri, onOpen }: { giri: GiroListItem[]; onOpen: (id: number
           <TableHead className="w-12">ID</TableHead>
           <TableHead className="w-28">Turno</TableHead>
           <TableHead>Tipo materiale</TableHead>
+          <TableHead className="w-32">Categoria</TableHead>
           <TableHead className="w-20 text-right">Giornate</TableHead>
           <TableHead className="w-28 text-right">km/giorno</TableHead>
           <TableHead className="w-28 text-right">km/anno</TableHead>
@@ -138,6 +139,9 @@ function GiriTable({ giri, onOpen }: { giri: GiroListItem[]; onOpen: (id: number
             <TableCell className="font-mono text-xs text-muted-foreground">#{g.id}</TableCell>
             <TableCell className="font-medium">{g.numero_turno}</TableCell>
             <TableCell className="text-sm">{g.tipo_materiale}</TableCell>
+            <TableCell>
+              <EtichettaBadge tipo={g.etichetta_tipo} dettaglio={g.etichetta_dettaglio} />
+            </TableCell>
             <TableCell className="text-right tabular-nums">{g.numero_giornate}</TableCell>
             <TableCell className="text-right tabular-nums">
               {g.km_media_giornaliera !== null
@@ -165,6 +169,55 @@ function MotivoChiusuraBadge({ motivo, chiuso }: { motivo: string | null; chiuso
   if (!chiuso) return <Badge variant="warning">non chiuso</Badge>;
   if (motivo !== null) return <Badge variant="outline">{motivo}</Badge>;
   return <Badge variant="muted">—</Badge>;
+}
+
+/**
+ * Sprint 7.7 MR 3: badge etichetta calcolata del giro. Compatto per
+ * tabella lista — il dettaglio (data o breakdown) appare nel tooltip.
+ */
+function EtichettaBadge({
+  tipo,
+  dettaglio,
+}: {
+  tipo: EtichettaTipo;
+  dettaglio: string | null;
+}) {
+  const variant = ((): "default" | "outline" | "success" | "warning" | "secondary" => {
+    switch (tipo) {
+      case "feriale":
+        return "default";
+      case "sabato":
+        return "secondary";
+      case "domenica":
+      case "festivo":
+        return "warning";
+      case "data_specifica":
+      case "personalizzata":
+        return "outline";
+    }
+  })();
+  const label = ((): string => {
+    if (tipo === "data_specifica" && dettaglio !== null) return dettaglio;
+    if (tipo === "personalizzata" && dettaglio !== null) return `mix · ${dettaglio}`;
+    switch (tipo) {
+      case "feriale":
+        return "Feriale";
+      case "sabato":
+        return "Sabato";
+      case "domenica":
+        return "Domenica";
+      case "festivo":
+        return "Festivo";
+      default:
+        return tipo;
+    }
+  })();
+  const tooltip = dettaglio !== null ? `${tipo}: ${dettaglio}` : tipo;
+  return (
+    <Badge variant={variant} title={tooltip}>
+      {label}
+    </Badge>
+  );
 }
 
 function EmptyState({ programmaId }: { programmaId: number }) {

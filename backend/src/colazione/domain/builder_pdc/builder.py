@@ -25,7 +25,6 @@ ciclo settimanale, S.COMP, assegnazione persone.
 
 from __future__ import annotations
 
-import itertools
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -35,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.models.anagrafica import LocalitaManutenzione
 from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
-from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
+from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale
 from colazione.models.turni_pdc import TurnoPdc, TurnoPdcBlocco, TurnoPdcGiornata
 
 # Sprint 7.4 MR 2: split CV intermedio.
@@ -480,34 +479,21 @@ async def genera_turno_pdc(
 
     giornata_ids = [gg.id for gg in giornate_giro]
 
-    # Sprint 7.5 MR 5: carica TUTTE le varianti, raggruppate per giornata.
-    varianti = list(
-        (
-            await session.execute(
-                select(GiroVariante)
-                .where(GiroVariante.giro_giornata_id.in_(giornata_ids))
-                .order_by(GiroVariante.giro_giornata_id, GiroVariante.variant_index)
-            )
-        ).scalars()
-    )
-    varianti_per_giornata: dict[int, list[GiroVariante]] = {}
-    for v in varianti:
-        varianti_per_giornata.setdefault(v.giro_giornata_id, []).append(v)
-    for gv_list in varianti_per_giornata.values():
-        gv_list.sort(key=lambda v: v.variant_index)
-
-    # Carica blocchi di TUTTE le varianti in una query.
-    variante_ids = [v.id for v in varianti]
-    blocchi_per_variante: dict[int, list[GiroBlocco]] = {}
-    if variante_ids:
+    # Sprint 7.7 MR 3 (refactor varianti → giri separati): la FK dei
+    # blocchi punta direttamente alla giornata. Niente più step
+    # intermedio "variante" né prodotto cartesiano di combinazioni —
+    # il giro materiale è ora UNO specifico pattern calendariale
+    # (etichetta_tipo) e ha una sola sequenza canonica per giornata.
+    blocchi_per_giornata: dict[int, list[GiroBlocco]] = {}
+    if giornata_ids:
         for b in (
             await session.execute(
                 select(GiroBlocco)
-                .where(GiroBlocco.giro_variante_id.in_(variante_ids))
-                .order_by(GiroBlocco.giro_variante_id, GiroBlocco.seq)
+                .where(GiroBlocco.giro_giornata_id.in_(giornata_ids))
+                .order_by(GiroBlocco.giro_giornata_id, GiroBlocco.seq)
             )
         ).scalars():
-            blocchi_per_variante.setdefault(b.giro_variante_id, []).append(b)
+            blocchi_per_giornata.setdefault(b.giro_giornata_id, []).append(b)
 
     # Stazione sede del PdC: collegata alla località di manutenzione di
     # partenza del giro. Calcolata una volta per tutto il loop.
@@ -546,21 +532,7 @@ async def genera_turno_pdc(
     if legati:
         await session.flush()
 
-    # Sprint 7.5 MR 5: enumera le combinazioni di varianti via prodotto
-    # cartesiano. Per ogni giornata prendiamo la lista delle sue varianti
-    # ordinate per variant_index; il prodotto restituisce tuple
-    # `(v_g1, v_g2, ..., v_gN)` di lunghezza len(giornate_giro).
-    liste_varianti_ordinate = [varianti_per_giornata.get(gg.id, []) for gg in giornate_giro]
-    if any(not lst for lst in liste_varianti_ordinate):
-        # Almeno una giornata non ha varianti → giro corrotto. Non
-        # generiamo nulla per quel giro (raise GiroVuoto).
-        raise GiroVuotoError(
-            f"Giro {giro_id} ha giornate senza varianti: niente da generare"
-        )
-    combinazioni = list(itertools.product(*liste_varianti_ordinate))
-
     valido_da_eff = valido_da or date.today()
-    multi_combo = len(combinazioni) > 1
 
     # Sprint 7.4 MR 2: carica una sola volta l'insieme di stazioni
     # ammesse a CV per l'azienda (depositi PdC + deroghe).
@@ -569,29 +541,22 @@ async def genera_turno_pdc(
 
     stazioni_cv = await lista_stazioni_cv_ammesse(session, azienda_id)
 
-    risultati: list[BuilderTurnoPdcResult] = []
-    for idx_combo, combo in enumerate(combinazioni, start=1):
-        # `combo` è una tupla `(GiroVariante, ...)` lunga len(giornate_giro).
-        # variante_per_giornata: id_giornata → variante scelta in questa combo
-        variante_per_giornata = {gg.id: combo[i] for i, gg in enumerate(giornate_giro)}
-
-        risultati_combo = await _genera_un_turno_pdc(
-            session=session,
-            azienda_id=azienda_id,
-            giro=giro,
-            giornate_giro=giornate_giro,
-            variante_per_giornata=variante_per_giornata,
-            blocchi_per_variante=blocchi_per_variante,
-            stazione_sede=stazione_sede,
-            stazioni_cv=stazioni_cv,
-            valido_da_eff=valido_da_eff,
-            indice_combinazione=idx_combo if multi_combo else None,
-        )
-        risultati.extend(risultati_combo)
+    # Sprint 7.7 MR 3: 1 giro = 1 turno PdC (più eventuali rami split CV).
+    # Niente più prodotto cartesiano di varianti.
+    risultati = await _genera_un_turno_pdc(
+        session=session,
+        azienda_id=azienda_id,
+        giro=giro,
+        giornate_giro=giornate_giro,
+        blocchi_per_giornata=blocchi_per_giornata,
+        stazione_sede=stazione_sede,
+        stazioni_cv=stazioni_cv,
+        valido_da_eff=valido_da_eff,
+    )
 
     if not risultati:
         raise GiroVuotoError(
-            f"Giro {giro_id} non ha blocchi validi in nessuna combinazione"
+            f"Giro {giro_id} non ha blocchi validi"
         )
 
     await session.commit()
@@ -604,25 +569,27 @@ async def _genera_un_turno_pdc(
     azienda_id: int,
     giro: GiroMateriale,
     giornate_giro: list[GiroGiornata],
-    variante_per_giornata: dict[int, GiroVariante],
-    blocchi_per_variante: dict[int, list[GiroBlocco]],
+    blocchi_per_giornata: dict[int, list[GiroBlocco]],
     stazione_sede: str | None,
     stazioni_cv: set[str],
     valido_da_eff: date,
-    indice_combinazione: int | None,
 ) -> list[BuilderTurnoPdcResult]:
-    """Persiste i `TurnoPdc` per la combinazione di varianti indicata.
+    """Persiste i `TurnoPdc` per il giro indicato.
 
-    Sprint 7.4 MR 2 (split CV intermedio): la combinazione produce in
-    generale **N** TurnoPdc, non più 1 solo:
+    Sprint 7.7 MR 3 (refactor varianti → giri separati): un giro
+    materiale ha ora una sola sequenza canonica per giornata —
+    nessun prodotto cartesiano di varianti. Il giro stesso è UN
+    pattern calendariale specifico (etichetta_tipo).
+
+    Sprint 7.4 MR 2 (split CV intermedio): produce in generale **N**
+    TurnoPdc:
 
     - **TurnoPdc principale**: contiene tutte le giornate-giro che
       NON sono state splittate (= rispettano i limiti normativi senza
-      bisogno di CV intermedio). Codice
-      `T-{base}` o `T-{base}-V{idx:02d}` come prima del MR 2.
+      bisogno di CV intermedio). Codice ``T-{numero_turno}``.
     - **TurnoPdc-ramo-split**: ogni ramo prodotto da una giornata
       splittata diventa un TurnoPdc autonomo. Codice
-      `T-{base}[-V{idx}]-G{n_giornata}-R{n_ramo}`.
+      ``T-{numero_turno}-G{n_giornata}-R{n_ramo}``.
 
     Se TUTTE le giornate sono splittate, il TurnoPdc principale non
     viene creato (lista vuota di drafts non-split).
@@ -631,16 +598,12 @@ async def _genera_un_turno_pdc(
         stazioni_cv: insieme dei codici stazione ammessi a Cambio
             Volante per l'azienda corrente. Caricato una volta dal
             chiamante (`genera_turno_pdc`).
-        indice_combinazione: 1-based; se ``None`` significa "1 sola
-            combinazione possibile", il codice usa il pattern compat
-            `T-{numero_turno}` (no suffisso V). Con valore esplicito,
-            il suffisso `-V{idx:02d}` discrimina i turni multipli.
 
     Returns:
-        Lista (eventualmente vuota se la combinazione non produce
-        alcun draft valido) di ``BuilderTurnoPdcResult``: 0..1 elemento
-        principale + 0..N rami split. Sempre almeno 1 elemento se
-        almeno una giornata-giro produce un draft.
+        Lista (eventualmente vuota se non c'è alcun draft valido) di
+        ``BuilderTurnoPdcResult``: 0..1 elemento principale + 0..N
+        rami split. Sempre almeno 1 elemento se almeno una giornata-
+        giro produce un draft.
     """
     # 1. Costruisci i draft, applicando lo split CV per ogni giornata.
     # Import deferred per rompere il ciclo split_cv ↔ builder.
@@ -648,13 +611,10 @@ async def _genera_un_turno_pdc(
 
     drafts_per_giornata: list[list[_GiornataPdcDraft]] = []
     for gg in giornate_giro:
-        v = variante_per_giornata.get(gg.id)
-        if v is None:
-            continue
-        blocchi = blocchi_per_variante.get(v.id, [])
+        blocchi = blocchi_per_giornata.get(gg.id, [])
         rami = split_e_build_giornata(
             numero_giornata=gg.numero_giornata,
-            variante_calendario=v.validita_testo or "GG",
+            variante_calendario=gg.validita_testo or "GG",
             blocchi_giro=blocchi,
             stazioni_cv=stazioni_cv,
         )
@@ -675,11 +635,7 @@ async def _genera_un_turno_pdc(
             rami_split.append(rami)
 
     # 3. Codice base e variabili comuni.
-    base_codice = _genera_codice_turno(giro)
-    if indice_combinazione is None:
-        codice_principale = base_codice
-    else:
-        codice_principale = f"{base_codice}-V{indice_combinazione:02d}"
+    codice_principale = _genera_codice_turno(giro)
 
     primo_draft = (
         drafts_principali[0] if drafts_principali else rami_split[0][0]
@@ -688,7 +644,7 @@ async def _genera_un_turno_pdc(
         stazione_sede if stazione_sede is not None else primo_draft.stazione_inizio
     )
 
-    varianti_ids_combo = [variante_per_giornata[gg.id].id for gg in giornate_giro]
+    giornate_ids_giro = [gg.id for gg in giornate_giro]
 
     risultati: list[BuilderTurnoPdcResult] = []
 
@@ -703,8 +659,7 @@ async def _genera_un_turno_pdc(
             codice=codice_principale,
             stazione_sede=stazione_sede_eff,
             valido_da_eff=valido_da_eff,
-            indice_combinazione=indice_combinazione,
-            varianti_ids=varianti_ids_combo,
+            giornate_ids=giornate_ids_giro,
             extra_metadata={
                 "fr_giornate": fr_giornate,
                 "is_ramo_split": False,
@@ -743,8 +698,7 @@ async def _genera_un_turno_pdc(
                 codice=codice_ramo,
                 stazione_sede=stazione_sede_eff,
                 valido_da_eff=valido_da_eff,
-                indice_combinazione=indice_combinazione,
-                varianti_ids=varianti_ids_combo,
+                giornate_ids=giornate_ids_giro,
                 extra_metadata={
                     "fr_giornate": [],
                     "is_ramo_split": True,
@@ -768,8 +722,7 @@ async def _persisti_un_turno_pdc(
     codice: str,
     stazione_sede: str | None,
     valido_da_eff: date,
-    indice_combinazione: int | None,
-    varianti_ids: list[int],
+    giornate_ids: list[int],
     extra_metadata: dict[str, Any],
 ) -> BuilderTurnoPdcResult:
     """Helper: persiste un singolo TurnoPdc + le sue giornate + blocchi.
@@ -795,9 +748,13 @@ async def _persisti_un_turno_pdc(
         "violazioni": violazioni,
         "stazione_sede": stazione_sede,
         "generato_at": datetime.utcnow().isoformat(),
-        "builder_version": "mvp-7.4",
-        "indice_combinazione": indice_combinazione,
-        "varianti_ids": varianti_ids,
+        "builder_version": "mvp-7.7.3",
+        # Sprint 7.7 MR 3: il giro materiale è ora UN pattern
+        # calendariale specifico (etichetta_tipo) — niente più
+        # combinazioni di varianti. ``giornate_ids`` traccia le
+        # giornate del giro che alimentano questo TurnoPdc per
+        # tracciabilità in audit.
+        "giornate_giro_ids": giornate_ids,
     }
     metadata.update(extra_metadata)
 

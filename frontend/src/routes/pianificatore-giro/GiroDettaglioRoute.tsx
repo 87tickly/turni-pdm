@@ -8,7 +8,12 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useGiroDettaglio } from "@/hooks/useGiri";
 import { useTurniPdcGiro } from "@/hooks/useTurniPdc";
 import { ApiError } from "@/lib/api/client";
-import type { GiroBlocco, GiroDettaglio } from "@/lib/api/giri";
+import type {
+  EtichettaTipo,
+  GiroBlocco,
+  GiroDettaglio,
+  GiroGiornata,
+} from "@/lib/api/giri";
 import { formatNumber } from "@/lib/format";
 import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdcDialog";
 
@@ -71,6 +76,57 @@ export function GiroDettaglioRoute() {
   );
 }
 
+/**
+ * Sprint 7.7 MR 3: badge etichetta giro. Mostra l'enum + dettaglio quando
+ * presente (data_specifica = data, personalizzata = breakdown).
+ */
+function EtichettaBadge({
+  tipo,
+  dettaglio,
+}: {
+  tipo: EtichettaTipo;
+  dettaglio: string | null;
+}) {
+  const variant = ((): "default" | "outline" | "success" | "warning" | "secondary" => {
+    switch (tipo) {
+      case "feriale":
+        return "default";
+      case "sabato":
+        return "secondary";
+      case "domenica":
+      case "festivo":
+        return "warning";
+      case "data_specifica":
+        return "outline";
+      case "personalizzata":
+        return "outline";
+    }
+  })();
+  const label = dettaglio !== null ? `${formatEtichetta(tipo)} · ${dettaglio}` : formatEtichetta(tipo);
+  return (
+    <Badge variant={variant} title="Categoria calendariale del giro (Sprint 7.7)">
+      {label}
+    </Badge>
+  );
+}
+
+function formatEtichetta(tipo: EtichettaTipo): string {
+  switch (tipo) {
+    case "feriale":
+      return "Feriale";
+    case "sabato":
+      return "Sabato";
+    case "domenica":
+      return "Domenica";
+    case "festivo":
+      return "Festivo";
+    case "data_specifica":
+      return "Data specifica";
+    case "personalizzata":
+      return "Personalizzata";
+  }
+}
+
 function HeaderRow({ giro }: { giro: GiroDettaglio }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const turniQuery = useTurniPdcGiro(giro.id);
@@ -82,6 +138,7 @@ function HeaderRow({ giro }: { giro: GiroDettaglio }) {
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-2xl font-semibold tracking-tight">{giro.numero_turno}</h1>
           <Badge variant="outline">{giro.tipo_materiale}</Badge>
+          <EtichettaBadge tipo={giro.etichetta_tipo} dettaglio={giro.etichetta_dettaglio} />
         </div>
         <p className="text-sm text-muted-foreground">
           #{giro.id} · {giro.numero_giornate} giornate · stato {giro.stato}
@@ -142,19 +199,16 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function GiornataPanel({ giornata }: { giornata: GiroDettaglio["giornate"][number] }) {
-  // Sprint 7.5 MR 6 (refactor bug 5): se la giornata ha N>1 varianti
-  // calendario, mostra una row di tab per scegliere quale visualizzare.
-  // Con A1 strict (default) ogni giornata ha 1 sola variante → niente
-  // tab, comportamento legacy invariato.
-  const [activeVariantIdx, setActiveVariantIdx] = useState(0);
-  const varianti = giornata.varianti;
-  const hasMultipleVarianti = varianti.length > 1;
-  const activeVariante = varianti[activeVariantIdx] ?? varianti[0];
-
+/**
+ * Sprint 7.7 MR 3: niente più tab varianti. La giornata ha una sola
+ * sequenza canonica di blocchi (= cosa il PdC vedrà). La validità
+ * testuale e le date di applicazione vivono ora qui.
+ */
+function GiornataPanel({ giornata }: { giornata: GiroGiornata }) {
+  const nDate = giornata.dates_apply_json.length;
   return (
     <div className="overflow-hidden rounded-md border border-border bg-white">
-      <div className="flex items-center justify-between border-b border-border bg-secondary/40 px-4 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-secondary/40 px-4 py-2">
         <div className="flex items-baseline gap-3">
           <span className="text-sm font-semibold">Giornata {giornata.numero_giornata}</span>
           {giornata.km_giornata !== null && (
@@ -165,69 +219,26 @@ function GiornataPanel({ giornata }: { giornata: GiroDettaglio["giornate"][numbe
               {formatNumber(Math.round(giornata.km_giornata))} km
             </span>
           )}
+          {giornata.validita_testo !== null && giornata.validita_testo.length > 0 && (
+            <span
+              className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+              title="Periodicità letterale del PdE (validita_testo)"
+            >
+              {giornata.validita_testo}
+            </span>
+          )}
         </div>
-        <span className="text-xs text-muted-foreground">
-          {varianti.length === 1
-            ? "1 variante"
-            : `${varianti.length} varianti calendario`}
+        <span
+          className="text-xs text-muted-foreground"
+          title="Numero di date in cui la giornata-tipo si applica nel periodo del programma"
+        >
+          {nDate === 1 ? "1 data" : `${nDate} date`}
         </span>
       </div>
-      {hasMultipleVarianti && (
-        <div
-          className="flex flex-wrap gap-1 border-b border-border bg-secondary/20 px-3 py-1.5"
-          role="tablist"
-          aria-label={`Varianti calendario giornata ${giornata.numero_giornata}`}
-        >
-          {varianti.map((v, idx) => {
-            const isActive = idx === activeVariantIdx;
-            const label = truncateLabel(v.validita_testo, idx);
-            return (
-              <button
-                key={v.id}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => setActiveVariantIdx(idx)}
-                title={v.validita_testo ?? `Variante ${idx + 1}`}
-                className={
-                  "rounded px-2 py-1 text-[11px] font-medium transition-colors " +
-                  (isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-white text-muted-foreground hover:bg-secondary")
-                }
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      )}
       <div className="flex flex-col gap-2 p-3">
-        {activeVariante !== undefined && <VariantePanel variante={activeVariante} />}
+        <GanttRow blocchi={giornata.blocchi} />
+        <BlocchiList blocchi={giornata.blocchi} />
       </div>
-    </div>
-  );
-}
-
-function truncateLabel(testo: string | null, idx: number): string {
-  const fallback = `Variante ${idx + 1}`;
-  if (testo === null || testo.length === 0) return fallback;
-  const MAX = 32;
-  return testo.length <= MAX ? testo : testo.substring(0, MAX - 1) + "…";
-}
-
-function VariantePanel({
-  variante,
-}: {
-  variante: GiroDettaglio["giornate"][number]["varianti"][number];
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      {variante.validita_testo !== null && variante.validita_testo.length > 0 && (
-        <p className="text-xs italic text-muted-foreground">Validità: {variante.validita_testo}</p>
-      )}
-      <GanttRow blocchi={variante.blocchi} />
-      <BlocchiList blocchi={variante.blocchi} />
     </div>
   );
 }
@@ -356,7 +367,7 @@ function BlocchiList({ blocchi }: { blocchi: GiroBlocco[] }) {
   if (blocchi.length === 0) {
     return (
       <p className="px-3 py-2 text-xs italic text-muted-foreground">
-        Nessun blocco in questa variante.
+        Nessun blocco in questa giornata.
       </p>
     );
   }

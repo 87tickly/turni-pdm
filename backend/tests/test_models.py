@@ -18,7 +18,7 @@ from sqlalchemy import text
 from colazione import models
 from colazione.db import Base, session_scope
 
-EXPECTED_TABLE_COUNT = 36  # +1 da Sprint 7.7 MR 2 (festivita_ufficiale)
+EXPECTED_TABLE_COUNT = 35  # 36 - 1 (drop giro_variante in Sprint 7.7 MR 3)
 
 
 def _db_available() -> bool:

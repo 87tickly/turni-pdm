@@ -48,7 +48,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.domain.builder_giro.catena import costruisci_catene
@@ -56,6 +56,7 @@ from colazione.domain.builder_giro.composizione import (
     GiroAssegnato,
     assegna_e_rileva_eventi,
 )
+from colazione.domain.builder_giro.etichetta import calcola_etichetta_giro
 from colazione.domain.builder_giro.multi_giornata import (
     Giro,
     ParamMultiGiornata,
@@ -74,7 +75,7 @@ from colazione.domain.builder_giro.posizionamento import (
     PosizionamentoImpossibileError,
     posiziona_su_localita,
 )
-from colazione.models.anagrafica import LocalitaManutenzione
+from colazione.models.anagrafica import FestivitaUfficiale, LocalitaManutenzione
 from colazione.models.corse import CorsaCommerciale
 from colazione.models.programmi import (
     ProgrammaMateriale,
@@ -255,6 +256,39 @@ async def _carica_whitelist_stazioni(session: AsyncSession, localita_id: int) ->
         "WHERE localita_manutenzione_id = :loc_id"
     )
     rows = (await session.execute(stmt, {"loc_id": localita_id})).scalars().all()
+    return frozenset(rows)
+
+
+async def _carica_festivita_periodo(
+    session: AsyncSession,
+    azienda_id: int,
+    valido_da: date,
+    valido_a: date,
+) -> frozenset[date]:
+    """Sprint 7.7 MR 3: carica festività ufficiali rilevanti per il periodo.
+
+    Include sia le festività nazionali (``azienda_id IS NULL``) sia le
+    festività locali specifiche per l'azienda (es. Sant'Ambrogio per
+    Trenord, righe ``azienda_id`` valorizzato). Filtra all'intervallo
+    ``[valido_da, valido_a]`` del programma — coerente col fatto che
+    le date di applicazione del giro sono dentro quel range per
+    costruzione.
+
+    Ritorna ``frozenset[date]`` per lookup O(1) in
+    ``calcola_etichetta_giro``. Se la migration 0015 non ha seedato
+    festività per gli anni del periodo (oltre 2030), il set risultante
+    può essere vuoto e ``tipo_giorno()`` ricadrà solo su
+    feriale/sabato/domenica.
+    """
+    stmt = select(FestivitaUfficiale.data).where(
+        or_(
+            FestivitaUfficiale.azienda_id.is_(None),
+            FestivitaUfficiale.azienda_id == azienda_id,
+        ),
+        FestivitaUfficiale.data >= valido_da,
+        FestivitaUfficiale.data <= valido_a,
+    )
+    rows = (await session.execute(stmt)).scalars().all()
     return frozenset(rows)
 
 
@@ -667,6 +701,10 @@ async def genera_giri(
     localita = await _carica_localita(session, localita_codice, azienda_id)
     whitelist = await _carica_whitelist_stazioni(session, localita.id)
     accoppiamenti = await _carica_accoppiamenti_ammessi(session)
+    # Sprint 7.7 MR 3: festività per classificazione etichetta giro.
+    festivita = await _carica_festivita_periodo(
+        session, azienda_id, programma.valido_da, programma.valido_a
+    )
 
     def is_accoppiamento_ammesso(a: str, b: str) -> bool:
         """Lookup nella set degli accoppiamenti ammessi (Sprint 5.5).
@@ -835,15 +873,26 @@ async def genera_giri(
     # - se fuori whitelist → niente vuoto, giro resta "non chiuso"
     #   con motivo `non_chiuso` + warning. MAI vuoti lunghi tipo
     #   COLICO → CERTOSA (decisione utente 2026-05-02).
-    giri_da_persistere = [
-        GiroDaPersistere(
-            numero_turno=f"G-{localita.codice_breve}-{idx:03d}",
-            giro=giro,
-            genera_rientro_sede=True,
-            whitelist_sede=whitelist,
+    # Sprint 7.7 MR 3: per ogni giro calcoliamo l'etichetta parlante
+    # (feriale/sabato/domenica/festivo/data_specifica/personalizzata)
+    # dalle date di applicazione del giro intero. Il persister la
+    # popola in ``GiroMateriale.etichetta_tipo`` + ``etichetta_dettaglio``.
+    giri_da_persistere: list[GiroDaPersistere] = []
+    for idx, giro_a in enumerate(giri_assegnati, start=1):
+        etichetta_tipo, etichetta_dettaglio = calcola_etichetta_giro(
+            (g.dates_apply_or_data for g in giro_a.giornate),
+            festivita,
         )
-        for idx, giro in enumerate(giri_assegnati, start=1)
-    ]
+        giri_da_persistere.append(
+            GiroDaPersistere(
+                numero_turno=f"G-{localita.codice_breve}-{idx:03d}",
+                giro=giro_a,
+                etichetta_tipo=etichetta_tipo,
+                etichetta_dettaglio=etichetta_dettaglio,
+                genera_rientro_sede=True,
+                whitelist_sede=whitelist,
+            )
+        )
     giro_ids = await persisti_giri(
         giri_da_persistere,
         session,

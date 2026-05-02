@@ -97,9 +97,10 @@ async def _wipe_corse(session: AsyncSession) -> None:
     # FK RESTRICT su turno_pdc_blocco → corse: pulire i turni PRIMA.
     await session.execute(text("DELETE FROM turno_pdc"))
     # Wipe entità che dipendono da giri (se eventualmente presenti).
+    # Sprint 7.7 MR 3: giro_variante droppato (ora 1 giornata = 1 sequenza
+    # canonica, niente step intermedio).
     await session.execute(text("DELETE FROM corsa_materiale_vuoto"))
     await session.execute(text("DELETE FROM giro_blocco"))
-    await session.execute(text("DELETE FROM giro_variante"))
     await session.execute(text("DELETE FROM giro_giornata"))
     await session.execute(text("DELETE FROM giro_materiale"))
     # Wipe filtri/composizioni dei programmi (riferiscono materiale_tipo).

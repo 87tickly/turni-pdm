@@ -5,7 +5,7 @@ strato (specchio della struttura `colazione/models/`):
 
 - Strato 0 — anagrafica (`anagrafica.py`): 8 schemi
 - Strato 1 — corse PdE (`corse.py`): 4 schemi
-- Strato 2 — giro materiale (`giri.py`): 6 schemi
+- Strato 2 — giro materiale (`giri.py`): 5 schemi
 - Strato 2bis — revisioni (`revisioni.py`): 3 schemi
 - Strato 3 — turno PdC (`turni_pdc.py`): 3 schemi
 - Strato 4 — personale (`personale.py`): 3 schemi
@@ -49,7 +49,6 @@ from colazione.schemas.giri import (
     GiroFinestraValiditaRead,
     GiroGiornataRead,
     GiroMaterialeRead,
-    GiroVarianteRead,
     VersioneBaseGiroRead,
 )
 from colazione.schemas.personale import (
@@ -98,7 +97,6 @@ __all__ = [
     "GiroFinestraValiditaRead",
     "GiroGiornataRead",
     "GiroMaterialeRead",
-    "GiroVarianteRead",
     "VersioneBaseGiroRead",
     # Strato 2bis — revisioni
     "RevisioneProvvisoriaBloccoRead",

@@ -160,8 +160,8 @@ class GiornataGiro:
 class Giro:
     """Output multi-giornata del builder pure (DB-agnostic).
 
-    Mappa su ORM ``GiroMateriale + GiroGiornata + GiroVariante +
-    GiroBlocco`` in `persister.py`.
+    Mappa su ORM ``GiroMateriale + GiroGiornata + GiroBlocco`` in
+    `persister.py` (Sprint 7.7 MR 3: ``GiroVariante`` rimosso).
 
     Attributi:
         localita_codice: codice località manutenzione del giro

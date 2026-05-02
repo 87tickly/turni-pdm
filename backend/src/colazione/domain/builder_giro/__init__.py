@@ -19,9 +19,13 @@ Sub-moduli:
 - `composizione.py` (Sprint 4.4.4) — assegnazione regole a ogni
   blocco corsa (chiama ``risolvi_corsa``) + rilevamento eventi
   ``aggancio``/``sgancio`` (delta numero_pezzi intra-giornata).
-- `persister.py` (Sprint 4.4.5a) — bridge dataclass dominio → ORM:
-  ``persisti_giri()`` async che scrive ``GiroMateriale + GiroGiornata
-  + GiroVariante + GiroBlocco + CorsaMaterialeVuoto``. Solo INSERT,
+- `etichetta.py` (Sprint 7.7 MR 3) — funzione pura
+  ``calcola_etichetta_giro`` che classifica un giro come
+  ``feriale | sabato | domenica | festivo | data_specifica |
+  personalizzata`` a partire dalle date di applicazione.
+- `persister.py` (Sprint 4.4.5a → 7.7 MR 3) — bridge dataclass dominio
+  → ORM: ``persisti_giri()`` async che scrive ``GiroMateriale +
+  GiroGiornata + GiroBlocco + CorsaMaterialeVuoto``. Solo INSERT,
   no commit (lo decide il caller).
 - `builder.py` (Sprint 4.4.5b) — loader DB + orchestrator end-to-end
   ``genera_giri()``. Endpoint API in ``api/giri.py``.
@@ -54,6 +58,10 @@ from colazione.domain.builder_giro.composizione import (
     assegna_e_rileva_eventi,
     assegna_materiali,
     rileva_eventi_composizione,
+)
+from colazione.domain.builder_giro.etichetta import (
+    ETICHETTE_AMMESSE,
+    calcola_etichetta_giro,
 )
 from colazione.domain.builder_giro.multi_giornata import (
     GiornataGiro,
@@ -90,6 +98,7 @@ from colazione.domain.builder_giro.risolvi_corsa import (
 )
 
 __all__ = [
+    "ETICHETTE_AMMESSE",
     "PERSISTER_VERSION",
     "AssegnazioneRisolta",
     "BloccoAssegnato",
@@ -123,6 +132,7 @@ __all__ = [
     "TipoEvento",
     "assegna_e_rileva_eventi",
     "assegna_materiali",
+    "calcola_etichetta_giro",
     "costruisci_catene",
     "costruisci_giri_multigiornata",
     "determina_giorno_tipo",

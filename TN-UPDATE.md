@@ -10,6 +10,271 @@
 
 ---
 
+## 2026-05-02 (77) — Sprint 7.7 MR 3: refactor varianti → giri separati con etichetta
+
+### Contesto
+
+Decisioni utente 2026-05-02 (post-MR2 calendario, memoria
+`project_refactor_varianti_giri_separati_TODO.md`):
+
+> "se un giro materiale in un determinato giorno ha delle variazioni
+> deve essere creato un giro solo per quel determinato giorno, con
+> scritto giornata 7 del 04/05/2026 oppure giornata 'festiva'..."
+
+Il modello `giro_variante` (N varianti calendario per giornata) era
+illeggibile per il pianificatore (giro 68068 con 5 varianti
+stagionali sulla giornata 7, tutte etichettate "Circola
+giornalmente. Soppresso nel corso di X"). MR conferma 4 decisioni:
+
+1. **Rigenerazione da zero** — giri esistenti sono solo prove, niente
+   migrazione dati.
+2. **Tutte le granularità** ma con enum **collassato a 6 valori**
+   (opzione "b"): `feriale | sabato | domenica | festivo |
+   data_specifica | personalizzata`. Niente codici PdE alias
+   (LV/SF/FX/GG): si capirebbe meno.
+3. **Drop tabella `giro_variante`** (non lasciamo "tabelle morte" —
+   regola 7 CLAUDE.md "niente backwards-compat hacks").
+4. **Tutto in un solo MR**: backend + persister + tests + UI.
+
+### Modifiche
+
+#### Backend (12 file modificati, 2 nuovi)
+
+- **Migration alembic 0016** `0016_refactor_varianti_giri_separati.py`
+  (revision `f7c2b189e405`, down_revision `e3b9a046f218`):
+  - WIPE preliminare: `DELETE giro_materiale` (CASCADE pulisce
+    giornate/varianti/blocchi) + `DELETE corsa_materiale_vuoto
+    WHERE giro_materiale_id IS NOT NULL`. Ordine FK-safe come in
+    `builder.py:_wipe_giri_programma`.
+  - `giro_materiale` + colonne: `etichetta_tipo VARCHAR(20) NOT NULL
+    DEFAULT 'personalizzata'` + CHECK constraint con i 6 valori
+    ammessi; `etichetta_dettaglio TEXT NULL`.
+  - `giro_giornata` assorbe i 3 campi della variante:
+    `validita_testo TEXT NULL`, `dates_apply_json JSONB NOT NULL
+    DEFAULT '[]'::jsonb`, `dates_skip_json JSONB NOT NULL DEFAULT
+    '[]'::jsonb`.
+  - `giro_blocco`: drop colonna `giro_variante_id` + UNIQUE
+    `(giro_variante_id, seq)`; aggiunge `giro_giornata_id BIGINT
+    NOT NULL REFERENCES giro_giornata(id) ON DELETE CASCADE` +
+    nuova UNIQUE `(giro_giornata_id, seq)`.
+  - `DROP TABLE giro_variante`.
+  - `downgrade()` ricrea schema vuoto (rollback richiede
+    rigenerazione giri).
+
+- **Nuovo `domain/builder_giro/etichetta.py`**: funzione pura
+  `calcola_etichetta_giro(giornate_dates, festivita) ->
+  (etichetta_tipo, etichetta_dettaglio)`:
+  - Firma disaccoppiata: `Iterable[Iterable[date]]` invece di tipo
+    `Giro`/`GiroAssegnato` concreto (così funziona con entrambe le
+    dataclass del builder pre/post-assegnazione).
+  - Algoritmo: 1 sola data unica → `data_specifica` con dettaglio
+    `DD/MM/YYYY`; tutti dello stesso `tipo_giorno` → etichetta
+    monotipo; mix → `personalizzata` con breakdown ordinato
+    calendariale (es. `feriale+festivo`).
+  - Costante `ETICHETTE_AMMESSE: frozenset[str]` sincronizzata col
+    CHECK constraint DB.
+
+- `models/giri.py`:
+  - `GiroMateriale`: nuovi campi `etichetta_tipo: Mapped[str]` +
+    `etichetta_dettaglio: Mapped[str | None]`.
+  - `GiroGiornata`: nuovi campi `validita_testo: Mapped[str | None]`,
+    `dates_apply_json: Mapped[list[Any]]`,
+    `dates_skip_json: Mapped[list[Any]]`.
+  - **`class GiroVariante` rimossa**.
+  - `GiroBlocco.giro_variante_id` → `giro_giornata_id` (FK
+    ridiretta).
+- `models/__init__.py`: import + `__all__` senza `GiroVariante`
+  (5 entità giro invece di 6).
+- `schemas/giri.py`: stesso shift su Pydantic. Rimossa
+  `GiroVarianteRead`. Aggiunti `etichetta_tipo`,
+  `etichetta_dettaglio` su `GiroMaterialeRead`; aggiunti
+  `validita_testo`, `dates_apply_json`, `dates_skip_json` su
+  `GiroGiornataRead`. `GiroBloccoRead.giro_variante_id` →
+  `giro_giornata_id`.
+- `schemas/__init__.py`: 38 schemi (era 39).
+
+- `domain/builder_giro/persister.py`:
+  - `PERSISTER_VERSION` bumpato da `"4.4.5a"` a `"7.7.3"`.
+  - `GiroDaPersistere`: nuovi campi `etichetta_tipo` (default
+    `"personalizzata"`) + `etichetta_dettaglio: str | None = None`.
+  - `_persisti_blocchi_giornata`: parametro
+    `giro_variante_id: int` → `giro_giornata_id: int`. Tutti i
+    `GiroBlocco(giro_variante_id=...)` → `giro_giornata_id=...`.
+  - `_persisti_un_giro`: niente più step intermedio
+    `GiroVariante`. La giornata viene creata direttamente con
+    `validita_testo` + `dates_apply_json` + `dates_skip_json`. I
+    blocchi puntano alla giornata stessa. Variabile `last_gv_id` →
+    `last_gg_id`.
+  - `_crea_blocco_rientro_sede`: parametro
+    `giro_variante_id` → `giro_giornata_id`.
+
+- `domain/builder_giro/builder.py`:
+  - Import `FestivitaUfficiale` + `or_` + `calcola_etichetta_giro`.
+  - Nuova helper `_carica_festivita_periodo(session, azienda_id,
+    valido_da, valido_a) -> frozenset[date]`: legge nazionali
+    (`azienda_id IS NULL`) + locali per azienda dal range del
+    programma.
+  - `genera_giri()`: dopo `assegna_e_rileva_eventi`, per ogni giro
+    calcolo `(etichetta_tipo, etichetta_dettaglio) =
+    calcola_etichetta_giro((g.dates_apply_or_data for g in
+    giro_a.giornate), festivita)` e lo passo via
+    `GiroDaPersistere`. Variabile loop rinominata
+    `giro` → `giro_a` per evitare collisione di tipo con il loop
+    `for giro in giri_regola: ...` precedente (mypy strict
+    narrowing).
+
+- `domain/builder_giro/__init__.py`: esporta `calcola_etichetta_giro`
+  + `ETICHETTE_AMMESSE`.
+
+- `domain/builder_giro/multi_giornata.py`: docstring aggiornato
+  (Giro mappa su `GiroMateriale + GiroGiornata + GiroBlocco`).
+
+- `domain/builder_pdc/builder.py`:
+  - Rimosso import `GiroVariante` + `itertools`.
+  - Caricamento blocchi: invece di lookup `GiroVariante` →
+    `GiroBlocco`, ora 1 query diretta `select(GiroBlocco).where(
+    giro_giornata_id.in_(...))`. Dict
+    `blocchi_per_variante` → `blocchi_per_giornata`.
+  - Loop di combinazioni rimosso: con 1 sola sequenza canonica per
+    giornata, c'è SEMPRE 1 sola "combinazione" → niente più
+    suffisso `-V{idx:02d}` nel codice turno (resta `T-{numero_turno}`
+    base + eventuali rami split CV).
+  - `_genera_un_turno_pdc`: parametri `variante_per_giornata` +
+    `blocchi_per_variante` + `indice_combinazione` rimossi;
+    sostituiti con `blocchi_per_giornata` direttamente. Legge
+    `gg.validita_testo` (era `v.validita_testo`).
+  - `_persisti_un_turno_pdc`: parametro `varianti_ids` +
+    `indice_combinazione` rimossi; sostituiti con
+    `giornate_ids: list[int]` per tracciabilità. Metadata key
+    `varianti_ids` → `giornate_giro_ids`. `builder_version` bumpato
+    a `"mvp-7.7.3"`.
+
+- `api/giri.py`:
+  - Rimossi import `GiroVariante` + class `GiroVarianteRead`.
+  - `GiroMaterialeListItem` + `GiroMaterialeDettaglioRead` con
+    `etichetta_tipo` + `etichetta_dettaglio`.
+  - `GiroGiornataRead` ingloba `validita_testo`,
+    `dates_apply_json`, `dates_skip_json`, `blocchi`.
+  - `GiroBloccoRead.giro_variante_id` → `giro_giornata_id`.
+  - Endpoint `get_giro_dettaglio`: query semplificata, 1 sola
+    SELECT su `GiroBlocco` per `giro_giornata_id IN (...)` invece
+    di passare per le varianti. Niente più step di assemblaggio
+    `varianti_per_giornata`. Valorizza i campi etichetta in
+    risposta.
+  - Endpoint lista: aggiunti `etichetta_tipo` + `etichetta_dettaglio`
+    nei mapper.
+
+#### Test backend (5 file modificati, 1 nuovo)
+
+- **Nuovo `tests/test_etichetta.py`** — 14 test puri (no DB) di
+  `calcola_etichetta_giro`:
+  - Vuoto / data unica / 5 lun-ven feriali / 3 sabati / 3 domeniche
+    / festivi monotipo / festivo che cade di sabato (precedenza) /
+    mix sab+fest → personalizzata / mix 4 tipi con breakdown
+    ordinato / aggregazione date da più giornate / Sant'Ambrogio
+    locale aggiunto al set diventa festivo.
+- `tests/test_models.py`: `EXPECTED_TABLE_COUNT = 36 → 35`.
+- `tests/test_schemas.py`: `EXPECTED_SCHEMA_COUNT = 39 → 38`.
+- `tests/test_persister.py`:
+  - Rimossi import + DELETE FROM giro_variante.
+  - `assert PERSISTER_VERSION == "7.7.3"`.
+  - Test rinominato
+    `test_due_giornate_due_GiroGiornata_due_GiroVariante` →
+    `test_due_giornate_due_GiroGiornata_con_dates_apply`,
+    asserzione su `gg.dates_apply_json` invece che su variante.
+  - 4 join `.join(GiroVariante).join(GiroGiornata)` → 1 join
+    diretto `.join(GiroGiornata, GiroBlocco.giro_giornata_id ==
+    GiroGiornata.id)`.
+  - Asserzione sull'etichetta default ("personalizzata") nel test
+    base.
+- `tests/test_pde_importer_db.py`: rimosso `DELETE FROM
+  giro_variante` dalla cleanup fixture.
+- `tests/test_genera_giri_api.py`: smoke `test_get_giro_dettaglio`
+  asserisce shape piatta (no `varianti`, blocchi diretti su
+  giornata, etichetta nel body).
+
+#### Frontend (3 file modificati)
+
+- `lib/api/giri.ts`:
+  - Nuovo type `EtichettaTipo` (union dei 6 valori).
+  - `interface GiroVariante` rimossa.
+  - `GiroListItem` + `GiroDettaglio` con `etichetta_tipo` +
+    `etichetta_dettaglio`.
+  - `GiroGiornata` ingloba `validita_testo`, `dates_apply_json`,
+    `dates_skip_json`, `blocchi: GiroBlocco[]`.
+
+- `routes/pianificatore-giro/GiroDettaglioRoute.tsx`:
+  - Rimosso `useState` per la tab variante attiva e l'intero
+    sotto-componente `VariantePanel`.
+  - `GiornataPanel` mostra direttamente `blocchi` (Gantt + lista)
+    con header esteso: numero giornata + km/giornata + chip
+    `validita_testo` PdE + counter "N date".
+  - `HeaderRow` aggiunge `<EtichettaBadge tipo dettaglio>` accanto
+    al tipo materiale.
+  - Nuovo helper interno `formatEtichetta` per label localizzata
+    (Feriale/Sabato/.../Personalizzata).
+
+- `routes/pianificatore-giro/ProgrammaGiriRoute.tsx`: nuova colonna
+  "Categoria" nella tabella lista giri con badge etichetta
+  compatto. Per `data_specifica` mostra direttamente la data
+  ("04/05/2026"); per `personalizzata` mostra "mix · feriale+festivo".
+
+- `routes/pianificatore-pdc/GiriRoute.test.tsx`: fixture `makeGiro`
+  + 2 campi etichetta (default `feriale` / `null`).
+
+### Verifiche
+
+- DB `alembic upgrade head`: ✅ `e3b9a046f218 → f7c2b189e405`.
+- `uv run mypy --strict src`: ✅ 54 source files clean (era 53,
+  +1 nuovo `etichetta.py`).
+- `uv run pytest --tb=line`: ✅ **468 passed, 12 skipped in 19.39s**
+  (baseline 454 → +14 nuovi `test_etichetta`).
+- Frontend `pnpm typecheck`: ✅ clean.
+- Frontend `pnpm test --run`: ✅ **53 passed**.
+- Frontend `pnpm build`: ✅ 1757 modules, 389KB bundle (114KB gzip),
+  951ms.
+- OpenAPI live verifica: `GiroVarianteRead` rimosso, `etichetta_*`
+  presenti su list/dettaglio, `GiroGiornataRead` con campi nuovi.
+
+### Conseguenze pratiche
+
+1. **Schema DB più semplice**: il dettaglio giro è ora 2 livelli
+   (giro → giornata → blocchi) invece di 3. Una query in meno per
+   il dettaglio.
+2. **Etichette parlanti in lista**: il pianificatore vede subito
+   "Feriale" / "Festivo" / "23/12/2026" senza dover aprire il
+   dettaglio. Risolve il caso utente "5 varianti illeggibili sulla
+   giornata 7".
+3. **builder_pdc semplificato**: con 1 sola sequenza canonica per
+   giornata, niente più prodotto cartesiano di varianti.
+   Codice turno PdC: `T-{numero_turno}` (no più `-V{idx}`).
+4. **Refactor compat regole future**: il calendario ufficiale
+   (MR 7.7.2) finalmente usato dal builder per popolare
+   l'etichetta — chiude il loop con la decisione utente
+   2026-05-02 originale.
+
+### Limitazioni note
+
+- **Limitazione 7.7.1 ancora aperta**: il troncamento dei giri non
+  chiusi agisce per giornata, non per singola corsa dentro la
+  catena. Indipendente da questo MR; resta a futuri raffinamenti.
+- **Etichetta su clustering già diviso**: oggi il clustering A1
+  produce giri separati per pattern di sequenza (corse diverse),
+  che combaciano già con feriale/festivo. La nuova etichetta è
+  un'**informazione descrittiva** che riflette il pattern; non
+  guida ancora la separazione lato builder. Se servirà controllo
+  esplicito (es. "non fondere mai feriale e festivo anche se
+  sequenze identiche"), si introduce in seguito un parametro
+  cluster su `tipo_giorno`.
+
+### Prossimo step
+
+Sprint 7.7 chiuso. Possibili direzioni: dashboard
+Pianificatore Turno PdC (Sprint 7.3, attesa), oppure raffinamenti
+sul cluster builder (Sprint 7.7.4 opzionale).
+
+---
+
 ## 2026-05-02 (76) — Sprint 7.7 MR 2: calendario ufficiale festività italiane
 
 ### Contesto

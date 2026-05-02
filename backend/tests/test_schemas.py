@@ -5,9 +5,9 @@ Verifica:
 - Parsing da dict fixture (input tipico API request/response body)
 - Parsing da modello ORM in memoria (path FastAPI route → response)
 
-Conteggio: 31 (Read base v0.5) + 7 (Sprint 4.1: FiltroRegola,
-StrictOptions, 2 Read + 2 Create + 1 Update per programma) + 1
-(Sprint 5.1: ComposizioneItem) = 39.
+Conteggio: 30 (Read base v0.5 — drop GiroVarianteRead in Sprint 7.7
+MR 3) + 7 (Sprint 4.1: FiltroRegola, StrictOptions, 2 Read + 2 Create
++ 1 Update per programma) + 1 (Sprint 5.1: ComposizioneItem) = 38.
 """
 
 from datetime import UTC, date, datetime, time
@@ -19,7 +19,7 @@ from colazione.models.corse import CorsaCommerciale
 from colazione.schemas.anagrafica import AziendaRead, LocalitaManutenzioneRead
 from colazione.schemas.corse import CorsaCommercialeRead
 
-EXPECTED_SCHEMA_COUNT = 39
+EXPECTED_SCHEMA_COUNT = 38  # 39 - 1 (drop GiroVarianteRead, Sprint 7.7 MR 3)
 
 
 def test_schemas_all_exported() -> None:

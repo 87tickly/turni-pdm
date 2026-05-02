@@ -16,7 +16,9 @@ Coverage:
 - Località non trovata → ``LocalitaNonTrovataError``.
 - ``numero_treno_vuoto`` formato ``V-{numero_turno}-{NNN}``.
 - ``generation_metadata_json`` popolato (versione, motivo, ecc.).
-- ``GiroVariante.validita_dates_apply_json`` = [data] (istanze 1:1).
+- ``GiroGiornata.dates_apply_json`` popolato con la data della giornata
+  (Sprint 7.7 MR 3: i campi di validità sono saliti su GiroGiornata,
+  GiroVariante è stato droppato).
 """
 
 from __future__ import annotations
@@ -46,7 +48,7 @@ from colazione.domain.builder_giro import (
 )
 from colazione.models.anagrafica import LocalitaManutenzione, Stazione
 from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
-from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
+from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale
 from colazione.models.programmi import ProgrammaMateriale
 
 pytestmark = pytest.mark.skipif(
@@ -82,7 +84,7 @@ async def azienda_id() -> int:
 async def _wipe_test_data() -> None:
     """Pulisce i dati di test (prefisso TEST_) + tutti i giri.
 
-    Ordine FK-safe: turni PdC → blocchi → varianti → giornate → vuoti →
+    Ordine FK-safe: turni PdC → blocchi → giornate → vuoti →
     giri → corse test → località test → stazioni test.
 
     `turno_pdc_blocco.corsa_materiale_vuoto_id` e
@@ -94,9 +96,9 @@ async def _wipe_test_data() -> None:
     async with session_scope() as session:
         # FK RESTRICT su turno_pdc_blocco → corse: pulire i turni PRIMA.
         await session.execute(text("DELETE FROM turno_pdc"))
-        # Tutti i giri (sono tutti di test in dev: nessuno in produzione)
+        # Tutti i giri (sono tutti di test in dev: nessuno in produzione).
+        # Sprint 7.7 MR 3: giro_variante droppato.
         await session.execute(text("DELETE FROM giro_blocco"))
-        await session.execute(text("DELETE FROM giro_variante"))
         await session.execute(text("DELETE FROM giro_giornata"))
         await session.execute(text("DELETE FROM corsa_materiale_vuoto"))
         await session.execute(text("DELETE FROM giro_materiale"))
@@ -309,7 +311,7 @@ async def test_lista_vuota_ritorna_lista_vuota(azienda_id: int) -> None:
 async def test_un_giro_una_corsa_ORM_creati(
     azienda_id: int, programma_test_id: int
 ) -> None:
-    """Verifica che GiroMateriale + GiroGiornata + GiroVariante + GiroBlocco siano creati."""
+    """Verifica che GiroMateriale + GiroGiornata + GiroBlocco siano creati."""
     await _crea_stazione("S99001", azienda_id)
     await _crea_stazione("S99002", azienda_id)
     loc_id = await _crea_localita("TEST_LOC_FIO", "S99001", azienda_id)
@@ -345,9 +347,13 @@ async def test_un_giro_una_corsa_ORM_creati(
         assert gm.localita_manutenzione_arrivo_id == loc_id
         assert gm.stato == "bozza"
         # generation_metadata_json popolato
-        assert gm.generation_metadata_json["persister_version"] == "4.4.5a"
+        assert gm.generation_metadata_json["persister_version"] == "7.7.3"
         assert gm.generation_metadata_json["motivo_chiusura"] == "naturale"
         assert gm.generation_metadata_json["chiuso"] is True
+        # Sprint 7.7 MR 3: etichetta calcolata. Per il default
+        # `GiroDaPersistere(...)` (senza specificare etichetta_tipo) il
+        # builder mette `personalizzata`.
+        assert gm.etichetta_tipo == "personalizzata"
 
         gg = (
             (
@@ -360,25 +366,15 @@ async def test_un_giro_una_corsa_ORM_creati(
         )
         assert len(gg) == 1
         assert gg[0].numero_giornata == 1
-
-        gv = (
-            (
-                await session.execute(
-                    select(GiroVariante).where(GiroVariante.giro_giornata_id == gg[0].id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert len(gv) == 1
-        assert gv[0].variant_index == 0
-        assert gv[0].validita_dates_apply_json == ["2026-04-27"]
+        # Sprint 7.7 MR 3: validità ora vivono su giornata.
+        assert gg[0].dates_apply_json == ["2026-04-27"]
+        assert gg[0].dates_skip_json == []
 
         blocchi = (
             (
                 await session.execute(
                     select(GiroBlocco)
-                    .where(GiroBlocco.giro_variante_id == gv[0].id)
+                    .where(GiroBlocco.giro_giornata_id == gg[0].id)
                     .order_by(GiroBlocco.seq)
                 )
             )
@@ -476,8 +472,7 @@ async def test_vuoto_testa_genera_corsa_materiale_vuoto_e_blocco(
             (
                 await session.execute(
                     select(GiroBlocco)
-                    .join(GiroVariante)
-                    .join(GiroGiornata)
+                    .join(GiroGiornata, GiroBlocco.giro_giornata_id == GiroGiornata.id)
                     .where(GiroGiornata.giro_materiale_id == gm_id)
                     .order_by(GiroBlocco.seq)
                 )
@@ -530,8 +525,7 @@ async def test_vuoto_coda_genera_corsa_materiale_vuoto_e_blocco(
             (
                 await session.execute(
                     select(GiroBlocco)
-                    .join(GiroVariante)
-                    .join(GiroGiornata)
+                    .join(GiroGiornata, GiroBlocco.giro_giornata_id == GiroGiornata.id)
                     .where(GiroGiornata.giro_materiale_id == gm_id)
                     .order_by(GiroBlocco.seq)
                 )
@@ -591,8 +585,7 @@ async def test_evento_aggancio_3_a_6_inserito_tra_blocchi(
             (
                 await session.execute(
                     select(GiroBlocco)
-                    .join(GiroVariante)
-                    .join(GiroGiornata)
+                    .join(GiroGiornata, GiroBlocco.giro_giornata_id == GiroGiornata.id)
                     .where(GiroGiornata.giro_materiale_id == gm_id)
                     .order_by(GiroBlocco.seq)
                 )
@@ -653,8 +646,7 @@ async def test_sequenza_3_6_3_genera_aggancio_e_sgancio(
             (
                 await session.execute(
                     select(GiroBlocco)
-                    .join(GiroVariante)
-                    .join(GiroGiornata)
+                    .join(GiroGiornata, GiroBlocco.giro_giornata_id == GiroGiornata.id)
                     .where(GiroGiornata.giro_materiale_id == gm_id)
                     .order_by(GiroBlocco.seq)
                 )
@@ -679,7 +671,7 @@ async def test_sequenza_3_6_3_genera_aggancio_e_sgancio(
 # =====================================================================
 
 
-async def test_due_giornate_due_GiroGiornata_due_GiroVariante(
+async def test_due_giornate_due_GiroGiornata_con_dates_apply(
     azienda_id: int, programma_test_id: int
 ) -> None:
     await _crea_stazione("S99001", azienda_id)
@@ -781,19 +773,10 @@ async def test_due_giornate_due_GiroGiornata_due_GiroVariante(
         assert giornate[0].numero_giornata == 1
         assert giornate[1].numero_giornata == 2
 
-        # Ogni giornata ha la sua variante con la sua data
-        gv1 = (
-            await session.execute(
-                select(GiroVariante).where(GiroVariante.giro_giornata_id == giornate[0].id)
-            )
-        ).scalar_one()
-        assert gv1.validita_dates_apply_json == ["2026-04-27"]
-        gv2 = (
-            await session.execute(
-                select(GiroVariante).where(GiroVariante.giro_giornata_id == giornate[1].id)
-            )
-        ).scalar_one()
-        assert gv2.validita_dates_apply_json == ["2026-04-28"]
+        # Sprint 7.7 MR 3: ogni giornata ha le sue dates_apply_json
+        # direttamente (no più step intermedio variante).
+        assert giornate[0].dates_apply_json == ["2026-04-27"]
+        assert giornate[1].dates_apply_json == ["2026-04-28"]
 
 
 # =====================================================================
@@ -908,7 +891,8 @@ async def test_giro_senza_blocchi_assegnati_tipo_materiale_misto(
 async def test_persister_version_costante() -> None:
     from colazione.domain.builder_giro.persister import PERSISTER_VERSION
 
-    assert PERSISTER_VERSION == "4.4.5a"
+    # Sprint 7.7 MR 3: bumped da "4.4.5a" a "7.7.3" col refactor varianti.
+    assert PERSISTER_VERSION == "7.7.3"
 
 
 async def test_giro_da_persistere_dataclass_smoke() -> None:
@@ -1197,14 +1181,12 @@ async def test_dates_apply_post_cluster_persistito_in_validita_dates_apply_json(
         gm_id = ids[0]
 
     async with session_scope() as session:
-        gv = (
+        gg = (
             await session.execute(
-                select(GiroVariante)
-                .join(GiroGiornata, GiroVariante.giro_giornata_id == GiroGiornata.id)
-                .where(GiroGiornata.giro_materiale_id == gm_id)
+                select(GiroGiornata).where(GiroGiornata.giro_materiale_id == gm_id)
             )
         ).scalar_one()
-        assert gv.validita_dates_apply_json == [
+        assert gg.dates_apply_json == [
             "2026-04-27",
             "2026-05-04",
             "2026-05-11",
@@ -1242,11 +1224,9 @@ async def test_dates_apply_vuoto_pre_cluster_fallback_a_data_giorno(
         gm_id = ids[0]
 
     async with session_scope() as session:
-        gv = (
+        gg = (
             await session.execute(
-                select(GiroVariante)
-                .join(GiroGiornata, GiroVariante.giro_giornata_id == GiroGiornata.id)
-                .where(GiroGiornata.giro_materiale_id == gm_id)
+                select(GiroGiornata).where(GiroGiornata.giro_materiale_id == gm_id)
             )
         ).scalar_one()
-        assert gv.validita_dates_apply_json == ["2026-06-01"]
+        assert gg.dates_apply_json == ["2026-06-01"]

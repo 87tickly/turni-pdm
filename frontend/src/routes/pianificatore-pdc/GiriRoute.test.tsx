@@ -18,6 +18,8 @@ function makeGiro(over: Partial<GiroListItem> = {}): GiroListItem {
     motivo_chiusura: "naturale",
     chiuso: true,
     stato: "pubblicato",
+    etichetta_tipo: "feriale",
+    etichetta_dettaglio: null,
     created_at: "2026-04-01T10:00:00Z",
     ...over,
   };

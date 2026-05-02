@@ -59,7 +59,8 @@ async def _wipe_test_data() -> None:
     - turno_pdc (CASCADE → giornate → blocchi; libera FK RESTRICT su
       `turno_pdc_blocco.corsa_materiale_vuoto_id` e
       `turno_pdc_blocco.corsa_commerciale_id`)
-    - giro_materiale (CASCADE su giornate/varianti/blocchi)
+    - giro_materiale (CASCADE su giornate/blocchi — Sprint 7.7 MR 3:
+      giro_variante droppato)
     - corsa_materiale_vuoto (orfana dopo cancellazione giri,
       ON DELETE SET NULL non basta per cancellare la riga)
     """

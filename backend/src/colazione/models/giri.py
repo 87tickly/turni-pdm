@@ -1,8 +1,12 @@
 """Strato 2 — giro materiale (LIV 2).
 
 Costruzione del ciclo di rotazione del materiale fisico: N giornate
-× M varianti calendario × sequenza di blocchi (corse, materiale
-vuoto, soste, manovre).
+× sequenza di blocchi (corse, materiale vuoto, soste, manovre).
+
+Sprint 7.7 MR 3 (migration 0016): drop di ``giro_variante``. Le
+"varianti calendario" diventano giri separati con etichetta parlante
+(``etichetta_tipo`` su ``GiroMateriale``). Una giornata = una sola
+sequenza canonica di blocchi.
 
 Vedi `docs/SCHEMA-DATI-NATIVO.md` §5 e `docs/LOGICA-COSTRUZIONE.md`.
 """
@@ -63,6 +67,18 @@ class GiroMateriale(Base):
         BigInteger, ForeignKey("localita_manutenzione.id", ondelete="RESTRICT")
     )
     stato: Mapped[str] = mapped_column(String(20), default="bozza")
+    # Sprint 7.7 MR 3 (migration 0016): etichetta parlante calcolata dal
+    # builder a partire dalle date di applicazione del giro
+    # (cfr. ``calcola_etichetta_giro``). Valori ammessi:
+    # ``feriale | sabato | domenica | festivo | data_specifica |
+    # personalizzata`` (CHECK constraint a livello DB).
+    etichetta_tipo: Mapped[str] = mapped_column(
+        String(20), default="personalizzata"
+    )
+    # Dettaglio leggibile: per ``data_specifica`` è ``DD/MM/YYYY``; per
+    # ``personalizzata`` è il breakdown dei tipi giorno presenti
+    # (es. ``feriale+festivo``). NULL per le etichette monotipo.
+    etichetta_dettaglio: Mapped[str | None] = mapped_column(Text)
     generation_metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -108,27 +124,28 @@ class GiroGiornata(Base):
     # commerciali di questa giornata. Nullable per giornate pre-MR3.2 o
     # quando il PdE non aveva km_tratta per le corse della catena.
     km_giornata: Mapped[float | None] = mapped_column(Numeric(8, 2))
-
-
-class GiroVariante(Base):
-    __tablename__ = "giro_variante"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    giro_giornata_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("giro_giornata.id", ondelete="CASCADE")
-    )
-    variant_index: Mapped[int] = mapped_column(Integer, default=0)
-    validita_testo: Mapped[str] = mapped_column(Text, default="GG")
-    validita_dates_apply_json: Mapped[list[Any]] = mapped_column(JSONB, default=list)
-    validita_dates_skip_json: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    # Sprint 7.7 MR 3 (migration 0016): assorbiti da ``giro_variante``.
+    # ``validita_testo`` = ``periodicita_breve`` PdE della prima corsa
+    # della giornata (verità letterale: feedback persistente
+    # ``feedback_pde_periodicita_verita.md``).
+    validita_testo: Mapped[str | None] = mapped_column(Text)
+    # Date in cui la giornata-tipo si applica (output del clustering A1
+    # multi-giornata, era ``validita_dates_apply_json`` su giro_variante).
+    dates_apply_json: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    # Date escluse (sospensioni). Oggi sempre vuoto, riservato per
+    # gestione "soppresso il NN/MM" futura.
+    dates_skip_json: Mapped[list[Any]] = mapped_column(JSONB, default=list)
 
 
 class GiroBlocco(Base):
     __tablename__ = "giro_blocco"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    giro_variante_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("giro_variante.id", ondelete="CASCADE")
+    # Sprint 7.7 MR 3 (migration 0016): la FK punta a ``giro_giornata``
+    # direttamente — ``giro_variante`` è stato droppato (1 giornata =
+    # 1 sequenza canonica).
+    giro_giornata_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("giro_giornata.id", ondelete="CASCADE")
     )
     seq: Mapped[int] = mapped_column(Integer)
     tipo_blocco: Mapped[str] = mapped_column(String(40))
