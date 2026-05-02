@@ -10,6 +10,89 @@
 
 ---
 
+## 2026-05-02 (73) — HOTFIX urgente: arrivo_min < 0 in posiziona_su_localita (Fix B + corsa 00:01)
+
+### Contesto
+
+Smoke utente post-MR3 + post-modal-semplificato (entry 72): l'utente
+ha lanciato "Genera giri" sul programma 3438 sede FIO con regola
+ETR204 → backend 500 con stack:
+
+```
+File "posizionamento.py", line 340, in posiziona_su_localita
+    ora_arrivo=_min_to_time(arrivo_min),
+File "posizionamento.py", line 204, in _min_to_time
+    return time(m // 60, m % 60)
+ValueError: hour must be in 0..23
+```
+
+### Diagnosi
+
+Bug pre-esistente in `posiziona_su_localita` esposto dal Fix B di
+MR 3.3 (entry 71). Il calcolo del vuoto di testa per cross-notte
+K-1 ribalta `partenza_min` (aggiunge 24*60) ma lascia `arrivo_min`
+invariato. Quando la prima corsa parte ENTRO `gap_min` minuti dalla
+mezzanotte (es. MALPENSA T1 alle 00:01 con gap=5 →
+arrivo_min = 1 - 5 = -4), il valore resta negativo e crasha
+`_min_to_time(-4)`.
+
+Path inaccessibile prima di MR 3.3 perché la condizione
+`prima.codice_origine in whitelist_stazioni` escludeva le origini
+fuori whitelist (Malpensa è tipicamente fuori whitelist FIO);
+con `forza_vuoto_iniziale=True` il path è ora attivo per le corse
+del primo giorno cronologico della prima generazione.
+
+### Fix
+
+`posizionamento.py:312-317`: dopo il ribaltamento di `partenza_min`,
+se anche `arrivo_min < 0` lo ribalto a K-1 (vuoto interamente la
+notte precedente). Significa: il treno parte alle 23:26 K-1 da
+sede, arriva alle 23:56 K-1 in stazione, attende, parte con la
+prima corsa alle 00:01 K. Coerente con la logica
+"vuoto di USCITA cross-notte K-1" già documentata.
+
+### Test
+
+Aggiunto `test_forza_vuoto_iniziale_corsa_alle_00_01_no_crash` in
+`tests/test_posizionamento.py`: verifica che il caso MALPENSA T1
+00:01 + Fix B non crashi e produca un vuoto con partenza/arrivo
+entrambi nella sera K-1 (hour ≥ 22).
+
+### Verifiche
+
+- `uv run mypy --strict src`: ✅ 52 source files clean
+- `uv run pytest --tb=line`: ✅ **437 passed, 12 skipped** (baseline
+  436 → +1 nuovo test regressione)
+
+### Backend hot-reload
+
+Il container `colazione_backend` ha `uvicorn --reload` attivo: la
+modifica al file Python è stata caricata automaticamente. L'utente
+può ritentare "Genera giri" subito.
+
+### Lezione imparata
+
+Quando si introduce un nuovo path attivante (Fix B/3.3 ha attivato
+un path prima inaccessibile), occorre runnare una grid di test su
+edge case temporali (corse a inizio/fine giornata, corse cross-
+notte). I 3 test del Fix B coprivano il caso "MALPENSA T1 in orario
+diurno" ma non il caso 00:01. Aggiungo regressione sul caso 00:01
+ora; in futuro (refactor varianti + calendario) testare anche
+00:00, 23:59, 12:00.
+
+### MR 7.7.1 in corso
+
+Le modifiche aggiuntive in working tree (migration 0014 +
+model/schema/API per `km_max_ciclo` per regola) NON sono incluse in
+questo commit hotfix — restano locali e verranno committate insieme
+al refactor builder cap-per-giro (MR 7.7.1 completo).
+
+### Prossimo step
+
+Riprendere MR 7.7.1 (cap-per-regola + Fix C rientro intelligente).
+
+---
+
 ## 2026-05-02 (72) — Mini-fix UX modal "Genera giri": rimosso lo scegli-periodo (opzione A)
 
 ### Contesto

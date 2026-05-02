@@ -311,7 +311,16 @@ def posiziona_su_localita(
             # NON hanno mai vincoli orari.
             cross_notte_K_minus_1 = True
             partenza_min += 24 * 60
-            # arrivo_min resta invariato (può essere 0..arrivo_corsa).
+            # Sprint 7.7 hotfix: se anche `arrivo_min` finisce sotto 0 (= la
+            # prima corsa parte ENTRO `gap_min` minuti dalla mezzanotte, es.
+            # MALPENSA T1 00:01 con gap=5 → arrivo=-4), ribalta anche
+            # l'arrivo a K-1. Significa vuoto interamente la notte K-1: il
+            # treno arriva alle 23:56 K-1, attende, parte con la prima
+            # corsa alle 00:01 K. Bug pre-esistente esposto dal Fix B di
+            # MR 3.3 (ora `forza_vuoto_iniziale=True` consente origini
+            # fuori whitelist con orari precoci).
+            if arrivo_min < 0:
+                arrivo_min += 24 * 60
             # Vincolo finestra vietata 01:00-03:00 NON applicabile qui:
             # l'orario serale (es. 23:35) è fuori dalla finestra notturna
             # vietata.

@@ -415,6 +415,28 @@ def test_forza_vuoto_iniziale_inerte_se_origine_uguale_sede() -> None:
     assert res.vuoto_testa is None
 
 
+def test_forza_vuoto_iniziale_corsa_alle_00_01_no_crash() -> None:
+    """Sprint 7.7 hotfix: bug pre-esistente esposto dal Fix B (MR 3.3).
+    Quando una corsa parte entro `gap_min` minuti dalla mezzanotte (es.
+    MALPENSA T1 alle 00:01 con gap=5 → arrivo_min = -4), il vuoto
+    deve essere interamente la notte K-1, non crashare con
+    `_min_to_time(-4)` "hour must be in 0..23".
+    """
+    a = _c("MALPENSA_T1", "MI_CADORNA", (0, 1), (0, 40))
+    cat = Catena(corse=(a,))
+    res = posiziona_su_localita(
+        cat,
+        LOC_FIORENZA,
+        _WL,
+        forza_vuoto_iniziale=True,
+    )
+    assert res.vuoto_testa is not None
+    assert res.vuoto_testa.cross_notte_giorno_precedente is True
+    # Sia partenza che arrivo in K-1 (notte serale, dopo le 22)
+    assert res.vuoto_testa.ora_partenza.hour >= 22
+    assert res.vuoto_testa.ora_arrivo.hour >= 22
+
+
 def test_forza_vuoto_iniziale_default_false_compat_legacy() -> None:
     """Sprint 7.6 MR 3.3: il flag default è False — comportamento
     storico invariato (vuoto solo se origine in whitelist)."""
