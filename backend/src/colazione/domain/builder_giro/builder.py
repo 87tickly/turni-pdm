@@ -43,6 +43,7 @@ Spec:
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
@@ -56,7 +57,9 @@ from colazione.domain.builder_giro.composizione import (
     assegna_e_rileva_eventi,
 )
 from colazione.domain.builder_giro.multi_giornata import (
+    Giro,
     ParamMultiGiornata,
+    _km_giornata as _km_giornata_catena,
     costruisci_giri_multigiornata,
 )
 from colazione.domain.builder_giro.persister import (
@@ -444,6 +447,71 @@ def _trova_regola_dominante(
     return candidate[0]
 
 
+def _giro_chiude_in_whitelist(
+    giro: Giro,
+    whitelist: frozenset[str],
+    stazione_sede: str | None,
+) -> bool:
+    """Sprint 7.7 MR 1 hotfix Fix C2: True se il giro termina in zona
+    sede (stazione_sede O qualunque stazione della whitelist).
+
+    Vuoto se il giro è vuoto o l'ultima giornata non ha corse.
+    """
+    if not giro.giornate:
+        return False
+    corse_ultima = giro.giornate[-1].catena_posizionata.catena.corse
+    if not corse_ultima:
+        return False
+    dest = corse_ultima[-1].codice_destinazione
+    return dest == stazione_sede or dest in whitelist
+
+
+def _tronca_a_chiusura_whitelist(
+    giro: Giro,
+    whitelist: frozenset[str],
+    stazione_sede: str | None,
+) -> Giro | None:
+    """Sprint 7.7 MR 1 hotfix Fix C2: tronca il giro all'ultima giornata
+    che termina in zona sede (whitelist).
+
+    Itera all'indietro e taglia a primo K dove
+    ``giornate[K].catena_posizionata.catena.corse[-1].codice_destinazione``
+    è in whitelist o uguale a ``stazione_sede``. Le giornate K+1..N
+    vengono scartate (le loro corse diventano orfane di troncamento, il
+    chiamante registra il warning).
+
+    Decisione utente 2026-05-02:
+
+    > "dobbiamo sempre chiudere i giri"
+
+    Combinato col vincolo "no vuoti lunghi" (Fix C originale), il
+    builder costruisce SEMPRE giri chiusi naturalmente in whitelist,
+    accettando di scartare le code che andrebbero fuori zona sede.
+
+    Ritorna ``None`` se nessuna giornata del giro termina in whitelist
+    (= sede non coerente con la regola; chiamante scarta l'intero giro
+    + warning forte al pianificatore).
+    """
+    for k in range(len(giro.giornate) - 1, -1, -1):
+        corse = giro.giornate[k].catena_posizionata.catena.corse
+        if not corse:
+            continue
+        dest = corse[-1].codice_destinazione
+        if dest == stazione_sede or dest in whitelist:
+            giornate_troncate = giro.giornate[: k + 1]
+            km_nuovi = sum(
+                _km_giornata_catena(g.catena_posizionata) for g in giornate_troncate
+            )
+            return dataclasses.replace(
+                giro,
+                giornate=giornate_troncate,
+                chiuso=True,
+                motivo_chiusura="naturale",
+                km_cumulati=km_nuovi,
+            )
+    return None
+
+
 def _calcola_cap_effettivo(
     regola: ProgrammaRegolaAssegnazione,
     programma: ProgrammaMateriale,
@@ -694,7 +762,8 @@ async def genera_giri(
             f"{catene_orphane} catene scartate: nessuna regola del programma copre la prima corsa."
         )
 
-    giri_dom: list[Any] = []
+    giri_dom: list[Giro] = []
+    n_corse_orfanate_troncamento = 0
     for regola_id, catene_per_d in catene_per_regola.items():
         regola = next(r for r in regole if r.id == regola_id)
         cap_effettivo = _calcola_cap_effettivo(
@@ -705,7 +774,48 @@ async def genera_giri(
             km_max_ciclo=cap_effettivo,
             whitelist_sede=whitelist,
         )
-        giri_dom.extend(costruisci_giri_multigiornata(catene_per_d, param_mg))
+        giri_regola = costruisci_giri_multigiornata(catene_per_d, param_mg)
+
+        # Sprint 7.7 MR 1 hotfix Fix C2 (decisione utente 2026-05-02:
+        # "dobbiamo sempre chiudere i giri"): per ogni giro che NON termina
+        # in zona sede (whitelist), TRONCARE all'ultima giornata in
+        # whitelist. Le giornate finali fuori whitelist vengono scartate
+        # (corse perse) — combinato col vincolo "no vuoti lunghi" (Fix C
+        # originale) garantisce che ogni giro persistito sia SEMPRE
+        # chiuso naturalmente. Se nessuna giornata del giro termina in
+        # whitelist → giro inutilizzabile (sede non coerente con regola).
+        sede_codice = localita.stazione_collegata_codice
+        for giro in giri_regola:
+            if _giro_chiude_in_whitelist(giro, whitelist, sede_codice):
+                giri_dom.append(giro)
+                continue
+            giro_troncato = _tronca_a_chiusura_whitelist(
+                giro, whitelist, sede_codice
+            )
+            if giro_troncato is not None:
+                n_giornate_perse = len(giro.giornate) - len(giro_troncato.giornate)
+                n_corse_perse = sum(
+                    len(g.catena_posizionata.catena.corse)
+                    for g in giro.giornate[len(giro_troncato.giornate) :]
+                )
+                n_corse_orfanate_troncamento += n_corse_perse
+                warnings.append(
+                    f"Giro regola id={regola.id} ({regola.materiale_tipo_codice or '?'}): "
+                    f"tagliate {n_giornate_perse} giornate finali "
+                    f"({n_corse_perse} corse) per chiudere in zona sede."
+                )
+                giri_dom.append(giro_troncato)
+            else:
+                n_corse_perse = sum(
+                    len(g.catena_posizionata.catena.corse) for g in giro.giornate
+                )
+                n_corse_orfanate_troncamento += n_corse_perse
+                warnings.append(
+                    f"Giro regola id={regola.id} ({regola.materiale_tipo_codice or '?'}) "
+                    f"SCARTATO: nessuna giornata termina in zona sede {localita.codice} "
+                    f"({n_corse_perse} corse non assegnate). La sede potrebbe non essere "
+                    f"coerente con questa regola."
+                )
 
     # 5. Assegnazione regole + eventi composizione (Sprint 5.5: validazione
     #    accoppiamenti via callback)

@@ -10,6 +10,95 @@
 
 ---
 
+## 2026-05-02 (75) — Hotfix Fix C2: giri SEMPRE chiusi (troncamento al limite whitelist)
+
+### Contesto
+
+Decisione utente post-MR 7.7.1 (entry 74), guardando il giro reale che
+terminava a COLICO senza vuoto:
+
+> "questo non deve accadere, dobbiamo sempre chiudere i giri"
+
+L'implementazione di Fix C (entry 74) eliminava i vuoti lunghi
+correttamente ma lasciava i giri "non chiusi" (warning) quando
+l'ultima destinazione era fuori whitelist. L'utente vuole il
+contratto opposto: i giri devono SEMPRE chiudere naturalmente.
+
+### Strategia (Fix C2)
+
+Il builder TRONCA i giri non chiusi all'ultima giornata che termina
+in whitelist sede. Le giornate successive (e le loro corse) vengono
+scartate, generano warning di "tagliate N giornate". Se nessuna
+giornata del giro termina in whitelist, il giro intero viene scartato
+con warning forte "sede non coerente con regola".
+
+### Modifiche
+
+**Backend** (3 file):
+
+- `domain/builder_giro/builder.py`:
+  - Import nuovo: `import dataclasses` + `Giro` + `_km_giornata` da
+    `multi_giornata` (alias `_km_giornata_catena` per chiarezza).
+  - Nuova helper `_giro_chiude_in_whitelist(giro, whitelist, stazione_sede) -> bool`:
+    True se `giro.giornate[-1].catena_posizionata.catena.corse[-1].codice_destinazione`
+    è in whitelist o uguale alla stazione_sede.
+  - Nuova helper `_tronca_a_chiusura_whitelist(giro, whitelist, stazione_sede) -> Giro | None`:
+    itera giornate da fine a inizio, trova ultima K che termina in
+    whitelist, ritorna `dataclasses.replace(giro,
+    giornate=giornate[:K+1], chiuso=True, motivo_chiusura="naturale",
+    km_cumulati=ricalcolato)`. Ritorna None se nessuna giornata in
+    whitelist.
+  - Loop multi_giornata per regola: per ogni giro non già chiuso in
+    whitelist, applica `_tronca_a_chiusura_whitelist`. Aggiunge
+    warning specifico:
+    - "Giro regola id=X: tagliate N giornate finali (M corse) per
+      chiudere in zona sede" (caso troncato).
+    - "Giro regola id=X SCARTATO: nessuna giornata termina in zona
+      sede (M corse non assegnate). La sede potrebbe non essere
+      coerente con questa regola." (caso non recuperabile).
+  - Counter `n_corse_orfanate_troncamento` (oggi solo per warning
+    interni, non esposto in `BuilderResult` per compat).
+
+- `tests/test_builder_giri.py`:
+  - Import `LocalitaStazioneVicina`.
+  - `_setup_completo`: popola whitelist sede LOC_BUILDER con tutte
+    le S99001-S99004 dopo `await session.flush()`. Necessario perché
+    Fix C2 scarta giri che non chiudono in whitelist.
+  - 2 nuovi test:
+    - `test_giro_scartato_se_nessuna_giornata_in_whitelist`: edge
+      case mono-giornata catena fuori whitelist → giro scartato +
+      warning forte.
+    - `test_giro_chiude_naturalmente_se_ultima_dest_in_whitelist`:
+      happy path — niente troncamento, niente warning.
+
+### Verifiche
+
+- `uv run mypy --strict src`: ✅ 52 source files clean
+- `uv run pytest --tb=short`: ✅ **439 passed, 12 skipped** (baseline
+  437 → +2 nuovi test C2)
+
+### Limitazione nota
+
+Il troncamento agisce per GIORNATA, non per singola corsa dentro la
+catena. Se un giro ha 1 sola giornata con catena multi-corsa la cui
+ultima corsa termina fuori whitelist, viene scartato intero (non si
+può tagliare la catena a metà). Per il caso reale Trenord (giri
+multi-giornata 7+) la limitazione non è bloccante. Da rivedere
+insieme al refactor varianti (Sprint 7.7.3) se serve granularità più
+fine.
+
+### Memoria aggiornata
+
+`project_km_cap_per_regola_TODO.md`: marcato come ✅ COMPLETATO con
+storia + limitazione nota. `MEMORY.md` aggiornato con tag completato.
+
+### Prossimo step
+
+MR 7.7.2: calendario ufficiale italiano. Poi MR 7.7.3: refactor
+varianti → giri separati con etichette parlanti.
+
+---
+
 ## 2026-05-02 (74) — Sprint 7.7 MR 1: km_max_ciclo per regola + Fix C rientro intelligente
 
 ### Contesto

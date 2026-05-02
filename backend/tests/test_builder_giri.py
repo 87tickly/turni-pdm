@@ -24,7 +24,11 @@ from colazione.domain.builder_giro import (
     StrictModeViolation,
     genera_giri,
 )
-from colazione.models.anagrafica import LocalitaManutenzione, Stazione
+from colazione.models.anagrafica import (
+    LocalitaManutenzione,
+    LocalitaStazioneVicina,
+    Stazione,
+)
 from colazione.models.corse import CorsaCommerciale
 from colazione.models.giri import GiroMateriale
 from colazione.models.programmi import (
@@ -142,6 +146,20 @@ async def _setup_completo(
             azienda_id=az_id,
         )
         session.add(loc)
+        await session.flush()
+
+        # Sprint 7.7 MR 1 hotfix Fix C2: whitelist sede deve includere
+        # tutte le stazioni delle corse di test, altrimenti i giri non
+        # chiudono in zona sede (decisione utente "dobbiamo sempre
+        # chiudere") e vengono scartati dal builder. In produzione la
+        # whitelist è popolata via migration 0012 (Sprint 7.6 MR 2).
+        for stazione_codice in ("S99001", "S99002", "S99003", "S99004"):
+            session.add(
+                LocalitaStazioneVicina(
+                    localita_manutenzione_id=loc.id,
+                    stazione_codice=stazione_codice,
+                )
+            )
 
         # Programma
         strict_opts = strict or {
@@ -547,6 +565,83 @@ async def test_default_solo_n_giornate_omesso(azienda_id: int) -> None:
     # Entrambe le corse cadono in [2026-04-27, 2026-12-31] → 2 giri
     # (uno per pattern, A1-strict).
     assert result.n_giri_creati == 2
+
+
+async def test_giro_scartato_se_nessuna_giornata_in_whitelist(
+    azienda_id: int,
+) -> None:
+    """Sprint 7.7 MR 1 hotfix Fix C2: i giri devono SEMPRE chiudere.
+
+    Edge case: un giro mono-giornata la cui catena termina fuori
+    whitelist sede non può essere troncato (il troncamento agisce per
+    GIORNATA, non per singola corsa dentro la catena). In tal caso
+    il giro viene SCARTATO con warning forte al pianificatore "sede
+    non coerente con la regola".
+
+    Setup: 2 corse concatenate `S99001→S99002→S99003` (gap < 65min →
+    una sola catena nella giornata). Whitelist priva di S99003.
+
+    Atteso:
+    - 0 giri creati (scartato per impossibilità di chiusura naturale).
+    - Warning forte presente.
+    """
+    prog_id = await _setup_completo(
+        azienda_id,
+        corse_def=[
+            ("TEST_C2_A", "S99001", "S99002", (8, 0), (9, 0), ["2026-04-27"]),
+            ("TEST_C2_B", "S99002", "S99003", (10, 0), (11, 0), ["2026-04-27"]),
+        ],
+    )
+    async with session_scope() as session:
+        await session.execute(
+            text(
+                "DELETE FROM localita_stazione_vicina "
+                "WHERE stazione_codice = 'S99003'"
+            )
+        )
+        await session.commit()
+
+    async with session_scope() as session:
+        result = await genera_giri(
+            programma_id=prog_id,
+            data_inizio=date(2026, 4, 27),
+            n_giornate=1,
+            localita_codice=LOC_CODICE,
+            session=session,
+            azienda_id=azienda_id,
+        )
+
+    assert result.n_giri_creati == 0
+    assert any(
+        "scartato" in w.lower() and "sede" in w.lower() for w in result.warnings
+    ), f"Warning forte mancante nei warnings: {result.warnings}"
+
+
+async def test_giro_chiude_naturalmente_se_ultima_dest_in_whitelist(
+    azienda_id: int,
+) -> None:
+    """Sprint 7.7 MR 1 hotfix Fix C2: caso happy path — l'ultima dest
+    è già in whitelist, niente troncamento, giro chiuso naturalmente.
+
+    Setup default `_setup_completo`: 2 corse cicliche
+    `S99001→S99002` + `S99002→S99001`. Ultima dest = S99001 = sede →
+    chiusura naturale, niente warning di troncamento.
+    """
+    prog_id = await _setup_completo(azienda_id)
+    async with session_scope() as session:
+        result = await genera_giri(
+            programma_id=prog_id,
+            data_inizio=date(2026, 4, 27),
+            n_giornate=1,
+            localita_codice=LOC_CODICE,
+            session=session,
+            azienda_id=azienda_id,
+        )
+    assert result.n_giri_creati == 1
+    assert result.n_giri_chiusi == 1
+    assert not any(
+        "tagliate" in w.lower() or "scartato" in w.lower() for w in result.warnings
+    ), f"Warning inatteso: {result.warnings}"
 
 
 async def test_data_inizio_oltre_valido_a_raises(azienda_id: int) -> None:
