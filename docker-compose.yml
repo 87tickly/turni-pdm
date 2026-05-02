@@ -45,7 +45,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://colazione:colazione@db:5432/colazione
       JWT_SECRET: dev-secret-change-me-min-32-characters-long
-      CORS_ALLOW_ORIGINS: http://localhost:5173
+      CORS_ALLOW_ORIGINS: http://localhost:5173,http://localhost:5174
       LOG_LEVEL: INFO
     ports:
       - "8000:8000"

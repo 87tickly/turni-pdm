@@ -10,6 +10,128 @@
 
 ---
 
+## 2026-05-02 (86) — Dashboard 1° ruolo: implementazione design `arturo/01-dashboard.html`
+
+### Contesto
+
+L'utente ha condiviso il bundle design `colazione-arturo (1).zip` (estratto
+in `/tmp/colazione-design-new/`) che contiene 5 schermate per il
+Pianificatore Giro Materiale. Schermata 1 = `arturo/01-dashboard.html`
+con layout in 3 zone (banda alert + griglia 8/4 + feed attività),
+specifica IA dettagliata in commento HTML.
+
+Stato di partenza: `DashboardRoute.tsx` era ancora uno stub con 4
+ActionCard placeholder ("Programmi materiale", "Genera giri", "Giri
+persistiti", "Visualizzatore Gantt") — non aveva KPI, programmi attivi,
+ultimo run.
+
+### Modifiche
+
+#### Frontend (1 file riscritto, 1 di config)
+
+- `frontend/src/routes/pianificatore-giro/DashboardRoute.tsx`
+  (riscritto, 380 righe) — implementa il layout del design:
+  - **Title row**: "Buongiorno, {username}" + sottotitolo data lunga IT
+    (`Sabato 2 Maggio 2026`) + indicatore "aggiornato HH:mm · auto-refresh 60s"
+  - **Zone 1 — Banda alert** (amber, condizionale): visibile solo se
+    `giriNonChiusi > 0` calcolato da `useGiriAzienda()`. Metrica + CTA
+    "Vedi dettagli" → `/pianificatore-giro/programmi`. Non implementati
+    "warnings" e "residue scoperte" (registro non persistito, vedi
+    residue).
+  - **Zone 2 sinistra (col-span-8) — Programmi attivi**: stack di
+    `ProgrammaAttivoCard` (1 per programma con stato `attivo`). Per ogni
+    card: badge stato + `#id`, nome programma, periodo + n. giorni,
+    KPI strip (Giri totali, Regole, Chiusi naturalmente con progress
+    bar colorata 90/70 thresholds), "Apri" + "Genera giri" CTA. Per
+    giri/regole count usa `useGiriProgramma(id)` + `useProgramma(id)`
+    per card.
+  - **Zone 2 destra (col-span-4) — Ultimo run**: derivato dal giro
+    più recente per `created_at` (max su `useGiriAzienda()`). Mostra
+    timestamp relativo + assoluto, n. programmi attivi totali, KPI
+    (giri creati oggi, giri totali, non chiusi). Empty state se 0 giri.
+  - **Zone 3 — Attività recenti**: empty state con copy "(In arrivo)"
+    finché non c'è audit_log (vedi residui).
+  - Empty state programmi attivi: card con CTA "Vai a Programmi".
+
+- `docker-compose.yml`: `CORS_ALLOW_ORIGINS` esteso da
+  `http://localhost:5173` a `http://localhost:5173,http://localhost:5174`
+  per supportare preview parallelo durante verifica visuale (entrambe
+  porte sono dev locali, no impatto produzione).
+
+### Verifiche
+
+- `pnpm exec tsc -b --noEmit` ✅ clean
+- `pnpm exec eslint src/routes/pianificatore-giro/DashboardRoute.tsx`
+  ✅ clean
+- `pnpm test --run` ✅ **53 passed** (no regressioni; il file
+  modificato non aveva test dedicati, copertura indiretta via
+  `App.test.tsx` + ProtectedRoute).
+- **Preview verifica visuale** su `http://localhost:5174/pianificatore-giro/dashboard`
+  con admin/admin12345, dati reali del DB Trenord (1 programma
+  attivo "fjpfjp" #5418, 19 giri 100% chiusi naturali):
+  - Sidebar PIANIFICATORE GIRO/PDC + logo ARTURO·Business ✅
+  - Header "Pianificatore Giro Materiale" + admin · ADMIN · azienda #2 ✅
+  - Title "Buongiorno, admin · Stato della pianificazione giro materiale ·
+    Sabato 2 Maggio 2026" + "aggiornato 22:06 · auto-refresh 60s" ✅
+  - Zone 1 (banda alert) **correttamente nascosta** perché 0 giri
+    non-chiusi (rispetta semantica del design) ✅
+  - Zone 2 SX: card "fjpfjp" attivo #5418 · 10/07/2026 → 01/08/2026 ·
+    23 giorni · 19 giri totali · 1 regola · 19/19 100% bar verde ✅
+  - Zone 2 DX: "ESEGUITO 14 minuti fa · 02/05/2026 · 21:51 · 1
+    programma · 19 giri creati oggi · 19 giri totali · 0 non chiusi" ✅
+  - Zone 3: empty state placeholder come da copy ✅
+  - Console clean (solo info React DevTools + HMR Vite) ✅
+
+### Conseguenze pratiche
+
+1. **1° ruolo dashboard ora atterra su valore reale**: l'utente entra
+   e vede subito (a) cosa è attivo, (b) qual è la copertura naturale
+   dei giri, (c) quando è stato l'ultimo run. Non più placeholder.
+2. **Patterns riutilizzabili**: `Kpi`, `SectionHeader`,
+   `ChiusiNaturalmenteKpi` (con threshold colore 90/70/altro) sono
+   helper interni al file, ma se serve estrarli per altre dashboard
+   sono già strutturati come componenti puri.
+3. **Auto-refresh "60s"** è dichiarato in copy ma NON ancora wired:
+   le query React Query usano lo `staleTime` default. Token `REFRESH_MS`
+   esposto pronto. Vedi residui.
+
+### Residui aperti (motivazione oggettiva)
+
+- **Audit log per "Attività recenti"**: richiede nuovo schema
+  `audit_event` + service che intercetta crea/pubblica/archivia/
+  genera-giri/aggiungi-regola e materializza eventi. Sprint
+  separato (NON pigrizia: è una feature backend con sue scelte
+  di scope — quanti giorni mostrare, quali eventi, retention).
+- **Warnings persistiti per banda alert**: oggi `BuilderResult.warnings`
+  esiste solo come response sincrona di `POST /genera-giri`, non
+  viene salvato in DB. Servirebbe una tabella `builder_run_warning`
+  legata a `builder_run`. Sprint separato.
+- **Corse residue scoperte aggregate**: stesso pattern dei warnings —
+  oggi il dato esiste solo nella response sincrona.
+- **Sede del run nel card "Ultimo run"**: il design mostra "FIO ·
+  Fiorenza"; oggi `GiroListItem` non espone `localita_manutenzione_*`,
+  servirebbe estendere il serializer o lookup separato. Tradeoff
+  perf vs UX, da discutere.
+- **`refetchInterval=60_000` su query dashboard**: i hook attuali
+  (`useProgrammi`, `useGiriAzienda`, `useGiriProgramma`,
+  `useProgramma`) non accettano override di refetchInterval. Serve
+  o estensione dei hook con parametro opzionale, o creazione di
+  varianti dashboard-only.
+- **Test dedicati DashboardRoute**: non aggiunti per il momento.
+  La logica derivata (sort giri, percent calc, relative date) è
+  facile da testare in isolation; può essere oggetto di un MR
+  successivo se la dashboard si estende.
+
+### Prossimo step
+
+A scelta utente: (a) chiudere i residui sopra in MR successivi
+(audit_log = sprint dedicato), (b) procedere con altre 4 schermate
+del bundle design (`02-programmi`, `03-dettaglio-programma`,
+`04-giri`, `05-gantt-giro`), (c) tornare a Sprint 7.3 (Dashboard
+Pianificatore Turno PdC).
+
+---
+
 ## 2026-05-02 (85) — Vincoli inviolabili materiale: integrazione backend (validation HARD su POST regole)
 
 ### Contesto
