@@ -2,13 +2,15 @@
   "_metadata": {
     "nome_file": "vincoli_materiale_inviolabili.json",
     "data_creazione": "2026-05-02",
-    "fonte": "Conferma utente in chat + dataset turni_materiale_2026_dump.json + interrogazione DB materiale_tipo",
+    "data_ultima_modifica": "2026-05-02 (entry 92)",
+    "fonte": "Conferma utente in chat",
     "scopo": "Vincoli a livello tipo materiale, INDIPENDENTI dal singolo programma di pianificazione. Non possono essere violati da una regola programma_regola_assegnazione: il backend valida ogni POST/PUT regola contro questo file e ritorna 400 se viola.",
     "differenza_da_programma_regola_assegnazione": "programma_regola_assegnazione contiene scelte SOFT del pianificatore per il singolo programma (es. 'su questo programma uso Vivalto per la R39'). Questo file contiene vincoli HARD che si applicano sempre, a prescindere dal programma scelto dal pianificatore.",
     "azienda": "trenord",
-    "scope_multi_tenant": "Quando si importerà SAD/Trenitalia/altre aziende, i vincoli 'tipo: tecnico_alimentazione' restano (legge di fisica). I vincoli 'tipo: contrattuale_omologazione' e 'tipo: operativo_turistico' sono specifici Trenord e vanno reimpostati per altre aziende.",
-    "totale_vincoli": 7,
-    "metodo_match": "I vincoli matchano direttamente su materiale_tipo.codice (PK), non su string famiglia (più robusto). Le linee vengono matchate sulle stazioni origine/destinazione delle corse catturate dai filtri della regola (regex pattern), non su codice_linea (che varia tra PdE diversi). Per famiglie con stazioni-capolinea ambigue (es. BRESCIA è capolinea sia di Brescia-Parma sia di Brescia-Iseo-Edolo), si usano pattern di rotta bidirezionali (es. 'BRESCIA.*PARMA|PARMA.*BRESCIA') invece di pattern singolo per stazione."
+    "scope_multi_tenant": "Quando si importerà SAD/Trenitalia/altre aziende, il vincolo 'tecnico_alimentazione' resta (legge di fisica). Il vincolo 'contrattuale_omologazione' TILO è specifico Trenord/SBB e va reimpostato per altre aziende.",
+    "totale_vincoli": 2,
+    "metodo_match": "I vincoli matchano direttamente su materiale_tipo.codice (PK), non su string famiglia (più robusto). Le linee vengono matchate sulle stazioni origine/destinazione delle corse catturate dai filtri della regola (regex pattern).",
+    "rationale_eliminazione_vincoli_operativi": "Entry 89-91 avevano introdotto vincoli HARD operativi per assegnamenti deposito (ATR803, ATR125/115, ALn668, D520). Si sono dimostrati ingestibili: ogni linea ha decine di sub-tratte (es. Brescia-Parma include Brescia-Piadena, Piadena-Parma, ecc.) e il pianificatore non poteva creare regole legittime senza falsi positivi. Decisione utente entry 92: i vincoli operativi sono soft (responsabilità del pianificatore), restano HARD solo i 2 fisicamente/legalmente inviolabili."
   },
   "vincoli": [
     {
@@ -43,9 +45,11 @@
         "(?i)\\bEDOLO\\b",
         "(?i)\\bPISOGNE\\b",
         "(?i)\\bDARFO\\b",
-        "(?i)\\bROVATO\\b.*\\bISEO\\b",
-        "(?i)\\bBRESCIA.*PARMA\\b|\\bPARMA.*BRESCIA\\b",
-        "(?i)\\bBORGO.*VAL.*TARO\\b"
+        "(?i)\\bSULZANO\\b",
+        "(?i)\\bMARONE\\b",
+        "(?i)\\bPARATICO\\b",
+        "(?i)\\bCEDEGOLO\\b",
+        "(?i)\\bBRENO\\b"
       ],
       "linee_descrizione_vietate": [
         "Brescia-Iseo-Edolo (NON elettrificata)",
@@ -58,7 +62,7 @@
         "ALn668(1000)",
         "D520"
       ],
-      "note": "ATR803 Coleoni è diesel ibrido (trazione termica + elettrica), può girare ovunque. ATR125/ATR115/ALn668(1000)/D520 sono diesel pure: tecnicamente potrebbero andare anche su elettrificate, ma è scelta operativa Trenord (vincolo soft, non in questo file). Le stazioni 'vietate' sono i capolinea/intermedie tipiche delle linee non elettrificate del PdE Trenord."
+      "note": "ATR803 Coleoni è diesel ibrido (trazione termica + elettrica), può girare ovunque. ATR125/ATR115/ALn668(1000)/D520 sono diesel pure: tecnicamente potrebbero andare anche su elettrificate, ma è scelta operativa Trenord (vincolo soft, non in questo file). Le stazioni 'vietate' sono i capolinea/intermedie tipiche delle linee non elettrificate del PdE Trenord. NB: rimosso BRESCIA dal pattern blacklist perché è anche capolinea di linee elettrificate (Bergamo-Brescia, Brescia-Milano); per le corse Brescia-Iseo basta che ISEO/EDOLO/etc compaia in destinazione."
     },
     {
       "id": "contrattuale_tilo_flirt_524",
@@ -85,135 +89,7 @@
         "Varese-Saronno-Milano (con servizio MXP-Varese)"
       ],
       "servizi_commerciali_dichiarati": ["S10", "S30", "S40", "RE80"],
-      "note": "Servizi TILO rilevati nel PdE 2026: S10, S30, S40. Una corsa è considerata ammessa se origine O destinazione matcha almeno un pattern. Verificato sul dataset: 7 turni ETR524 tutti compliant."
-    },
-    {
-      "id": "operativo_treno_dei_sapori_d520",
-      "nome": "Treno dei Sapori (D520) — solo Brescia-Iseo-Edolo",
-      "tipo": "operativo_turistico",
-      "scope": "Specifico Trenord (treno turistico stagionale)",
-      "modalita": "whitelist",
-      "descrizione": "Il Treno dei Sapori è un convoglio turistico speciale Trenord trainato dal locomotore diesel D520, in servizio sulla linea della Valcamonica (Brescia-Iseo-Edolo). Non viene utilizzato su altre linee.",
-      "materiale_tipo_codici_target": [
-        "D520"
-      ],
-      "stazioni_ammesse_pattern_regex": [
-        "(?i)\\bBRESCIA\\b.*\\b(ISEO|EDOLO|PISOGNE|DARFO|SULZANO|MARONE|PARATICO|CEDEGOLO|BRENO)\\b",
-        "(?i)\\b(ISEO|EDOLO|PISOGNE|DARFO|SULZANO|MARONE|PARATICO|CEDEGOLO|BRENO)\\b.*\\bBRESCIA\\b",
-        "(?i)\\b(ISEO|EDOLO|PISOGNE|DARFO|SULZANO|MARONE|PARATICO|CEDEGOLO|BRENO)\\b.*\\b(ISEO|EDOLO|PISOGNE|DARFO|SULZANO|MARONE|PARATICO|CEDEGOLO|BRENO)\\b"
-      ],
-      "linee_descrizione_ammesse": [
-        "Brescia-Iseo-Edolo (NON elettrificata)"
-      ],
-      "note": "Conferma utente 2026-05-02. Pattern bidir di rotta: BRESCIA è ambigua (capolinea anche di Brescia-Parma e Brescia-Milano), serve la coppia con stazione Valcamonica (ISEO/EDOLO/...) per accettare la corsa."
-    },
-    {
-      "id": "operativo_atr803_linee_assegnate",
-      "nome": "ATR803 Coleoni — assegnamento operativo",
-      "tipo": "operativo_deposito_assegnamento",
-      "scope": "Specifico Trenord (assegnamento operativo Coleoni)",
-      "modalita": "whitelist",
-      "descrizione": "ATR803 Coleoni assegnato dal pianificatore solo alle linee Brescia-Parma, Pavia-Alessandria, Pavia-Vercelli, Pavia-Codogno-Cremona (con sub-tratte Pavia-Mortara, Pavia-Torreberetti, Codogno-Cremona).",
-      "materiale_tipo_codici_target": [
-        "ATR803"
-      ],
-      "stazioni_ammesse_pattern_regex": [
-        "(?i)\\bBRESCIA\\b.*\\bPARMA\\b|\\bPARMA\\b.*\\bBRESCIA\\b",
-        "(?i)\\bPAVIA\\b.*\\bALESSANDRIA\\b|\\bALESSANDRIA\\b.*\\bPAVIA\\b",
-        "(?i)\\bPAVIA\\b.*\\bVERCELLI\\b|\\bVERCELLI\\b.*\\bPAVIA\\b",
-        "(?i)\\bPAVIA\\b.*\\bCREMONA\\b|\\bCREMONA\\b.*\\bPAVIA\\b",
-        "(?i)\\bPAVIA\\b.*\\bCODOGNO\\b|\\bCODOGNO\\b.*\\bPAVIA\\b",
-        "(?i)\\bPAVIA\\b.*\\bCASALPUSTERLENGO\\b|\\bCASALPUSTERLENGO\\b.*\\bPAVIA\\b",
-        "(?i)\\bCODOGNO\\b.*\\bCREMONA\\b|\\bCREMONA\\b.*\\bCODOGNO\\b",
-        "(?i)\\bCASALPUSTERLENGO\\b.*\\bCODOGNO\\b|\\bCODOGNO\\b.*\\bCASALPUSTERLENGO\\b",
-        "(?i)\\bPAVIA\\b.*\\bMORTARA\\b|\\bMORTARA\\b.*\\bPAVIA\\b",
-        "(?i)\\bPAVIA\\b.*\\bTORREBERETTI\\b|\\bTORREBERETTI\\b.*\\bPAVIA\\b",
-        "(?i)\\bMORTARA\\b.*\\bALESSANDRIA\\b|\\bALESSANDRIA\\b.*\\bMORTARA\\b",
-        "(?i)\\bMORTARA\\b.*\\bVERCELLI\\b|\\bVERCELLI\\b.*\\bMORTARA\\b",
-        "(?i)\\bTORREBERETTI\\b.*\\bALESSANDRIA\\b|\\bALESSANDRIA\\b.*\\bTORREBERETTI\\b"
-      ],
-      "linee_descrizione_ammesse": [
-        "Brescia-Parma (NON elettrificata)",
-        "Pavia-Alessandria (con sub Mortara, Torreberetti)",
-        "Pavia-Vercelli (con sub Mortara)",
-        "Pavia-Codogno-Cremona (con sub Casalpusterlengo)",
-        "Codogno-Cremona, Codogno-Casalpusterlengo (sub-tratte)",
-        "Mortara-Alessandria, Mortara-Vercelli (sub linee Pavia)",
-        "Torreberetti-Alessandria (sub Pavia-Alessandria)"
-      ],
-      "note": "Conferma utente 2026-05-02 (entry 90). Pattern bidir di rotta evita falsi positivi su stazioni ambigue. Aggiunte sub-tratte Pavia-Mortara, Pavia-Torreberetti, Mortara-Alessandria e affini su richiesta utente: il pianificatore filtra spesso `codice_origine=PAVIA` e cattura corse con destinazione Mortara/Torreberetti che sono legittime sub-tratte ATR803."
-    },
-    {
-      "id": "operativo_atr115_deposito_lecco",
-      "nome": "ATR115 Pesa Atribo — solo deposito Lecco",
-      "tipo": "operativo_deposito_assegnamento",
-      "scope": "Specifico Trenord (deposito Lecco)",
-      "modalita": "whitelist",
-      "descrizione": "ATR115 Pesa Atribo del solo deposito Lecco (a differenza dell'ATR125, NON è in dotazione al deposito Iseo). Linee operative: Lecco-Molteno-Milano P.Garibaldi, Lecco-Molteno-Como, Molteno-Como.",
-      "materiale_tipo_codici_target": [
-        "ATR115"
-      ],
-      "stazioni_ammesse_pattern_regex": [
-        "(?i)\\bLECCO\\b.*\\bMOLTENO\\b|\\bMOLTENO\\b.*\\bLECCO\\b",
-        "(?i)\\bLECCO\\b.*\\bCOMO\\b|\\bCOMO\\b.*\\bLECCO\\b",
-        "(?i)\\bMOLTENO\\b.*\\bCOMO\\b|\\bCOMO\\b.*\\bMOLTENO\\b",
-        "(?i)\\bLECCO\\b.*\\bMILANO PORTA GARIBALDI\\b|\\bMILANO PORTA GARIBALDI\\b.*\\bLECCO\\b",
-        "(?i)\\bMOLTENO\\b.*\\bMILANO PORTA GARIBALDI\\b|\\bMILANO PORTA GARIBALDI\\b.*\\bMOLTENO\\b"
-      ],
-      "linee_descrizione_ammesse": [
-        "Lecco-Molteno-Milano P.Garibaldi",
-        "Lecco-Molteno-Como (S8/Brianza)",
-        "Molteno-Como (sub)"
-      ],
-      "note": "Conferma utente 2026-05-02. Le stazioni COMO matchano COMO S.GIOVANNI/CAMERLATA/LAGO (regex \\bCOMO\\b)."
-    },
-    {
-      "id": "operativo_atr125_deposito_lecco_e_iseo",
-      "nome": "ATR125 Minuetto — depositi Lecco + Iseo",
-      "tipo": "operativo_deposito_assegnamento",
-      "scope": "Specifico Trenord (depositi Lecco + Iseo)",
-      "modalita": "whitelist",
-      "descrizione": "ATR125 Minuetto è in dotazione a 2 depositi: Lecco (3 linee Brianza) E Iseo (linea Valcamonica). Quindi può circolare su Lecco-Molteno-Milano P.Garibaldi, Lecco-Molteno-Como, Molteno-Como, e anche su Brescia-Iseo-Edolo.",
-      "materiale_tipo_codici_target": [
-        "ATR125"
-      ],
-      "stazioni_ammesse_pattern_regex": [
-        "(?i)\\bLECCO\\b.*\\bMOLTENO\\b|\\bMOLTENO\\b.*\\bLECCO\\b",
-        "(?i)\\bLECCO\\b.*\\bCOMO\\b|\\bCOMO\\b.*\\bLECCO\\b",
-        "(?i)\\bMOLTENO\\b.*\\bCOMO\\b|\\bCOMO\\b.*\\bMOLTENO\\b",
-        "(?i)\\bLECCO\\b.*\\bMILANO PORTA GARIBALDI\\b|\\bMILANO PORTA GARIBALDI\\b.*\\bLECCO\\b",
-        "(?i)\\bMOLTENO\\b.*\\bMILANO PORTA GARIBALDI\\b|\\bMILANO PORTA GARIBALDI\\b.*\\bMOLTENO\\b",
-        "(?i)\\bBRESCIA\\b.*\\b(ISEO|EDOLO|PISOGNE|DARFO|SULZANO|MARONE|PARATICO|CEDEGOLO|BRENO)\\b",
-        "(?i)\\b(ISEO|EDOLO|PISOGNE|DARFO|SULZANO|MARONE|PARATICO|CEDEGOLO|BRENO)\\b.*\\bBRESCIA\\b",
-        "(?i)\\b(ISEO|EDOLO|PISOGNE|DARFO|SULZANO|MARONE|PARATICO|CEDEGOLO|BRENO)\\b.*\\b(ISEO|EDOLO|PISOGNE|DARFO|SULZANO|MARONE|PARATICO|CEDEGOLO|BRENO)\\b"
-      ],
-      "linee_descrizione_ammesse": [
-        "Lecco-Molteno-Milano P.Garibaldi (deposito Lecco)",
-        "Lecco-Molteno-Como (deposito Lecco)",
-        "Molteno-Como (deposito Lecco)",
-        "Brescia-Iseo-Edolo (deposito Iseo, NON elettrificata)"
-      ],
-      "note": "Conferma utente 2026-05-02 (entry 90). ATR125 è multi-deposito: Lecco + Iseo. ATR115 invece solo Lecco (vincolo separato). Vincolo splittato per coerenza con la dotazione fisica reale Trenord."
-    },
-    {
-      "id": "operativo_aln668_deposito_iseo",
-      "nome": "ALn668(1000) — deposito Iseo",
-      "tipo": "operativo_deposito_assegnamento",
-      "scope": "Specifico Trenord (deposito Iseo)",
-      "modalita": "whitelist",
-      "descrizione": "ALn668(1000) del deposito Iseo. Linea operativa: Brescia-Iseo-Edolo (Valcamonica).",
-      "materiale_tipo_codici_target": [
-        "ALn668(1000)"
-      ],
-      "stazioni_ammesse_pattern_regex": [
-        "(?i)\\bBRESCIA\\b.*\\b(ISEO|EDOLO|PISOGNE|DARFO|SULZANO|MARONE|PARATICO|CEDEGOLO|BRENO)\\b",
-        "(?i)\\b(ISEO|EDOLO|PISOGNE|DARFO|SULZANO|MARONE|PARATICO|CEDEGOLO|BRENO)\\b.*\\bBRESCIA\\b",
-        "(?i)\\b(ISEO|EDOLO|PISOGNE|DARFO|SULZANO|MARONE|PARATICO|CEDEGOLO|BRENO)\\b.*\\b(ISEO|EDOLO|PISOGNE|DARFO|SULZANO|MARONE|PARATICO|CEDEGOLO|BRENO)\\b"
-      ],
-      "linee_descrizione_ammesse": [
-        "Brescia-Iseo-Edolo (NON elettrificata)"
-      ],
-      "note": "Conferma utente 2026-05-02. Stesso vincolo geografico del Treno dei Sapori, applicato anche all'ALn668. Il deposito Iseo è dedicato esclusivamente alla linea della Valcamonica."
+      "note": "Servizi TILO rilevati nel PdE 2026: S10, S30, S40. Una corsa è considerata ammessa se origine O destinazione matcha almeno un pattern."
     }
   ]
 }

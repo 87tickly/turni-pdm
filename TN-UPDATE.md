@@ -10,6 +10,94 @@
 
 ---
 
+## 2026-05-02 (93) — Vincoli inviolabili: rimossi 5 vincoli operativi (HARD ingestibili sulle sub-tratte)
+
+### Contesto
+
+Entry 89-91 avevano introdotto vincoli HARD operativi (ATR803,
+ATR125+ATR115, ALn668, D520) per limitare il pianificatore alle linee
+operative dei depositi. Smoke ripetuto sull'UI ha mostrato falsi
+positivi sistematici sulle sub-tratte legittime: corse `CREMONA →
+BELGIOIOSO`, `CORTEOLONA → CREMONA`, `BRESCIA → PIADENA`, `PIADENA →
+PARMA` sono tutte ATR803 legittime ma il pattern bidir
+capolinea-capolinea le rifiutava.
+
+Decisione utente:
+> "allora eliminiamo hard se va in sbattimento con qualsiasi sub,
+> perchè Comunque [...] fanno parte della stessa linea."
+
+Espandere la whitelist con tutte le combinazioni stazioni intermedie
+= esplosione combinatoria. Approccio HARD non sostenibile per
+vincoli operativi.
+
+### Modifiche
+
+#### `data/vincoli_materiale_inviolabili.json` (7 → 2 vincoli)
+
+**Rimossi**:
+- `operativo_atr803_linee_assegnate`
+- `operativo_atr115_deposito_lecco`
+- `operativo_atr125_deposito_lecco_e_iseo`
+- `operativo_aln668_deposito_iseo`
+- `operativo_treno_dei_sapori_d520`
+
+**Mantenuti** (i 2 veramente inviolabili):
+- `tecnico_elettrico_no_linee_diesel` (legge di fisica: catenaria)
+- `contrattuale_tilo_flirt_524` (omologazione TILO/CH)
+
+Rimosso anche `BRESCIA` dalla blacklist del vincolo elettrico
+(ambiguo: capolinea anche di linee elettrificate). Il vincolo ora
+matcha solo le stazioni interne Valcamonica (ISEO, EDOLO, PISOGNE,
+DARFO, SULZANO, MARONE, PARATICO, CEDEGOLO, BRENO).
+
+#### Test backend (`test_vincoli_inviolabili.py`)
+
+Da 26 → **12 test**:
+- Rimossi 14 test sui vincoli operativi.
+- 2 test nuovi: `test_diesel_atr125_libero_ovunque`,
+  `test_diesel_atr803_su_brescia_iseo_ok` (sostituisce la versione
+  "violazione" dell'entry 89).
+- `test_carica_vincoli_dal_json_reale` aggiornato a 2 vincoli.
+
+### Verifiche
+
+- `uv run mypy --strict src` ✅ 58 file clean.
+- `uv run pytest -q` ✅ **511 passed, 12 skipped** (era 525, -14
+  eliminati con vincoli operativi).
+- **Smoke API**:
+  1. `ATR803` senza filtro → **201** (libertà totale).
+  2. `ETR421` senza filtro → **400** vincolo elettrico (corse
+     Brescia-Edolo).
+  3. `ETR524` con filtro `codice_origine=COMO S.GIOV` → **201**.
+
+### Conseguenze pratiche
+
+1. **ATR803, ATR125, ATR115, ALn668, D520**: nessun vincolo HARD
+   geografico. Il pianificatore decide via filtri della regola.
+2. **Materiale elettrico**: rimane il blocco fisico su Valcamonica.
+   Il pianificatore deve filtrare la regola per evitare di catturare
+   corse Brescia-Iseo-Edolo. NON può creare regola ETR421 senza
+   filtri.
+3. **TILO ETR524**: rimane vincolo whitelist (solo Chiasso/MXP/Luino).
+4. **Workflow corretto**: il pianificatore deve sempre specificare
+   filtri (`codice_linea`, `codice_origine`, `direttrice`, ecc.) per
+   restringere il subset di corse.
+
+### Limitazioni note / aperti
+
+- **Workflow filtri**: nessuna validazione frontend forza l'utente
+  ad aggiungere filtri. Se mette composizione ETR421 senza filtri,
+  ottiene 400. Possibile miglioramento UX: blocca il submit se
+  filtri vuoti, o messaggio di errore con suggerimento. Decisione
+  utente per follow-up.
+
+### Prossimo step
+
+Decisione utente: miglioramento UX (filtri obbligatori, suggerimento
+errore) o altro task.
+
+---
+
 ## 2026-05-02 (92) — Chiusura must-have #2 Gantt giro: matrice ore × stazioni (Opzione A)
 
 ### Contesto
