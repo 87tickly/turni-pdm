@@ -28,9 +28,6 @@ from sqlalchemy.orm import joinedload
 
 from colazione.auth import require_role
 from colazione.db import get_session
-from colazione.domain.vincoli import carica_vincoli, valida_regola
-from colazione.models.anagrafica import Stazione
-from colazione.models.corse import CorsaCommerciale
 from colazione.models.programmi import (
     ProgrammaMateriale,
     ProgrammaRegolaAssegnazione,
@@ -43,11 +40,6 @@ from colazione.schemas.programmi import (
     ProgrammaRegolaAssegnazioneRead,
 )
 from colazione.schemas.security import CurrentUser
-from colazione.schemas.vincoli import (
-    CorsaProblematica,
-    VincoliViolatiResponse,
-    VincoloViolato,
-)
 
 router = APIRouter(prefix="/api/programmi", tags=["programmi"])
 
@@ -159,9 +151,8 @@ async def create_programma(
     session.add(programma)
     await session.flush()  # popola programma.id
 
-    # Vincoli inviolabili anche per regole nested in POST programma.
-    for regola_payload in payload.regole:
-        await _verifica_vincoli_inviolabili(session, programma, regola_payload)
+    # Entry 96: nessun check vincoli inviolabili sulle regole nested.
+    # Il builder applica i vincoli a livello corsa (residua se incompatibile).
 
     for regola_payload in payload.regole:
         # Sprint 5.1: composizione è la fonte autorevole. I campi legacy
@@ -289,71 +280,6 @@ async def update_programma(
 # =====================================================================
 
 
-async def _verifica_vincoli_inviolabili(
-    session: AsyncSession,
-    programma: ProgrammaMateriale,
-    payload: ProgrammaRegolaAssegnazioneCreate,
-) -> None:
-    """Valida la regola in creazione contro i vincoli inviolabili
-    (`data/vincoli_materiale_inviolabili.json`).
-
-    Carica le corse del programma (azienda + finestra date) e il lookup
-    stazioni, applica i filtri della regola, e verifica che nessuna
-    corsa catturata violi un vincolo HARD per il materiale scelto.
-
-    Solleva ``HTTPException(400)`` con response strutturata
-    ``VincoliViolatiResponse`` se violato.
-    """
-    # 1. Corse candidate del programma (azienda + intervallo date)
-    stmt_corse = select(CorsaCommerciale).where(
-        CorsaCommerciale.azienda_id == programma.azienda_id,
-        CorsaCommerciale.valido_da <= programma.valido_a,
-        CorsaCommerciale.valido_a >= programma.valido_da,
-    )
-    corse = (await session.execute(stmt_corse)).scalars().all()
-
-    # 2. Lookup stazioni dell'azienda
-    stmt_st = select(Stazione).where(Stazione.azienda_id == programma.azienda_id)
-    stazioni_lookup = {
-        s.codice: s.nome for s in (await session.execute(stmt_st)).scalars().all()
-    }
-
-    # 3. Carica vincoli (file JSON)
-    vincoli = carica_vincoli()
-
-    # 4. Valida (funzione pura)
-    violazioni = valida_regola(
-        corse_programma=corse,
-        stazioni_lookup=stazioni_lookup,
-        composizione=[c.model_dump() for c in payload.composizione],
-        filtri=[f.model_dump() for f in payload.filtri_json],
-        vincoli=vincoli,
-    )
-
-    if not violazioni:
-        return
-
-    response = VincoliViolatiResponse(
-        violazioni=[
-            VincoloViolato(
-                vincolo_id=v.vincolo_id,
-                vincolo_nome=v.vincolo_nome,
-                vincolo_tipo=v.vincolo_tipo,
-                materiale_tipo_codice=v.materiale_tipo_codice,
-                descrizione=v.descrizione,
-                corse_problematiche=[
-                    CorsaProblematica(**cp) for cp in v.corse_problematiche
-                ],
-            )
-            for v in violazioni
-        ]
-    )
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=response.model_dump(mode="json"),
-    )
-
-
 @router.post(
     "/{programma_id}/regole",
     response_model=ProgrammaRegolaAssegnazioneRead,
@@ -370,11 +296,13 @@ async def add_regola(
     - programma deve esistere e appartenere all'azienda corrente
     - programma deve essere in stato `bozza` (mod. di un attivo richiede
       revisione futura, fuori MVP)
-    - la regola NON deve violare i vincoli inviolabili a livello tipo
-      materiale (`data/vincoli_materiale_inviolabili.json`): TILO ETR524
-      solo Chiasso/MXP-Varese/Luino-MXP, materiale elettrico no linee
-      non elettrificate, Treno dei Sapori D520 solo Brescia-Iseo-Edolo.
-      Se viola → 400 con elenco violazioni.
+
+    Entry 96: i vincoli HARD a livello tipo materiale
+    (`data/vincoli_materiale_inviolabili.json`) **non sono più
+    applicati qui**. Il pianificatore può creare regole "ampie" senza
+    essere bloccato. Il check viene fatto dal builder (``risolvi_corsa``):
+    le corse incompatibili col materiale di una regola cadono come
+    residue invece che bloccare la creazione.
     """
     p = await _get_programma_or_404(session, programma_id, user.azienda_id)
     if p.stato != "bozza":
@@ -382,9 +310,6 @@ async def add_regola(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"programma in stato {p.stato!r}: regole modificabili solo in bozza",
         )
-
-    # Vincolo inviolabile: solleva 400 con response strutturata se violato.
-    await _verifica_vincoli_inviolabili(session, p, payload)
 
     composizione = payload.composizione
     regola = ProgrammaRegolaAssegnazione(

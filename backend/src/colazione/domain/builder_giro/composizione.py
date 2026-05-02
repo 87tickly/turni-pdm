@@ -206,6 +206,8 @@ def assegna_materiali(
     giro: Giro,
     regole: Sequence[_RegolaLike],
     is_accoppiamento_ammesso: IsAccoppiamentoAmmesso | None = None,
+    vincoli_inviolabili: Sequence[Any] = (),
+    stazioni_lookup: dict[str, str] | None = None,
 ) -> GiroAssegnato:
     """Assegna composizione a ogni corsa del giro chiamando ``risolvi_corsa``.
 
@@ -253,7 +255,14 @@ def assegna_materiali(
         tipi_materiale: set[str] = set()
 
         for corsa in giornata.catena_posizionata.catena.corse:
-            assegnazione = risolvi_corsa(corsa, regole, giornata.data, is_accoppiamento_ammesso)
+            assegnazione = risolvi_corsa(
+                corsa,
+                regole,
+                giornata.data,
+                is_accoppiamento_ammesso,
+                vincoli_inviolabili=vincoli_inviolabili,
+                stazioni_lookup=stazioni_lookup,
+            )
             if assegnazione is None:
                 residue.append(CorsaResidua(data=giornata.data, corsa=corsa))
                 continue
@@ -402,23 +411,31 @@ def assegna_e_rileva_eventi(
     giri: Sequence[Giro],
     regole: Sequence[_RegolaLike],
     is_accoppiamento_ammesso: IsAccoppiamentoAmmesso | None = None,
+    vincoli_inviolabili: Sequence[Any] = (),
+    stazioni_lookup: dict[str, str] | None = None,
 ) -> list[GiroAssegnato]:
     """Pipeline completa: ``assegna_materiali`` + ``rileva_eventi_composizione``
     su tutti i giri in input.
 
-    Equivalente a::
-
-        [
-            rileva_eventi_composizione(
-                assegna_materiali(g, regole, is_accoppiamento_ammesso)
-            )
-            for g in giri
-        ]
-
-    Esposto come funzione separata per chiarezza nel chiamante.
+    Args:
+        giri: lista di ``Giro`` da multi-giornata.
+        regole: regole del programma.
+        is_accoppiamento_ammesso: callback Sprint 5.5 (opzionale).
+        vincoli_inviolabili: lista di Vincolo (entry 96). Se non vuota,
+            le corse incompatibili col materiale di una regola
+            cadono come residue invece che bloccare la creazione.
+        stazioni_lookup: ``{codice: nome}`` per i pattern dei vincoli.
     """
     return [
-        rileva_eventi_composizione(assegna_materiali(g, regole, is_accoppiamento_ammesso))
+        rileva_eventi_composizione(
+            assegna_materiali(
+                g,
+                regole,
+                is_accoppiamento_ammesso,
+                vincoli_inviolabili=vincoli_inviolabili,
+                stazioni_lookup=stazioni_lookup,
+            )
+        )
         for g in giri
     ]
 

@@ -452,3 +452,64 @@ def test_aln668_su_bergamo_violazione(vincoli: list[Vincolo]) -> None:
     )
     assert len(violazioni) == 1
     assert violazioni[0].vincolo_id == "operativo_aln668_deposito_iseo"
+
+
+# =====================================================================
+# Entry 96: corsa_ammessa_per_materiale (usata dal builder)
+# =====================================================================
+
+
+def test_corsa_ammessa_etr522_su_bergamo_treviglio(vincoli: list[Vincolo]) -> None:
+    """ETR522 (elettrico) su Bergamo-Treviglio (elettrificata) → ammesso."""
+    from colazione.domain.vincoli import corsa_ammessa_per_materiale
+
+    corsa = CorsaMock("R-1", "ST_BERGAMO", "ST_TREVIGLIO")
+    assert corsa_ammessa_per_materiale(
+        corsa=corsa,
+        materiale_tipo_codice="ETR522",
+        stazioni_lookup=_STAZIONI,
+        vincoli=vincoli,
+    ) is True
+
+
+def test_corsa_ammessa_etr522_su_brescia_edolo(vincoli: list[Vincolo]) -> None:
+    """ETR522 (elettrico) su Brescia-Edolo (NON elettrificata) → NON ammesso."""
+    from colazione.domain.vincoli import corsa_ammessa_per_materiale
+
+    corsa = CorsaMock("R-1", "ST_BS", "ST_EDOLO")
+    assert corsa_ammessa_per_materiale(
+        corsa=corsa,
+        materiale_tipo_codice="ETR522",
+        stazioni_lookup=_STAZIONI,
+        vincoli=vincoli,
+    ) is False
+
+
+def test_corsa_ammessa_atr803_su_brescia_edolo(vincoli: list[Vincolo]) -> None:
+    """ATR803 fuori dalle linee operative ATR803 (deposito Iseo) → NON ammesso."""
+    from colazione.domain.vincoli import corsa_ammessa_per_materiale
+
+    corsa = CorsaMock("R-1", "ST_BS", "ST_EDOLO")
+    # ATR803 è esente dal vincolo elettrico, ma la sua whitelist
+    # operativa NON include la Valcamonica → NON ammesso.
+    assert corsa_ammessa_per_materiale(
+        corsa=corsa,
+        materiale_tipo_codice="ATR803",
+        stazioni_lookup=_STAZIONI,
+        vincoli=vincoli,
+    ) is False
+
+
+def test_corsa_ammessa_lista_vincoli_vuota_sempre_true(
+    vincoli: list[Vincolo],
+) -> None:
+    """Senza vincoli, qualsiasi corsa è ammessa (back-compat)."""
+    from colazione.domain.vincoli import corsa_ammessa_per_materiale
+
+    corsa = CorsaMock("R-1", "ST_BS", "ST_EDOLO")
+    assert corsa_ammessa_per_materiale(
+        corsa=corsa,
+        materiale_tipo_codice="ETR522",
+        stazioni_lookup=_STAZIONI,
+        vincoli=[],
+    ) is True

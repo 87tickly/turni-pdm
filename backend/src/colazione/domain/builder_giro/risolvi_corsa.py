@@ -355,54 +355,75 @@ def risolvi_corsa(
     regole: Sequence[_RegolaLike],
     data: date,
     is_accoppiamento_ammesso: IsAccoppiamentoAmmesso | None = None,
+    vincoli_inviolabili: Sequence[Any] = (),
+    stazioni_lookup: dict[str, str] | None = None,
 ) -> AssegnazioneRisolta | None:
     """Risolve l'assegnazione di una corsa (composizione di rotabili)
     in una data.
 
-    Algoritmo (vedi `PROGRAMMA-MATERIALE.md` §4.1 e
-    `SPRINT-5-RIPENSAMENTO.md` §5.5):
+    Algoritmo (vedi `PROGRAMMA-MATERIALE.md` §4.1, `SPRINT-5-RIPENSAMENTO.md`
+    §5.5, entry 96 vincoli HARD nel builder):
 
     1. Determina `giorno_tipo` dalla `data`.
     2. Filtra le `regole` candidate (AND di tutti i filtri).
-    3. Se nessuna candidata → `None`.
-    4. Ordina per `(priorita DESC, specificita DESC)`.
-    5. Se top-2 hanno priorità+specificità identiche → `RegolaAmbiguaError`.
-    6. Costruisce ``composizione`` dalla ``composizione_json`` della top.
-    7. **Sprint 5.5 — Validazione accoppiamento**: se la composizione
+    3. **Entry 96**: se passati ``vincoli_inviolabili``, scarta le
+       regole la cui composizione include un materiale incompatibile
+       con questa corsa (es. ETR522 elettrico su corsa Brescia-Edolo).
+       La regola viene rimossa dalle candidate, la corsa cade su una
+       regola successiva o diventa residua.
+    4. Se nessuna candidata → `None`.
+    5. Ordina per `(priorita DESC, specificita DESC)`.
+    6. Se top-2 hanno priorità+specificità identiche → `RegolaAmbiguaError`.
+    7. Costruisce ``composizione`` dalla ``composizione_json`` della top.
+    8. **Sprint 5.5 — Validazione accoppiamento**: se la composizione
        ha 2+ materiali, ``is_composizione_manuale=False``, e il
        chiamante ha passato ``is_accoppiamento_ammesso``, ogni coppia
        (normalizzata lex) deve essere ammessa. Altrimenti
        ``ComposizioneNonAmmessaError``.
-    8. Ritorna ``AssegnazioneRisolta`` con la composizione.
+    9. Ritorna ``AssegnazioneRisolta`` con la composizione.
 
     Args:
-        corsa: oggetto con i campi della corsa (vedi
-            `schemas/programmi.CAMPI_AMMESSI`).
-        regole: lista di regole del programma, **già caricata** (no lazy
-            ORM). Tipicamente `programma.regole`.
+        corsa: oggetto con i campi della corsa.
+        regole: lista di regole del programma, già caricata.
         data: data per cui si risolve.
-        is_accoppiamento_ammesso: callback opzionale che dato (a, b)
-            ordinati lex ritorna True se la coppia è ammessa. Se
-            ``None``, la validazione accoppiamento viene saltata
-            (comportamento legacy / testing semplice).
+        is_accoppiamento_ammesso: callback opzionale Sprint 5.5.
+        vincoli_inviolabili: lista di Vincolo (caricati da
+            ``carica_vincoli()``). Se non vuota, le regole con
+            materiale incompatibile con la corsa vengono escluse
+            dalle candidate. Default `()` = no check (back-compat).
+        stazioni_lookup: ``{codice: nome}`` per i pattern dei vincoli.
+            Required se ``vincoli_inviolabili`` non è vuota.
 
     Returns:
-        `AssegnazioneRisolta` con regola vincente, oppure `None` se
-        nessuna regola matcha (corsa "residua" — vedi strict mode).
-
-    Raises:
-        RegolaAmbiguaError: se top-2 regole sono indistinguibili.
-        ComposizioneNonAmmessaError: se la composizione viola gli
-            accoppiamenti ammessi (Sprint 5.5).
-        ValueError: se un filtro ha operatore sconosciuto.
+        `AssegnazioneRisolta`, oppure `None` se nessuna regola matcha.
     """
     giorno_tipo = determina_giorno_tipo(data)
 
     candidate = [r for r in regole if matches_all(r.filtri_json, corsa, giorno_tipo)]
+
+    # Entry 96: filtra le regole con materiale incompatibile con questa corsa.
+    # Una regola viene esclusa se ANCHE UNO dei suoi materiali viola un vincolo
+    # HARD per questa corsa (es. ETR522 + corsa Brescia-Edolo → fuori).
+    if vincoli_inviolabili and stazioni_lookup is not None:
+        from colazione.domain.vincoli.inviolabili import corsa_ammessa_per_materiale
+
+        candidate = [
+            r
+            for r in candidate
+            if all(
+                corsa_ammessa_per_materiale(
+                    corsa=corsa,
+                    materiale_tipo_codice=str(item["materiale_tipo_codice"]),
+                    stazioni_lookup=stazioni_lookup,
+                    vincoli=vincoli_inviolabili,
+                )
+                for item in r.composizione_json
+            )
+        ]
+
     if not candidate:
         return None
 
-    # Ordine: priorità più alta vince; a parità, più specifica (più filtri).
     candidate.sort(key=lambda r: (r.priorita, len(r.filtri_json)), reverse=True)
 
     top = candidate[0]
@@ -422,8 +443,6 @@ def risolvi_corsa(
             "lista non vuota)."
         )
 
-    # Validazione accoppiamenti (Sprint 5.5). Skip se manuale o callback
-    # non fornita.
     if not top.is_composizione_manuale and is_accoppiamento_ammesso is not None:
         _valida_accoppiamenti(top.id, composizione, is_accoppiamento_ammesso)
 

@@ -241,6 +241,61 @@ def _corsa_problematica_summary(
     }
 
 
+def corsa_ammessa_per_materiale(
+    *,
+    corsa: _CorsaLike,
+    materiale_tipo_codice: str,
+    stazioni_lookup: dict[str, str],
+    vincoli: Sequence[Vincolo],
+) -> bool:
+    """Verifica se UNA corsa può essere assegnata a UN materiale.
+
+    Usata dal builder (``risolvi_corsa``) per filtrare le regole
+    candidate: se il materiale di una regola NON può fare quella
+    corsa (vincolo HARD violato), la regola viene scartata e si
+    prova la successiva (o la corsa diventa residua).
+
+    Args:
+        corsa: una corsa (CorsaCommerciale o mock con codice_origine,
+            codice_destinazione).
+        materiale_tipo_codice: codice PK del materiale (es. "ETR522").
+        stazioni_lookup: ``{codice: nome}`` per matchare le stazioni
+            contro i pattern dei vincoli.
+        vincoli: lista di ``Vincolo`` (caricata da ``carica_vincoli()``).
+
+    Returns:
+        ``True`` se il materiale può fare la corsa, ``False`` altrimenti.
+        Se la lista vincoli è vuota, ritorna sempre ``True`` (no check).
+    """
+    for vincolo in vincoli:
+        # Vincolo applicabile a questo materiale?
+        if materiale_tipo_codice not in vincolo.materiale_tipo_codici_target:
+            continue
+        if materiale_tipo_codice in vincolo.materiale_tipo_codici_esenti:
+            continue
+
+        if vincolo.modalita == "whitelist":
+            # La corsa deve matchare le stazioni ammesse
+            if not _corsa_matcha_stazioni_ammesse(
+                corsa,
+                stazioni_lookup,
+                vincolo.stazioni_ammesse_pattern,
+                vincolo.stazioni_ammesse_lista,
+            ):
+                return False
+        elif vincolo.modalita == "blacklist":
+            # La corsa NON deve matchare le stazioni vietate
+            if _corsa_matcha_stazioni_vietate(
+                corsa, stazioni_lookup, vincolo.stazioni_vietate_pattern
+            ):
+                return False
+        else:
+            raise ValueError(
+                f"vincolo {vincolo.id}: modalita={vincolo.modalita!r} non supportata"
+            )
+    return True
+
+
 def valida_regola(
     *,
     corse_programma: Iterable[_CorsaLike],

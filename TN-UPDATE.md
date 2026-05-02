@@ -10,6 +10,65 @@
 
 ---
 
+## 2026-05-03 (97) — Vincoli inviolabili V4: spostati dal POST regola al builder
+
+### Contesto
+
+Decisione utente in chat:
+> "se io voglio fare qualcosa con il 521 che cazz me ne frega del
+> vincolo di iseo, non mettere il 521 su iseo e bon, perchè mi devi
+> bloccare tutto??"
+> "tu la regola devi inserirla al contrario"
+
+Il design precedente (entry 85-95) bloccava la creazione della regola
+con 400 se catturava corse incompatibili. Troppo aggressivo.
+
+### Modifiche
+
+`domain/vincoli/inviolabili.py`: nuova funzione pura
+`corsa_ammessa_per_materiale(corsa, materiale, lookup, vincoli) -> bool`.
+
+`domain/builder_giro/risolvi_corsa.py`: 2 nuovi parametri opzionali
+(`vincoli_inviolabili`, `stazioni_lookup`). Quando passati, dopo il
+match dei filtri scarta le regole con materiale incompatibile per
+quella corsa.
+
+`composizione.py`: threading dei 2 parametri in `assegna_materiali`
+e `assegna_e_rileva_eventi`.
+
+`builder.py`: nuovo helper `_carica_stazioni_lookup`. Il builder
+carica i vincoli + lookup e li passa al pipeline di assegnazione.
+
+`api/programmi.py`: **rimossa** `_verifica_vincoli_inviolabili()` e
+tutte le sue chiamate. Niente più 400 sul POST regola per vincoli
+HARD. Imports puliti.
+
+`test_vincoli_inviolabili.py`: 4 test nuovi su
+`corsa_ammessa_per_materiale`.
+
+### Verifiche
+
+- `uv run mypy --strict src` ✅ 58 file clean.
+- `uv run pytest -q` ✅ **523 passed, 12 skipped** (+4 nuovi).
+- **Smoke API**: ATR803/ETR522/ETR524 senza filtri → tutti **201**
+  (erano 400).
+
+### Conseguenze pratiche
+
+1. **Pianificatore libero**: crea regole senza essere bloccato.
+2. **Builder filtra**: per ogni corsa scarta regole con materiale
+   incompatibile. Corse senza regola compatibile → residue.
+3. **Vincoli HARD continuano a funzionare**: nessun ETR522 finirà su
+   Brescia-Edolo nel giro generato.
+
+### Limitazioni note
+
+- **Visibilità corse scartate**: oggi silenti nei warning. UX
+  miglioramento: mostrare nel dettaglio quante corse sono state
+  scartate per vincolo HARD.
+
+---
+
 ## 2026-05-03 (96) — Schermata 5 Gantt giro v3: layout single-line PDF Trenord (chiusura must-have #4 + #5)
 
 ### Contesto

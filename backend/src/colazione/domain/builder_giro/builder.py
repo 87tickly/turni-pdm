@@ -332,6 +332,21 @@ async def _carica_corse(
     return list((await session.execute(stmt)).scalars().all())
 
 
+async def _carica_stazioni_lookup(
+    session: AsyncSession, azienda_id: int
+) -> dict[str, str]:
+    """Carica `{codice: nome}` di tutte le stazioni dell'azienda.
+
+    Entry 96: usato dai vincoli HARD del builder per matchare i
+    pattern stazione contro origine/destinazione delle corse.
+    """
+    stmt = text(
+        "SELECT codice, nome FROM stazione WHERE azienda_id = :azienda_id"
+    )
+    rows = (await session.execute(stmt, {"azienda_id": azienda_id})).all()
+    return {str(r[0]): str(r[1]) for r in rows}
+
+
 async def _count_giri_esistenti(
     session: AsyncSession,
     programma_id: int,
@@ -710,6 +725,12 @@ async def genera_giri(
     festivita = await carica_festivita_periodo(
         session, azienda_id, programma.valido_da, programma.valido_a
     )
+    # Entry 96: vincoli HARD applicati nel builder (non più nel POST regola).
+    # Le corse incompatibili col materiale di una regola cadono come residue.
+    from colazione.domain.vincoli import carica_vincoli
+
+    vincoli_inviolabili = carica_vincoli()
+    stazioni_lookup = await _carica_stazioni_lookup(session, azienda_id)
 
     def is_accoppiamento_ammesso(a: str, b: str) -> bool:
         """Lookup nella set degli accoppiamenti ammessi (Sprint 5.5).
@@ -862,7 +883,13 @@ async def genera_giri(
 
     # 5. Assegnazione regole + eventi composizione (Sprint 5.5: validazione
     #    accoppiamenti via callback)
-    giri_assegnati = assegna_e_rileva_eventi(giri_dom, regole, is_accoppiamento_ammesso)
+    giri_assegnati = assegna_e_rileva_eventi(
+        giri_dom,
+        regole,
+        is_accoppiamento_ammesso,
+        vincoli_inviolabili=vincoli_inviolabili,
+        stazioni_lookup=stazioni_lookup,
+    )
 
     # 6. Strict mode pre-persistenza (sui giri pre-aggregazione)
     _check_strict_mode(programma, giri_assegnati)
