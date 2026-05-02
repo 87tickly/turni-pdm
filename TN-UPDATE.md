@@ -10,6 +10,99 @@
 
 ---
 
+## 2026-05-02 (70) — Sprint 7.6 MR 2: configurazione canonica sedi Trenord (FIO=CERTOSA + whitelist M:N)
+
+### Contesto
+
+Smoke utente Sprint 7.3 ha evidenziato 2 errori sulla configurazione
+delle località manutenzione Trenord:
+
+1. **FIO** (IMPMAN_MILANO_FIORENZA) aveva `stazione_collegata_codice
+   = S01700` (MILANO CENTRALE), ma il proxy commerciale corretto è
+   **MILANO CERTOSA (S01640)** — fisicamente più vicina alla sede di
+   Fiorenza, quindi il vuoto sede→origine prima corsa risulta minimo.
+
+2. **Whitelist M:N `localita_stazione_vicina`** era completamente
+   vuota in DB (lo script `seed_whitelist_e_accoppiamenti.py` non era
+   mai stato eseguito post-migration 0007). Conseguenza: il builder
+   non aveva stazioni candidate dove chiudere i giri "vicino sede"
+   per nessuna delle 6 sedi.
+
+L'utente ha citato anche **NOVATE Milanese** tra le stazioni vicine
+NOV: verificato in DB, **non esiste come stazione PdE Trenord**
+(probabilmente perché è solo deposito/scalo non commerciale, non
+ha corse passeggeri). Annotato come limitazione: se in futuro il
+PdE includerà la stazione, basta aggiungerla al pattern.
+
+### Modifiche
+
+**Backend** (2 file):
+
+- **Migration alembic 0012** `0012_sedi_trenord_canoniche.py`
+  (revision `b9e4c712a83f`, down_revision `a8d3c5f97e21`):
+  - `UPDATE localita_manutenzione SET stazione_collegata_codice =
+    (SELECT codice FROM stazione WHERE nome = 'MILANO CERTOSA')
+    WHERE codice = 'IMPMAN_MILANO_FIORENZA' AND stazione_collegata
+    IS DISTINCT FROM ...` — idempotente
+  - `INSERT INTO localita_stazione_vicina ... ON CONFLICT DO NOTHING`
+    via blocco PL/pgSQL DO $$ ... $$ per ogni (sede, pattern):
+    cerca stazione via ILIKE, INSERT solo se UNICO match. Skip + RAISE
+    NOTICE se 0 o N match (= migration green anche con whitelist
+    parzialmente popolata, no broken-CI).
+  - Whitelist canonica:
+    - **FIO**: GARIBALDI, CENTRALE, LAMBRATE, ROGOREDO, GRECO PIRELLI,
+      **CERTOSA** (sede)
+    - **NOV**: CADORNA, BOVISA POLITECNICO, SARONNO
+    - **CAM**: SEVESO, SARONNO
+    - **LEC, CRE, ISE**: solo la stazione omonima
+- `backend/scripts/seed_whitelist_e_accoppiamenti.py`:
+  - Aggiunto `MILANO CERTOSA` al pattern FIO per coerenza con
+    migration 0012
+  - Annotata limitazione NOVATE come comment block sulla sede NOV
+
+### Verifiche
+
+- `alembic upgrade head`: ✅ migration applicata, no errori
+- Stato DB post-migration:
+
+  | Sede | stazione_collegata | nome | whitelist (count) |
+  |------|--------------------|------|-------------------|
+  | FIO  | S01640 | MILANO CERTOSA | 6 stazioni |
+  | NOV  | S01066 | MILANO CADORNA | 3 stazioni |
+  | CAM  | S01316 | CAMNAGO-LENTATE | 2 stazioni |
+  | LEC  | S01520 | LECCO | 1 stazione |
+  | CRE  | S01915 | CREMONA | 1 stazione |
+  | ISE  | S01021 | ISEO | 1 stazione |
+  | TILO | NULL | (blackbox) | 0 |
+
+- `uv run mypy --strict src`: ✅ 52 source files clean
+- `uv run pytest --tb=line`: ✅ **433 passed, 12 skipped in 19.62s**
+  (skip = 11 test distruttivi protetti dalla guardia entry 67 + 1
+  storico)
+
+### Memoria aggiornata
+
+- `project_stazione_collegata_localita.md`: tabella aggiornata con
+  FIO=CERTOSA + descrizione whitelist + nota limitazione NOVATE
+- `MEMORY.md`: descrizione riga aggiornata
+
+### Limitazioni note
+
+- **NOVATE Milanese**: l'utente l'ha citata come stazione vicina NOV,
+  ma non esiste nel PdE Trenord 2025-2026 attuale. Se in futuro
+  apparirà nel PdE, basta aggiungere il pattern in
+  `WHITELIST_TRENORD["IMPMAN_NOVATE"]` + nuova migration o re-run
+  dello script seed.
+
+### Prossimo step
+
+MR 3 (genera-giri cumulativo): rimuovere il `force=true` globale che
+cancella tutti i giri del programma, sostituirlo con scoping per
+(programma, località). Aggiungere riepilogo km giornaliero/mensile
+per le giornate del giro.
+
+---
+
 ## 2026-05-02 (69) — Mini-fix UX programma materiale: rimuovi N. giornate (safety) + chiarisci "turno unico"
 
 ### Contesto

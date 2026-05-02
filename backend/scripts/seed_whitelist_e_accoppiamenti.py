@@ -333,11 +333,16 @@ WHITELIST_TRENORD: dict[str, list[str]] = {
         "%MILANO%LAMBRATE%",
         "%MILANO%ROGOREDO%",
         "%MILANO%GRECO%PIRELLI%",
+        "MILANO CERTOSA",  # Sprint 7.6 MR 2: sede fisica
     ],
     "IMPMAN_NOVATE": [  # NOV
         "%MILANO%CADORNA%",
         "%MILANO%BOVISA%",
         "SARONNO",  # condivisa con CAM
+        # NB Sprint 7.6 MR 2: l'utente ha citato anche NOVATE
+        # MILANESE ma non e' presente come stazione PdE Trenord
+        # (e' solo deposito, non commerciale). Non aggiunto fino a
+        # quando il PdE non la include. Vedi TN-UPDATE entry 70.
     ],
     "IMPMAN_CAMNAGO": [  # CAM
         "SEVESO",
