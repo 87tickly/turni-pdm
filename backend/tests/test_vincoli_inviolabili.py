@@ -76,6 +76,9 @@ _STAZIONI = {
     "ST_VERCELLI": "VERCELLI",
     "ST_ALESSANDRIA": "ALESSANDRIA",
     "ST_PARMA": "PARMA",
+    "ST_MORTARA": "MORTARA",
+    "ST_TORREB": "TORREBERETTI",
+    "ST_CASALP": "CASALPUSTERLENGO",
     # Deposito Lecco (Lecco-Molteno-Como/Mi.P.Gar)
     "ST_LECCO": "LECCO",
     "ST_MOLTENO": "MOLTENO",
@@ -338,16 +341,17 @@ def test_lookup_stazione_mancante_usa_codice_grezzo(
 
 
 def test_carica_vincoli_dal_json_reale() -> None:
-    """Verifica che i 6 vincoli si caricano correttamente dal file canonico."""
+    """Verifica che i 7 vincoli si caricano correttamente dal file canonico."""
     vincoli = carica_vincoli()
-    assert len(vincoli) == 6
+    assert len(vincoli) == 7
     ids = {v.id for v in vincoli}
     assert ids == {
         "tecnico_elettrico_no_linee_diesel",
         "contrattuale_tilo_flirt_524",
         "operativo_treno_dei_sapori_d520",
         "operativo_atr803_linee_assegnate",
-        "operativo_atr125_atr115_deposito_lecco",
+        "operativo_atr115_deposito_lecco",
+        "operativo_atr125_deposito_lecco_e_iseo",
         "operativo_aln668_deposito_iseo",
     }
     # Vincolo elettrico è blacklist con materiali esenti
@@ -362,9 +366,12 @@ def test_carica_vincoli_dal_json_reale() -> None:
     # Vincolo ATR803 (operativo deposito assegnamento)
     atr803 = next(v for v in vincoli if v.id == "operativo_atr803_linee_assegnate")
     assert atr803.materiale_tipo_codici_target == frozenset({"ATR803"})
-    # Vincolo ATR125+ATR115 deposito Lecco
-    lecco = next(v for v in vincoli if v.id == "operativo_atr125_atr115_deposito_lecco")
-    assert lecco.materiale_tipo_codici_target == frozenset({"ATR125", "ATR115"})
+    # Vincolo ATR115 solo deposito Lecco
+    atr115 = next(v for v in vincoli if v.id == "operativo_atr115_deposito_lecco")
+    assert atr115.materiale_tipo_codici_target == frozenset({"ATR115"})
+    # Vincolo ATR125 multi-deposito Lecco + Iseo
+    atr125 = next(v for v in vincoli if v.id == "operativo_atr125_deposito_lecco_e_iseo")
+    assert atr125.materiale_tipo_codici_target == frozenset({"ATR125"})
     # Vincolo ALn668 deposito Iseo
     iseo = next(v for v in vincoli if v.id == "operativo_aln668_deposito_iseo")
     assert iseo.materiale_tipo_codici_target == frozenset({"ALn668(1000)"})
@@ -442,6 +449,31 @@ def test_atr803_su_bergamo_violazione(vincoli: list[Vincolo]) -> None:
     assert violazioni[0].vincolo_id == "operativo_atr803_linee_assegnate"
 
 
+def test_atr803_pavia_mortara_torreberetti_ok(vincoli: list[Vincolo]) -> None:
+    """ATR803 su sub-tratte Pavia-Mortara, Pavia-Torreberetti, Pavia-Casalp → ammesse.
+
+    Sono sub-tratte legittime delle linee Pavia-Alessandria/Pavia-Vercelli/
+    Pavia-Codogno, aggiunte su richiesta utente (entry 90)."""
+    corse = [
+        CorsaMock("R-600", "ST_PAVIA", "ST_MORTARA"),
+        CorsaMock("R-601", "ST_MORTARA", "ST_PAVIA"),
+        CorsaMock("R-602", "ST_PAVIA", "ST_TORREB"),
+        CorsaMock("R-603", "ST_TORREB", "ST_ALESSANDRIA"),
+        CorsaMock("R-604", "ST_MORTARA", "ST_ALESSANDRIA"),
+        CorsaMock("R-605", "ST_MORTARA", "ST_VERCELLI"),
+        CorsaMock("R-606", "ST_PAVIA", "ST_CASALP"),
+        CorsaMock("R-607", "ST_CASALP", "ST_CODOGNO"),
+    ]
+    violazioni = valida_regola(
+        corse_programma=corse,
+        stazioni_lookup=_STAZIONI,
+        composizione=[{"materiale_tipo_codice": "ATR803", "n_pezzi": 1}],
+        filtri=[],
+        vincoli=vincoli,
+    )
+    assert violazioni == []
+
+
 # =====================================================================
 # 5. Vincolo ATR125 + ATR115 deposito Lecco (whitelist)
 # =====================================================================
@@ -465,7 +497,8 @@ def test_atr125_su_lecco_molteno_ok(vincoli: list[Vincolo]) -> None:
 
 
 def test_atr115_su_brescia_iseo_violazione(vincoli: list[Vincolo]) -> None:
-    """ATR115 (deposito Lecco) su Brescia-Iseo (deposito Iseo) → violazione."""
+    """ATR115 (SOLO deposito Lecco) su Brescia-Iseo → violazione (a differenza
+    di ATR125 che è multi-deposito Lecco+Iseo, ATR115 è esclusivo di Lecco)."""
     corse = [CorsaMock("R-300", "ST_BS", "ST_EDOLO")]
     violazioni = valida_regola(
         corse_programma=corse,
@@ -475,7 +508,53 @@ def test_atr115_su_brescia_iseo_violazione(vincoli: list[Vincolo]) -> None:
         vincoli=vincoli,
     )
     assert len(violazioni) == 1
-    assert violazioni[0].vincolo_id == "operativo_atr125_atr115_deposito_lecco"
+    assert violazioni[0].vincolo_id == "operativo_atr115_deposito_lecco"
+
+
+def test_atr125_su_lecco_molteno_ok_lecco_deposito(vincoli: list[Vincolo]) -> None:
+    """ATR125 sul deposito Lecco (Lecco-Molteno-Como) → ammesso."""
+    corse = [CorsaMock("R-700", "ST_LECCO", "ST_MOLTENO"),
+             CorsaMock("R-701", "ST_MOLTENO", "ST_COMO")]
+    violazioni = valida_regola(
+        corse_programma=corse,
+        stazioni_lookup=_STAZIONI,
+        composizione=[{"materiale_tipo_codice": "ATR125", "n_pezzi": 1}],
+        filtri=[],
+        vincoli=vincoli,
+    )
+    assert violazioni == []
+
+
+def test_atr125_su_brescia_iseo_ok_iseo_deposito(vincoli: list[Vincolo]) -> None:
+    """ATR125 sul deposito Iseo (Brescia-Iseo-Edolo) → ammesso (multi-deposito).
+
+    A differenza di ATR115 che è solo Lecco, ATR125 è in dotazione anche
+    al deposito Iseo (correzione utente entry 90)."""
+    corse = [CorsaMock("R-800", "ST_BS", "ST_EDOLO"),
+             CorsaMock("R-801", "ST_BS", "ST_ISEO"),
+             CorsaMock("R-802", "ST_ISEO", "ST_EDOLO")]
+    violazioni = valida_regola(
+        corse_programma=corse,
+        stazioni_lookup=_STAZIONI,
+        composizione=[{"materiale_tipo_codice": "ATR125", "n_pezzi": 1}],
+        filtri=[],
+        vincoli=vincoli,
+    )
+    assert violazioni == []
+
+
+def test_atr125_su_bergamo_violazione(vincoli: list[Vincolo]) -> None:
+    """ATR125 fuori dai 2 depositi (Lecco, Iseo) → violazione."""
+    corse = [CorsaMock("R-900", "ST_BERGAMO", "ST_TREVIGLIO")]
+    violazioni = valida_regola(
+        corse_programma=corse,
+        stazioni_lookup=_STAZIONI,
+        composizione=[{"materiale_tipo_codice": "ATR125", "n_pezzi": 1}],
+        filtri=[],
+        vincoli=vincoli,
+    )
+    assert len(violazioni) == 1
+    assert violazioni[0].vincolo_id == "operativo_atr125_deposito_lecco_e_iseo"
 
 
 # =====================================================================

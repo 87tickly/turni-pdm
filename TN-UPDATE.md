@@ -10,6 +10,68 @@
 
 ---
 
+## 2026-05-02 (91) — Vincoli inviolabili: split ATR125/ATR115 + sub-tratte ATR803
+
+### Contesto
+
+Correzioni utente in chat su entry 89:
+> "ATR 125 del deposito ISEO deve andare anche su Brescia-Iseo-Edolo (Valcamonica)."
+> "ATR803 su codice_origine=PAVIA non deve rifiutare sub-tratte
+> Pavia→Mortara oppure Pavia-Torreberetti."
+
+Due correzioni:
+1. **ATR125 multi-deposito**: ATR125 è in dotazione SIA al deposito
+   Lecco SIA al deposito Iseo. ATR115 invece solo Lecco. Vincolo
+   combinato precedente bloccava ATR125 su Iseo.
+2. **Sub-tratte ATR803**: pattern bidir capolinea-capolinea non
+   copriva Pavia-Mortara, Pavia-Torreberetti, Pavia-Casalpusterlengo.
+
+### Modifiche
+
+`data/vincoli_materiale_inviolabili.json` (6 → 7 vincoli):
+
+- Splittato `operativo_atr125_atr115_deposito_lecco` in
+  `operativo_atr115_deposito_lecco` (solo Brianza) e
+  `operativo_atr125_deposito_lecco_e_iseo` (Brianza + Valcamonica).
+- Esteso `operativo_atr803_linee_assegnate` con 6 nuovi pattern bidir
+  sub-tratte: PAVIA ↔ MORTARA / TORREBERETTI / CASALPUSTERLENGO,
+  MORTARA ↔ ALESSANDRIA / VERCELLI, TORREBERETTI ↔ ALESSANDRIA,
+  CASALPUSTERLENGO ↔ CODOGNO.
+
+`backend/tests/test_vincoli_inviolabili.py`:
+- 3 nuovi test ATR125 multi-deposito (Lecco OK, Iseo OK, Bergamo KO).
+- `test_atr803_pavia_mortara_torreberetti_ok` esteso con Casalpusterlengo.
+- `test_atr115_su_brescia_iseo_violazione` punta al nuovo vincolo
+  `operativo_atr115_deposito_lecco`.
+- Loader test aggiornato per 7 vincoli e nuovi IDs.
+
+### Verifiche
+
+- `uv run mypy --strict src` ✅ 58 file clean.
+- `uv run pytest -q` ✅ **525 passed, 12 skipped** (era 521, +4 nuovi).
+- **Smoke API**:
+  1. ATR803 origine=CODOGNO destinazione=PAVIA → **201**.
+  2. ATR125 origine=ISEO → **201** (deposito Iseo ammesso).
+  3. ATR115 origine=ISEO → **400** vincolo
+     `operativo_atr115_deposito_lecco`.
+
+### Conseguenze pratiche
+
+1. ATR125 può ora essere assegnato sia su Brianza sia su Valcamonica.
+2. ATR115 resta vincolato solo Brianza.
+3. ATR803 con filtri "larghi" (`codice_origine=PAVIA`) ammette
+   sub-tratte Pavia→Mortara/Torreberetti/Casalpusterlengo. Resta
+   rifiutato per destinazioni fuori dotazione (es. Pavia→Asti).
+
+### Limitazioni note / aperti
+
+- **Pavia→Asti**: rilevato nel smoke ma NON aggiunto in whitelist
+  (utente non l'ha menzionato). Se servisse, aggiungere pattern.
+- **Pattern di rotta vs sub-tratte**: approccio incrementale, si
+  aggiunge ogni sub-tratta al primo "false negative" rilevato.
+
+---
+
 ## 2026-05-02 (90) — Schermate 4 + 5: lista giri (KPI + filtri + preview) + Gantt giro (hero + per-giornata + side panel blocco)
 
 ### Contesto
