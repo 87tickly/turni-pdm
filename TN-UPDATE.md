@@ -10,6 +10,49 @@
 
 ---
 
+## 2026-05-02 (69) — Code review completa repo COLAZIONE
+
+### Contesto
+
+Su richiesta utente: review sistematica dell'intero codebase dopo
+Sprint 7.6 MR 1. Lettura di tutti i file sorgente Python e TypeScript,
+confronto puntuale con NORMATIVA-PDC.md e MODELLO-DATI.md. Nessuna
+modifica al codice — solo analisi read-only e produzione del documento.
+
+### Modifiche
+
+- **`docs/CODE-REVIEW-2026-05-02.md`** — nuovo file, review completa:
+  7 CRITICI, 11 IMPORTANTI, 6 MINORI. Ogni finding con `file:riga`,
+  motivo, impatto, fix concreto proposto.
+- **`TN-UPDATE.md`** — questa entry.
+
+### Principali finding
+
+| ID | Gravità | Descrizione breve |
+|----|---------|-------------------|
+| C1 | CRITICO | `is_notturno` soglia 00:00 invece di 01:00 (NORMATIVA §11.8) |
+| C2 | CRITICO | Full table scan `TurnoPdc` per lookup `giro_materiale_id` |
+| C3 | CRITICO | `impianto` popolato con `tipo_materiale` invece di deposito PdC |
+| C4 | CRITICO | count/wipe giri usa JSONB path ignorando colonna FK di migration 0010 |
+| C5 | CRITICO | `datetime.utcnow()` deprecato Python 3.12 |
+| C6 | CRITICO | `TurnoPdc.codice` senza UNIQUE constraint per azienda |
+| C7 | CRITICO | JWT access token lifetime 72h senza revoca |
+| I3 | IMP. | PK creati per gap < 20 min (NORMATIVA §4.4) |
+| I4 | IMP. | ACCp preriscaldo invernale 80' non implementato (NORMATIVA §3.3) |
+| I5 | IMP. | FR limits (1/sett, 3/28gg) non enforced (NORMATIVA §10.6) |
+
+### Stato
+
+Review completata. Nessuna modifica al codice produzione. PR aperta
+con solo `docs/CODE-REVIEW-2026-05-02.md` per lettura utente.
+
+### Prossimo step
+
+Utente decide quali finding affrontare e in quale ordine. Candidati
+veloci (< 30 min): C5, M2, I9. Candidati a impatto immediato: C3, C1.
+
+---
+
 ## 2026-05-02 (68) — Sprint 7.6 MR 1: UX modal regola di assegnazione
 
 ### Contesto
