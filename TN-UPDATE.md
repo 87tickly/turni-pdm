@@ -10,6 +10,148 @@
 
 ---
 
+## 2026-05-02 (92) — Chiusura must-have #2 Gantt giro: matrice ore × stazioni (Opzione A)
+
+### Contesto
+
+Residuo aperto in entry 90 (schermata 5 design v2): must-have #2 del
+brief specifica che la vista Gantt giro deve usare la matrice ore ×
+stazioni come "Opzione A" quando le stazioni distinte sono ≤ 10
+(soglia design). Esempio: giro Tirano = 5 stazioni (FIO, MI.CLE,
+LEC, SON, TIR) → matrice è la scelta naturale, fedele al PDF Trenord.
+
+L'implementazione precedente (entry 90) renderizzava SOLO la
+"timeline view" (Opzione B): tutti i blocchi della giornata su una
+singola riga. Funzionante, ma perde la dimensione spaziale.
+
+### Modifiche
+
+#### Frontend (`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`)
+
+**Costanti matrice aggiunte**:
+- `MATRICE_MAX_STAZIONI = 10` (soglia design)
+- `MATRICE_STATION_COL_PX = 180` (colonna sticky-left)
+- `MATRICE_AXIS_WIDTH_PX = 1440` (1h = 60px)
+- `MATRICE_ROW_HEIGHT_PX = 56` / `MATRICE_HEADER_HEIGHT_PX = 40`
+
+**Nuovo type `StazioneRow`** + helper `buildStazioniRows(variante)`:
+estrae stazioni distinte dai blocchi (sia stazione_da sia stazione_a)
+e le ordina per "prima apparizione temporale" (proxy del route order
+geografico, fallback codice alfabetico).
+
+**Nuovo helper `pickRowForBlocco(b)`**: decide quale row stazione
+ospita ogni blocco:
+- `corsa_commerciale`, `materiale_vuoto` → stazione_a (destinazione)
+- `rientro_sede` → stazione_da (origine = sede target)
+- `sosta`, `accessori` → stazione_da (= stazione_a)
+- default → stazione_da
+
+Coerente col mock-up del designer: in produzione "il blocco scivola
+diagonalmente da MI.CLE a TIR" ma la versione semplificata renderizza
+una barra orizzontale singola sulla row terminal. Il side panel
+mostra entrambe le stazioni nei detail rows.
+
+**Nuovo `GanttToolbar`**: switch segmented "Stazioni | Solo timeline"
++ counter "X stazioni · Y blocchi" + helper text "Asse 04→04
+giorno seguente · 1h = 60px". Default = `stazioni` se ≤10 stazioni
+(soglia rispettata), altrimenti `timeline`.
+
+**Nuovo `MatriceView`** (~120 righe):
+- Outer scrollable con `max-h-[640px]`, larghezza inner
+  fissa = 180 + 1440 = 1620px (scroll orizzontale per default
+  su layout 8/4 con side panel attivo).
+- Header `sticky top-0 z-30` con asse X (12 tick: 04, 06, ...,
+  02 next day) + corner sticky-left z-40 ("Stazione · ora") opaco
+  per nascondere overlap durante 2-axis scroll.
+- N row stazioni con label sticky-left z-20 (nome + codice mono),
+  track 1440px, hourly grid lines, blocchi posizionati px-based
+  (vs % della timeline view).
+- Riusa `colorForTipo`, `bloccoLabel`, `bloccoTooltip` dei
+  blocchi esistenti.
+
+**Nuovo `BloccoBarPx`**: variante px-based di `BloccoBar`. Stesso
+shape/comportamento ma `style={{ left: '${px}px', width: '${px}px' }}`
+invece che `%`. Mantiene must-have #1 (numero_treno mono in barra),
+#6 (selezione outline + dim 55% altri), #8 (bordo dx 4px emerald
+se validato).
+
+**Helper px aggiunti**: `minToPx(min)` e `hourToPx(h)` parallels dei
+`*Pct` esistenti, scalano relativamente a `MATRICE_AXIS_WIDTH_PX`.
+
+**`GanttView` rinominato → `TimelineView`** per chiarezza
+(comportamento invariato, solo rename + import aggiornato).
+
+### Verifiche
+
+- `pnpm exec tsc -b --noEmit` ✅ clean
+- `pnpm exec eslint` (file modificato) ✅ clean
+- `pnpm test --run` ✅ **53 passed** (no regressioni)
+- Preview verifica: error state schermata 5 (giro inesistente) e
+  empty state schermata 4 ancora funzionano. Console clean. La
+  verifica visuale completa della matrice richiede giri reali in
+  DB (al momento 0 giri persistiti); appena il pianificatore
+  genera giri reali la matrice apparirà di default per giornate
+  con ≤10 stazioni distinte.
+
+### Conseguenze pratiche
+
+1. **Vista più fedele al PDF Trenord**: il pianificatore vede il
+   giro come matrice ore × stazioni, riconoscendo immediatamente
+   i punti di interesse (FIO sosta notturna, MI.CLE punto di
+   trasferimento, TIR terminal) e le rotazioni del materiale.
+2. **Switcher "Stazioni | Solo timeline"** dà una via di fuga: per
+   giri molto complessi (>10 stazioni) o per chi preferisce la
+   visione lineare, il toggle riporta alla timeline view di entry 90.
+3. **Sticky scroll attivo** (must-have #7 parziale): asse X in
+   alto + colonna stazioni a sinistra rimangono visibili durante
+   lo scroll orizzontale (tipico per asse 1440px su viewport ~800px)
+   o verticale (per giri con molte stazioni).
+
+### Residui aperti (3 must-have del design v2 ancora aperti)
+
+Implementati cumulativamente (entry 90 + 92): #1 (treno in barra),
+#2 (matrice stazioni Opzione A), #6 (selezione + dim), #7 (sticky
+scroll, parziale solo in matrice), #8 (validato bordo emerald),
++ cross-mezzanotte.
+
+Restano da implementare:
+
+- **Must-have #3 — gap minuti label**: tra blocchi consecutivi sulla
+  STESSA row (es. sosta tra due commerciali), se gap ≥10' label
+  testuale "45'" sopra la zona vuota, ≥30' bordo tratteggiato di
+  enfasi. Richiede iterazione coppie consecutive ordinate per
+  start time. Sprint dedicato (~80 righe).
+- **Must-have #4 — eventi composizione marker**: marker arancione
+  4px sopra il blocco con click = popup `composizione_da →
+  composizione_a`. Richiede campo `eventi_composizione` strutturato
+  in `generation_metadata_json` (oggi non popolato dal builder).
+  Sprint backend + frontend.
+- **Must-have #5 — banda notte fra giornate con verifica
+  congruenza**: 28px tra G_n-end e G_n+1-start, copy "notte ·
+  sosta a [stazione] · [durata]". Verifica congruenza
+  stazione_a(ultimo blocco G_n) vs stazione_da(primo blocco
+  G_n+1); flag rosso "discontinuità" se diverse (probabile
+  bug builder). Richiede layout cross-card (tutti i giornate
+  in unico scrollable continuo) — riscrittura significativa
+  della struttura attuale. Sprint dedicato.
+
+Nota: l'ordinamento "route order" delle stazioni nella matrice è
+oggi un proxy ("prima apparizione temporale"). Per giri lineari
+tipici (Tirano, Brescia-Iseo) produce ordine corretto. Per giri
+con percorsi paralleli o ramificati può non essere intuitivo —
+in tal caso utente switcha a "Solo timeline" o si introduce
+un campo `ordine_geografico` lato anagrafica stazioni (sprint
+dedicato).
+
+### Prossimo step
+
+Decisione utente: (a) chiudere altro must-have residuo (#3 gap
+minuti è il più semplice ~80 righe), (b) generare giri reali per
+verificare visualmente la matrice, (c) procedere con altre attività
+(test, 2° ruolo, ecc.).
+
+---
+
 ## 2026-05-02 (91) — Vincoli inviolabili: split ATR125/ATR115 + sub-tratte ATR803
 
 ### Contesto

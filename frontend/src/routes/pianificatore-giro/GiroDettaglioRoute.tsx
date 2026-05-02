@@ -21,15 +21,16 @@ import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdc
  * Struttura: Hero header (mono) + Meta band + per-giornata Gantt
  * (asse 04:00→04:00 next day, 1440 min) + side panel blocco selezionato.
  *
- * Implementati 4 dei 8 must-have del design (tradeoff scope/MVP, vedi
- * TN-UPDATE entry 89):
+ * Must-have implementati (entry 90 + 91):
  *   1. ✅ numero_treno DENTRO barra ≥60px (mono semibold bianco)
- *   6. ✅ selezione blocco: bordo + side panel (no opacità altri ancora)
+ *   2. ✅ matrice ore × stazioni (Opzione A, ≤10 stazioni — entry 91)
+ *   6. ✅ selezione blocco: bordo + side panel + dim altri 55%
+ *   7. ✅ sticky scroll: asse X top + colonna stazioni left + corner opaco
+ *      (parziale, attivo solo in matrice — entry 91)
  *   8. ✅ is_validato_utente: bordo dx 4px emerald + badge in panel
  *   ✅ cross-mezzanotte: span 04:00→04:00 next day
- * Residui (matrice ore×stazioni Opzione A, eventi composizione,
- * notte fra giornate banda, gap minuti label, sticky scroll, opacità
- * dim su altri blocchi).
+ * Restano residui: gap minuti label (#3), eventi composizione marker (#4),
+ * banda notte fra giornate con verifica congruenza (#5).
  */
 
 // =====================================================================
@@ -40,6 +41,21 @@ const AXIS_START_MIN = 4 * 60; // 04:00
 const AXIS_TOTAL_MIN = 24 * 60; // 1440 min
 /** Tick ogni 2 ore: 04, 06, 08, ..., 02. */
 const TICK_HOURS = [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 0, 2];
+
+// =====================================================================
+// Constants — matrice (Opzione A) layout
+// =====================================================================
+
+/** Soglia design: ≤ MATRICE_MAX_STAZIONI → matrice, > → timeline. */
+const MATRICE_MAX_STAZIONI = 10;
+/** Larghezza colonna stazioni sticky-left (px). */
+const MATRICE_STATION_COL_PX = 180;
+/** Larghezza asse X tempo: 1h = 60px → 24h = 1440px. */
+const MATRICE_AXIS_WIDTH_PX = 1440;
+/** Altezza riga stazione (px). */
+const MATRICE_ROW_HEIGHT_PX = 56;
+/** Altezza riga header X axis (px). */
+const MATRICE_HEADER_HEIGHT_PX = 40;
 
 // =====================================================================
 // Route component
@@ -361,6 +377,16 @@ function GiornataGanttCard({
   const hasMultiple = varianti.length > 1;
   const active = varianti[activeIdx] ?? varianti[0];
 
+  // Calcolo stazioni distinte della variante attiva (dopo aver selezionato active).
+  const stazioni = useMemo(
+    () => (active !== undefined ? buildStazioniRows(active) : []),
+    [active],
+  );
+  // Default view: matrice se ≤10 stazioni distinte (design v2 must-have #2).
+  const defaultView: GanttViewMode =
+    stazioni.length > 0 && stazioni.length <= MATRICE_MAX_STAZIONI ? "stazioni" : "timeline";
+  const [viewMode, setViewMode] = useState<GanttViewMode>(defaultView);
+
   if (active === undefined) {
     return (
       <Card className="p-5">
@@ -424,13 +450,309 @@ function GiornataGanttCard({
         </div>
       )}
 
-      {/* Time axis + Gantt row */}
-      <GanttView
-        variante={active}
-        selectedBloccoId={selectedBloccoId}
-        onSelectBlocco={onSelectBlocco}
+      {/* Toolbar: switch view + counter stazioni */}
+      <GanttToolbar
+        viewMode={viewMode}
+        onChange={setViewMode}
+        nStazioni={stazioni.length}
+        nBlocchi={active.blocchi.length}
       />
+
+      {/* Body: matrice o timeline */}
+      {viewMode === "stazioni" ? (
+        <MatriceView
+          variante={active}
+          stazioni={stazioni}
+          selectedBloccoId={selectedBloccoId}
+          onSelectBlocco={onSelectBlocco}
+        />
+      ) : (
+        <TimelineView
+          variante={active}
+          selectedBloccoId={selectedBloccoId}
+          onSelectBlocco={onSelectBlocco}
+        />
+      )}
     </Card>
+  );
+}
+
+// =====================================================================
+// Gantt toolbar — switch matrice ↔ timeline
+// =====================================================================
+
+type GanttViewMode = "stazioni" | "timeline";
+
+function GanttToolbar({
+  viewMode,
+  onChange,
+  nStazioni,
+  nBlocchi,
+}: {
+  viewMode: GanttViewMode;
+  onChange: (m: GanttViewMode) => void;
+  nStazioni: number;
+  nBlocchi: number;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-2 text-xs">
+      <div className="flex items-center gap-3 text-muted-foreground">
+        <span className="font-medium uppercase tracking-wide">Vista</span>
+        <div className="inline-flex items-center rounded border border-border bg-white p-0.5">
+          <button
+            type="button"
+            onClick={() => onChange("stazioni")}
+            className={cn(
+              "rounded px-2 py-1 text-[11px] font-medium",
+              viewMode === "stazioni"
+                ? "bg-foreground text-white"
+                : "text-muted-foreground hover:bg-muted",
+            )}
+            title="Matrice ore × stazioni (Opzione A)"
+          >
+            Stazioni
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange("timeline")}
+            className={cn(
+              "rounded px-2 py-1 text-[11px] font-medium",
+              viewMode === "timeline"
+                ? "bg-foreground text-white"
+                : "text-muted-foreground hover:bg-muted",
+            )}
+            title="Timeline lineare (tutti i blocchi su una riga)"
+          >
+            Solo timeline
+          </button>
+        </div>
+        <span className="text-border">·</span>
+        <span className="tabular-nums">
+          {nStazioni} stazion{nStazioni === 1 ? "e" : "i"} · {nBlocchi} blocch
+          {nBlocchi === 1 ? "i" : "i"}
+        </span>
+      </div>
+      <div className="text-[11px] text-muted-foreground/80">
+        Asse: 04:00 → 04:00 (giorno seguente) · 1h = 60px
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
+// Matrice ore × stazioni (Opzione A — must-have #2 design v2)
+// =====================================================================
+
+interface StazioneRow {
+  codice: string;
+  nome: string | null;
+  /** Per ordinamento: minuti dall'inizio giornata della prima apparizione. */
+  firstAppearMin: number;
+}
+
+/**
+ * Estrae stazioni distinte dalla variante e le ordina per prima
+ * apparizione (proxy "ordine geografico/route order"). Se due stazioni
+ * appaiono nello stesso minuto, fallback al codice alfabetico.
+ */
+function buildStazioniRows(variante: GiroVariante): StazioneRow[] {
+  const map = new Map<string, StazioneRow>();
+  for (const b of variante.blocchi) {
+    const startMin = parseTimeToMin(b.ora_inizio) ?? 0;
+    const candidates: { codice: string | null; nome: string | null }[] = [
+      { codice: b.stazione_da_codice, nome: b.stazione_da_nome },
+      { codice: b.stazione_a_codice, nome: b.stazione_a_nome },
+    ];
+    for (const s of candidates) {
+      if (s.codice !== null && !map.has(s.codice)) {
+        map.set(s.codice, {
+          codice: s.codice,
+          nome: s.nome,
+          firstAppearMin: startMin,
+        });
+      }
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => {
+    if (a.firstAppearMin !== b.firstAppearMin) return a.firstAppearMin - b.firstAppearMin;
+    return a.codice.localeCompare(b.codice);
+  });
+}
+
+/**
+ * Decide su quale row stazione un blocco viene renderizzato:
+ *   - corsa_commerciale, materiale_vuoto: stazione_a (destinazione)
+ *   - rientro_sede: stazione_da (origine = sede target)
+ *   - sosta, accessori: stazione_da (= stazione_a tipicamente)
+ *   - default: stazione_da
+ *
+ * Semplificazione del design v2: in produzione "il blocco scivola
+ * diagonalmente" tra stazione_da e stazione_a; qui rendiamo come
+ * barra orizzontale singola sulla row terminal/origine. Coerente
+ * col mock-up del designer.
+ */
+function pickRowForBlocco(b: GiroBlocco): string | null {
+  switch (b.tipo_blocco) {
+    case "corsa_commerciale":
+    case "materiale_vuoto":
+      return b.stazione_a_codice ?? b.stazione_da_codice;
+    case "rientro_sede":
+      return b.stazione_da_codice ?? b.stazione_a_codice;
+    default:
+      return b.stazione_da_codice ?? b.stazione_a_codice;
+  }
+}
+
+function MatriceView({
+  variante,
+  stazioni,
+  selectedBloccoId,
+  onSelectBlocco,
+}: {
+  variante: GiroVariante;
+  stazioni: StazioneRow[];
+  selectedBloccoId: number | null;
+  onSelectBlocco: (b: GiroBlocco) => void;
+}) {
+  const totalWidth = MATRICE_STATION_COL_PX + MATRICE_AXIS_WIDTH_PX;
+  const innerHeight =
+    MATRICE_HEADER_HEIGHT_PX + stazioni.length * MATRICE_ROW_HEIGHT_PX;
+  const maxScrollHeight = Math.min(innerHeight + 16, 640);
+
+  return (
+    <div
+      className="relative overflow-auto"
+      style={{ maxHeight: `${maxScrollHeight}px` }}
+    >
+      <div className="relative" style={{ width: `${totalWidth}px` }}>
+        {/* Header sticky-top: corner + asse X */}
+        <div
+          className="sticky top-0 z-30 flex border-b border-border bg-white"
+          style={{ height: MATRICE_HEADER_HEIGHT_PX }}
+        >
+          {/* Corner sticky-left */}
+          <div
+            className="sticky left-0 z-40 border-r border-border bg-white"
+            style={{ width: MATRICE_STATION_COL_PX }}
+          >
+            <div className="flex h-full items-end px-3 pb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+              Stazione · ora
+            </div>
+          </div>
+          {/* Asse X */}
+          <div className="relative" style={{ width: MATRICE_AXIS_WIDTH_PX }}>
+            {TICK_HOURS.map((h) => {
+              const px = hourToPx(h);
+              return (
+                <span
+                  key={`axis-${h}`}
+                  className="absolute top-2 font-mono text-[11px] tabular-nums text-foreground"
+                  style={{ left: `${px}px` }}
+                >
+                  {String(h).padStart(2, "0")}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Rows stazioni */}
+        {stazioni.map((s) => {
+          const blocchiRow = variante.blocchi.filter(
+            (b) => pickRowForBlocco(b) === s.codice,
+          );
+          return (
+            <div
+              key={s.codice}
+              className="relative flex border-b border-border/40"
+              style={{ height: MATRICE_ROW_HEIGHT_PX }}
+            >
+              {/* Stazione label sticky-left */}
+              <div
+                className="sticky left-0 z-20 flex flex-col justify-center border-r border-border bg-white px-3"
+                style={{ width: MATRICE_STATION_COL_PX }}
+              >
+                <div className="truncate text-[12px] font-medium text-foreground">
+                  {s.nome ?? s.codice}
+                </div>
+                <div className="font-mono text-[10px] text-muted-foreground">
+                  {s.codice}
+                </div>
+              </div>
+
+              {/* Track con grid orario + blocchi */}
+              <div className="relative" style={{ width: MATRICE_AXIS_WIDTH_PX }}>
+                {/* Hourly grid lines */}
+                {TICK_HOURS.map((h) => {
+                  const px = hourToPx(h);
+                  return (
+                    <div
+                      key={`grid-${s.codice}-${h}`}
+                      className="pointer-events-none absolute top-0 h-full w-px bg-border/30"
+                      style={{ left: `${px}px` }}
+                    />
+                  );
+                })}
+                {/* Blocchi su questa row stazione */}
+                {blocchiRow.map((b) => (
+                  <BloccoBarPx
+                    key={b.id}
+                    blocco={b}
+                    selected={b.id === selectedBloccoId}
+                    dimmed={selectedBloccoId !== null && b.id !== selectedBloccoId}
+                    onSelect={() => onSelectBlocco(b)}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Variante px-based del BloccoBar per la matrice (left/width assoluti
+ * in px, non %). Riutilizza colorForTipo + bloccoLabel + bloccoTooltip.
+ */
+function BloccoBarPx({
+  blocco,
+  selected,
+  dimmed,
+  onSelect,
+}: {
+  blocco: GiroBlocco;
+  selected: boolean;
+  dimmed: boolean;
+  onSelect: () => void;
+}) {
+  const inizio = parseTimeToMin(blocco.ora_inizio);
+  const fine = parseTimeToMin(blocco.ora_fine);
+  if (inizio === null || fine === null) return null;
+
+  const startPx = minToPx(inizio);
+  let endPx = minToPx(fine);
+  if (endPx < startPx) endPx = minToPx(fine + AXIS_TOTAL_MIN);
+  const widthPx = Math.max(8, endPx - startPx);
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title={bloccoTooltip(blocco)}
+      className={cn(
+        "absolute top-3 flex h-8 items-center overflow-hidden rounded text-[11px] font-medium transition-opacity",
+        colorForTipo(blocco.tipo_blocco),
+        selected && "outline outline-2 outline-primary z-10",
+        dimmed && "opacity-55",
+        blocco.is_validato_utente && "border-r-4 border-emerald-500",
+      )}
+      style={{ left: `${startPx}px`, width: `${widthPx}px` }}
+      aria-pressed={selected}
+    >
+      <span className="truncate px-1.5 font-mono">{bloccoLabel(blocco)}</span>
+    </button>
   );
 }
 
@@ -439,7 +761,7 @@ function truncateLabel(testo: string): string {
   return testo.length <= MAX ? testo : testo.substring(0, MAX - 1) + "…";
 }
 
-function GanttView({
+function TimelineView({
   variante,
   selectedBloccoId,
   onSelectBlocco,
@@ -803,6 +1125,18 @@ function minToPct(min: number): number {
 /** Posizione X di un'ora (0-23) sull'asse. */
 function hourToPct(h: number): number {
   return minToPct(h * 60);
+}
+
+/** Minuti da 00:00 → pixel sull'asse 04:00→04:00 (matrice mode). */
+function minToPx(min: number): number {
+  let rel = min - AXIS_START_MIN;
+  if (rel < 0) rel += AXIS_TOTAL_MIN;
+  return (rel / AXIS_TOTAL_MIN) * MATRICE_AXIS_WIDTH_PX;
+}
+
+/** Posizione X in px di un'ora sull'asse matrice. */
+function hourToPx(h: number): number {
+  return minToPx(h * 60);
 }
 
 /** Estrae sede da numero_turno tipo `G-FIO-001-ETR526` → `FIO`. */
