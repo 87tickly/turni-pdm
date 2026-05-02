@@ -130,5 +130,11 @@ class ProgrammaRegolaAssegnazione(Base):
     numero_pezzi: Mapped[int | None] = mapped_column(Integer)
 
     priorita: Mapped[int] = mapped_column(Integer, default=60)
+    # Sprint 7.7 MR 1 (migration 0014): cap km del ciclo specifico per
+    # questa regola/materiale. Il builder usa
+    # `regola.km_max_ciclo OR programma.km_max_ciclo OR DEFAULT_*` come
+    # cap effettivo del giro generato da questa regola. Ogni materiale
+    # ha autonomie diverse (ETR526 ~4500, E464 ~6000, ATR803 ~ecc).
+    km_max_ciclo: Mapped[int | None] = mapped_column(Integer)
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

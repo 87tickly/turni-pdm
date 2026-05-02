@@ -163,6 +163,7 @@ async def create_programma(
             materiale_tipo_codice=composizione[0].materiale_tipo_codice,
             numero_pezzi=composizione[0].n_pezzi,
             priorita=regola_payload.priorita,
+            km_max_ciclo=regola_payload.km_max_ciclo,
             note=regola_payload.note,
         )
         session.add(regola)
@@ -299,6 +300,7 @@ async def add_regola(
         materiale_tipo_codice=composizione[0].materiale_tipo_codice,
         numero_pezzi=composizione[0].n_pezzi,
         priorita=payload.priorita,
+        km_max_ciclo=payload.km_max_ciclo,
         note=payload.note,
     )
     session.add(regola)

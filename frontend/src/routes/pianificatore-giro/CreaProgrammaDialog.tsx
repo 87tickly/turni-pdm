@@ -27,30 +27,30 @@ interface FormState {
   nome: string;
   valido_da: string;
   valido_a: string;
-  km_max_ciclo: string;
 }
 
 const INITIAL: FormState = {
   nome: "",
   valido_da: "",
   valido_a: "",
-  km_max_ciclo: "",
 };
 
 /**
  * Form modale di creazione programma.
  *
  * Crea sempre in stato `bozza`, senza regole (le regole si aggiungono
- * in Sub 6.3 — editor regole). I campi opzionali (km_max_ciclo, …)
- * sono inviati solo se compilati.
+ * dopo nel dettaglio).
  *
- * NB Sprint 7.6 (decisione utente 2026-05-02): il programma materiale
+ * NB Sprint 7.6/7.7 (decisione utente 2026-05-02): il programma materiale
  * è UN turno unico per la sua finestra di validità. Le giornate del
  * turno emergono dalla generazione dei giri (una per materiale/regola)
  * e si sommano nel programma — quindi NON si dichiarano in fase di
- * creazione del programma. Il campo `n_giornate_default` è oggi solo
- * un valore safety lato backend (default 1) usato dal builder come
- * limite, non una promessa al pianificatore.
+ * creazione del programma.
+ *
+ * Sprint 7.7 MR 1: il `km_max_ciclo` non si dichiara più sul programma
+ * ma sotto la singola REGOLA (sotto materiale), perché ogni materiale
+ * ha autonomie diverse. La colonna programma resta come legacy/fallback
+ * lato backend.
  */
 export function CreaProgrammaDialog({ open, onOpenChange, onCreated }: CreaProgrammaDialogProps) {
   const [form, setForm] = useState<FormState>(INITIAL);
@@ -76,16 +76,13 @@ export function CreaProgrammaDialog({ open, onOpenChange, onCreated }: CreaProgr
     if (!isValid) return;
     setError(null);
 
-    const kmCiclo = form.km_max_ciclo.trim();
-
     try {
       const created = await createMutation.mutateAsync({
         nome: form.nome.trim(),
         valido_da: form.valido_da,
         valido_a: form.valido_a,
-        km_max_ciclo: kmCiclo === "" ? null : Number(kmCiclo),
-        // n_giornate_default: backend default 1, non chiesto al pianificatore
-        // (le giornate emergono dalla generazione dei giri per materiale).
+        // Sprint 7.7 MR 1: niente km_max_ciclo qui (sposta sotto regola).
+        // Sprint 7.6: niente n_giornate_default (backend default 1).
       });
       onCreated?.(created);
       handleClose(false);
@@ -152,19 +149,6 @@ export function CreaProgrammaDialog({ open, onOpenChange, onCreated }: CreaProgr
                 disabled={createMutation.isPending}
               />
             </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="km_max_ciclo">km max per ciclo (opzionale)</Label>
-            <Input
-              id="km_max_ciclo"
-              type="number"
-              min={1}
-              value={form.km_max_ciclo}
-              onChange={(e) => update("km_max_ciclo", e.target.value)}
-              placeholder="Es. 10000 (cap chiusura ciclo dinamico)"
-              disabled={createMutation.isPending}
-            />
           </div>
 
           {error !== null && (

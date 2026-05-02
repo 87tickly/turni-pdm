@@ -92,6 +92,7 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
   const [modo, setModo] = useState<ModoComposizione>("singola");
   const [composizione, setComposizione] = useState<ComposizioneRow[]>([emptyRow()]);
   const [priorita, setPriorita] = useState(60);
+  const [kmMaxCiclo, setKmMaxCiclo] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -103,6 +104,7 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
       setModo("singola");
       setComposizione([emptyRow()]);
       setPriorita(60);
+      setKmMaxCiclo("");
       setNote("");
       setError(null);
     }
@@ -135,6 +137,13 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
       return;
     }
 
+    const kmCiclo = kmMaxCiclo.trim();
+    const kmCicloNum = kmCiclo === "" ? null : Number(kmCiclo);
+    if (kmCicloNum !== null && (!Number.isFinite(kmCicloNum) || kmCicloNum < 1)) {
+      setError("km max per ciclo deve essere un numero ≥ 1.");
+      return;
+    }
+
     try {
       await addMutation.mutateAsync({
         programmaId,
@@ -148,6 +157,8 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
           // `materiale_accoppiamento_ammesso` lato backend.
           is_composizione_manuale: modo === "personalizzata",
           priorita,
+          // Sprint 7.7 MR 1: cap km del ciclo specifico per regola.
+          km_max_ciclo: kmCicloNum,
           note: note.trim().length > 0 ? note.trim() : null,
         },
       });
@@ -215,6 +226,24 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
               onChange={setComposizione}
               disabled={addMutation.isPending}
             />
+          </section>
+
+          <section className="flex flex-col gap-1.5">
+            <Label htmlFor="km-max-ciclo">km max per ciclo (opzionale)</Label>
+            <Input
+              id="km-max-ciclo"
+              type="number"
+              min={1}
+              value={kmMaxCiclo}
+              onChange={(e) => setKmMaxCiclo(e.target.value)}
+              disabled={addMutation.isPending}
+              placeholder="Es. 4500 — se vuoto, builder considera ~850 km/giorno medio"
+            />
+            <p className="text-xs text-muted-foreground">
+              Cap chilometrico del ciclo per il materiale di questa regola (es. ETR526 ~4500
+              km/ciclo, E464 ~6000). Quando raggiunto, il giro chiude appena il treno è in zona
+              sede. Se vuoto, nessun limite hard — il giro chiude per safety net o naturalmente.
+            </p>
           </section>
 
           <section className="grid grid-cols-2 gap-4">

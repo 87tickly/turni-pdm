@@ -229,6 +229,8 @@ class ProgrammaRegolaAssegnazioneRead(BaseModel):
     materiale_tipo_codice: str | None = None
     numero_pezzi: int | None = None
     priorita: int
+    # Sprint 7.7 MR 1: cap km del ciclo specifico per regola.
+    km_max_ciclo: int | None = None
     note: str | None = None
     created_at: datetime
 
@@ -274,6 +276,10 @@ class ProgrammaRegolaAssegnazioneCreate(BaseModel):
     composizione: list[ComposizioneItem] = Field(min_length=1)
     is_composizione_manuale: bool = False
     priorita: int = Field(default=60, ge=0, le=100)
+    # Sprint 7.7 MR 1: cap km del ciclo specifico per questa regola
+    # (es. ETR526 ~4500 km/ciclo, E464 ~6000). Se vuoto, builder usa
+    # il fallback DEFAULT_KM_MEDIO_GIORNALIERO * n_giornate_safety.
+    km_max_ciclo: int | None = Field(default=None, ge=1)
     note: str | None = None
 
 

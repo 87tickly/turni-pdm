@@ -21,6 +21,7 @@ function makeRegola(
     materiale_tipo_codice: "ETR526",
     numero_pezzi: 1,
     priorita: 60,
+    km_max_ciclo: null,
     note: null,
     created_at: "2026-04-25T10:00:00Z",
     ...over,
@@ -100,7 +101,10 @@ describe("ProgrammaDettaglioRoute", () => {
     expect(screen.getAllByText(/01\/01\/2026 → 31\/12\/2026/).length).toBeGreaterThan(0);
     // Sezione configurazione
     expect(screen.getByText(/Configurazione/i)).toBeInTheDocument();
-    expect(screen.getByText(/10\.000/)).toBeInTheDocument(); // km/ciclo formattato it-IT
+    // Sprint 7.7 MR 1: "km/ciclo max" non è più mostrato in Configurazione
+    // (spostato sotto la singola regola). Verifichiamo invece "Tolleranza"
+    // come campo presente nella Configurazione.
+    expect(screen.getByText(/Tolleranza fascia oraria/i)).toBeInTheDocument();
     // Filtri della regola — il campo backend "direttrice" è etichettato "Linea" in UI.
     // Match preciso (^Linea$) per evitare collisioni con altre stringhe contenenti "linea".
     expect(screen.getByText(/^Linea$/)).toBeInTheDocument();

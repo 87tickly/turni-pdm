@@ -31,7 +31,7 @@ Si **assume** che ogni ``corsa`` in `BloccoAssegnato.corsa` sia un ORM
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -95,15 +95,24 @@ class GiroDaPersistere:
     come opaco.
 
     Sprint 5.6 Feature 4: ``genera_rientro_sede`` (default False) attiva
-    la creazione automatica della corsa virtuale 9XXXX a fine giro
-    quando ``motivo_chiusura='naturale'`` e l'ultima dest != stazione
-    collegata sede. Settato a True dal builder.py orchestrator nel
-    "modo dinamico" (programma con km_max_ciclo configurato).
+    la creazione automatica della corsa virtuale 9XXXX a fine giro.
+
+    Sprint 7.7 MR 1 (Fix C "rientro intelligente"): l'attivazione del
+    rientro è SOGGETTA al check whitelist sede — il vuoto di rientro
+    si genera SOLO se l'ultima destinazione è in whitelist (vicino
+    sede). Mai vuoti lunghi tipo COLICO → CERTOSA. Decisione utente
+    2026-05-02. ``whitelist_sede`` deve essere passata dal caller
+    (oggi ``builder.py:_carica_whitelist_stazioni``).
     """
 
     numero_turno: str
     giro: GiroAssegnato
     genera_rientro_sede: bool = False
+    # Sprint 7.7 MR 1 (Fix C): codici stazione "vicini sede" (whitelist
+    # `localita_stazione_vicina` della sede del giro). Se vuota o se
+    # `ultima_dest` non vi appartiene, il rientro NON viene generato
+    # (giro resta non chiuso → warning, mai vuoti lunghi).
+    whitelist_sede: frozenset[str] = field(default_factory=frozenset)
 
 
 # =====================================================================
@@ -628,20 +637,33 @@ async def _persisti_un_giro(
             session,
         )
 
-    # Sprint 5.6 Feature 4: corsa rientro a sede 9XXXX. Si attiva solo se
-    # il caller ha richiesto esplicitamente (`genera_rientro_sede=True`,
-    # tipico modo dinamico) e la chiusura è naturale e non si è già a
-    # destinazione sede.
+    # Sprint 5.6 Feature 4 + Sprint 7.7 MR 1 (Fix C): corsa rientro
+    # a sede 9XXXX. SOLO se l'ultima destinazione del giro è già
+    # vicino sede (in whitelist `localita_stazione_vicina`). Mai
+    # vuoti lunghi tipo COLICO → CERTOSA. Decisione utente
+    # 2026-05-02:
+    # - ultima_dest == stazione_sede → niente vuoto (chiusura naturale)
+    # - ultima_dest in whitelist & != stazione_sede → vuoto BREVE
+    #   (es. CADORNA → CERTOSA, ~5km)
+    # - ultima_dest fuori whitelist → niente vuoto, giro resta non
+    #   chiuso (warning visibile in `motivo_chiusura`).
+    # NB: la condizione `motivo_chiusura == 'naturale'` non e' più
+    # vincolante per Fix C — anche giri che chiudono per `km_cap`
+    # possono avere il vuoto di rientro se l'ultima dest è in
+    # whitelist (significa che il builder e' riuscito a far terminare
+    # la corsa in zona sede pur raggiungendo il cap).
     if (
         entry.genera_rientro_sede
-        and entry.giro.motivo_chiusura == "naturale"
         and last_gv_id is not None
         and loc.stazione_collegata_codice is not None
     ):
         ultima_giornata = entry.giro.giornate[-1]
         ultima_corsa = ultima_giornata.catena_posizionata.catena.corse[-1]
         ultima_dest = ultima_corsa.codice_destinazione
-        if ultima_dest != loc.stazione_collegata_codice:
+        if (
+            ultima_dest != loc.stazione_collegata_codice
+            and ultima_dest in entry.whitelist_sede
+        ):
             await _crea_blocco_rientro_sede(
                 session=session,
                 giro_variante_id=last_gv_id,

@@ -35,8 +35,13 @@ export function RegolaCard({ regola, programmaId, editable }: RegolaCardProps) {
     <Card>
       <CardContent className="flex flex-col gap-3 px-4 py-4">
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Badge variant="default">priorità {regola.priorita}</Badge>
+            {regola.km_max_ciclo !== null && (
+              <Badge variant="outline" title="Cap km del ciclo per questa regola/materiale">
+                cap {regola.km_max_ciclo.toLocaleString("it-IT")} km
+              </Badge>
+            )}
             {regola.is_composizione_manuale && (
               <Badge variant="warning">composizione manuale</Badge>
             )}

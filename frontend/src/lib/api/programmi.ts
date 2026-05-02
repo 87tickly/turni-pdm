@@ -61,6 +61,8 @@ export interface ProgrammaRegolaAssegnazioneRead {
   materiale_tipo_codice: string | null;
   numero_pezzi: number | null;
   priorita: number;
+  /** Sprint 7.7 MR 1: cap km del ciclo specifico per regola (es. ETR526 ~4500). */
+  km_max_ciclo: number | null;
   note: string | null;
   created_at: string;
 }
@@ -74,6 +76,8 @@ export interface ProgrammaRegolaAssegnazioneCreate {
   composizione: ComposizioneItemPayload[];
   is_composizione_manuale?: boolean;
   priorita?: number;
+  /** Sprint 7.7 MR 1: cap km del ciclo specifico per regola (opzionale). */
+  km_max_ciclo?: number | null;
   note?: string | null;
 }
 

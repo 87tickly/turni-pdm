@@ -1095,6 +1095,12 @@ async def test_persister_corsa_rientro_9xxxx_se_genera_rientro_sede(azienda_id: 
                     numero_turno="G-TST-R9",
                     giro=giro,
                     genera_rientro_sede=True,
+                    # Sprint 7.7 MR 1 (Fix C): la whitelist DEVE includere
+                    # l'ultima destinazione del giro per permettere il
+                    # rientro intelligente. Senza, il vuoto non si genera
+                    # (no vuoti lunghi). S99002 è l'ultima dest del giro
+                    # in test, S99001 la stazione_sede.
+                    whitelist_sede=frozenset({"S99002"}),
                 )
             ],
             session,

@@ -10,6 +10,169 @@
 
 ---
 
+## 2026-05-02 (74) — Sprint 7.7 MR 1: km_max_ciclo per regola + Fix C rientro intelligente
+
+### Contesto
+
+TODO post-MR3 (memoria `project_km_cap_per_regola_TODO.md`)
+finalmente affrontato. Decisione utente 2026-05-02:
+
+> "il km max per ciclo va inserito sotto il materiale no all inizio
+> della creazione del turno materiale"
+
+> "se non viene inserito dobbiamo considerare che in media un treno
+> al giorno fa circa 700/1000 km, [...] non devo invalidare il giro,
+> ma posso comunque portarlo a termine"
+
+> "il rientro in deposito non deve avvenire da una località distanta,
+> ma deve riprendere le regole dell inizio turno da fiorenza. perchè
+> non possiamo permetterci invii vuoti da localitò distanti è un
+> spreco di soldi"
+
+### Modifiche
+
+#### Backend (8 file modificati, 1 nuovo)
+
+- **Migration alembic 0014** `0014_km_max_ciclo_per_regola.py`
+  (revision `d2a8f17bc94e`, down_revision `c1f5d932b8a2`):
+  aggiunge `km_max_ciclo INT NULL` a `programma_regola_assegnazione`.
+- `models/programmi.py` `ProgrammaRegolaAssegnazione`: nuovo campo
+  `km_max_ciclo: Mapped[int | None]`.
+- `schemas/programmi.py`: `ProgrammaRegolaAssegnazioneRead.km_max_ciclo: int | None = None`
+  + `ProgrammaRegolaAssegnazioneCreate.km_max_ciclo: int | None = Field(default=None, ge=1)`.
+- `api/programmi.py`: 2 punti di creazione regola (batch in
+  `create_programma` + standalone in `create_regola`) ora
+  passano `km_max_ciclo=payload.km_max_ciclo`.
+
+- `domain/builder_giro/builder.py`:
+  - Nuova costante `DEFAULT_KM_MEDIO_GIORNALIERO: int = 850` (≈ stima
+    "700-1000 km/giorno" decisa con utente, midpoint).
+  - Nuova helper `_trova_regola_dominante(cat_pos, regole)`: regola
+    con priorità più alta che copre la PRIMA corsa della catena
+    (giorno tipo `feriale` come euristica). Tie-break: id più basso.
+  - Nuova helper `_calcola_cap_effettivo(regola, programma, n_giornate_safety)`
+    che ritorna primo non-None tra `regola.km_max_ciclo`,
+    `programma.km_max_ciclo`, oppure `None` (modo legacy).
+    `DEFAULT_KM_MEDIO_GIORNALIERO` resta solo come stima informativa
+    UI, NON applicato come hard cap (decisione: "non è obbligatorio,
+    indicativamente").
+  - Refactor del loop `multi_giornata`: invece di un singolo
+    `costruisci_giri_multigiornata(catene_per_data, param_mg)` con
+    cap globale, ora **raggruppa le catene per regola dominante** e
+    chiama `costruisci_giri_multigiornata` per ogni gruppo con il cap
+    della regola. Catene di regole diverse NON si fondono cross-notte
+    (= materiali diversi, convogli fisici diversi). Catene orfane
+    (nessuna regola) generano warning `N catene scartate: nessuna
+    regola del programma copre la prima corsa.`
+  - **Fix C rientro intelligente**: `genera_rientro_sede=True`
+    SEMPRE (non più legato a `modo_dinamico`). La logica "vuoto
+    breve / niente vuoto" è demandata al persister con il check
+    whitelist sede.
+  - Pass-through di `whitelist_sede=whitelist` ai `GiroDaPersistere`.
+
+- `domain/builder_giro/persister.py`:
+  - Importato `field` da dataclasses.
+  - `GiroDaPersistere`: nuovo campo
+    `whitelist_sede: frozenset[str] = field(default_factory=frozenset)`.
+  - Logica del rientro 9XXXX riscritta: ora si attiva SOLO se
+    `entry.genera_rientro_sede AND last_gv_id is not None AND
+    loc.stazione_collegata_codice is not None AND ultima_dest !=
+    loc.stazione_collegata_codice AND ultima_dest in
+    entry.whitelist_sede`. Mai vuoti lunghi tipo `COLICO →
+    CERTOSA`. Rimosso il vincolo precedente
+    `motivo_chiusura == 'naturale'`: anche giri chiusi per
+    `km_cap` possono avere il rientro se ultima dest in whitelist.
+
+- `tests/test_persister.py`:
+  `test_persister_corsa_rientro_9xxxx_se_genera_rientro_sede`
+  aggiornato per passare `whitelist_sede=frozenset({"S99002"})` —
+  la whitelist DEVE includere l'ultima dest perché il rientro si
+  generi.
+
+#### Frontend (5 file modificati)
+
+- `lib/api/programmi.ts`:
+  - `ProgrammaRegolaAssegnazioneRead.km_max_ciclo: number | null` (obbligatorio)
+  - `ProgrammaRegolaAssegnazioneCreate.km_max_ciclo?: number | null` (opzionale)
+- `routes/pianificatore-giro/regola/RegolaEditor.tsx`:
+  - Nuovo state `kmMaxCiclo: string`.
+  - Nuova sezione UI "km max per ciclo (opzionale)" sotto Composizione,
+    placeholder "Es. 4500 — se vuoto, builder considera ~850 km/giorno
+    medio". Validazione client (`>= 1` se compilato).
+  - Submit invia `km_max_ciclo: kmCicloNum`.
+- `routes/pianificatore-giro/regola/RegolaCard.tsx`:
+  - Nuovo Badge `outline` "cap N km" accanto a "priorità N", visibile
+    solo se `regola.km_max_ciclo !== null`. Title tooltip
+    "Cap km del ciclo per questa regola/materiale".
+- `routes/pianificatore-giro/CreaProgrammaDialog.tsx`:
+  - Rimosso campo `km_max_ciclo` dal form e dallo state. Aggiornato
+    docstring per documentare la decisione.
+- `routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`:
+  - Rimosso `Field "km/ciclo max"` dalla sezione Configurazione
+    (ora si vede sotto la singola regola).
+- `routes/pianificatore-giro/ProgrammaDettaglioRoute.test.tsx`:
+  - Fixture `makeRegola`: aggiunto `km_max_ciclo: null`.
+  - Sostituito `expect(screen.getByText(/10\.000/))` con
+    `expect(screen.getByText(/Tolleranza fascia oraria/i))`.
+
+### Verifiche
+
+- `uv run mypy --strict src`: ✅ 52 source files clean
+- `uv run pytest --tb=short`: ✅ **437 passed, 12 skipped in 19.45s**
+  (baseline 437 → invariato; modifiche backend backward-compat coperte)
+- Frontend `pnpm typecheck`: ✅ clean
+- Frontend `pnpm test --run`: ✅ **53 passed**
+- Frontend `pnpm build` (Vite production): ✅ 1757 modules,
+  389KB bundle (114KB gzip), 966ms
+
+### Migrazione DB applicata
+
+`alembic upgrade head`: `c1f5d932b8a2 → d2a8f17bc94e`. Stato corrente:
+0014 applied.
+
+### Conseguenze pratiche
+
+1. **Cap-per-materiale**: la regola "ETR526 sulla linea Tirano" può
+   avere cap 4500, la regola "E464+Vivalto sulla linea Pavia" può
+   avere cap 6000 — il builder li applica in modo distinto. Le
+   catene di regole diverse non si fondono cross-notte
+   (= ogni regola/materiale ha i suoi giri).
+2. **No vuoti lunghi**: un giro che termina a COLICO (fuori
+   whitelist FIO) NON genera più il vuoto lungo `COLICO →
+   CERTOSA`. Resta segnato come "non chiuso" con warning. Il
+   pianificatore può estendere il giro o configurare la regola
+   per chiuderlo in zona sede.
+3. **UI più chiara**: il cap si dichiara dove ha senso (sotto il
+   materiale della regola, non sul programma intero).
+
+### Limitazioni note (rimandate al refactor varianti)
+
+- `_trova_regola_dominante` usa giorno_tipo "feriale" come
+  euristica per matchare la prima corsa: per le regole con filtro
+  `giorno_tipo` esplicito (sabato/festivo) potrebbe assegnare al
+  cluster sbagliato. Sprint 7.7.3 (refactor varianti + calendario
+  ufficiale) risolverà questo.
+- Catene multi-corsa con corse di regole diverse: la regola
+  "dominante" è quella della prima corsa. Le altre corse della
+  catena vengono assegnate alla stessa regola del giro tramite
+  `assegna_e_rileva_eventi`. Coerente col modello attuale ma da
+  rivedere quando le regole avranno granularità più fine.
+
+### Memoria
+
+`project_km_cap_per_regola_TODO.md`: TODO completato (verrà
+archiviato/rimosso nel prossimo sweep memoria). `Fix C` incluso
+in questa entry — la nota nella memoria può essere considerata
+conclusa.
+
+### Prossimo step
+
+MR 7.7.2: calendario ufficiale italiano (tabella + seed festività).
+Poi MR 7.7.3: refactor varianti → giri separati con etichette
+parlanti.
+
+---
+
 ## 2026-05-02 (73) — HOTFIX urgente: arrivo_min < 0 in posiziona_su_localita (Fix B + corsa 00:01)
 
 ### Contesto

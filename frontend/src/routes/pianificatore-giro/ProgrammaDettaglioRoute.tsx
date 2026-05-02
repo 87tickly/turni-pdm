@@ -210,7 +210,9 @@ function ConfigurazioneCard({ programma }: { programma: ProgrammaDettaglioRead }
           value={`${programma.fascia_oraria_tolerance_min} min`}
         />
         <Field label="km/giorno max" value={formatNumber(programma.km_max_giornaliero)} />
-        <Field label="km/ciclo max" value={formatNumber(programma.km_max_ciclo)} />
+        {/* Sprint 7.7 MR 1: km/ciclo si dichiara per regola (sotto materiale),
+            non più sul programma. La colonna programma resta come legacy/fallback
+            backend ma non più esposta in UI. */}
         <Field
           label="Sosta notturna extra"
           value={

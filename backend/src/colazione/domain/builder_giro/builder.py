@@ -79,6 +79,18 @@ from colazione.models.programmi import (
 )
 
 # =====================================================================
+# Costanti
+# =====================================================================
+
+#: Sprint 7.7 MR 1 — chilometraggio medio giornaliero di un treno
+#: regionale italiano. Decisione utente 2026-05-02: "in media un treno
+#: al giorno fa circa 700/1000 km". Usato come fallback per il cap
+#: effettivo del giro quando né la regola né il programma hanno
+#: `km_max_ciclo` configurato. 850 = midpoint.
+DEFAULT_KM_MEDIO_GIORNALIERO: int = 850
+
+
+# =====================================================================
 # Errori
 # =====================================================================
 
@@ -405,6 +417,66 @@ def _corsa_vale_in_data(corsa: CorsaCommerciale, d: date) -> bool:
     return d.isoformat() in corsa.valido_in_date_json
 
 
+def _trova_regola_dominante(
+    cat_pos: CatenaPosizionata,
+    regole: list[ProgrammaRegolaAssegnazione],
+) -> ProgrammaRegolaAssegnazione | None:
+    """Sprint 7.7 MR 1: regola "dominante" che determina il cap del giro.
+
+    Convenzione: la regola di una catena è quella con `priorita` più
+    alta tra le regole che coprono la PRIMA corsa della catena (giorno
+    tipo `feriale` come euristica, allineato col filtro perimetro).
+    Se più regole hanno la stessa priorità, vince quella con `id` più
+    basso (deterministico).
+
+    Ritorna ``None`` se la prima corsa non è coperta da nessuna regola
+    (catena orfana — il chiamante la scarta con warning).
+    """
+    from colazione.domain.builder_giro.risolvi_corsa import matches_all
+
+    if not cat_pos.catena.corse:
+        return None
+    prima = cat_pos.catena.corse[0]
+    candidate = [r for r in regole if matches_all(r.filtri_json, prima, "feriale")]
+    if not candidate:
+        return None
+    candidate.sort(key=lambda r: (-r.priorita, r.id))
+    return candidate[0]
+
+
+def _calcola_cap_effettivo(
+    regola: ProgrammaRegolaAssegnazione,
+    programma: ProgrammaMateriale,
+    n_giornate_safety: int,
+) -> float | None:
+    """Sprint 7.7 MR 1: cap km del giro = primo non-None tra:
+
+    1. ``regola.km_max_ciclo`` — cap specifico per materiale (es.
+       ETR526 ~4500). Modello target post-MR 7.7.1.
+    2. ``programma.km_max_ciclo`` — cap legacy globale del programma.
+       Backward compat per programmi pre-MR 7.7.1.
+    3. ``None`` — nessun cap esplicito → ``costruisci_giri_multigiornata``
+       opera in modo legacy (chiusura per safety `n_giornate_max` o
+       assenza catena successiva). Il fallback informativo
+       ``DEFAULT_KM_MEDIO_GIORNALIERO`` (~850 km/giorno) NON è
+       applicato come hard cap: è solo una stima UI mostrata al
+       pianificatore come placeholder. Decisione 2026-05-02:
+       l'utente vuole "indicativamente 700-1000 km/giorno" come
+       riferimento, non come limite operativo del builder. Per cap
+       hard reale, l'utente compila esplicitamente il campo regola.
+
+    ``n_giornate_safety`` viene mantenuto come parametro per
+    futura attivazione del cap di default (es. opzione "applica
+    cap stimato"), oggi inutilizzato.
+    """
+    _ = n_giornate_safety  # reserved
+    if regola.km_max_ciclo is not None:
+        return float(regola.km_max_ciclo)
+    if programma.km_max_ciclo is not None:
+        return float(programma.km_max_ciclo)
+    return None
+
+
 # =====================================================================
 # Strict mode
 # =====================================================================
@@ -598,16 +670,42 @@ async def genera_giri(
         catene_per_data[d] = catene_pos
 
     # 4. Multi-giornata (cross-notte) con cumulo km e chiusura dinamica.
-    # Sprint 5.6: il giro chiude solo se km_cap raggiunto AND treno in
-    # whitelist sede ("vicino_sede"). `n_giornate_default` del programma
-    # diventa SAFETY NET (non più termine attivo): default 30 se non
-    # configurato, comunque protegge da loop pathologici.
-    param_mg = ParamMultiGiornata(
-        n_giornate_max=max(programma.n_giornate_default, 30),
-        km_max_ciclo=float(programma.km_max_ciclo) if programma.km_max_ciclo else None,
-        whitelist_sede=whitelist,
-    )
-    giri_dom = costruisci_giri_multigiornata(catene_per_data, param_mg)
+    # Sprint 7.7 MR 1 (refactor cap-per-regola): per ogni catena calcolo
+    # la regola dominante (priorità max che copre la prima corsa) e
+    # raggruppo. Cap effettivo del giro = regola.km_max_ciclo OR
+    # programma.km_max_ciclo (legacy) OR DEFAULT_KM_MEDIO_GIORNALIERO *
+    # DEFAULT_N_GIORNATE_SAFETY (≈ 850 × 30 = 25500 km, fallback
+    # ragionevole per "no cap esplicito"). Catene di regole diverse
+    # NON si fondono cross-notte (= materiali diversi, convogli fisici
+    # diversi).
+    n_giornate_safety = max(programma.n_giornate_default, 30)
+    catene_per_regola: dict[int, dict[date, list[CatenaPosizionata]]] = {}
+    catene_orphane = 0
+    for d_iter, catene_pos_iter in catene_per_data.items():
+        for cp in catene_pos_iter:
+            regola_dom = _trova_regola_dominante(cp, regole)
+            if regola_dom is None:
+                catene_orphane += 1
+                continue
+            per_data = catene_per_regola.setdefault(regola_dom.id, {})
+            per_data.setdefault(d_iter, []).append(cp)
+    if catene_orphane > 0:
+        warnings.append(
+            f"{catene_orphane} catene scartate: nessuna regola del programma copre la prima corsa."
+        )
+
+    giri_dom: list[Any] = []
+    for regola_id, catene_per_d in catene_per_regola.items():
+        regola = next(r for r in regole if r.id == regola_id)
+        cap_effettivo = _calcola_cap_effettivo(
+            regola, programma, n_giornate_safety
+        )
+        param_mg = ParamMultiGiornata(
+            n_giornate_max=n_giornate_safety,
+            km_max_ciclo=cap_effettivo,
+            whitelist_sede=whitelist,
+        )
+        giri_dom.extend(costruisci_giri_multigiornata(catene_per_d, param_mg))
 
     # 5. Assegnazione regole + eventi composizione (Sprint 5.5: validazione
     #    accoppiamenti via callback)
@@ -617,15 +715,22 @@ async def genera_giri(
     _check_strict_mode(programma, giri_assegnati)
 
     # 7. Genera numero_turno + persisti.
-    # Sprint 5.6: in modo dinamico (km_max_ciclo configurato) attiva la
-    # creazione automatica della corsa rientro 9XXXX a fine giro
-    # "naturale" (Feature 4).
-    modo_dinamico = programma.km_max_ciclo is not None
+    # Sprint 7.7 MR 1 (Fix C "rientro intelligente"): genera_rientro_sede è
+    # ora SEMPRE True. La logica di chiusura "naturale vs vuoto breve vs
+    # giro non chiuso" è demandata al persister, che decide in base alla
+    # destinazione dell'ultima giornata:
+    # - se in whitelist sede ≠ stazione_sede → genera vuoto BREVE di
+    #   rientro (es. CADORNA → CERTOSA);
+    # - se = stazione_sede → niente vuoto (chiusura naturale);
+    # - se fuori whitelist → niente vuoto, giro resta "non chiuso"
+    #   con motivo `non_chiuso` + warning. MAI vuoti lunghi tipo
+    #   COLICO → CERTOSA (decisione utente 2026-05-02).
     giri_da_persistere = [
         GiroDaPersistere(
             numero_turno=f"G-{localita.codice_breve}-{idx:03d}",
             giro=giro,
-            genera_rientro_sede=modo_dinamico,
+            genera_rientro_sede=True,
+            whitelist_sede=whitelist,
         )
         for idx, giro in enumerate(giri_assegnati, start=1)
     ]
