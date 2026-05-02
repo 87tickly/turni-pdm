@@ -138,10 +138,11 @@ function HeroHeader({
   onVediGiri,
 }: HeroHeaderProps) {
   const giorni = diffDaysInclusive(programma.valido_da, programma.valido_a);
-  // L'API espone solo `created_by_user_id` — niente username server-side.
-  // Vedi TN-UPDATE per il residuo "user lookup".
+  // Backend entry 88: la response include `created_by_username` via JOIN.
+  // Fallback a `user#id` se l'utente è stato eliminato (relazione NULL).
   const createdBy =
-    programma.created_by_user_id !== null ? `user#${programma.created_by_user_id}` : "—";
+    programma.created_by_username ??
+    (programma.created_by_user_id !== null ? `user#${programma.created_by_user_id}` : "—");
 
   return (
     <Card className="p-6">

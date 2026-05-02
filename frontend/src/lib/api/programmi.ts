@@ -37,6 +37,8 @@ export interface ProgrammaMaterialeRead {
   strict_options_json: StrictOptions;
   stazioni_sosta_extra_json: string[];
   created_by_user_id: number | null;
+  /** Backend entry 88: popolato via JOIN con `app_user`, `null` se utente eliminato. */
+  created_by_username: string | null;
   created_at: string;
   updated_at: string;
 }

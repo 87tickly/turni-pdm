@@ -251,6 +251,10 @@ class ProgrammaMaterialeRead(BaseModel):
     strict_options_json: dict[str, Any]
     stazioni_sosta_extra_json: list[str] = Field(default_factory=list)
     created_by_user_id: int | None = None
+    # Sprint dashboard 1° ruolo (entry 88): popolato via JOIN con `app_user`
+    # quando la query usa `joinedload(ProgrammaMateriale.created_by)`.
+    # `None` se l'utente è stato eliminato o la relazione non è stata caricata.
+    created_by_username: str | None = None
     created_at: datetime
     updated_at: datetime
 

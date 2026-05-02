@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from colazione.auth import require_role
 from colazione.db import get_session
@@ -191,8 +192,16 @@ async def list_programmi(
     session: AsyncSession = Depends(get_session),
     stato: str | None = Query(default=None, description="filtro per stato"),
 ) -> list[ProgrammaMateriale]:
-    """Lista programmi dell'azienda corrente. Ordinati `valido_da DESC`."""
-    stmt = select(ProgrammaMateriale).where(ProgrammaMateriale.azienda_id == user.azienda_id)
+    """Lista programmi dell'azienda corrente. Ordinati `valido_da DESC`.
+
+    Eager-load `created_by` per popolare `created_by_username` nella
+    response (entry 88 — schermata 3 design `arturo/03-dettaglio-programma.html`).
+    """
+    stmt = (
+        select(ProgrammaMateriale)
+        .options(joinedload(ProgrammaMateriale.created_by))
+        .where(ProgrammaMateriale.azienda_id == user.azienda_id)
+    )
     if stato is not None:
         stmt = stmt.where(ProgrammaMateriale.stato == stato)
     stmt = stmt.order_by(ProgrammaMateriale.valido_da.desc())
@@ -214,6 +223,7 @@ async def get_programma(
     """Dettaglio del programma + lista regole (eager loading via 1 query)."""
     stmt = (
         select(ProgrammaMateriale)
+        .options(joinedload(ProgrammaMateriale.created_by))
         .where(
             ProgrammaMateriale.id == programma_id,
             ProgrammaMateriale.azienda_id == user.azienda_id,

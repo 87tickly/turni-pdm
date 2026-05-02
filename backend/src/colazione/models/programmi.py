@@ -18,7 +18,7 @@ Le 3 stagioni (`invernale/estiva/agosto`) restano solo a livello di
 """
 
 from datetime import date, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     BigInteger,
@@ -32,9 +32,13 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.exc import MissingGreenlet
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from colazione.db import Base
+
+if TYPE_CHECKING:
+    from colazione.models.auth import AppUser
 
 
 class ProgrammaMateriale(Base):
@@ -78,8 +82,23 @@ class ProgrammaMateriale(Base):
 
     # Tracking
     created_by_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("app_user.id"))
+    created_by: Mapped["AppUser | None"] = relationship(foreign_keys=[created_by_user_id])
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    @property
+    def created_by_username(self) -> str | None:
+        """Username del creatore se la relazione è eager-loaded.
+
+        Restituisce ``None`` se la relazione non è stata caricata
+        (per evitare lazy-load implicito in contesto async). Le query
+        che vogliono questo campo devono usare `joinedload(...)`.
+        Entry 88 (TN-UPDATE).
+        """
+        try:
+            return self.created_by.username if self.created_by is not None else None
+        except MissingGreenlet:
+            return None
 
 
 class ProgrammaRegolaAssegnazione(Base):

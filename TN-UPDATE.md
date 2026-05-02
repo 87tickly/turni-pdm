@@ -10,6 +10,91 @@
 
 ---
 
+## 2026-05-02 (88) — Chiusura residuo "user lookup": `created_by_username` via JOIN backend
+
+### Contesto
+
+Residuo aperto in entry 87 (schermata 3 dettaglio programma): l'hero
+header mostrava "creato da user#3" perché l'API esponeva solo
+`created_by_user_id` (FK), non l'username. Il fix è semplice (~30
+min) e ad alta visibilità → chiusura immediata prima di passare a
+schermate 4 e 5.
+
+### Modifiche
+
+#### Backend
+
+- **`backend/src/colazione/models/programmi.py`**:
+  - Import `relationship` da SQLAlchemy.orm + `MissingGreenlet`
+    da `sqlalchemy.exc` + `TYPE_CHECKING`/`AppUser` per il type hint.
+  - Aggiunto attributo `created_by: Mapped["AppUser | None"] =
+    relationship(foreign_keys=[created_by_user_id])` su
+    `ProgrammaMateriale`.
+  - Aggiunto property `@property created_by_username` che ritorna
+    `self.created_by.username if self.created_by else None`,
+    con guard `MissingGreenlet` per evitare lazy-load implicito in
+    contesto async (ritorna `None` se la relazione non è eager-loaded).
+
+- **`backend/src/colazione/schemas/programmi.py`**:
+  - Aggiunto `created_by_username: str | None = None` a
+    `ProgrammaMaterialeRead` (Pydantic con `from_attributes=True`
+    auto-mappa la `@property` dell'ORM).
+
+- **`backend/src/colazione/api/programmi.py`**:
+  - Import `joinedload` da SQLAlchemy.orm.
+  - `list_programmi` e `get_programma`: aggiunto
+    `.options(joinedload(ProgrammaMateriale.created_by))` per
+    eager-loading. Una sola query SQL con LEFT JOIN ad `app_user`,
+    nessun N+1.
+
+#### Frontend
+
+- **`frontend/src/lib/api/programmi.ts`**: aggiunto
+  `created_by_username: string | null` al type
+  `ProgrammaMaterialeRead`.
+- **`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`**:
+  hero header usa `programma.created_by_username` con fallback a
+  `user#${id}` se `null` (utente eliminato).
+- Tests: aggiunto `created_by_username: "admin"` ai mock factory
+  `makeProgramma()` in `ProgrammaDettaglioRoute.test.tsx` e
+  `ProgrammiRoute.test.tsx`.
+
+### Verifiche
+
+- `uv run mypy --strict src` ✅ 58 file clean
+- `uv run pytest -q` ✅ **513 passed, 12 skipped** (no regressioni
+  su 23 test esistenti `test_programmi_api`)
+- **Smoke API** con `curl` su Docker compose stack:
+  ```json
+  {
+    "id": 5692,
+    "created_by_user_id": 3,
+    "created_by_username": "admin",
+    ...
+  }
+  ```
+  Field popolato correttamente via JOIN.
+- Frontend `pnpm exec tsc -b --noEmit` ✅ clean
+- Frontend `pnpm test --run` ✅ **53 passed** (no regressioni)
+
+### Conseguenze pratiche
+
+- Hero header dettaglio programma: "creato da user#3" → "creato da
+  admin". Polish UX immediato.
+- Nessun overhead perf rilevante: il JOIN con `app_user` è LEFT,
+  indicizzato (PK), e si applica solo a query già a basso volume
+  (pochi programmi per azienda).
+
+### Limitazioni note
+
+- Nessuna API per altri lookup user_id → username (es. `audit_log`
+  o storico modifiche). La pattern è replicabile quando servirà.
+- Non c'è gestione di "creatore eliminato" lato UI oltre al fallback
+  `user#${id}`. Decisione futura: mostrare "utente eliminato" stile
+  GitHub/GitLab.
+
+---
+
 ## 2026-05-02 (87) — Schermate 2 + 3: lista programmi (calendario Gantt) + dettaglio programma (hero + config 2-col + regole + storico)
 
 ### Contesto
