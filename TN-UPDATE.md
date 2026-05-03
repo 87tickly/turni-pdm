@@ -10,6 +10,106 @@
 
 ---
 
+## 2026-05-03 (108) — Sprint 7.9 MR 9A: rimossa aggregazione MR6 per categoria semantica
+
+### Contesto
+
+Feedback utente vedendo giro 74417 G1 con etichetta
+`"Lavorativo+Festivo (15 date)"`:
+
+> "i lavorativi è regolare il festivo, ma poi abbiamo il calendario
+> ufficiale no? perchè non utilizzarlo? oppure trova la soluzione
+> come il secondo screen [PDF Trenord 1134], non ci siamo non
+> funziona l algoritmo cosi come è impostato."
+
+> "Rischio: esplosione UI questo non accade se tu crei un algoritmo
+> che per 8 o qualsivoglia giornata assegna il materiale ai treni ok?"
+
+Il PDF Trenord 1134 (riferimento canonico) mostra varianti DISAGGREGATE:
+ogni cluster A1 con la sua etichetta specifica (`Si eff. 26/2, 2-3-4/3`,
+`LV 1:5 esclusi 2-3-4-5/3`, `Effettuato 6F`).
+
+L'aggregazione MR6 (Sprint 7.8 MR 6) fondeva varianti per categoria
+primaria semantica (lavorativo/prefestivo/festivo) producendo etichette
+generiche (`Lavorativo+Festivo (N date)`) che nascondevano i veri
+pattern di servizio.
+
+### Diagnosi
+
+`backend/src/colazione/api/giri.py:615-679` raggruppava le varianti
+ORM post-A2 per chiave `(giornata_id, categoria_primaria_dates)` dove
+`categoria_primaria` = MODA di `tipo_giorno_categoria` sulle
+`dates_apply`. Le varianti dello stesso (giornata, categoria) venivano
+fuse: `dates_apply = unione`, `blocchi = del canonico`,
+`etichetta = ricalcolata sull'unione`. Cluster A1 distinti (= pattern
+di servizio diversi nel PdE) sparivano dietro un'etichetta sintetica.
+
+L'aggregazione A2 a livello persistenza (Sprint 7.8 MR 2.5, chiave
+`(materiale, sede)`) garantisce già:
+- Disgiunzione delle date tra varianti della stessa giornata-K (per
+  costruzione del clustering A1).
+- Numero di varianti per giornata-K = numero di cluster A1 distinti =
+  numero di pattern di servizio nel PdE per quella giornata.
+
+Quindi MR6 non risolveva un problema reale: solo nascondeva la
+struttura. Se A2 producesse troppe varianti, è bug di clustering A1
+da investigare a monte, non da mascherare a livello UI.
+
+### Modifiche
+
+`backend/src/colazione/api/giri.py`:
+- Rimosso il blocco aggregazione MR6 (riga 615-684).
+- Sostituito con costruzione 1:1: ogni `GiroVariante` ORM post-A2
+  produce una `GiroVarianteRead` separata.
+- `etichetta_parlante` calcolata su `dates_var` della variante singola
+  (non più sull'unione di un gruppo).
+- `cluster_a1_ids = [gv.variant_index]` (lista singola). La
+  propagazione cross-giornata (MR 8A) ora usa identità invece di
+  intersezione su set.
+
+### Conseguenze attese
+
+- Etichette varianti diventano specifiche stile Trenord PDF 1134:
+  `Si eff. 3/3, 4/3, 5/3 (Lavorativo)`, `Lv esclusi 25/5`,
+  `Solo 23/5/26`, ecc.
+- Il caso "multi-categoria" (`Lavorativo+Festivo (N date)`) può
+  ancora capitare se un singolo cluster A1 ha date di tipologie miste
+  (es. una sequenza di servizio applicata sia di sabato che di
+  domenica) — è un'informazione corretta, non un artefatto di
+  aggregazione.
+- Numero di varianti per giornata = numero di cluster A1 post-A2.
+  Su PdE Trenord 2025-2026 ci aspettiamo ~3-6 varianti per giornata
+  (= modello PDF 1134 reale). Se emergessero ~50+ varianti per
+  giornata, è bug clustering A1 separato.
+
+### Verifiche
+
+- `mypy --strict` ✅ 58 file clean.
+- `pytest` ✅ **536 passed, 12 skipped**.
+- Frontend `tsc -b --noEmit` ✅.
+- Smoke E2E: da fare con DB popolato (DB attualmente vuoto, programma
+  8615 e giro 74417 dello screenshot non più presenti).
+
+### Stato
+
+- ✅ MR 9A rimozione aggregazione MR6.
+- 🟡 MR 9B (marker uscita ciclo + badge continuità GN per varianti
+  fuori whitelist) ancora da fare.
+- 🟡 Smoke test su dati reali per misurare numero varianti A2 per
+  giornata.
+
+### Prossimo step
+
+1. Re-import PdE 2025-2026 + creazione programma di test (FIO ETR421
+   o simile) + smoke test per misurare numero varianti per giornata
+   nel real-world.
+2. MR 9B: estensione marker "🏠→ uscita ciclo" a tutte le varianti
+   di G1 con vuoto_testa partente da whitelist + badge esplicito
+   "↪ continuità GN" per varianti che partono fuori whitelist
+   (= cross-notte K-1 dalla giornata N).
+
+---
+
 ## 2026-05-03 (107) — Sprint 7.9 hotfix: rimosso blocco pubblicazione su sovrapposizione finestre
 
 ### Contesto
