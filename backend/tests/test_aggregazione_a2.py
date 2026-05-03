@@ -201,9 +201,10 @@ def test_due_giri_chiave_diversa_restano_aggregati_distinti() -> None:
     assert materiali == {"ETR204", "ETR425"}
 
 
-def test_n_giornate_diverse_non_si_fondono() -> None:
-    """Stesso materiale + sede ma n_giornate diversi → aggregati
-    separati.
+def test_n_giornate_diverse_si_fondono_in_canonico_max() -> None:
+    """Sprint 7.8 MR 2.5: stesso materiale + sede ma n_giornate
+    diversi → fusione in UN aggregato di lunghezza max. Il cluster più
+    corto contribuisce varianti SOLO alle prime K giornate.
     """
     g_8 = _giro(
         materiale="ETR204",
@@ -220,9 +221,21 @@ def test_n_giornate_diverse_non_si_fondono() -> None:
         ),
     )
     out = aggrega_a2([g_8, g_5])
-    assert len(out) == 2
-    n_giornate_set = {len(a.giornate) for a in out}
-    assert n_giornate_set == {5, 8}
+    # 1 solo aggregato, lunghezza canonica 8 (= max)
+    assert len(out) == 1
+    agg = out[0]
+    assert len(agg.giornate) == 8
+    assert agg.n_cluster_a1 == 2
+    # Giornate 1-5: entrambi i cluster contribuiscono (2 varianti)
+    for k in range(5):
+        assert len(agg.giornate[k].varianti) == 2, (
+            f"giornata {k+1}: attese 2 varianti, ottenute {len(agg.giornate[k].varianti)}"
+        )
+    # Giornate 6-8: solo il cluster lungo contribuisce (1 variante)
+    for k in range(5, 8):
+        assert len(agg.giornate[k].varianti) == 1, (
+            f"giornata {k+1}: attesa 1 variante, ottenute {len(agg.giornate[k].varianti)}"
+        )
 
 
 def test_giro_orfano_senza_composizione_viene_scartato() -> None:

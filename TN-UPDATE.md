@@ -10,6 +10,115 @@
 
 ---
 
+## 2026-05-03 (101) — Sprint 7.8 MR 2.5: refactor chiave A2 (materiale, sede) → 1 turno con N giornate canoniche
+
+### Contesto
+
+Completamento di MR 2 (entry 100). Il refactor algoritmico del
+builder aveva risolto il cap superiore (12) e introdotto motivo
+`sotto_min`, ma la frammentazione persisteva: 12 giri di lunghezze
+1–12, perché `aggrega_a2()` usava chiave A2 =
+``(materiale, sede, n_giornate)`` e separava i cluster A1 di
+lunghezze diverse.
+
+Decisione utente 2026-05-03 (post-smoke entry 100):
+> "procedi con m2.5"
+
+### Modifiche
+
+`domain/builder_giro/aggregazione_a2.py`:
+
+- **Chiave A2 nuova**: ``(materiale_tipo_codice, localita_codice)``
+  (drop di `n_giornate`).
+- ``canonical_len`` = max(`len(g.giornate)`) tra i cluster A1 della
+  stessa chiave.
+- Ordinamento canonico: ``(-len(giornate), data_partenza_minima)``
+  → primo è il cluster con max lunghezza, tie-break su data.
+- Per ogni K=0..canonical_len-1, raccoglie le varianti SOLO dai
+  cluster con ``len(giornate) > K``: i cluster più corti
+  contribuiscono varianti alle PRIME giornate-pattern e basta.
+  Per le giornate K successive, NON contribuiscono variante (= per
+  le date di quel cluster, il convoglio NON fa quelle giornate).
+- Ordinamento output deterministico: per chiave (materiale, sede)
+  senza più `n_giornate` come terzo campo.
+
+`tests/test_aggregazione_a2.py`:
+
+- `test_n_giornate_diverse_non_si_fondono` rinominato in
+  `test_n_giornate_diverse_si_fondono_in_canonico_max`. Verifica:
+  - 1 solo aggregato (era 2)
+  - lunghezza canonica = max
+  - giornate 1..min_len: tutte hanno 2 varianti
+  - giornate min_len+1..canonical: 1 sola variante (cluster lungo)
+
+### Verifiche
+
+- `mypy --strict` ✅ 58 file clean.
+- `pytest tests/` ✅ **532 passed, 12 skipped** (no regressioni).
+
+#### Smoke E2E su programma 7590 (PdE 19/05–07/06, 13.374 corse,
+sede FIO, regola ETR421+ETR421 senza filtri linea)
+
+```
+1 giro creato (era 12), 13.374 corse processate, 372 residue.
+n_giri_chiusi=1, n_giri_non_chiusi=0.
+```
+
+Pattern varianti per giornata (giro 73605):
+
+| Giornata | Varianti | Blocchi |
+|---|---|---|
+| 1 | 370 | 2553 |
+| 2 | 284 | 2165 |
+| 3 | 230 | 1860 |
+| 4 | 187 | 1650 |
+| 5 | 163 | 1312 |
+| 6 | 133 | 1236 |
+| 7 | 111 | 1023 |
+| 8 | 85 | 743 |
+| 9 | 66 | 635 |
+| 10 | 52 | 520 |
+| 11 | 33 | 312 |
+| 12 | 14 | 132 |
+
+La giornata 1 ha più varianti (370 = somma di tutti i cluster A1)
+perché TUTTI i cluster contribuiscono. Le giornate successive hanno
+varianti decrescenti (= solo i cluster più lunghi raggiungono
+giornate elevate). Giornata 12 = 14 varianti = solo cluster A1 di
+lunghezza 12 max.
+
+### Conseguenze sul frontend
+
+Il numero alto di varianti per giornata (370 per la giornata 1) NON
+è gestibile direttamente dal Gantt v3 (entry 96, design assume 1-4
+varianti tipiche). MR 3 (etichette stile Trenord) raggruppa le
+varianti per etichetta semantica (`Lv` / `F` / `P escl. DD/M` /
+`Si eff. DD/M`) prima del rendering.
+
+### Stato
+
+- ✅ MR 1 (schema + UI form): chiuso (entry 99).
+- ✅ MR 2 (cap algoritmico + motivo sotto_min): chiuso (entry 100).
+- ✅ MR 2.5 (refactor chiave A2): chiuso ora.
+- 🔄 MR 3 (etichette varianti stile Trenord): prossimo.
+- ⏳ MR 4 (Gantt nomi stazioni), MR 5 (dashboard convogli).
+
+### Prossimo step
+
+MR 3: refactor `domain/builder_giro/etichetta.py` per produrre
+etichette stile Trenord:
+
+- `Lv` (Lavorativo: tutte le date sono feriali)
+- `F` (Festivo)
+- `P` / `P escl. DD/M, DD/M`
+- `Si eff. DD/M, DD/M`
+- `LV 1:5 esclusi 2-3-4/3` (combinato range + esclusioni)
+
+Le 370 varianti della giornata 1 si comprimono in pochi gruppi
+semantici (~3-6 etichette tipiche), gestibili dal Gantt v3.
+
+---
+
 ## 2026-05-03 (100) — Sprint 7.8 MR 2: builder cap soft/hard + motivo "sotto_min" (parziale)
 
 ### Contesto
