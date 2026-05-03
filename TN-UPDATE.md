@@ -10,6 +10,59 @@
 
 ---
 
+## 2026-05-04 (117) — Dockerfile production-ready per deploy Railway
+
+### Contesto
+
+Decisione utente 2026-05-04: deploy del programma su Railway via CLI
+sul progetto già linkato `Arturo-Turni`.
+
+### Modifiche
+
+`backend/Dockerfile`:
+- Aggiunta `COPY scripts ./scripts` per disponibilità degli script di
+  seed (whitelist, dotazione Trenord) nell'immagine production.
+- `ENV PORT=8000` come default; bind dinamico a `${PORT}` injettato da
+  Railway.
+- CMD ora esegue `alembic upgrade head` PRIMA di `uvicorn` → schema
+  sempre allineato senza intervento manuale al deploy.
+
+`frontend/Dockerfile`:
+- Riscritto come **multi-stage**:
+  - **Stage 1 (build)**: node:20-alpine + pnpm@10.33.2, build con
+    `VITE_API_BASE_URL` come `ARG` (iniettato da Railway).
+  - **Stage 2 (runtime)**: nginx:1.27-alpine, config SPA fallback
+    (`try_files $uri $uri/ /index.html`) + cache `Cache-Control:
+    public, immutable` per `/assets/`, bind dinamico a `${PORT}`.
+
+Il Dockerfile dev precedente (single-stage con `pnpm dev`) era
+inadatto a production: ricostruiva ogni request, niente bundle
+compresso, porta 5173 fissa.
+
+### Setup Railway pendente
+
+CLI loggato come Antonio (as87fly@gmail.com), progetto `Arturo-Turni`
+linkato. Comando `railway add --database postgres` ritorna
+"Unauthorized" — probabile token CLI con permessi limitati. Risolutore
+manuale: `railway logout && railway login` da Terminal interattivo,
+o aggiunta dei 3 servizi (Postgres, backend empty, frontend empty)
+direttamente da dashboard. Dopo setup iniziale il deploy continua via
+CLI (`railway up --service backend|frontend` + `railway variables set`).
+
+### Verifiche
+
+- Dockerfile backend: validazione visiva (alembic + uvicorn).
+- Dockerfile frontend: multi-stage corretto, nginx template valido.
+- Build effettivo verrà eseguito al primo `railway up`.
+
+### Stato
+
+- ✅ Dockerfile production-ready committati.
+- 🟡 Deploy in attesa di sblocco auth Railway CLI o setup manuale
+  servizi da dashboard.
+
+---
+
 ## 2026-05-04 (116) — Sprint 7.9 MR 11C: BuilderRun persistito + UI "Ultimo run"
 
 ### Contesto

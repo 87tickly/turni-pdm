@@ -25,10 +25,14 @@ RUN uv sync --no-dev --no-install-project
 COPY src ./src
 COPY alembic.ini* ./
 COPY alembic ./alembic
+COPY scripts ./scripts
 
 # Install project (without re-installing deps)
 RUN uv sync --no-dev
 
+# Railway inietta $PORT dinamicamente; default 8000 in locale.
+ENV PORT=8000
 EXPOSE 8000
 
-CMD ["uvicorn", "colazione.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Migration + start. `sh -c` necessario per espandere $PORT.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn colazione.main:app --host 0.0.0.0 --port ${PORT}"]
