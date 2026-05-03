@@ -168,6 +168,36 @@ export async function pubblicaProgramma(id: number): Promise<ProgrammaMaterialeR
   });
 }
 
+// =====================================================================
+// Builder run (Sprint 7.9 MR 11C, entry 116)
+// =====================================================================
+
+export interface BuilderRunRead {
+  id: number;
+  programma_id: number;
+  localita_codice: string;
+  eseguito_at: string;
+  eseguito_da_user_id: number | null;
+  n_giri_creati: number;
+  n_giri_chiusi: number;
+  n_giri_non_chiusi: number;
+  n_corse_processate: number;
+  n_corse_residue: number;
+  n_eventi_composizione: number;
+  n_incompatibilita_materiale: number;
+  warnings_json: string[];
+  force: boolean;
+}
+
+export async function getLastBuilderRun(
+  programmaId: number,
+): Promise<BuilderRunRead | null> {
+  return apiJson<BuilderRunRead | null>(
+    `/api/programmi/${programmaId}/last-run`,
+    { method: "GET" },
+  );
+}
+
 export async function archiviaProgramma(id: number): Promise<ProgrammaMaterialeRead> {
   return apiJson<ProgrammaMaterialeRead>(`/api/programmi/${id}/archivia`, {
     method: "POST",

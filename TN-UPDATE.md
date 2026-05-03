@@ -10,6 +10,74 @@
 
 ---
 
+## 2026-05-04 (116) — Sprint 7.9 MR 11C: BuilderRun persistito + UI "Ultimo run"
+
+### Contesto
+
+Decisione utente 2026-05-04: dopo che il programma 9447 produceva 0 giri
+(sede CRE non coerente con direttrice BRESCIA-PIADENA-PARMA, entry 115),
+il pianificatore non vedeva PERCHÉ — i 20 warning del builder erano
+prodotti correttamente ma persi dopo la response HTTP. Card UI
+"Storico run del builder · in arrivo" da entry 86 era ancora placeholder.
+
+### Modifiche
+
+**Backend**:
+
+- `alembic/versions/0021_builder_run.py`: nuova tabella `builder_run`
+  con FK a `programma_materiale`, `azienda`, `app_user`. Indice
+  `(programma_id, eseguito_at DESC)` per recupero ultimo run.
+- `models/programmi.py`: `class BuilderRun` ORM con stats + `warnings_json`
+  (JSONB) + `force` flag.
+- `models/__init__.py`: export di `BuilderRun`.
+- `domain/builder_giro/builder.py`: `genera_giri` accetta nuovo
+  `eseguito_da_user_id: int | None = None`. A fine pipeline persiste
+  un `BuilderRun` con tutte le stats + warnings.
+- `api/giri.py`: endpoint `genera_giri_endpoint` passa
+  `user.user_id` come `eseguito_da_user_id`.
+- `api/programmi.py`: 2 nuovi endpoint:
+  - `GET /api/programmi/{id}/last-run` → `BuilderRunRead | null`
+  - `GET /api/programmi/{id}/runs?limit=N` → `list[BuilderRunRead]`
+- `tests/test_models.py`: `EXPECTED_TABLE_COUNT` 37 → 38.
+
+**Frontend**:
+
+- `lib/api/programmi.ts`: `interface BuilderRunRead` + `getLastBuilderRun`.
+- `hooks/useProgrammi.ts`: `useLastBuilderRun(id)` query.
+- `routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`:
+  - Rimosso `StoricoRunPlaceholder` (placeholder "in arrivo").
+  - Aggiunto `UltimoRunSection` con:
+    - Badge stato (verde se `n_giri_creati > 0`, rosso se 0).
+    - Timestamp + sede + flag force.
+    - Stats: corse processate, residue, copertura PdE % con barra.
+    - `<details>` collassabile con elenco warnings (max 50 mostrati).
+
+### Verifiche
+
+- `mypy --strict` ✅ 59 file clean.
+- `pytest` ✅ **550 passed, 12 skipped**.
+- Frontend `tsc -b --noEmit` ✅.
+- Frontend `vitest` ✅ **53 passed**.
+- Smoke E2E: invocazione diretta `genera_giri` su programma 9447 con
+  pytest reset (programma rigenerato in run successiva via UI
+  utente).
+
+### Stato
+
+- ✅ MR 11C BuilderRun persistito + UI esposta.
+- 🟡 Deploy Railway dopo conferma utente.
+- 🟡 MR 11B capacity-based assignment ancora pendente.
+- 🟡 MR 13 UI sblocco modifica regole su programma attivo.
+
+### Prossimo step
+
+Utente rigenera programma in UI → la pagina dettaglio mostra
+direttamente "Ultimo run del builder" con copertura PdE + warnings
+del builder espliciti (es. "sede non coerente con questa regola"
+quando il caso entry 115 si ripresenta).
+
+---
+
 ## 2026-05-03 (115) — Whitelist CRE estesa con BRESCIA e PIADENA
 
 ### Contesto

@@ -165,6 +165,7 @@ async def genera_giri_endpoint(
             session=session,
             azienda_id=user.azienda_id,
             force=force,
+            eseguito_da_user_id=user.user_id,
         )
     except ProgrammaNonTrovatoError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

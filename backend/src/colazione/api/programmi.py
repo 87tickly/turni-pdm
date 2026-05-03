@@ -20,8 +20,10 @@ non rivelare l'esistenza).
 """
 
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -29,6 +31,7 @@ from sqlalchemy.orm import joinedload
 from colazione.auth import require_role
 from colazione.db import get_session
 from colazione.models.programmi import (
+    BuilderRun,
     ProgrammaMateriale,
     ProgrammaRegolaAssegnazione,
 )
@@ -411,3 +414,78 @@ async def archivia_programma(
     await session.commit()
     await session.refresh(p)
     return p
+
+
+# =====================================================================
+# Builder run (Sprint 7.9 MR 11C, entry 116)
+# =====================================================================
+
+
+class BuilderRunRead(BaseModel):
+    """Esito di una run del builder + metriche di copertura."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    programma_id: int
+    localita_codice: str
+    eseguito_at: datetime
+    eseguito_da_user_id: int | None
+    n_giri_creati: int
+    n_giri_chiusi: int
+    n_giri_non_chiusi: int
+    n_corse_processate: int
+    n_corse_residue: int
+    n_eventi_composizione: int
+    n_incompatibilita_materiale: int
+    warnings_json: list[Any]
+    force: bool
+
+
+@router.get(
+    "/{programma_id}/last-run",
+    response_model=BuilderRunRead | None,
+    summary="Ritorna l'esito dell'ultima run del builder per il programma",
+)
+async def get_last_builder_run(
+    programma_id: int,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> BuilderRun | None:
+    """Recupera l'ultimo ``BuilderRun`` per il programma (per mostrarne
+    warnings + copertura PdE in UI).
+
+    Restituisce ``null`` se il programma non ha ancora avuto run, oppure
+    se non esiste / appartiene ad altra azienda (404 silenzioso per
+    privacy multi-tenant — coerente con il pattern di altre route).
+    """
+    p = await _get_programma_or_404(session, programma_id, user.azienda_id)
+    stmt = (
+        select(BuilderRun)
+        .where(BuilderRun.programma_id == p.id, BuilderRun.azienda_id == user.azienda_id)
+        .order_by(BuilderRun.eseguito_at.desc())
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+@router.get(
+    "/{programma_id}/runs",
+    response_model=list[BuilderRunRead],
+    summary="Storico run del builder per il programma (più recente per primo)",
+)
+async def list_builder_runs(
+    programma_id: int,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+    limit: int = Query(20, ge=1, le=100),
+) -> list[BuilderRun]:
+    """Storico run del builder. Ordinato per ``eseguito_at DESC``."""
+    p = await _get_programma_or_404(session, programma_id, user.azienda_id)
+    stmt = (
+        select(BuilderRun)
+        .where(BuilderRun.programma_id == p.id, BuilderRun.azienda_id == user.azienda_id)
+        .order_by(BuilderRun.eseguito_at.desc())
+        .limit(limit)
+    )
+    return list((await session.execute(stmt)).scalars().all())

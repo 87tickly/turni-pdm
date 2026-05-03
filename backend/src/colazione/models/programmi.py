@@ -164,3 +164,51 @@ class ProgrammaRegolaAssegnazione(Base):
     km_max_ciclo: Mapped[int | None] = mapped_column(Integer)
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class BuilderRun(Base):
+    """Esito persistito di una run del builder (Sprint 7.9 MR 11C, entry 116).
+
+    Ogni invocazione di ``genera_giri`` produce una riga in questa
+    tabella che conserva stats + warnings, così il pianificatore può:
+    - Vedere perché il run ha prodotto 0 giri (warnings espliciti tipo
+      "sede non coerente con la regola").
+    - Confrontare run successivi (regole modificate, sede cambiata).
+    - Esporre la copertura PdE (corse_processate / corse_residue).
+
+    Decisione utente 2026-05-04: warning del builder oggi sono persi
+    dopo la response. La persistenza permette di mostrare dashboard
+    "Ultimo run" + storico run senza re-eseguire.
+    """
+
+    __tablename__ = "builder_run"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    programma_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("programma_materiale.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    azienda_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("azienda.id", ondelete="CASCADE"), nullable=False
+    )
+    localita_codice: Mapped[str] = mapped_column(String(64), nullable=False)
+    eseguito_da_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("app_user.id", ondelete="SET NULL"), nullable=True
+    )
+    eseguito_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    n_giri_creati: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    n_giri_chiusi: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    n_giri_non_chiusi: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    n_corse_processate: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    n_corse_residue: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    n_eventi_composizione: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    n_incompatibilita_materiale: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    warnings_json: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    force: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

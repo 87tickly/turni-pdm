@@ -18,9 +18,11 @@ import {
   archiviaProgramma,
   createProgramma,
   deleteRegola,
+  getLastBuilderRun,
   getProgramma,
   listProgrammi,
   pubblicaProgramma,
+  type BuilderRunRead,
   type ListProgrammiParams,
   type ProgrammaDettaglioRead,
   type ProgrammaMaterialeCreate,
@@ -48,6 +50,22 @@ export function useProgramma(id: number | undefined): UseQueryResult<ProgrammaDe
         throw new Error("id mancante");
       }
       return getProgramma(id);
+    },
+    enabled: id !== undefined,
+  });
+}
+
+/** Sprint 7.9 MR 11C entry 116: ultimo run del builder per il programma. */
+export function useLastBuilderRun(
+  id: number | undefined,
+): UseQueryResult<BuilderRunRead | null> {
+  return useQuery({
+    queryKey: [...PROGRAMMI_KEY, "last-run", id],
+    queryFn: () => {
+      if (id === undefined) {
+        throw new Error("id mancante");
+      }
+      return getLastBuilderRun(id);
     },
     enabled: id !== undefined,
   });

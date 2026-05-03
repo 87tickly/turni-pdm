@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertCircle, Archive, ArrowLeft, ArrowRight, ListOrdered, Play, Plus, Send } from "lucide-react";
+import { AlertCircle, Archive, ArrowLeft, ListOrdered, Play, Plus, Send } from "lucide-react";
+
+import { cn } from "@/lib/utils";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -9,7 +11,12 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ProgrammaStatoBadge } from "@/components/domain/ProgrammaStatoBadge";
 import { useMateriali } from "@/hooks/useAnagrafiche";
 import { useGiriProgramma } from "@/hooks/useGiri";
-import { useArchiviaProgramma, useProgramma, usePubblicaProgramma } from "@/hooks/useProgrammi";
+import {
+  useArchiviaProgramma,
+  useLastBuilderRun,
+  useProgramma,
+  usePubblicaProgramma,
+} from "@/hooks/useProgrammi";
 import { ApiError } from "@/lib/api/client";
 import type { GiroListItem } from "@/lib/api/giri";
 import type {
@@ -104,8 +111,8 @@ export function ProgrammaDettaglioRoute() {
         onAddRegola={() => setEditorOpen(true)}
       />
 
-      {/* ═══ 4 · STORICO RUN ════════════════════════════════════ */}
-      {programma.stato === "attivo" && <StoricoRunPlaceholder />}
+      {/* ═══ 4 · ULTIMO RUN DEL BUILDER ════════════════════════ */}
+      {programma.stato === "attivo" && <UltimoRunSection programmaId={programma.id} />}
 
       {/* Dialogs */}
       <RegolaEditor programmaId={programma.id} open={editorOpen} onOpenChange={setEditorOpen} />
@@ -716,36 +723,141 @@ function RegoleSection({
 }
 
 // =====================================================================
-// 4 · Storico run (placeholder finché non c'è builder_run table)
+// 4 · Ultimo run del builder (Sprint 7.9 MR 11C, entry 116)
 // =====================================================================
 
-function StoricoRunPlaceholder() {
+function UltimoRunSection({ programmaId }: { programmaId: number }) {
+  const query = useLastBuilderRun(programmaId);
+  const run = query.data;
+
+  if (query.isLoading) {
+    return (
+      <section>
+        <div className="mb-3 flex items-baseline gap-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">
+            Ultimo run del builder
+          </h2>
+        </div>
+        <Card className="p-5 text-sm text-muted-foreground">Caricamento…</Card>
+      </section>
+    );
+  }
+
+  if (run == null) {
+    return (
+      <section>
+        <div className="mb-3 flex items-baseline gap-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">
+            Ultimo run del builder
+          </h2>
+        </div>
+        <Card className="flex items-start gap-3 p-5">
+          <Badge variant="muted">Mai eseguito</Badge>
+          <p className="text-sm text-muted-foreground">
+            Avvia la generazione dei giri dal pulsante &ldquo;Genera giri&rdquo; in cima alla
+            pagina. Dopo il run vedrai qui le statistiche di copertura e gli eventuali avvisi.
+          </p>
+        </Card>
+      </section>
+    );
+  }
+
+  const isOk = run.n_giri_creati > 0;
+  const eseguitoAt = new Date(run.eseguito_at).toLocaleString("it-IT");
+  const totale = run.n_corse_processate + run.n_corse_residue;
+  const coperturaPct =
+    totale > 0 ? Math.round((run.n_corse_processate / totale) * 100) : 0;
+  const warnings = (run.warnings_json ?? []).filter(
+    (w): w is string => typeof w === "string",
+  );
+
   return (
     <section>
       <div className="mb-3 flex items-baseline gap-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">
-          Storico run del builder
+          Ultimo run del builder
         </h2>
-        <span className="text-xs text-muted-foreground">in arrivo</span>
+        <span className="text-xs text-muted-foreground">
+          {eseguitoAt} · sede {run.localita_codice}
+        </span>
       </div>
-      <Card className="flex flex-col items-start gap-2 p-5">
-        <Badge variant="muted">Registro non ancora persistito</Badge>
-        <p className="text-sm text-muted-foreground">
-          Il dettaglio dei run del builder (data, sede, eseguito_by, n_giri, residue, warnings,
-          force) comparirà qui non appena sarà disponibile la tabella <code>builder_run</code>{" "}
-          (vedi TN-UPDATE entry 86). Per ora puoi consultare i giri generati dalla pagina
-          dedicata.
-        </p>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            const el = document.querySelector('a[href*="/giri"]');
-            if (el instanceof HTMLAnchorElement) el.click();
-          }}
-        >
-          Apri lista giri <ArrowRight className="ml-2 h-3.5 w-3.5" aria-hidden />
-        </Button>
+      <Card className="p-5">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {isOk ? (
+            <Badge variant="success">{run.n_giri_creati} giri creati</Badge>
+          ) : (
+            <Badge variant="destructive">Nessun giro creato</Badge>
+          )}
+          {run.n_giri_chiusi > 0 && (
+            <Badge variant="muted">{run.n_giri_chiusi} chiusi naturalmente</Badge>
+          )}
+          {run.n_giri_non_chiusi > 0 && (
+            <Badge variant="warning">{run.n_giri_non_chiusi} non chiusi</Badge>
+          )}
+          {run.force && <Badge variant="muted">force = true</Badge>}
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              Corse processate
+            </div>
+            <div className="font-mono text-2xl tabular-nums">
+              {run.n_corse_processate}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              Corse residue (non coperte)
+            </div>
+            <div
+              className={cn(
+                "font-mono text-2xl tabular-nums",
+                run.n_corse_residue > 0 && "text-amber-600",
+              )}
+            >
+              {run.n_corse_residue}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              Copertura PdE
+            </div>
+            <div className="font-mono text-2xl tabular-nums">{coperturaPct}%</div>
+            {totale > 0 && (
+              <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-secondary">
+                <div
+                  className={cn(
+                    "h-full",
+                    coperturaPct === 100 ? "bg-emerald-500" : "bg-amber-500",
+                  )}
+                  style={{ width: `${coperturaPct}%` }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {warnings.length > 0 && (
+          <details className="mt-4 rounded border border-amber-300 bg-amber-50 p-3">
+            <summary className="cursor-pointer text-sm font-medium text-amber-900">
+              <AlertCircle className="mr-2 inline h-4 w-4" aria-hidden />
+              {warnings.length} avvisi del builder
+            </summary>
+            <ul className="mt-2 space-y-1 text-xs text-amber-900">
+              {warnings.slice(0, 50).map((w, i) => (
+                <li key={i} className="font-mono">
+                  • {w}
+                </li>
+              ))}
+              {warnings.length > 50 && (
+                <li className="italic">
+                  …e altri {warnings.length - 50} (mostrati i primi 50)
+                </li>
+              )}
+            </ul>
+          </details>
+        )}
       </Card>
     </section>
   );

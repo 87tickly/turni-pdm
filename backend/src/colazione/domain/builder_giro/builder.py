@@ -80,6 +80,7 @@ from colazione.domain.builder_giro.posizionamento import (
 from colazione.models.anagrafica import FestivitaUfficiale, LocalitaManutenzione
 from colazione.models.corse import CorsaCommerciale
 from colazione.models.programmi import (
+    BuilderRun,
     ProgrammaMateriale,
     ProgrammaRegolaAssegnazione,
 )
@@ -652,6 +653,7 @@ async def genera_giri(
     session: AsyncSession,
     azienda_id: int,
     force: bool = False,
+    eseguito_da_user_id: int | None = None,
 ) -> BuilderResult:
     """Genera giri materiali end-to-end e li persiste.
 
@@ -964,6 +966,28 @@ async def genera_giri(
     n_giri_km_cap = sum(1 for g in giri_aggregati if g.motivo_chiusura == "km_cap")
     n_eventi = sum(len(gg.eventi_composizione) for g in giri_assegnati for gg in g.giornate)
     n_incompat = sum(len(g.incompatibilita_materiale) for g in giri_assegnati)
+
+    # Sprint 7.9 MR 11C (entry 116): persiste l'esito del run per
+    # esposizione "Ultimo run del builder" + copertura PdE in UI.
+    # Anche i run a 0 giri vengono persistiti (sono i più importanti
+    # da diagnosticare via warnings).
+    run = BuilderRun(
+        programma_id=programma_id,
+        azienda_id=azienda_id,
+        localita_codice=localita_codice,
+        eseguito_da_user_id=eseguito_da_user_id,
+        n_giri_creati=len(giro_ids),
+        n_giri_chiusi=n_giri_chiusi,
+        n_giri_non_chiusi=n_giri_non_chiusi,
+        n_corse_processate=n_corse_processate,
+        n_corse_residue=n_corse_residue,
+        n_eventi_composizione=n_eventi,
+        n_incompatibilita_materiale=n_incompat,
+        warnings_json=list(warnings),
+        force=force,
+    )
+    session.add(run)
+    await session.commit()
 
     return BuilderResult(
         giri_ids=giro_ids,

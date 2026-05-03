@@ -18,7 +18,7 @@ from sqlalchemy import text
 from colazione import models
 from colazione.db import Base, session_scope
 
-EXPECTED_TABLE_COUNT = 37  # Sprint 7.9 MR 7D: +materiale_dotazione_azienda
+EXPECTED_TABLE_COUNT = 38  # Sprint 7.9 MR 11C entry 116: +builder_run
 
 
 def _db_available() -> bool:
