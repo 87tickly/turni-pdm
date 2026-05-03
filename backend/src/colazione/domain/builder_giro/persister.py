@@ -665,6 +665,15 @@ async def _persisti_un_giro(
     # con variazione della destinazione in base all'ultima corsa di
     # quella variante. Per il MR 5 manteniamo la logica MR 1: rientro
     # solo se l'ultima dest della variante FINALE è in whitelist.
+    # Sprint 7.9 entry 111: il rientro 9XXXX viene generato SOLO se
+    # l'ultima variante dell'ultima giornata NON ha già un `vuoto_coda`
+    # naturale (= il posizionamento ha già prodotto un blocco di
+    # chiusura sede). Pre-fix il check generava entrambi i blocchi
+    # (vuoto_coda 22:32→23:02 + rientro_sede 22:27→22:57), creando
+    # un duplicato sovrapposto temporalmente con stessa origine/dest.
+    # Caso d'uso che resta valido per il rientro: ultima catena senza
+    # `vuoto_coda` (es. cross-notte, oppure ultima dest fuori whitelist
+    # ma raggiungibile a sede via tratta sintetica).
     if (
         entry.genera_rientro_sede
         and last_gv_id is not None
@@ -675,7 +684,7 @@ async def _persisti_un_giro(
         if ultima_giornata.varianti:
             ultima_variante = ultima_giornata.varianti[-1]
             corse_ultima = ultima_variante.catena_posizionata.catena.corse
-            if corse_ultima:
+            if corse_ultima and ultima_variante.catena_posizionata.vuoto_coda is None:
                 ultima_dest = corse_ultima[-1].codice_destinazione
                 if (
                     ultima_dest != loc.stazione_collegata_codice

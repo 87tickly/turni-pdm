@@ -10,6 +10,64 @@
 
 ---
 
+## 2026-05-03 (111) — Sprint 7.9 fix: rientro_sede non duplica più vuoto_coda
+
+### Contesto
+
+Smoke utente post-MR 10 sul programma 9151 (5 giri ETR522 a FIO):
+nello screenshot del giro 74847 G3 v0 (Lv) i blocchi mostravano:
+
+```
+seq=4 materiale_vuoto S01701 → S01640  22:32 → 23:02  | "Vuoto coda"
+seq=5 materiale_vuoto S01701 → S01640  22:27 → 22:57  | "Rientro sede 90004"
+```
+
+Due blocchi distinti per la STESSA tratta, sovrapposti temporalmente
+(vuoto_coda 22:32-23:02, rientro 22:27-22:57). Bug.
+
+### Diagnosi
+
+`backend/src/colazione/domain/builder_giro/persister.py:668-693`:
+il check di generazione `rientro_sede` controllava solo:
+- `ultima_dest != stazione_collegata_codice` (= ultima corsa non
+  finisce in sede)
+- `ultima_dest in whitelist_sede` (= ultima dest in whitelist)
+
+Ma NON verificava se la `CatenaPosizionata.vuoto_coda` esisteva già.
+Quando la catena chiude in stazione di whitelist, `posizionamento.py`
+genera AUTOMATICAMENTE un `vuoto_coda` come blocco di chiusura. Il
+rientro_sede aggiungeva un secondo blocco identico.
+
+### Modifiche
+
+`backend/src/colazione/domain/builder_giro/persister.py`:
+- Aggiunta condizione `ultima_variante.catena_posizionata.vuoto_coda
+  is None` al check di generazione rientro_sede.
+- Casi d'uso che restano validi per rientro_sede: ultima catena
+  cross-notte (niente vuoto_coda), oppure ultima dest fuori whitelist
+  ma raggiungibile a sede via tratta sintetica.
+
+### Verifiche
+
+- `mypy --strict` ✅ 58 file clean.
+- `pytest` ✅ **537 passed, 12 skipped**.
+
+### Stato
+
+- ✅ Fix doppio blocco chiusura.
+- 🟡 Bug "treni ripetuti" segnalato dall'utente (corsa 2351, 2361
+  in 4 giri diversi): **NON è un bug**. Verifica empirica:
+  0 date in cui la stessa corsa è in più giri contemporaneamente.
+  Le 14 occorrenze sono tutte in date di applicazione disgiunte
+  (corsa periodica eseguita da convogli paralleli in date diverse,
+  modello Trenord canonico).
+- 🟡 Bug "sosta 12h a Voghera" segnalato dall'utente: bug reale,
+  decisione di scope necessaria (catena.py non ha gap_max, decisione
+  passata "no gap soglia" memorizzata vs feedback attuale "10 ore
+  sono troppe"). In attesa direttiva utente.
+
+---
+
 ## 2026-05-03 (110) — Sprint 7.9 fix UI: scritte stazione non si sovrappongono più sul Gantt
 
 ### Contesto
