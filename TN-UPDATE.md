@@ -10,6 +10,153 @@
 
 ---
 
+## 2026-05-03 (103) — Sprint 7.8 MR 6: aggregazione varianti per categoria + UI form regola semplificata
+
+### Contesto
+
+Feedback utente sul giro 73827 (post entry 102):
+
+> "il turno non genera delle singole giornate, come nello screen
+> uno [PDF Trenord 1134], ma guarda lo screen 2 [3501 varianti
+> 'Solo DD/MM/YY']?"
+
+> "intanto priorità eliminalo non ha senso. tutti quei filtri dello
+> screen 4 non hanno senso, basta solo inserire le linee e inserire
+> il tipo di treno se diretto o regionale."
+
+3 fix concordati: aggregazione varianti per categoria (modello PDF
+Trenord); rimozione campo Priorità; riduzione filtri a Linea + Tipo
+treno.
+
+### Modifiche
+
+#### MR 6 A — Campo "Priorità" rimosso dalla UI
+
+`frontend/src/routes/pianificatore-giro/regola/RegolaEditor.tsx`:
+- State `priorita` rimosso (era `useState(60)`).
+- Sezione `<Label htmlFor="priorita">` + `<Input>` rimosse.
+- Reset state in `handleClose` aggiornato.
+- Submit payload usa `priorita: 60` fisso (default backend).
+- Import `HelpCircle` rimosso (non più usato).
+
+Backend mantiene il campo `priorita` per disambiguazione regole
+sovrapposte; di fatto sempre 60 fisso → ambiguità → errore al
+pianificatore (regole devono essere disgiunte).
+
+#### MR 6 B — Filtri ridotti a Linea + Tipo treno
+
+`frontend/src/lib/regola/schema.ts`:
+- Aggiunta costante `CAMPI_REGOLA_VISIBILI = ["direttrice",
+  "categoria"]`.
+- `LABEL_CAMPO.categoria` rinominato da "Categoria" a **"Tipo treno"**
+  (più parlante).
+- `HINT_CAMPO.categoria` riformulato: ``"REG = Regionale; RE/INT =
+  Diretto. Puoi sceglierne più di una."``.
+
+`frontend/src/routes/pianificatore-giro/regola/FiltriEditor.tsx`:
+- Import `CAMPI_REGOLA` → `CAMPI_REGOLA_VISIBILI`.
+- Dropdown campo mostra solo `Linea` + `Tipo treno`.
+- Fallback: se la regola fu salvata con un campo avanzato (es.
+  `codice_origine` da legacy), lo riproponiamo come `<option>`
+  aggiuntiva per non perdere il dato in editing.
+
+Backend invariato: tutti i CAMPI_REGOLA restano accettati dall'API.
+
+#### MR 6 C — Aggregazione varianti per categoria semantica
+
+`backend/src/colazione/api/giri.py` (read-side `GET /api/giri/{id}`):
+- Funzione `_categoria_primaria(dates: list[date]) -> str`: moda
+  di `tipo_giorno_categoria` (lavorativo/prefestivo/festivo) sulle
+  dates_apply della variante. Empty → "altro".
+- Raggruppamento varianti ORM per chiave
+  `(giro_giornata_id, categoria_primaria)` invece di
+  variante-per-variante.
+- Per ogni cluster:
+  - Canonico = variante con `min(variant_index)`.
+  - `dates_apply` = unione ordinata di tutte le date dei membri.
+  - `etichetta_parlante` ricalcolata sull'unione (Lv/F/P/Misto/...).
+  - `blocchi` = blocchi del canonico (sequenza tipica del cluster).
+- Funzione `_etichetta_parlante` interna rimossa (logica integrata
+  nel ciclo aggregazione).
+
+Conseguenza: il numero di varianti per giornata si comprime da N
+(= 1 cluster A1 per data calendaristica del periodo) a max 4
+(lavorativo, prefestivo, festivo, altro). Modello allineato al PDF
+Trenord 1134.
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 58 file clean.
+- Backend `pytest` ✅ **535 passed, 12 skipped** (no regressioni).
+- Frontend `tsc -b --noEmit` ✅.
+- Frontend `vitest` ✅ **53 passed**.
+
+#### Smoke E2E sul programma 7964 (PdE 19/05–07/06, ETR421+ETR421, FIO)
+
+Output API `GET /api/giri/{id}` per il giro 73901:
+
+```
+giornate: 12, varianti totali: 35 (era 3501!)
+G1: 3 varianti = ['Misto: Lv+P+F (17 date)', 'P', 'Misto: Lv+F (5 date)']
+G2: 3 varianti = ['Lv', 'P', 'F']
+G3: 3 varianti = ['Lv', 'P', 'F']
+G4: 3 varianti = ['Lv', 'P', 'F']
+G5: 3 varianti = ['P', 'F', 'Lv']
+G6: 3 varianti = ['F', 'Lv', 'P']
+G7-G11: 3 varianti = ['Lv', 'P', 'F']
+G12: 2 varianti = ['P', 'F']
+```
+
+Modello PDF Trenord turno 1134 → riprodotto. Le giornate G2–G11
+mostrano sigle pulite (`Lv` per i lavorativi, `P` per i prefestivi,
+`F` per i festivi). G1 e G12 hanno cluster con "Misto" perché
+contengono date di categoria mista (= il convoglio fa la prima
+giornata di ciclo in giorni di tipo diverso, normale per i bordi
+del periodo).
+
+Verifica visiva preview Gantt giro 73901:
+- header "VARIANTI 35 SU 12 GIORNATE" (was "1728 SU 12 GIORNATE")
+- giornata 2: tab `Lv | P | F` invece di centinaia di "Solo DD/M/YY"
+- nomi stazioni leggibili (GARIBALDI, ROGOREDO, COLICO, MORTARA, LECCO)
+
+### Limitazioni note
+
+- **Granularità persa**: varianti con la stessa categoria primaria
+  ma sequenze di blocchi diverse vengono fuse → si vede solo la
+  sequenza canonica del cluster. Pre-MR 6 il pianificatore poteva
+  vedere le 3501 sequenze distinte ma era ingestibile. Trade-off
+  scelto: leggibilità >> tracciabilità giornata-per-giornata. Per
+  recuperare la granularità, futura iterazione potrà aggiungere
+  un toggle "sequenza esatta del giorno X".
+- **Filtro Tipo treno = categoria PdE**: il valore `categoria`
+  (REG, RE, R, MET, S, INT) è il dato Trenord nativo. Il pianificatore
+  tipicamente userà `["REG"]` per Regionale o `["RE", "INT"]` per
+  Diretto. Future iterazione: dropdown a 2 valori ("Diretto" /
+  "Regionale") con mapping interno alle categorie.
+
+### Stato
+
+- ✅ MR 1–5 chiusi (entry 99-102).
+- ✅ MR 6 (aggregazione varianti + UI form) chiuso ora.
+- ⏳ Open: 1 programma DEVE contenere TUTTE le regole/materiali per
+  coprire tutti i treni — feedback utente: "il turno OOOOOO deve
+  contenere tutti i materiali e tutti i treni". Il modello dati lo
+  supporta già (multi-regola); manca il **workflow guidato**
+  (es. wizard "una regola per ciascun materiale × linea") e la
+  consapevolezza della **dotazione fisica** (capacity check su
+  pezzi reali). Sprint 7.9.
+
+### Prossimo step
+
+Validazione utente sul giro 73901 dopo MR 6:
+1. Le 3 etichette per giornata (Lv/P/F) sono come si aspettava?
+2. Il form regola con solo 2 filtri funziona?
+3. La rimozione di "Priorità" è chiara?
+
+Poi Sprint 7.9: workflow multi-regola guidato + dotazione fisica.
+
+---
+
 ## 2026-05-03 (102) — Sprint 7.8 MR 3 + 4 + 5: etichette stile Trenord + nomi stazioni + dashboard convogli
 
 ### Contesto

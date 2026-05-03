@@ -600,41 +600,77 @@ async def get_giro_dettaglio(
             cat_set.add(d)
             periodo_per_giornata[gv.giro_giornata_id][cat] = frozenset(cat_set)
 
-    def _etichetta_parlante(v: GiroVariante) -> str:
-        """Sprint 7.8 MR 3: etichetta stile Trenord (sigle Lv/F/P
-        + esclusioni inline).
-
-        Output esempi: ``"Lv"`` (tutti i lavorativi del periodo),
-        ``"P esclusi 3/3, 4/3"`` (prefestivi tranne 3, 4 marzo),
-        ``"Si eff. 3/3, 4/3, 5/3 (Lv)"`` (solo 3 lavorativi specifici),
-        ``"Misto: Lv+F (7 date)"``, ``"Solo 4/5/26"``.
-        """
-        dates_apply: list[date] = []
-        for d_str in v.dates_apply_json or []:
-            if isinstance(d_str, str):
-                dates_apply.append(date.fromisoformat(d_str))
-        periodo_cat = periodo_per_giornata.get(v.giro_giornata_id)
-        return calcola_etichetta_variante(dates_apply, festivita, periodo_cat)
-
-    # Sprint 7.7 MR 5: blocchi raggruppati per variante; varianti
-    # raggruppate per giornata.
+    # Sprint 7.7 MR 5: blocchi raggruppati per variante.
     blocchi_per_variante: dict[int, list[GiroBloccoRead]] = {}
     for b in blocchi_orm:
         blocchi_per_variante.setdefault(b.giro_variante_id, []).append(_to_blocco_read(b))
 
-    varianti_per_giornata: dict[int, list[GiroVarianteRead]] = {}
+    # Sprint 7.8 MR 6 (decisione utente 2026-05-03): aggregazione
+    # varianti per categoria semantica del calendario. Il modello PDF
+    # Trenord turno 1134 mostra ~3-4 varianti per giornata (Lv, F, P,
+    # eccezioni). Pre-MR 6, il post-A2 produceva 1 variante per ogni
+    # cluster A1 distinto → centinaia di "Solo DD/M/YY". Aggregando
+    # per (giornata_id, categoria_primaria_dates), rid uciamo il
+    # rumore e otteniamo etichette stile Trenord.
+    #
+    # `categoria primaria` = moda di `tipo_giorno_categoria` sulle
+    # dates_apply della variante (lavorativo/prefestivo/festivo).
+    # Le varianti con la stessa categoria vengono fuse: dates_apply
+    # = unione, blocchi = del cluster canonico (min variant_index),
+    # etichetta ricalcolata sull'unione.
+
+    def _categoria_primaria(dates: list[date]) -> str:
+        """Moda di tipo_giorno_categoria sulle date. Empty → 'altro'."""
+        if not dates:
+            return "altro"
+        counts: dict[str, int] = {}
+        for d in dates:
+            cat = tipo_giorno_categoria(d, festivita)
+            counts[cat] = counts.get(cat, 0) + 1
+        return max(counts, key=lambda k: counts[k])
+
+    # Raggruppa le varianti ORM per (giornata_id, categoria_primaria).
+    cluster_varianti: dict[tuple[int, str], list[GiroVariante]] = {}
+    dates_per_variante: dict[int, list[date]] = {}
     for gv in varianti_orm:
-        varianti_per_giornata.setdefault(gv.giro_giornata_id, []).append(
+        dates_var: list[date] = []
+        for d_str in gv.dates_apply_json or []:
+            if isinstance(d_str, str):
+                dates_var.append(date.fromisoformat(d_str))
+        dates_per_variante[gv.id] = dates_var
+        cat_primaria = _categoria_primaria(dates_var)
+        chiave = (gv.giro_giornata_id, cat_primaria)
+        cluster_varianti.setdefault(chiave, []).append(gv)
+
+    varianti_per_giornata: dict[int, list[GiroVarianteRead]] = {}
+    for (gg_id, _cat), gruppo in cluster_varianti.items():
+        # Canonico: variant_index minimo (= prima variante salvata,
+        # tipicamente la sequenza più rappresentativa del cluster A1
+        # canonico Sprint 7.5).
+        canonico = min(gruppo, key=lambda g: g.variant_index)
+        # Unione date_apply ordinate
+        dates_unite: list[date] = sorted(
+            {d for v in gruppo for d in dates_per_variante[v.id]}
+        )
+        etichetta = calcola_etichetta_variante(
+            dates_unite, festivita, periodo_per_giornata.get(gg_id)
+        )
+        varianti_per_giornata.setdefault(gg_id, []).append(
             GiroVarianteRead(
-                id=gv.id,
-                variant_index=gv.variant_index,
-                validita_testo=gv.validita_testo,
-                dates_apply_json=list(gv.dates_apply_json or []),
-                dates_skip_json=list(gv.dates_skip_json or []),
-                etichetta_parlante=_etichetta_parlante(gv),
-                blocchi=blocchi_per_variante.get(gv.id, []),
+                id=canonico.id,
+                variant_index=canonico.variant_index,
+                validita_testo=canonico.validita_testo,
+                dates_apply_json=[d.isoformat() for d in dates_unite],
+                dates_skip_json=list(canonico.dates_skip_json or []),
+                etichetta_parlante=etichetta,
+                blocchi=blocchi_per_variante.get(canonico.id, []),
             )
         )
+
+    # Ordinamento deterministico delle varianti dentro la giornata:
+    # per variant_index del canonico (preserva l'ordinamento storico).
+    for gg_id in varianti_per_giornata:
+        varianti_per_giornata[gg_id].sort(key=lambda v: v.variant_index)
 
     giornate_out = [
         GiroGiornataRead(

@@ -1,6 +1,5 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { HelpCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import {
@@ -91,7 +90,7 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
   const [filtri, setFiltri] = useState<FiltroRow[]>([]);
   const [modo, setModo] = useState<ModoComposizione>("singola");
   const [composizione, setComposizione] = useState<ComposizioneRow[]>([emptyRow()]);
-  const [priorita, setPriorita] = useState(60);
+  // Sprint 7.8 MR 6: campo "priorità" rimosso dalla UI (default fisso 60).
   const [kmMaxCiclo, setKmMaxCiclo] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -103,7 +102,6 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
       setFiltri([]);
       setModo("singola");
       setComposizione([emptyRow()]);
-      setPriorita(60);
       setKmMaxCiclo("");
       setNote("");
       setError(null);
@@ -156,7 +154,8 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
           // Solo la modalità Personalizzata bypassa il check
           // `materiale_accoppiamento_ammesso` lato backend.
           is_composizione_manuale: modo === "personalizzata",
-          priorita,
+          // Sprint 7.8 MR 6: priorità non più scelta in UI (default 60).
+          priorita: 60,
           // Sprint 7.7 MR 1: cap km del ciclo specifico per regola.
           km_max_ciclo: kmCicloNum,
           note: note.trim().length > 0 ? note.trim() : null,
@@ -246,37 +245,10 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
             </p>
           </section>
 
-          <section className="grid grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="priorita" className="flex items-center gap-1.5">
-                Priorità (0-100)
-                <HelpCircle
-                  className="h-3.5 w-3.5 cursor-help text-muted-foreground"
-                  aria-hidden
-                />
-                <span className="sr-only">
-                  La priorità serve solo se due regole coprono la stessa corsa: vince quella con
-                  numero più alto. Se le tue regole non si sovrappongono, lascia il valore di
-                  default.
-                </span>
-              </Label>
-              <Input
-                id="priorita"
-                type="number"
-                min={0}
-                max={100}
-                value={priorita}
-                onChange={(e) =>
-                  setPriorita(Math.min(100, Math.max(0, Number.parseInt(e.target.value, 10) || 0)))
-                }
-                disabled={addMutation.isPending}
-                title="Conta solo se due regole coprono la stessa corsa: vince la priorità più alta. Se le tue regole sono disgiunte, lascia 60."
-              />
-              <p className="text-xs text-muted-foreground">
-                Conta solo se due regole coprono la stessa corsa: vince la priorità più alta.
-              </p>
-            </div>
-          </section>
+          {/* Sprint 7.8 MR 6 (decisione utente 2026-05-03): campo
+              priorità rimosso dalla UI. Backend mantiene default 60
+              fisso — se due regole catturano la stessa corsa, errore
+              al pianificatore (regole devono essere disgiunte). */}
 
           <section className="flex flex-col gap-1.5">
             <Label htmlFor="note">Note (opzionale)</Label>

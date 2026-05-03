@@ -14,6 +14,14 @@
  * commerciale e resta avanzato.
  */
 
+/**
+ * Tutti i campi filtro esistenti. Il backend li accetta tutti.
+ * Sprint 7.8 MR 6 (decisione utente 2026-05-03): l'UI mostra di
+ * default solo i 2 campi essenziali (`direttrice` = "Linea",
+ * `categoria` = "Tipo treno"); gli altri campi avanzati non vengono
+ * più offerti nel dropdown ma restano nel tipo per chi importa
+ * regole pre-esistenti.
+ */
 export const CAMPI_REGOLA = [
   "direttrice",
   "categoria",
@@ -29,6 +37,16 @@ export const CAMPI_REGOLA = [
 ] as const;
 
 export type CampoRegola = (typeof CAMPI_REGOLA)[number];
+
+/** Sprint 7.8 MR 6: campi filtro selezionabili dal nuovo editor regola.
+ * Lista volutamente ridotta: il pianificatore lavora con linee +
+ * tipo treno. Ogni altro filtro è considerato avanzato e va aggiunto
+ * separatamente lato dato (non da UI).
+ */
+export const CAMPI_REGOLA_VISIBILI: ReadonlyArray<CampoRegola> = [
+  "direttrice",
+  "categoria",
+];
 
 export const OP_PER_CAMPO: Record<CampoRegola, ReadonlyArray<string>> = {
   direttrice: ["eq", "in"],
@@ -46,7 +64,9 @@ export const OP_PER_CAMPO: Record<CampoRegola, ReadonlyArray<string>> = {
 
 export const LABEL_CAMPO: Record<CampoRegola, string> = {
   direttrice: "Linea",
-  categoria: "Categoria",
+  // Sprint 7.8 MR 6: "Tipo treno" (Diretto/Regionale) invece di "Categoria"
+  // — più parlante per il pianificatore.
+  categoria: "Tipo treno",
   codice_origine: "Stazione di origine",
   codice_destinazione: "Stazione di destinazione",
   giorno_tipo: "Giorno tipo",
@@ -64,7 +84,9 @@ export const LABEL_CAMPO: Record<CampoRegola, string> = {
  */
 export const HINT_CAMPO: Partial<Record<CampoRegola, string>> = {
   direttrice: "Es. TIRANO-SONDRIO-LECCO-MILANO. Puoi sceglierne più di una.",
-  categoria: "Es. REG, RE, R, MET, S, INT.",
+  // Sprint 7.8 MR 6: hint riformulato — "REG = Regionale; RE/INT = Diretto"
+  // come guida operativa (Trenord usa categoria PdE).
+  categoria: "REG = Regionale; RE/INT = Diretto. Puoi sceglierne più di una.",
   codice_origine: "Codice stazione di partenza della corsa.",
   codice_destinazione: "Codice stazione di arrivo della corsa.",
   giorno_tipo: "Tipo di giorno calendario (feriale/sabato/festivo).",

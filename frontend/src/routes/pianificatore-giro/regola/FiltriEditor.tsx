@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/Label";
 import { Select } from "@/components/ui/Select";
 import { useDirettrici, useStazioni } from "@/hooks/useAnagrafiche";
 import {
-  CAMPI_REGOLA,
+  CAMPI_REGOLA_VISIBILI,
   CATEGORIE_COMUNI,
   GIORNI_TIPO,
   HINT_CAMPO,
@@ -104,11 +104,21 @@ export function FiltriEditor({ filtri, onChange, disabled = false }: FiltriEdito
                     });
                   }}
                 >
-                  {CAMPI_REGOLA.map((c) => (
+                  {/* Sprint 7.8 MR 6: dropdown ridotto a Linea + Tipo
+                      treno. Se la regola fu salvata con un campo
+                      avanzato (es. codice_origine), lo riproponiamo
+                      transitoriamente per non perdere il dato in
+                      editing. */}
+                  {CAMPI_REGOLA_VISIBILI.map((c) => (
                     <option key={c} value={c}>
                       {LABEL_CAMPO[c]}
                     </option>
                   ))}
+                  {!CAMPI_REGOLA_VISIBILI.includes(row.campo) && (
+                    <option value={row.campo}>
+                      {LABEL_CAMPO[row.campo]}
+                    </option>
+                  )}
                 </Select>
               </div>
 
