@@ -10,6 +10,128 @@
 
 ---
 
+## 2026-05-03 (100) — Sprint 7.8 MR 2: builder cap soft/hard + motivo "sotto_min" (parziale)
+
+### Contesto
+
+MR successivo a entry 99 (schema range giornate). Il builder
+attuale (`multi_giornata.py`) aveva `n_giornate_max=5` di default
+(ma chiamato dal builder con `safety=30`) e nessuna nozione di
+`n_giornate_min`. Il loop di estensione cross-notte chiudeva su
+"chiusura ideale" (km_cap AND vicino_sede) o `chiusa_a_localita`
+(modo legacy), producendo giri di lunghezza variabile.
+
+### Modifiche
+
+`domain/builder_giro/multi_giornata.py`:
+
+- `MotivoChiusura`: aggiunto literal ``"sotto_min"``.
+- `ParamMultiGiornata`:
+  - default `n_giornate_max` = **12** (era 5).
+  - nuovo campo `n_giornate_min` = **4** (default).
+- Loop di estensione `_costruisci_giri_per_data`:
+  - HARD cap su `n_giornate_max` come prima azione del loop.
+  - Soft floor: se `len(giornate) < n_min`, NON breakka su
+    `chiusa_a_localita` (modo legacy) e prosegue. La chiusura
+    ideale `km_cap AND vicino_sede` resta intatta (km_cap è
+    vincolo fisico hard).
+  - `km_cap_raggiunto AND not vicino_sede`: prosegue sperando in
+    rientro a sede (logica esistente, esplicitata).
+- Determinazione motivo: aggiunto `"sotto_min"` quando il giro
+  chiude con `len < n_min` per cause non di km_cap o
+  max_giornate (= pool esaurito sotto il floor).
+
+`domain/builder_giro/builder.py`:
+
+- Passa `programma.n_giornate_min` e `programma.n_giornate_max`
+  a `ParamMultiGiornata` (sostituendo `n_giornate_safety=30`).
+
+`tests/test_multi_giornata.py`:
+
+- 5 test esistenti aggiornati: passano `ParamMultiGiornata(
+  n_giornate_min=1)` per testare la semantica originale
+  ``"non_chiuso"`` (sotto default 4 sarebbe ``"sotto_min"``).
+- 2 test default: `test_param_default_5` rinominato in
+  `test_param_default_range`, asserisce `12/4`. Stesso per
+  `test_param_multi_giornata_km_max_ciclo_default_none`.
+- 4 test nuovi:
+  - `test_sotto_min_un_giorno_marcato_sotto_min`
+  - `test_soft_floor_estende_oltre_chiusa_a_localita`
+  - `test_sopra_min_chiusura_naturale`
+  - `test_n_giornate_max_hard_cap_anche_sotto_min`
+
+### Verifiche
+
+- `mypy --strict` ✅ 58 file clean.
+- `pytest tests/` ✅ **532 passed, 12 skipped** (era 528, +4 nuovi).
+
+#### Smoke E2E su programma 7405 (PdE 19/05–07/06, 13.374 corse,
+sede FIO, regola ETR421+ETR421 senza filtri linea)
+
+```
+12 giri creati, 13.374 corse processate, 372 residue.
+n_giri_chiusi=12, n_giri_non_chiusi=0.
+Lunghezze giri: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 (uno per
+lunghezza, da 1 a hard cap 12).
+```
+
+### ⚠️ Limitazione nota — frammentazione persistente per chiave A2
+
+Il numero totale di giri (12) **non è cambiato** rispetto a entry 98
+(9 giri da 1 a 10 con cap 30). MR 2 ha solo:
+
+- spostato il cap superiore da 30 a 12,
+- introdotto motivo `sotto_min` come metadato esplicito,
+- attivato il soft floor per i casi di chiusura "naturale legacy"
+  prematura.
+
+La causa root del numero di giri frammentati è
+`aggregazione_a2.aggrega_a2()` (Sprint 7.7 MR 5): chiave A2 =
+``(materiale_tipo_codice, localita_codice, n_giornate)``. Tutti i
+giri-tentativo di lunghezza 1 finiscono in un unico cluster, tutti
+quelli di lunghezza 2 in un altro, etc. → 12 cluster A2 distinti =
+12 GiroAggregato persistiti.
+
+Il **modello target** (PDF Trenord 1134, decisione utente 2026-05-03)
+è UN turno con N giornate (ognuna con M varianti calendariali). Per
+arrivarci serve un **MR 2.5** che:
+
+1. Cambi la chiave A2 a `(materiale, sede)` SOLO (rimuovendo
+   `n_giornate`).
+2. Allinei le giornate dei cluster A1 di lunghezza diversa al
+   "ciclo canonico" del turno aggregato (= la lunghezza più
+   frequente o la massima nel range).
+3. I giri sotto-min diventano "varianti residue" (per giornate
+   specifiche del calendario in cui il convoglio ha fatto un
+   pattern più corto) — flagged come "sotto_min" già a livello
+   variante.
+
+### Stato
+
+- ✅ MR 1 (schema + UI): chiuso (entry 99).
+- 🟡 MR 2 (cap soft/hard, motivo sotto_min): chiuso a livello
+  algoritmico ma frammentazione persiste per chiave A2.
+- ⏳ MR 2.5 (refactor chiave A2 → 1 turno per (materiale, sede)):
+  da concordare con l'utente — è un cambio di modello dati a
+  cascata su persister/API/frontend.
+- ⏳ MR 3 (etichette varianti stile Trenord), MR 4 (nomi stazioni
+  Gantt), MR 5 (dashboard convogli).
+
+### Prossimo step
+
+Decisione utente fra:
+
+A. **Procedi con MR 2.5** (refactor chiave A2 — risolve la
+   frammentazione e produce il modello PDF Trenord 1134 desiderato).
+   Costo: refactor `aggregazione_a2.py` + persister + frontend
+   ~1 giornata.
+B. **Lascia MR 2 in stato attuale** e procedi con MR 3-5 (fix UI
+   visibili che migliorano l'esperienza anche col modello frammentato).
+C. **Combinato**: MR 4 (nomi stazioni — istantaneo) prima di
+   tornare a MR 2.5.
+
+---
+
 ## 2026-05-03 (99) — Sprint 7.8 MR 1: range n_giornate_min/max sul programma materiale
 
 ### Contesto

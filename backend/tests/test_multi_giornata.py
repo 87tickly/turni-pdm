@@ -120,7 +120,12 @@ def test_una_catena_non_chiusa_senza_continuazione_non_chiuso() -> None:
         corse=(_c("MI_FIO", "BG", (8, 0), (9, 0)),),
         chiusa=False,
     )
-    giri = costruisci_giri_multigiornata({D_LUN: [cat]})
+    # Sprint 7.8 MR 2: con default `n_giornate_min=4`, un giro da 1
+    # giornata sotto il floor è marcato "sotto_min". Il vecchio motivo
+    # "non_chiuso" è reso esplicito passando n_giornate_min=1.
+    giri = costruisci_giri_multigiornata(
+        {D_LUN: [cat]}, ParamMultiGiornata(n_giornate_min=1)
+    )
     assert len(giri) == 1
     assert len(giri[0].giornate) == 1
     assert giri[0].chiuso is False
@@ -169,7 +174,12 @@ def test_continuazione_mancante_giro_appeso_non_chiuso() -> None:
         corse=(_c("MI_FIO", "VA", (8, 0), (9, 0)),),  # parte da MI_FIO, non BG
         chiusa=True,
     )
-    giri = costruisci_giri_multigiornata({D_LUN: [g1], D_MAR: [g2]})
+    # Sprint 7.8 MR 2: passa n_giornate_min=1 per testare la
+    # semantica originale "non_chiuso" (sotto default 4 sarebbe
+    # "sotto_min").
+    giri = costruisci_giri_multigiornata(
+        {D_LUN: [g1], D_MAR: [g2]}, ParamMultiGiornata(n_giornate_min=1)
+    )
     # Due giri separati: G1 appeso, G2 standalone
     assert len(giri) == 2
     appeso = next(g for g in giri if not g.chiuso)
@@ -193,7 +203,9 @@ def test_localita_diverse_non_si_legano() -> None:
         corse=(_c("BG", "MI_NOV", (6, 0), (7, 0)),),
         chiusa=True,
     )
-    giri = costruisci_giri_multigiornata({D_LUN: [g1], D_MAR: [g2]})
+    giri = costruisci_giri_multigiornata(
+        {D_LUN: [g1], D_MAR: [g2]}, ParamMultiGiornata(n_giornate_min=1)
+    )
     assert len(giri) == 2
     g1_out = next(gi for gi in giri if gi.localita_codice == "FIO")
     assert g1_out.motivo_chiusura == "non_chiuso"
@@ -310,7 +322,10 @@ def test_due_catene_lunedi_una_continuazione_la_prima_vince() -> None:
         corse=(_c("BG", "MI_FIO", (6, 0), (7, 0)),),
         chiusa=True,
     )
-    giri = costruisci_giri_multigiornata({D_LUN: [g1_alba, g1_sera], D_MAR: [g2]})
+    giri = costruisci_giri_multigiornata(
+        {D_LUN: [g1_alba, g1_sera], D_MAR: [g2]},
+        ParamMultiGiornata(n_giornate_min=1),
+    )
     # g1_alba (parte alle 5) vince e si lega a g2 → giro 2-giornate
     # g1_sera resta appeso
     assert len(giri) == 2
@@ -360,7 +375,9 @@ def test_data_successiva_mancante_giro_chiuso_per_appeso() -> None:
         corse=(_c("BG", "MI_FIO", (6, 0), (7, 0)),),
         chiusa=True,
     )
-    giri = costruisci_giri_multigiornata({D_LUN: [g1], D_MER: [g2_mer]})
+    giri = costruisci_giri_multigiornata(
+        {D_LUN: [g1], D_MER: [g2_mer]}, ParamMultiGiornata(n_giornate_min=1)
+    )
     # G1 appeso (D_MAR mancante), G2 standalone
     assert len(giri) == 2
     appeso = next(gi for gi in giri if not gi.chiuso)
@@ -372,8 +389,11 @@ def test_data_successiva_mancante_giro_chiuso_per_appeso() -> None:
 # =====================================================================
 
 
-def test_param_default_5() -> None:
-    assert ParamMultiGiornata().n_giornate_max == 5
+def test_param_default_range() -> None:
+    """Sprint 7.8 MR 2: default n_giornate_max=12, n_giornate_min=4."""
+    p = ParamMultiGiornata()
+    assert p.n_giornate_max == 12
+    assert p.n_giornate_min == 4
 
 
 def test_param_frozen() -> None:
@@ -634,7 +654,9 @@ def test_param_multi_giornata_km_max_ciclo_default_none() -> None:
     """Default ParamMultiGiornata: km_max_ciclo=None (no cap)."""
     p = ParamMultiGiornata()
     assert p.km_max_ciclo is None
-    assert p.n_giornate_max == 5
+    # Sprint 7.8 MR 2: default range giornate (12 hard / 4 soft).
+    assert p.n_giornate_max == 12
+    assert p.n_giornate_min == 4
 
 
 # =====================================================================
@@ -817,3 +839,96 @@ def test_cluster_a1_vuoto_testa_diverso_due_giri() -> None:
     )
     giri = costruisci_giri_multigiornata({D_LUN: [cat_no_vuoto], D_LUN_2: [cat_con_vuoto]})
     assert len(giri) == 2
+
+
+# =====================================================================
+# Sprint 7.8 MR 2 — soft floor n_giornate_min + motivo "sotto_min"
+# =====================================================================
+
+
+def test_sotto_min_un_giorno_marcato_sotto_min() -> None:
+    """Giro da 1 giornata con default min=4 → motivo 'sotto_min'."""
+    cat = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (8, 0), (9, 0)),),
+        chiusa=False,
+    )
+    giri = costruisci_giri_multigiornata({D_LUN: [cat]})
+    assert len(giri) == 1
+    assert len(giri[0].giornate) == 1
+    assert giri[0].chiuso is False
+    assert giri[0].motivo_chiusura == "sotto_min"
+
+
+def test_soft_floor_estende_oltre_chiusa_a_localita() -> None:
+    """Modo legacy (km_max_ciclo=None): se la giornata 1 è
+    chiusa_a_localita ma siamo sotto n_min, il loop NON breaka e prova
+    ad estendere a giornata 2 (se c'è continuazione)."""
+    g1_chiusa = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "MI_FIO", (8, 0), (9, 0)),),  # torna a MI_FIO
+        chiusa=True,  # chiusura geografica
+    )
+    g2 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (10, 0), (11, 0)),),
+        chiusa=False,
+    )
+    # Default n_min=4 → il giro tenta di estendere oltre la chiusura
+    # legacy. Trova g2 nel D_MAR partendo da MI_FIO → si lega.
+    giri = costruisci_giri_multigiornata({D_LUN: [g1_chiusa], D_MAR: [g2]})
+    assert len(giri) == 1
+    assert len(giri[0].giornate) == 2  # estensione effettuata
+    # Non chiuso (g2 fuori sede), sotto min (2 < 4)
+    assert giri[0].motivo_chiusura == "sotto_min"
+
+
+def test_sopra_min_chiusura_naturale() -> None:
+    """Se la catena della giornata 1 è chiusa_a_localita E siamo già
+    al minimo, il loop chiude regolarmente con motivo naturale."""
+    g1_chiusa = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "MI_FIO", (8, 0), (9, 0)),),
+        chiusa=True,
+    )
+    # n_min=1 → già al floor → break immediato, naturale.
+    giri = costruisci_giri_multigiornata(
+        {D_LUN: [g1_chiusa]}, ParamMultiGiornata(n_giornate_min=1)
+    )
+    assert len(giri) == 1
+    assert len(giri[0].giornate) == 1
+    assert giri[0].motivo_chiusura == "naturale"
+
+
+def test_n_giornate_max_hard_cap_anche_sotto_min() -> None:
+    """n_giornate_max è HARD: se n_min > n_max non ha senso, ma il loop
+    non deve mai eccedere n_max indipendentemente da n_min."""
+    g1 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("MI_FIO", "BG", (20, 0), (21, 0)),),
+        chiusa=False,
+    )
+    g2 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("BG", "BS", (8, 0), (9, 0)),),
+        chiusa=False,
+    )
+    g3 = _cat_pos(
+        localita="FIO",
+        stazione="MI_FIO",
+        corse=(_c("BS", "CR", (8, 0), (9, 0)),),
+        chiusa=False,
+    )
+    # n_max=2, n_min=10 (incoerente, ma testiamo che hard prevale)
+    giri = costruisci_giri_multigiornata(
+        {D_LUN: [g1], D_MAR: [g2], D_MER: [g3]},
+        ParamMultiGiornata(n_giornate_max=2, n_giornate_min=10),
+    )
+    primo = next(g for g in giri if len(g.giornate) == 2)
+    assert primo.motivo_chiusura == "max_giornate"

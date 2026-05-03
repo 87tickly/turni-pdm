@@ -833,8 +833,13 @@ async def genera_giri(
         cap_effettivo = _calcola_cap_effettivo(
             regola, programma, n_giornate_safety
         )
+        # Sprint 7.8 MR 2: range giornate per giro vincolato dal
+        # programma. n_giornate_max è HARD cap, n_giornate_min è SOFT
+        # floor (il loop preferisce continuare oltre la chiusura
+        # ideale finché sotto min, salvo km_cap).
         param_mg = ParamMultiGiornata(
-            n_giornate_max=n_giornate_safety,
+            n_giornate_max=programma.n_giornate_max,
+            n_giornate_min=programma.n_giornate_min,
             km_max_ciclo=cap_effettivo,
             whitelist_sede=whitelist,
         )

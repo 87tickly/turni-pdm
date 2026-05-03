@@ -82,32 +82,48 @@ from colazione.domain.builder_giro.posizionamento import CatenaPosizionata
 # =====================================================================
 
 
-MotivoChiusura = Literal["naturale", "max_giornate", "km_cap", "non_chiuso"]
+MotivoChiusura = Literal[
+    "naturale", "max_giornate", "km_cap", "non_chiuso", "sotto_min"
+]
 
 
 @dataclass(frozen=True)
 class ParamMultiGiornata:
     """Parametri per la concatenazione multi-giornata.
 
-    Sprint 5.6 (refactor algoritmo): la chiusura del giro è dinamica.
-    Il loop estende cross-notte FINCHÉ NON valgono ENTRAMBE le
-    condizioni "km_cap_raggiunto AND vicino_sede" — `chiusa_a_localita`
-    di una singola giornata NON ferma il loop (resta come info).
+    Sprint 7.8 MR 2 (decisione utente 2026-05-03): introduzione di un
+    range ``[n_giornate_min, n_giornate_max]`` per la lunghezza dei
+    giri:
+
+    - ``n_giornate_max`` = HARD cap. Nessun giro può superarlo.
+    - ``n_giornate_min`` = SOFT floor. Il loop di estensione **non
+      chiude su ``vicino_sede AND km_cap``** se ``len(giornate) <
+      n_giornate_min`` E c'è ancora continuazione disponibile E
+      km_cap non è ancora vincolante. Il giro continua a cercare
+      lunghezza maggiore.
+    - Eccezione di chiusura: se nonostante il soft floor il giro
+      chiude con ``len(giornate) < n_giornate_min`` (perché non c'è
+      continuazione, o km_cap raggiunto), il motivo diventa
+      ``"sotto_min"`` (giro di "chiusura" delle corse residue).
+
+    Sprint 5.6 (algoritmo originale): la chiusura "ideale" resta
+    "km_cap_raggiunto AND vicino_sede" — ``chiusa_a_localita`` di una
+    singola giornata NON ferma il loop (resta come metadato).
 
     Attributi:
-        n_giornate_max: safety net per evitare loop infiniti pathologici
-            (es. dato corrupto, calendario ciclico). Default 30. Il
-            vero termine del giro sono ``km_max_ciclo + vicino_sede``.
+        n_giornate_max: HARD cap sulla lunghezza del giro. Default 12.
+            Il loop interrompe l'estensione quando lo raggiunge.
+        n_giornate_min: SOFT floor sulla lunghezza del giro. Default 4.
+            Il loop preferisce continuare oltre la chiusura "ideale"
+            finché ``len(giornate) < n_min`` E ci sono opzioni.
         km_max_ciclo: km cumulati massimi sul ciclo intero. ``None``
-            = nessun cap (allora il giro chiude solo per safety o
-            assenza di continuazione). Tipici 5000-10000.
+            = nessun cap. Tipici 5000-10000.
         whitelist_sede: codici stazione "vicine alla sede manutentiva"
-            del programma. Quando l'ultima corsa di una giornata arriva
-            in una di queste, il treno è "vicino sede" (criterio per
-            chiusura naturale completa).
+            del programma.
     """
 
-    n_giornate_max: int = 5
+    n_giornate_max: int = 12
+    n_giornate_min: int = 4
     km_max_ciclo: float | None = None
     whitelist_sede: frozenset[str] = field(default_factory=frozenset)
 
@@ -437,21 +453,38 @@ def _costruisci_giri_per_data(
                 ultima_corsa = ultima_g.catena_posizionata.catena.corse[-1]
                 staz_arrivo = ultima_corsa.codice_destinazione
 
+                # Sprint 7.8 MR 2: HARD cap su n_giornate_max — sempre
+                # prioritario, niente estensione oltre.
+                if len(giornate) >= params.n_giornate_max:
+                    break
+
+                # Soft floor: se siamo sotto n_min, posticipiamo la
+                # chiusura "ideale" (km_cap+vicino_sede o
+                # chiusa_a_localita) al fine di provare ad arrivare al
+                # min. Il km_cap resta hard (sotto): se km_cap raggiunto,
+                # il giro DEVE chiudere comunque (autonomia treno).
+                sotto_min = len(giornate) < params.n_giornate_min
+
                 if modo_dinamico:
                     km_cap_raggiunto = km_cumulati >= float(params.km_max_ciclo or 0.0)
                     vicino_sede = staz_arrivo in params.whitelist_sede
-                    # Chiusura ideale: entrambe le condizioni
+                    # Chiusura ideale: km_cap E vicino_sede
                     if km_cap_raggiunto and vicino_sede:
+                        # Sopra n_min → chiudi normale.
+                        # Sotto n_min ma km_cap raggiunto → chiudi
+                        # comunque (km_cap è vincolo fisico hard).
                         break
-                else:
-                    # Modo legacy: break su chiusa_a_localita
+                    if km_cap_raggiunto and not vicino_sede:
+                        # Sub-ottimale: km_cap raggiunto fuori sede.
+                        # Prosegue per cercare di tornare a sede ma se
+                        # non c'è continuazione esce con motivo km_cap.
+                        # Se ne troviamo una, continua (niente break qui).
+                        pass
+                elif not sotto_min:
+                    # Modo legacy: break su chiusa_a_localita SOLO se
+                    # abbiamo già raggiunto n_min. Sotto n_min, prosegui.
                     if ultima_g.catena_posizionata.chiusa_a_localita:
                         break
-
-                # Safety net per loop infiniti pathologici (vale per
-                # entrambi i modi)
-                if len(giornate) >= params.n_giornate_max:
-                    break
 
                 d_prossima = d_inizio + timedelta(days=len(giornate))
                 if d_prossima not in catene_per_data:
@@ -486,6 +519,7 @@ def _costruisci_giri_per_data(
             staz_arrivo_finale = ultima_corsa_finale.codice_destinazione
 
             motivo: MotivoChiusura
+            sotto_min_finale = len(giornate) < params.n_giornate_min
             if modo_dinamico:
                 km_cap_raggiunto = km_cumulati >= float(params.km_max_ciclo or 0.0)
                 vicino_sede = staz_arrivo_finale in params.whitelist_sede
@@ -495,6 +529,12 @@ def _costruisci_giri_per_data(
                     motivo = "km_cap"
                 elif len(giornate) >= params.n_giornate_max:
                     motivo = "max_giornate"
+                elif sotto_min_finale:
+                    # Sprint 7.8 MR 2: chiusura per pool esaurito sotto
+                    # il soft floor — è un giro "di chiusura" delle
+                    # corse residue (pianificatore deve vederlo come
+                    # eccezione).
+                    motivo = "sotto_min"
                 else:
                     motivo = "non_chiuso"
             else:
@@ -504,6 +544,8 @@ def _costruisci_giri_per_data(
                     motivo = "naturale"
                 elif len(giornate) >= params.n_giornate_max:
                     motivo = "max_giornate"
+                elif sotto_min_finale:
+                    motivo = "sotto_min"
                 else:
                     motivo = "non_chiuso"
             chiuso = motivo == "naturale"
