@@ -605,33 +605,24 @@ async def _persisti_un_giro(
             session.add(gv)
             await session.flush()
 
-            # Sprint 7.9 MR 7C: blocco "uscita_sede" sintetico per la
-            # prima giornata del ciclo. Rappresenta il convoglio che
-            # esce dal deposito (sede manutentiva) verso la prima
-            # stazione commerciale, anche se questa è fuori whitelist
-            # (= linee lontane). Si applica solo se non c'è già un
-            # vuoto_testa naturale e la prima corsa NON parte dalla
-            # sede stessa.
+            # Sprint 7.9 MR 7C → MR 7C-rollback (decisione utente
+            # 2026-05-03): generavamo un blocco "uscita_sede" sintetico
+            # per la prima giornata anche quando la prima corsa partiva
+            # da una stazione FUORI whitelist (es. LECCO). Risultato:
+            # vuoti tecnici da 30+ minuti per 50+ km (Fiorenza → Lecco)
+            # — operativamente Trenord non li fa così. Rollback: il
+            # vuoto di testa NATURALE generato in `posizionamento.py`
+            # (solo se la prima corsa parte da una stazione in
+            # whitelist sede) resta l'unico meccanismo. Stazioni fuori
+            # whitelist significano cross-notte K-1: il convoglio era
+            # già lì dalla notte precedente — non un vuoto sintetico.
             seq_blocco_inizio = 1
-            corse_var = variante.catena_posizionata.catena.corse
-            if (
-                is_prima_giornata
-                and variante.catena_posizionata.vuoto_testa is None
-                and corse_var
-                and loc.stazione_collegata_codice is not None
-                and corse_var[0].codice_origine != loc.stazione_collegata_codice
-            ):
-                await _crea_blocco_uscita_sede(
-                    session=session,
-                    giro_variante_id=gv.id,
-                    giro_materiale_id=gm_id,
-                    azienda_id=azienda_id,
-                    seq=1,
-                    stazione_da=loc.stazione_collegata_codice,
-                    stazione_a=corse_var[0].codice_origine,
-                    ora_arrivo=corse_var[0].ora_partenza,
-                )
-                seq_blocco_inizio = 2
+            # NOTA: la funzione `_crea_blocco_uscita_sede` resta nel
+            # modulo come builder block riusabile per scenari futuri
+            # (es. inizio assoluto ciclo da prima generazione + uscita
+            # operativa coerente con flotta), ma non è più chiamata
+            # automaticamente qui.
+            _ = is_prima_giornata  # reserved per futuri scenari
 
             seq_vuoto_giro, last_seq_blocco = await _persisti_blocchi_variante(
                 variante,

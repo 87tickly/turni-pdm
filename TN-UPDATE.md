@@ -10,6 +10,132 @@
 
 ---
 
+## 2026-05-03 (105) — Sprint 7.9 fix UX: rollback MR 7C uscita_sede + MR 7B propagazione + etichette "Misto" più chiare
+
+### Contesto
+
+Feedback utente sul giro 74269 generato post Sprint 7.9 (entry 104):
+
+> "primo fai un materiale vuoto lecco, hai violato la prima regola,
+> non fare materiali vuoto troppo lunghi. poi non si capisce niente.
+> ma cosa vuol dire 'misto lv+ F' una persona che non sa cosa
+> dovrebbe capire? guarda il secondo screen giornata 4 e 5 LV per
+> la 4 ma per la 5? non esiste un lv....."
+
+3 problemi confermati in DB e nel preview:
+
+1. **MR 7C uscita_sede semanticamente sbagliato**: il blocco
+   sintetico FIO → LECCO (50+ km, 30 min) violava la regola
+   operativa "no vuoti lunghi". Trenord usa la prima corsa
+   commerciale partita da una stazione vicino sede (Garibaldi /
+   Centrale / ecc.) per portare il convoglio in linea, non un
+   vuoto tecnico lungo.
+
+2. **"Misto: Lv+F (N date)"** è criptico per chi non conosce le
+   sigle Trenord.
+
+3. **MR 7B propagazione cluster A1**: il `variant_index` esposto
+   dopo l'aggregazione MR6 NON è un identificatore stabile del
+   cluster A1 attraverso le giornate (= è il `min variant_index`
+   del cluster aggregato per categoria, varia tra giornate).
+   Quindi la propagazione fa match impossibili e l'indicatore
+   "ciclo non si estende qui" appare ovunque.
+
+### Modifiche (rollback parziali Sprint 7.9)
+
+#### FIX 1 — Rollback MR 7C uscita_sede vs stazioni fuori whitelist
+
+`backend/src/colazione/domain/builder_giro/persister.py`:
+- Rimossa l'invocazione automatica di `_crea_blocco_uscita_sede`
+  per la prima giornata. Il vuoto di testa naturale generato in
+  `posizionamento.py` (solo per stazioni in whitelist sede)
+  resta l'unico meccanismo.
+- La funzione `_crea_blocco_uscita_sede` resta nel modulo come
+  builder block riusabile (uso futuro: scenari di prima
+  generazione assoluta del ciclo con uscita operativa coerente
+  con la flotta), ma non più chiamata.
+- `_persisti_blocchi_variante.seq_blocco_inizio` parametro
+  mantenuto per estendibilità futura.
+
+Smoke conferma: giro 74343 G1 V0 ora ha solo `vuoto_testa`
+naturale S01640 → S01700 (Centrale, in whitelist). Nessun più
+vuoto sintetico FIO → LECCO.
+
+#### FIX 2 — Etichette "Misto" leggibili
+
+`backend/src/colazione/domain/builder_giro/etichetta.py`:
+- Caso multi-categoria: ``"Misto: Lv+F (N date)"`` →
+  ``"Lavorativo+Festivo (N date)"`` (nomi estesi, niente "Misto:").
+- Caso mono-categoria senza periodo + > _MAX_DATE_INLINE: ``"Lv
+  (N date)"`` → ``"Lavorativo · N date"``.
+- Caso "Si eff. ..." → suffisso passa da ``(Lv)`` a ``(Lavorativo)``.
+- Caso "Lv esclusi DD/M, ..." con periodo definito mantiene la
+  sigla compatta (= layout PDF Trenord 1134 originale).
+
+Test: 6 etichette aggiornate in `test_etichetta.py`.
+
+#### FIX 3 — Rollback MR 7B propagazione cluster A1
+
+`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`:
+- Rimossa logica di propagazione automatica del cluster A1 attraverso
+  le giornate. Il click su tab variante ora cambia SOLO la giornata
+  cliccata.
+- Rimosso state `selectedClusterId` e indicatore "ⓘ ciclo non si
+  estende qui".
+- Note in commento: refactor futuro = espone `cluster_a1_id`
+  originario (variant_index pre-aggregazione MR6) nelle varianti
+  aggregate per consentire highlight reale.
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 58 file clean.
+- Backend `pytest` ✅ **536 passed, 12 skipped** (etichetta tests
+  aggiornati).
+- Frontend `tsc -b --noEmit` ✅.
+- Frontend `vitest` 52/53 (1 timeout flaky preesistente test PDC,
+  non correlato).
+- Smoke E2E giro 74343:
+  - G1 V0 blocco seq=1 = vuoto_testa naturale S01640 → S01700
+    (Centrale, in whitelist FIO). Nessun vuoto sintetico verso
+    Lecco/Bergamo/altre fuori whitelist.
+  - Etichette varianti: ``"Lavorativo+Festivo (15 date)"``,
+    ``"Lv esclusi 25/5"``, ``"P esclusi 1/6"``,
+    ``"Lavorativo+Prefestivo (5 date)"``, ``"F"``, ``"Solo
+    23/5/26"`` — tutte leggibili.
+  - Click tab variante: cambia solo la giornata cliccata, niente
+    propagazione confusa.
+- Verifica visiva preview: pulita, nessun indicatore amber falso.
+
+### Stato
+
+- ✅ FIX 1 rollback uscita_sede sintetico
+- ✅ FIX 2 etichette leggibili
+- ✅ FIX 3 rollback propagazione cluster A1
+
+### Limitazioni note (scope futuro)
+
+- **Continuità tra giornate**: oggi il pianificatore deve
+  selezionare manualmente la variante coerente per ogni giornata.
+  Per garantire continuità automatica serve esporre il
+  `cluster_a1_id` ORIGINARIO (variant_index pre-aggregazione MR6)
+  nelle varianti aggregate, e basare la propagazione su quello.
+- **Inizio assoluto del ciclo**: per il PRIMO giorno del primo
+  ciclo, il convoglio deve fisicamente uscire dalla sede. Se la
+  prima corsa commerciale parte da una stazione lontana, oggi
+  il modello assume cross-notte K-1 (= il convoglio era già
+  lì). La gestione "uscita assoluta da deposito" richiede un
+  meccanismo separato (forse un blocco `uscita_assoluta` solo
+  per la prima istanza del ciclo, distinto dai vuoti tecnici).
+
+### Prossimo step
+
+Validazione utente su:
+1. Vuoto testa naturale (Fiorenza → Centrale) accettabile?
+2. Etichette "Lavorativo+Festivo (N date)" più chiare di prima?
+3. Click variante che cambia solo una giornata è ok per ora?
+
+---
+
 ## 2026-05-03 (104) — Sprint 7.9: filtri obbligatori + continuità + vuoti uscita sede + dotazione + capacity warning
 
 ### Contesto

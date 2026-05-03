@@ -133,30 +133,19 @@ export function GiroDettaglioRoute() {
             selectedBlocco={selectedBlocco}
             onSelectBlocco={setSelectedBlocco}
             activeVariantByGiornata={activeVariantByGiornata}
-            onChangeActiveVariant={(giornataId, idx) => {
-              // Sprint 7.9 MR 7B: propagazione del cluster A1 attraverso
-              // le giornate per garantire CONTINUITÀ del ciclo. Quando
-              // l'utente seleziona una variante in giornata G_K, leggiamo
-              // il `variant_index` (= cluster A1 origine) e selezioniamo
-              // automaticamente la variante con stesso variant_index in
-              // TUTTE le altre giornate. Se una giornata non ha quella
-              // variante (cluster A1 più corto), si lascia invariata.
-              const giornataK = giro.giornate.find((g) => g.id === giornataId);
-              const variante = giornataK?.varianti[idx];
-              if (variante === undefined) return;
-              const targetClusterId = variante.variant_index;
-              setActiveVariantByGiornata((prev) => {
-                const next: Record<number, number> = { ...prev, [giornataId]: idx };
-                for (const g of giro.giornate) {
-                  if (g.id === giornataId) continue;
-                  const matchIdx = g.varianti.findIndex(
-                    (v) => v.variant_index === targetClusterId,
-                  );
-                  if (matchIdx >= 0) next[g.id] = matchIdx;
-                }
-                return next;
-              });
-            }}
+            onChangeActiveVariant={(giornataId, idx) =>
+              // Sprint 7.9 fix UX (decisione utente 2026-05-03): MR 7B
+              // (propagazione automatica cluster A1 attraverso giornate)
+              // ROLLED BACK perché il `variant_index` post-aggregazione
+              // MR6 non è un identificatore stabile del cluster A1
+              // attraverso le giornate, generando falsi indicatori
+              // "ciclo non si estende qui". Per ora il click cambia
+              // solo la giornata cliccata; la coerenza tra giornate è
+              // responsabilità dell'utente. Refactor futuro:
+              // esposizione `cluster_a1_id` originario nelle varianti
+              // aggregate per consentire highlight reale.
+              setActiveVariantByGiornata((prev) => ({ ...prev, [giornataId]: idx }))
+            }
           />
         </div>
 

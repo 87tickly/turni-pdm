@@ -203,7 +203,7 @@ class TestCalcolaEtichettaVariante:
         feriali = [date(2026, 5, 4), date(2026, 5, 5), date(2026, 5, 6), date(2026, 5, 7)]
         assert (
             calcola_etichetta_variante(feriali, _festivita_2026())
-            == "Si eff. 4/5, 5/5, 6/5, 7/5 (Lv)"
+            == "Si eff. 4/5, 5/5, 6/5, 7/5 (Lavorativo)"
         )
 
     def test_tutti_lavorativi_periodo_completo_sigla_pura(self) -> None:
@@ -230,14 +230,14 @@ class TestCalcolaEtichettaVariante:
         sabati = [date(2026, 5, 2), date(2026, 5, 9), date(2026, 5, 16)]
         assert (
             calcola_etichetta_variante(sabati, _festivita_2026())
-            == "Si eff. 2/5, 9/5, 16/5 (P)"
+            == "Si eff. 2/5, 9/5, 16/5 (Prefestivo)"
         )
 
     def test_tutti_festivi_domeniche_si_eff(self) -> None:
         domeniche = [date(2026, 5, 3), date(2026, 5, 10), date(2026, 5, 17)]
         assert (
             calcola_etichetta_variante(domeniche, _festivita_2026())
-            == "Si eff. 3/5, 10/5, 17/5 (F)"
+            == "Si eff. 3/5, 10/5, 17/5 (Festivo)"
         )
 
     def test_misto_lavorativo_prefestivo(self) -> None:
@@ -248,29 +248,29 @@ class TestCalcolaEtichettaVariante:
         ]
         out = calcola_etichetta_variante(misto, _festivita_2026())
         # Sprint 7.8 MR 3: sigle Lv/P/F con conteggio.
-        assert out == "Misto: Lv+P (3 date)"
+        assert out == "Lavorativo+Prefestivo (3 date)"
 
     def test_misto_lavorativo_festivo_ordine_label(self) -> None:
         misto = [date(2026, 5, 4), date(2026, 5, 3)]
         out = calcola_etichetta_variante(misto, _festivita_2026())
-        assert out == "Misto: Lv+F (2 date)"
+        assert out == "Lavorativo+Festivo (2 date)"
 
     def test_misto_3_categorie_complete(self) -> None:
         misto = [date(2026, 5, 4), date(2026, 5, 2), date(2026, 5, 3)]
         out = calcola_etichetta_variante(misto, _festivita_2026())
-        assert out == "Misto: Lv+P+F (3 date)"
+        assert out == "Lavorativo+Prefestivo+Festivo (3 date)"
 
     def test_festivita_nazionale_di_sabato_resta_festivo(self) -> None:
         out = calcola_etichetta_variante(
             [date(2026, 4, 25), date(2026, 5, 4)], _festivita_2026()
         )
-        assert out == "Misto: Lv+F (2 date)"
+        assert out == "Lavorativo+Festivo (2 date)"
 
     def test_venerdi_24_aprile_2026_e_prefestivo(self) -> None:
         out = calcola_etichetta_variante(
             [date(2026, 4, 24), date(2026, 5, 8)], _festivita_2026()
         )
-        assert out == "Misto: Lv+P (2 date)"
+        assert out == "Lavorativo+Prefestivo (2 date)"
 
     def test_due_date_uniche_uguali_collassano_a_solo(self) -> None:
         out = calcola_etichetta_variante(
@@ -289,4 +289,4 @@ class TestCalcolaEtichettaVariante:
         variante = lavorativi_maggio_2026[:8]
         periodo_cat = {"lavorativo": frozenset(lavorativi_maggio_2026)}
         out = calcola_etichetta_variante(variante, _festivita_2026(), periodo_cat)
-        assert out == "Lv (8 di 20 date)"
+        assert out == "Lv (8 di 20 date)"  # noqa: con periodo definito uso ancora la sigla

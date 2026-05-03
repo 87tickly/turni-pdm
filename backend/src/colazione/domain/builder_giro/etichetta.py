@@ -198,10 +198,12 @@ def calcola_etichetta_variante(
     tipi_per_data = {d: tipo_giorno_categoria(d, festivita) for d in date_uniche}
     tipi_unici = set(tipi_per_data.values())
 
-    # Caso multi-categoria: etichetta "Misto" con sigle.
+    # Sprint 7.9 fix UX (decisione utente 2026-05-03): "Misto: Lv+F"
+    # è criptico per chi non conosce le sigle. Sostituiamo con i nomi
+    # estesi "Lavorativo+Festivo" per la categoria multi-tipo.
     if len(tipi_unici) > 1:
-        sigle = [_SIGLA_CATEGORIA[t] for t in _ORDINE_CATEGORIE if t in tipi_unici]
-        return f"Misto: {'+'.join(sigle)} ({n} date)"
+        nomi = [_LABEL_CATEGORIA[t] for t in _ORDINE_CATEGORIE if t in tipi_unici]
+        return f"{'+'.join(nomi)} ({n} date)"
 
     # Mono-categoria: confronta col periodo se fornito.
     cat_unica = next(iter(tipi_unici))
@@ -225,6 +227,10 @@ def calcola_etichetta_variante(
             return f"{sigla} ({n} di {n_periodo} date)"
 
     # Senza periodo: fallback su elenco esplicito o conteggio.
+    # Sprint 7.9 fix UX: usa il nome esteso della categoria invece
+    # della sigla per leggibilità ("Lavorativo · 12 date" invece di
+    # "Lv (12 date)").
+    label = _LABEL_CATEGORIA[cat_unica]
     if n <= _MAX_DATE_INLINE:
-        return f"Si eff. {_format_date_list(date_uniche)} ({sigla})"
-    return f"{sigla} ({n} date)"
+        return f"Si eff. {_format_date_list(date_uniche)} ({label})"
+    return f"{label} · {n} date"
