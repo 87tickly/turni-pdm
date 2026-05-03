@@ -10,6 +10,57 @@
 
 ---
 
+## 2026-05-03 (110) — Sprint 7.9 fix UI: scritte stazione non si sovrappongono più sul Gantt
+
+### Contesto
+
+Feedback utente vedendo giro 74769 G5: le etichette stazione_da/stazione_a
+dei BloccoSegment si sovrapponevano visivamente formando stringhe
+illeggibili tipo `"VARESECERCERESIOGARIBALDI"` (= "VARESE" + "CERESIO"
++ "GARIBALDI" concatenati senza spazio per esondazione dai bordi del
+button adiacente).
+
+> "inoltre cerca di mettere in ordine le scritte, non si capisce niente
+> sono una sopra l altra"
+
+### Diagnosi
+
+`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx::BloccoSegment`:
+- Il button `.blk` non aveva `overflow:hidden` → testo dei `<span>`
+  esondava oltre i bordi quando i nomi stazione erano lunghi.
+- I due `<span>` (origine, destinazione) usavano `flex justify-between`
+  ma senza `min-width:0 + truncate`, quindi non venivano troncati ma
+  dilatavano il container.
+
+### Modifiche
+
+`GiroDettaglioRoute.tsx`:
+- Aggiunto `overflow-hidden` al button `.blk`.
+- Span stazioni con `min-w-0 flex-1 truncate` (ognuno occupa metà
+  larghezza, troncato con ellipsis).
+- Soglia `widthPx >= 70` per mostrare i nomi stazione: blocchi più
+  stretti mostrano un placeholder `aria-hidden` di altezza pari per
+  preservare il layout, ma niente testo (evita illeggibilità su
+  blocchi piccoli).
+- Soglia `widthPx >= 50` per mostrare gli orari, simile.
+- Span numero treno con `truncate` per evitare overflow se il numero
+  fosse lungo.
+
+### Verifiche
+
+- Frontend `tsc -b --noEmit` ✅.
+- Vite HMR ricompila senza errori (`hmr update GiroDettaglioRoute.tsx`).
+- Verifica visiva: rinviata al prossimo giro reale (DB attualmente
+  vuoto post-pytest). Il fix sarà osservabile quando l'utente rigenera
+  il programma "GGGG" post-MR 10.
+
+### Stato
+
+- ✅ Fix overflow blocchi.
+- 🟡 Verifica visiva su giro reale.
+
+---
+
 ## 2026-05-03 (109) — Sprint 7.9 MR 10: bin-packing convogli paralleli in turni separati
 
 ### Contesto

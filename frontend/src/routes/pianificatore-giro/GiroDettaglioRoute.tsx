@@ -961,21 +961,29 @@ function CommercialeBlocco({
   // Fallback al codice se il nome manca dal payload.
   const stazioneDa = stazioneShort(blocco.stazione_da_nome ?? blocco.stazione_da_codice);
   const stazioneA = stazioneShort(blocco.stazione_a_nome ?? blocco.stazione_a_codice);
+  // Sprint 7.9 entry 110: blocchi stretti (<70px) mostrano solo
+  // arrow+numero per evitare sovrapposizione delle etichette stazione
+  // sui blocchi adiacenti. Sopra 70px stampa entrambe (origine|dest)
+  // tronche al 50% della width disponibile.
+  const showStazioni = widthPx >= 70;
+  const showOrari = widthPx >= 50;
   return (
     <button
       type="button"
       onClick={onSelect}
       title={tooltip}
       aria-pressed={selected}
-      className={cn("blk absolute", selected && "is-selected")}
+      className={cn("blk absolute overflow-hidden", selected && "is-selected")}
       style={{ left: startPx, top: 24, width: widthPx }}
     >
-      {/* Stazioni sopra */}
-      <div className="flex justify-between font-mono text-[10px] font-semibold leading-none text-emerald-700">
-        <span>{stazioneDa}</span>
-        <span>{stazioneA}</span>
-      </div>
-      {/* Linea + numero treno */}
+      {showStazioni ? (
+        <div className="flex justify-between gap-1 font-mono text-[10px] font-semibold leading-none text-emerald-700">
+          <span className="min-w-0 flex-1 truncate text-left">{stazioneDa}</span>
+          <span className="min-w-0 flex-1 truncate text-right">{stazioneA}</span>
+        </div>
+      ) : (
+        <div className="h-[10px]" aria-hidden="true" />
+      )}
       <div
         className={cn(
           "seg-line seg-comm relative mt-1.5 flex h-3 items-center justify-center rounded-sm",
@@ -983,15 +991,18 @@ function CommercialeBlocco({
           selected && "outline outline-2 outline-primary outline-offset-2",
         )}
       >
-        <span className="font-mono text-[11px] font-semibold tabular-nums text-white">
+        <span className="truncate px-1 font-mono text-[11px] font-semibold tabular-nums text-white">
           {arrow} {blocco.numero_treno ?? "—"}
         </span>
       </div>
-      {/* Minuti sotto */}
-      <div className="mt-1 flex justify-between font-mono text-[9px] leading-none tabular-nums text-muted-foreground">
-        <span>{formatTimeShort(blocco.ora_inizio)}</span>
-        <span>{formatTimeShort(blocco.ora_fine)}</span>
-      </div>
+      {showOrari ? (
+        <div className="mt-1 flex justify-between gap-1 font-mono text-[9px] leading-none tabular-nums text-muted-foreground">
+          <span className="truncate">{formatTimeShort(blocco.ora_inizio)}</span>
+          <span className="truncate">{formatTimeShort(blocco.ora_fine)}</span>
+        </div>
+      ) : (
+        <div className="mt-1 h-[9px]" aria-hidden="true" />
+      )}
     </button>
   );
 }
