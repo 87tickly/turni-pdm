@@ -33,7 +33,29 @@ Dopo ogni feature, fix, refactoring, qualsiasi modifica:
   modifiche, stato, prossimo step
 - `git add` dei file modificati
 - `git commit` con messaggio descrittivo
-- `git push`
+- `git push` su `origin/master`
+- **Deploy Railway**: dopo il push, rilanciare il deploy dei servizi
+  toccati così la produzione resta allineata con `master`. Decisione
+  utente 2026-05-04: "ogni modifica → commit + push + main su Railway".
+  Comandi tipici (CLI già linkato a progetto `Arturo-Turni`):
+  ```
+  # Backend (backend/, models, migrations, schemas, domain logic)
+  railway link --service backend --project Arturo-Turni \
+              --environment production
+  railway up --detach --service backend
+  ```
+  ```
+  # Frontend (frontend/, route, hook, lib)
+  railway link --service frontend --project Arturo-Turni \
+              --environment production
+  railway up --detach --service frontend
+  ```
+  Se la modifica è solo backend → solo `railway up --service backend`,
+  e simmetricamente per frontend. Se la modifica tocca SOLO `*.md` o
+  `docs/`, salta il deploy (commit+push bastano). Migration Alembic
+  vengono applicate automaticamente al boot del backend (CMD =
+  `alembic upgrade head && uvicorn ...`).
+  Verifica post-deploy: `railway logs --service <name>` per build/runtime.
 
 L'entry segue la struttura: `## YYYY-MM-DD — titolo breve` + sezioni
 `### Contesto`, `### Modifiche`, `### Stato`, `### Prossimo step`.

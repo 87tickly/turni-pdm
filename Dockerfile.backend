@@ -1,0 +1,38 @@
+# =====================================================================
+# Dockerfile.backend — deploy Railway (build context = repo root)
+# Sprint 7.9 entry 117. Mantiene `backend/Dockerfile` separato per
+# `docker compose` con context `./backend` (sviluppo locale).
+# =====================================================================
+
+FROM python:3.12-slim AS base
+
+# uv: package manager (versione pinned per riproducibilità).
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    PATH="/app/.venv/bin:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Cache layer dipendenze: invariate finché lockfile non cambia.
+COPY backend/pyproject.toml backend/uv.lock* ./
+RUN uv sync --no-dev --no-install-project
+
+# Sorgente + Alembic + scripts seed.
+COPY backend/src ./src
+COPY backend/alembic.ini* ./
+COPY backend/alembic ./alembic
+COPY backend/scripts ./scripts
+
+# Re-sync per registrare il progetto stesso (dopo che il src è in /app).
+RUN uv sync --no-dev
+
+# Railway inietta $PORT a runtime.
+ENV PORT=8000
+EXPOSE 8000
+
+CMD ["sh", "-c", "alembic upgrade head && uvicorn colazione.main:app --host 0.0.0.0 --port ${PORT}"]

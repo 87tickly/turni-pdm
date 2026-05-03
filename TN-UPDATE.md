@@ -10,6 +10,93 @@
 
 ---
 
+## 2026-05-04 (118) — Deploy Railway live + clone DB locale → produzione
+
+### Contesto
+
+Sequenza logica entry 117. Dopo Dockerfile production-ready e `railway
+logout && railway login` fresh, deploy completo end-to-end via CLI sul
+progetto `Arturo-Turni`.
+
+### Modifiche
+
+**Dockerfile root dedicati** (entry 117 stava su `backend/Dockerfile`
+e `frontend/Dockerfile` con context locale, ma `railway up` carica il
+git root):
+
+- `Dockerfile.backend`: build context = repo root, COPY backend/...,
+  alembic upgrade + uvicorn.
+- `Dockerfile.frontend`: multi-stage pnpm build + nginx serve dist
+  con SPA fallback.
+- Backend/frontend Dockerfile in subdir mantenuti per `docker-compose`
+  dev locale.
+
+**Servizi Railway creati**:
+
+- `Postgres` (image `postgres:16-alpine`) con volume persistente
+  `postgres-volume` su `/var/lib/postgresql/data`. DATABASE_URL
+  interno `postgres.railway.internal:5432/railway` + proxy TCP esterno
+  `nozomi.proxy.rlwy.net:28852`.
+- `backend` con env vars: `DATABASE_URL` (template
+  `${{Postgres.PGUSER}}:${{Postgres.PGPASSWORD}}@...`),
+  `JWT_SECRET` random 32 hex, `JWT_ALGORITHM=HS256`, `ADMIN_DEFAULT_*`,
+  `DEFAULT_AZIENDA=trenord`, `CORS_ALLOW_ORIGINS=https://frontend-...
+  ,http://localhost:5173`, `RAILWAY_DOCKERFILE_PATH=Dockerfile.backend`.
+- `frontend` con `VITE_API_BASE_URL` puntato al backend domain,
+  `RAILWAY_DOCKERFILE_PATH=Dockerfile.frontend`.
+
+**Domini pubblici**:
+
+- Backend: `https://backend-production-f67f.up.railway.app`
+- Frontend: `https://frontend-production-8271.up.railway.app`
+
+**Schema bootstrap**: `DROP SCHEMA public CASCADE` + `CREATE SCHEMA
+public` per pulire un primo deploy fallito che aveva applicato migration
+parziali. Successivo deploy ha eseguito alembic upgrade da 0 → 0021
+(21 migration applicate clean).
+
+**Clone dati DB locale → Railway** (~6.5k corse PdE, anagrafica
+stazioni, sedi, whitelist, festività, dotazione, accoppiamenti):
+
+- `pg_dump` via Docker container (`postgres:16-alpine` con
+  `--add-host=host.docker.internal:host-gateway`) dal locale.
+- `TRUNCATE ... CASCADE` delle tabelle target su Railway (per pulire
+  i seed alembic-applicati).
+- `psql -f dump.sql` su Railway (anche in Docker).
+- Verifica row count: corsa_commerciale 6536, stazione 132,
+  localita_manutenzione 7, localita_stazione_vicina 16,
+  materiale_tipo 90, materiale_dotazione_azienda 16,
+  festivita_ufficiale 78, azienda 1, app_user 2 — **identico al
+  locale**.
+
+**CLAUDE.md regola 2 estesa**: ogni modifica ora richiede `git push`
++ `railway up --service <toccato>` (commento utente 2026-05-04 "ogni
+modifica commit push e main su railway").
+
+### Verifiche
+
+- Backend HTTP 401 su `/api/auth/me` (= corretto, no token), HTTP 200
+  su `/openapi.json`.
+- Frontend HTTP 200 su `/`.
+- Login admin: `POST /api/auth/login` con `admin/admin12345` → 200 con
+  JWT valido.
+- 21 migration alembic applicate clean alla boot.
+
+### Stato
+
+- ✅ Stack live su Railway: Postgres + backend + frontend.
+- ✅ Dati locali clonati 1:1.
+- ✅ CLAUDE.md regola deploy aggiornata.
+- 🟡 Smoke utente sul URL produzione: login + crea programma + genera
+  giri + verifica card "Ultimo run".
+
+### Prossimo step
+
+Utente apre `https://frontend-production-8271.up.railway.app` →
+login `admin/admin12345` → verifica funzionamento end-to-end.
+
+---
+
 ## 2026-05-04 (117) — Dockerfile production-ready per deploy Railway
 
 ### Contesto
