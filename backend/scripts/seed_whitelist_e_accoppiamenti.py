@@ -353,6 +353,14 @@ WHITELIST_TRENORD: dict[str, list[str]] = {
     ],
     "IMPMAN_CREMONA": [  # CRE
         "CREMONA",
+        # Sprint 7.9 entry 115 (decisione utente 2026-05-03): la sede
+        # CRE deve poter ammettere uscita/rientro con materiali vuoti
+        # anche da BRESCIA e PIADENA per coprire la direttrice
+        # BRESCIA-PIADENA-PARMA. Pre-fix il programma con regola su
+        # quella direttrice + sede CRE produceva 0 giri perché tutte
+        # le catene venivano scartate (origine corse fuori whitelist).
+        "BRESCIA",
+        "PIADENA",
     ],
     "IMPMAN_ISEO": [  # ISE
         "ISEO",

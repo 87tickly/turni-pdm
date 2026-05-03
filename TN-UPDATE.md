@@ -10,6 +10,60 @@
 
 ---
 
+## 2026-05-03 (115) — Whitelist CRE estesa con BRESCIA e PIADENA
+
+### Contesto
+
+Smoke utente sul programma 9447 (regola ATR803×1 + filtro direttrice
+`BRESCIA-PIADENA-PARMA` + sede CRE) dava 0 giri.
+
+Diagnosi: la whitelist sede `IMPMAN_CREMONA` aveva solo CREMONA
+(S01915). Le 53 corse della direttrice partono da BRESCIA (S01717),
+PARMA (S05014), PIADENA (S01919), CANNETO, S.GIOVANNI IN CROCE.
+Builder produceva 20 warning espliciti:
+
+> "Catena scartata: la prima corsa parte da 'S01717' che è FUORI dalla
+> whitelist della sede IMPMAN_CREMONA"
+> "Giro regola id=5328 (ATR803) SCARTATO: nessuna giornata termina in
+> zona sede IMPMAN_CREMONA. La sede potrebbe non essere coerente con
+> questa regola."
+
+Il sistema lo sapeva, ma i warning non sono mostrati all'utente
+(MR 11C "esposizione warnings" pendente).
+
+> "aggiungi BRESCIA e PIADENA alla whitelist CRemona con materiali vuoti"
+
+### Modifiche
+
+`backend/scripts/seed_whitelist_e_accoppiamenti.py`:
+- `IMPMAN_CREMONA` ora include `BRESCIA` e `PIADENA` oltre a `CREMONA`.
+- Commento esplicativo + riferimento entry 115.
+
+DB diretto (per il run corrente):
+- `INSERT INTO localita_stazione_vicina (localita_manutenzione_id=12,
+  stazione_codice IN ('S01717', 'S01919'))`.
+
+### Verifiche
+
+Re-esecuzione builder programma 9447:
+- **n_giri_creati: 0 → 7**
+- **n_corse_processate: 0 → 414**
+- **n_corse_residue: 0** (tutto coperto)
+- 7 giri chiusi naturalmente
+- 2 warning residui (catena del 7/6 da PARMA S05014, 9 corse minori)
+
+PARMA (S05014) NON è stata aggiunta alla whitelist CRE (decisione
+utente: aggiunta solo BRESCIA + PIADENA). Le 9 corse residue restano
+non coperte.
+
+### Stato
+
+- ✅ Whitelist CRE aggiornata con BRESCIA + PIADENA.
+- 🟡 PARMA potrebbe essere candidata futura (decisione utente da
+  prendere se le 9 corse residue contano).
+
+---
+
 ## 2026-05-03 (114) — Sprint 7.9 MR 12: fusione cluster A1 simili (riduce frammentazione)
 
 ### Contesto
