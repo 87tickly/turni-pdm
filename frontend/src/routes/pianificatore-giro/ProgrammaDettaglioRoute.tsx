@@ -485,14 +485,18 @@ function StrictChip({ name, active }: { name: string; active: boolean }) {
 /**
  * Sintesi del materiale rotabile necessario per coprire il programma.
  *
- * Modello operativo Trenord (PDF turno 1134, decisione utente
- * 2026-05-03): un giro a N giornate richiede **N convogli simultanei**
- * — uno per ogni giornata-pattern. Ogni convoglio applica la
- * composizione della regola (es. ETR421+ETR421 = 2 pezzi singoli).
+ * Sprint 7.9 entry 113 (decisione utente 2026-05-03): post-MR 10
+ * (bin-packing convogli paralleli) ogni giro = **1 convoglio fisico**.
+ * I cluster A1 con date di applicazione sovrapposte (= convogli
+ * paralleli) sono già stati separati in giri distinti. Quindi:
+ *   pezzi_necessari = SUM(giri_regola) × n_pezzi_per_unit_composizione
  *
- * Output: per ogni regola, il numero di convogli + i pezzi totali per
- * tipo materiale, sommati su tutti i giri della regola (= per
- * materiale_tipo_codice del giro).
+ * Pre-MR 10 invece il "giro aggregato A2" rappresentava UN turno
+ * concettuale a N giornate, e per coprire ogni giorno del periodo
+ * servivano N convogli sfasati simultaneamente — formula:
+ *   pezzi = SUM(giornate_giri) × n_pezzi
+ * Quel calcolo, post-MR 10, è doppio conteggio (es. 23 giri con 5.35
+ * giornate medie = 123 pezzi, dovrebbero essere 23).
  */
 function ConvogliNecessariSection({
   programma,
@@ -507,10 +511,6 @@ function ConvogliNecessariSection({
   for (const m of materialiQuery.data ?? []) {
     dotazione[m.codice] = m.pezzi_disponibili;
   }
-  // Per ogni regola, lega i giri il cui `materiale_tipo_codice` è in
-  // `composizione_json` (= materiale principale). Una regola può
-  // generare 1+ giri se è multi-sede o se l'aggregazione A2 produce
-  // più chiavi (oggi raro: 1 sede × 1 materiale → 1 giro tipico).
   const sintesi = programma.regole.map((r) => {
     const materiali_regola = new Set(
       r.composizione_json.map((c) => c.materiale_tipo_codice),
@@ -518,18 +518,18 @@ function ConvogliNecessariSection({
     const giri_regola = giri.filter(
       (g) => g.materiale_tipo_codice !== null && materiali_regola.has(g.materiale_tipo_codice),
     );
-    const giornate_totali = giri_regola.reduce((acc, g) => acc + g.numero_giornate, 0);
-    // Pezzi totali per tipo: per ogni pezzo della composizione, conta
-    // quanti convogli simultanei × pezzi del componente.
+    // Sprint 7.9 entry 113: 1 giro = 1 convoglio fisico (post-MR 10).
+    // Niente moltiplicazione per giornate.
+    const n_convogli = giri_regola.length;
     const pezzi_per_tipo = r.composizione_json.map((c) => ({
       tipo: c.materiale_tipo_codice,
-      pezzi: c.n_pezzi * giornate_totali,
+      pezzi: c.n_pezzi * n_convogli,
     }));
     return {
       regola_id: r.id,
       composizione: r.composizione_json,
       giri_count: giri_regola.length,
-      convogli: giornate_totali,
+      convogli: n_convogli,
       pezzi_per_tipo,
     };
   });
@@ -647,9 +647,9 @@ function ConvogliNecessariSection({
       </div>
 
       <p className="mt-4 text-xs italic text-muted-foreground">
-        Sprint 7.8 MR 5: 1 giro a N giornate richiede N convogli simultanei (modello PDF
-        Trenord 1134). I pezzi sono dati indicativi calcolati dal builder; il pianificatore
-        può rivedere la composizione per regola se la dotazione fisica è inferiore.
+        Post-MR 10: ogni giro è 1 convoglio fisico (i convogli paralleli sono già stati
+        separati in turni distinti dal bin-packing). Pezzi necessari = numero giri ×
+        composizione. Confronta con la dotazione registrata dell&apos;azienda.
       </p>
     </Card>
   );

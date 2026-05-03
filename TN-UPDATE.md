@@ -10,6 +10,71 @@
 
 ---
 
+## 2026-05-03 (113) — Sprint 7.9 fix: calcolo "Convogli necessari" coerente con MR 10
+
+### Contesto
+
+Smoke utente sul programma 9259 (23 giri ETR522) mostrava la card
+"Convogli necessari" con valori sballati:
+
+```
+CONVOGLI NECESSARI: 123 convogli · 123 pezzi singoli totali
+GIRI (TURNI): 23
+CONVOGLI SIMULTANEI: 123
+PEZZI SINGOLI NECESSARI: ETR522 × 123 / 71  (← warning capacity)
+```
+
+> "su che base fa questo calcolo? non capisco, qualcosa nella logica
+> di costruzione non funziona."
+
+### Diagnosi
+
+`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx::ConvogliNecessariSection`
+applicava la formula Sprint 7.8 MR 5:
+
+```
+giornate_totali = SUM(giri_regola.numero_giornate)
+pezzi = c.n_pezzi * giornate_totali
+```
+
+Razionale pre-MR 10: il "giro aggregato A2" rappresentava UN turno
+concettuale a N giornate; per coprire ogni giorno del periodo
+servivano N convogli sfasati simultaneamente → moltiplicazione.
+
+**Post-MR 10 il modello è cambiato**: il bin-packing separa già i
+convogli paralleli in giri distinti. Ogni giro = 1 convoglio fisico.
+La moltiplicazione per le giornate diventa doppio conteggio:
+
+- Programma 9259: 23 giri ETR522, somma giornate = 123 → calcolo
+  errato 123 ETR522 necessari (warning capacity vs dotazione 71).
+- Reale: 23 giri × `ETR522×1` = 23 ETR522 necessari (entro la
+  dotazione, niente warning).
+
+### Modifiche
+
+`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`:
+- `n_convogli = giri_regola.length` (non più
+  `SUM(numero_giornate)`).
+- `pezzi = c.n_pezzi * n_convogli` (1 giro = 1 convoglio fisico).
+- Docstring + nota footer aggiornate per riflettere il modello
+  post-MR 10.
+
+### Verifiche
+
+- Frontend `tsc -b --noEmit` ✅.
+- Vite HMR ricompila pulito.
+- Verifica visiva: utente ricarica `/pianificatore-giro/programmi/9259`
+  → "Convogli necessari: 23 · 23 pezzi totali" (vs precedente 123).
+
+### Stato
+
+- ✅ Fix calcolo capacity post-MR 10.
+- 🟡 MR 11B (capacity-based assignment + multi-composizione regola)
+  ancora aperto.
+- 🟡 MR 11C (check copertura PdE) ancora aperto.
+
+---
+
 ## 2026-05-03 (112) — Sprint 7.9 MR 11A: gap_max=360 (6h) chiude catene con sosta troppo lunga
 
 ### Contesto
