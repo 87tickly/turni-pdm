@@ -74,11 +74,17 @@ async def _get_programma_or_404(
 async def _validate_pubblicabile(session: AsyncSession, programma: ProgrammaMateriale) -> None:
     """Validazione pre-pubblicazione (bozza → attivo).
 
-    1. Stato corrente = 'bozza' (idempotente: già attivo → no-op? No, errore.)
+    1. Stato corrente = 'bozza'.
     2. Almeno 1 regola.
-    3. Tutti i `materiale_tipo` referenziati esistono.
-    4. Nessun programma attivo della stessa azienda si sovrappone
-       sulla finestra `[valido_da, valido_a]`.
+
+    Nota Sprint 7.9 (entry 107): rimosso il check di sovrapposizione
+    finestre. Programmi paralleli sulla stessa finestra temporale sono
+    legittimi: tipicamente coprono materiali diversi (es. ETR526 Tirano
+    + ATR803 Cremona + ETR522 Malpensa attivi insieme su 2026-03→06).
+    Il builder filtra per `programma_id` singolo, quindi due programmi
+    sulla stessa finestra producono insiemi di giri indipendenti — non
+    c'è ambiguità a livello di builder. La responsabilità di non
+    sovrapporre regole sullo stesso materiale è del pianificatore.
     """
     if programma.stato != "bozza":
         raise HTTPException(
@@ -86,7 +92,6 @@ async def _validate_pubblicabile(session: AsyncSession, programma: ProgrammaMate
             detail=f"programma in stato {programma.stato!r}, non pubblicabile",
         )
 
-    # 2. Almeno 1 regola
     stmt_count = select(ProgrammaRegolaAssegnazione.id).where(
         ProgrammaRegolaAssegnazione.programma_id == programma.id
     )
@@ -95,26 +100,6 @@ async def _validate_pubblicabile(session: AsyncSession, programma: ProgrammaMate
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="nessuna regola: aggiungi almeno una regola prima di pubblicare",
-        )
-
-    # 4. Sovrapposizione con altri programmi attivi (stessa azienda).
-    # Sprint 7.3: il campo `stagione` è stato rimosso, l'overlap check
-    # ora confronta solo le finestre temporali. Due programmi
-    # cronologicamente disgiunti possono coesistere; sovrapposti no.
-    stmt_overlap = select(ProgrammaMateriale.id, ProgrammaMateriale.nome).where(
-        ProgrammaMateriale.azienda_id == programma.azienda_id,
-        ProgrammaMateriale.stato == "attivo",
-        ProgrammaMateriale.id != programma.id,
-        ProgrammaMateriale.valido_da <= programma.valido_a,
-        ProgrammaMateriale.valido_a >= programma.valido_da,
-    )
-
-    overlap = (await session.execute(stmt_overlap)).all()
-    if overlap:
-        nomi = ", ".join(f"{r.id}={r.nome!r}" for r in overlap)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(f"finestra valido_da/valido_a si sovrappone con programma/i attivo/i: {nomi}"),
         )
 
 
@@ -394,7 +379,10 @@ async def pubblica_programma(
     Errori possibili:
     - 400 se non in `bozza`
     - 400 se nessuna regola
-    - 409 se finestra valido_da/valido_a si sovrappone con altri attivi
+
+    Nota: programmi paralleli sulla stessa finestra temporale sono
+    consentiti (entry 107). Il builder lavora per `programma_id`
+    singolo, niente conflitti automatici.
     """
     p = await _get_programma_or_404(session, programma_id, user.azienda_id)
     await _validate_pubblicabile(session, p)

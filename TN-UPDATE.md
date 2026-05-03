@@ -10,6 +10,83 @@
 
 ---
 
+## 2026-05-03 (107) — Sprint 7.9 hotfix: rimosso blocco pubblicazione su sovrapposizione finestre
+
+### Contesto
+
+Feedback utente vedendo l'alert browser:
+
+> "non capisco perchè con la stessa data io non possa generare altri
+> treni. prima risolviamo il problema dei doppioni, poi procedi con
+> la diagnosi."
+
+Tentativo di pubblicare programma `8615 'prova'` (03/05→24/05/2026)
+bloccato con `409` perché esisteva `8613 'Smoke MR8'` attivo sulla
+stessa finestra.
+
+### Diagnosi
+
+`backend/src/colazione/api/programmi.py::_validate_pubblicabile`
+controllava sovrapposizione `[valido_da, valido_a]` con altri
+programmi attivi (regola introdotta Sprint 7.3 dopo rimozione campo
+`stagione`). Il check è troppo conservativo: il caso d'uso reale è
+**programmi paralleli su materiali diversi** (es. ETR526 Tirano +
+ATR803 Cremona + ETR522 Malpensa attivi insieme). Il builder filtra
+per `programma_id` singolo (vedi `builder_giro/builder.py:227`),
+quindi due programmi sulla stessa finestra producono insiemi di giri
+indipendenti. Niente conflitto a livello di builder.
+
+### Modifiche
+
+`backend/src/colazione/api/programmi.py`:
+- Rimosso il blocco `stmt_overlap` + raise 409 da
+  `_validate_pubblicabile`. Resta il check stato='bozza' e regole
+  ≥ 1.
+- Docstring aggiornato con nota Sprint 7.9 sul perché del cambio.
+- Docstring `pubblica_programma` aggiornato: rimosso "409 se finestra
+  ... si sovrappone" dagli errori possibili.
+
+`backend/tests/test_programmi_api.py`:
+- `test_pubblica_sovrapposizione_409` → rinominato
+  `test_pubblica_programmi_paralleli_consentiti`. Ora verifica che
+  due programmi attivi con finestre sovrapposte coesistano (entrambi
+  `200 OK + stato='attivo'`).
+
+### Verifiche
+
+- `mypy --strict` ✅ 58 file clean.
+- `pytest` ✅ **536 passed, 12 skipped**.
+- Frontend `tsc -b --noEmit` ✅.
+- Smoke: pubblicazione di `prova` (8615) ora dovrebbe procedere senza
+  409. Da verificare nel browser dell'utente.
+
+### Stato
+
+- ✅ Blocco pubblicazione paralleli rimosso.
+- 🟡 Diagnosi 3 problemi MR 8 in coda (next step esplicito utente).
+
+### Prossimo step
+
+Diagnosi richiesta dall'utente sui 3 problemi reali identificati
+guardando giro 74417 G1:
+1. Day 1 che parte da Lecco senza giustificazione fisica (= "uscita
+   assoluta dal ciclo" è scope-cutting silente di entry 105/106).
+2. Etichette aggregate (`Lavorativo+Festivo (15 date)`) vs date
+   specifiche del PDF Trenord (`Si eff. 26/2, 2-3-4/3`,
+   `Effettuato 6F`) — sfruttare `FestivitaUfficiale` (MR 7.7.6) e
+   le date concrete dei cluster A1 per produrre etichette pattern
+   reali.
+3. Granularità cluster A1 nell'aggregazione MR6: la propagazione
+   "vince sulla prima intersezione" non traccia un cluster
+   specifico — serve revisitare se aggregare meno o esporre tab
+   per cluster sotto la variante aggregata.
+
+Questi 3 punti erano stati marcati come "scope futuro" in entry
+105/106 ma violano il principio CLAUDE.md regola 7 (niente pigrizia).
+Vanno chiusi.
+
+---
+
 ## 2026-05-03 (106) — Sprint 7.9 MR 8: continuità reale via cluster_a1_ids + marker "uscita ciclo"
 
 ### Contesto

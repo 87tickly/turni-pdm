@@ -434,10 +434,13 @@ def test_pubblica_gia_attivo_400(client: TestClient) -> None:
     assert res2.status_code == 400
 
 
-def test_pubblica_sovrapposizione_409(client: TestClient) -> None:
-    """Due programmi attivi nella stessa azienda con finestre che si
-    sovrappongono → 409. Sprint 7.3: il check non confronta più la
-    stagione (campo rimosso), solo la finestra temporale.
+def test_pubblica_programmi_paralleli_consentiti(client: TestClient) -> None:
+    """Sprint 7.9 entry 107: due programmi attivi nella stessa azienda
+    con finestre temporali che si sovrappongono sono CONSENTITI.
+
+    Caso d'uso: programmi paralleli su materiali diversi (es. ETR526
+    Tirano + ATR803 Cremona) sulla stessa finestra. Il builder filtra
+    per `programma_id` singolo, niente conflitti automatici.
     """
     token = _login(client, "admin", "admin12345")
     payload = {
@@ -448,19 +451,21 @@ def test_pubblica_sovrapposizione_409(client: TestClient) -> None:
     }
     res = client.post("/api/programmi", json=payload, headers=_auth_headers(token))
     pid1 = res.json()["id"]
-    client.post(f"/api/programmi/{pid1}/pubblica", headers=_auth_headers(token))
+    pub1 = client.post(f"/api/programmi/{pid1}/pubblica", headers=_auth_headers(token))
+    assert pub1.status_code == 200
+    assert pub1.json()["stato"] == "attivo"
 
     payload2 = {
         **payload,
-        "nome": "Altro inverno",
-        "valido_da": "2026-04-01",  # sovrappone
+        "nome": "Programma parallelo",
+        "valido_da": "2026-04-01",
         "valido_a": "2026-08-31",
     }
     res2 = client.post("/api/programmi", json=payload2, headers=_auth_headers(token))
     pid2 = res2.json()["id"]
-    res3 = client.post(f"/api/programmi/{pid2}/pubblica", headers=_auth_headers(token))
-    assert res3.status_code == 409
-    assert "sovrappone" in res3.json()["detail"]
+    pub2 = client.post(f"/api/programmi/{pid2}/pubblica", headers=_auth_headers(token))
+    assert pub2.status_code == 200, pub2.json()
+    assert pub2.json()["stato"] == "attivo"
 
 
 def test_archivia_attivo_ok(client: TestClient) -> None:
