@@ -67,6 +67,13 @@ class ProgrammaMateriale(Base):
     # Configurato dal pianificatore per ogni programma; tipici 5000-10000.
     km_max_ciclo: Mapped[int | None] = mapped_column(Integer)
     n_giornate_default: Mapped[int] = mapped_column(Integer, default=1)
+    # Sprint 7.8 (migration 0019): range lunghezza giri generati dal
+    # builder. `n_giornate_min` è SOFT (il builder scende sotto solo
+    # per giri di "chiusura" delle corse residue a fine pool).
+    # `n_giornate_max` è HARD (nessun giro supera questo numero).
+    # Decisione utente 2026-05-03: default min=4, max=12.
+    n_giornate_min: Mapped[int] = mapped_column(Integer, default=4, server_default="4")
+    n_giornate_max: Mapped[int] = mapped_column(Integer, default=12, server_default="12")
     fascia_oraria_tolerance_min: Mapped[int] = mapped_column(Integer, default=30)
 
     # Strict mode granulare (vedi PROGRAMMA-MATERIALE.md §2.7)

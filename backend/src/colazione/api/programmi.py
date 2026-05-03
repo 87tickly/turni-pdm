@@ -143,6 +143,8 @@ async def create_programma(
         km_max_giornaliero=payload.km_max_giornaliero,
         km_max_ciclo=payload.km_max_ciclo,
         n_giornate_default=payload.n_giornate_default,
+        n_giornate_min=payload.n_giornate_min,
+        n_giornate_max=payload.n_giornate_max,
         fascia_oraria_tolerance_min=payload.fascia_oraria_tolerance_min,
         strict_options_json=payload.strict_options_json.model_dump(),
         stazioni_sosta_extra_json=payload.stazioni_sosta_extra_json,
@@ -266,6 +268,20 @@ async def update_programma(
     data.pop("stato", None)
     if "strict_options_json" in data and data["strict_options_json"] is not None:
         data["strict_options_json"] = payload.strict_options_json.model_dump()  # type: ignore[union-attr]
+
+    # Sprint 7.8: valida range n_giornate_min ≤ n_giornate_max sul valore
+    # finale (merge di payload + valori esistenti). Evita 500 da CHECK
+    # constraint DB se il pianificatore patcha solo uno dei due campi.
+    nuovo_min = data.get("n_giornate_min", p.n_giornate_min)
+    nuovo_max = data.get("n_giornate_max", p.n_giornate_max)
+    if nuovo_min is not None and nuovo_max is not None and nuovo_max < nuovo_min:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"n_giornate_max ({nuovo_max}) deve essere >= "
+                f"n_giornate_min ({nuovo_min})"
+            ),
+        )
 
     for k, v in data.items():
         setattr(p, k, v)

@@ -10,6 +10,134 @@
 
 ---
 
+## 2026-05-03 (99) — Sprint 7.8 MR 1: range n_giornate_min/max sul programma materiale
+
+### Contesto
+
+Decisione utente 2026-05-03 dopo screen del giro 73074 + diagnosi del
+builder corrente (entry 98 + chat post): il pianificatore vuole
+controllo sulla **lunghezza dei giri generati** dal builder, in stile
+turno Trenord 1134 (8 giornate-tipo che si ripetono).
+
+> "non è che tutte le giornate sono 8 possiamo mettere un minimo di
+> partenza fino a un max di 12, eccezion fatta quando dobbiamo chiudere
+> i treni che potrebbe capitare che escano solo 2 giornate o cose
+> simili"
+
+> "ti consiglierei di escludere i treni che utilizzi in modo tale da
+> avete continuità"
+
+Strada decisa: **Strada 1** (range vincolato + esclusione progressiva
+delle corse fra giri). Greedy lungo verso `n_giornate_max`. `n_min` è
+soft (il builder scende sotto solo per i giri di "chiusura" del pool a
+fine elaborazione).
+
+Default confermati: `n_min=4`, `n_max=12`. Modificabili dal
+pianificatore via UI per programma.
+
+### Modifiche (MR 1 — schema + UI, builder ancora invariato)
+
+#### Backend
+
+`alembic/versions/0019_n_giornate_range_programma.py` (nuovo):
+- `programma_materiale.n_giornate_min INT NOT NULL DEFAULT 4`
+- `programma_materiale.n_giornate_max INT NOT NULL DEFAULT 12`
+- check `n_giornate_min >= 1`
+- check `n_giornate_max >= n_giornate_min`
+
+`models/programmi.py`: campi `Mapped[int]` sul model
+`ProgrammaMateriale`.
+
+`schemas/programmi.py`:
+- `ProgrammaMaterialeRead`: campi nuovi (default 4/12 per backward-compat
+  in test fixtures).
+- `ProgrammaMaterialeCreate`: `Field(default=4, ge=1, le=30)` /
+  `Field(default=12, ge=1, le=30)` + `model_validator` cross-field
+  (`n_giornate_max >= n_giornate_min`).
+- `ProgrammaMaterialeUpdate`: opzionali con stessa validazione.
+
+`api/programmi.py`:
+- `create_programma`: passa i 2 campi al model.
+- `update_programma`: valida cross-field sul **valore finale** (merge
+  payload + DB esistente) → 400 se `max < min`. Evita 500 da CHECK
+  constraint quando il pianificatore patcha solo uno dei due.
+
+#### Frontend
+
+`lib/api/programmi.ts`:
+- `ProgrammaMaterialeRead.n_giornate_min/max: number` (richiesti).
+- `ProgrammaMaterialeCreate.n_giornate_min/max?: number` (opzionali).
+- `ProgrammaMaterialeUpdate.n_giornate_min/max?: number` (opzionali).
+
+`routes/pianificatore-giro/CreaProgrammaDialog.tsx`:
+- 2 input `<input type="number" min=1 max=30>` precompilati a 4 e 12.
+- Validazione client: `rangeOk` (entrambi interi 1–30, `max >= min`).
+- Messaggio inline "Inserisci due interi tra 1 e 30 con max ≥ min."
+  + bottone disabilitato se `rangeOk=false`.
+- Helper text per ogni campo che spiega la semantica soft/hard.
+
+`routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`:
+- Aggiunta `ScalarRow "Lunghezza giri" → "{min}–{max} giornate"` tra
+  "Km max / giorno" e "Km max / ciclo (legacy)".
+
+`routes/pianificatore-giro/ProgrammiRoute.test.tsx` +
+`ProgrammaDettaglioRoute.test.tsx`: fixture `makeProgramma` aggiornate
+con i 2 campi (TS strict richiede valori).
+
+### Verifiche
+
+- Migration applicata: `alembic upgrade head` ✅, default 4/12 backfilled
+  su programma esistente 7219.
+- Backend: `mypy --strict` ✅ 58 file clean. Pytest ✅ **528 passed,
+  12 skipped** (era 524, +4 nuovi):
+  - `test_create_programma_con_range_giornate_custom` (POST custom)
+  - `test_create_programma_max_inferiore_min_422` (Pydantic 422)
+  - `test_patch_range_solo_max_inferiore_min_400` (PATCH 400)
+  - `test_patch_aggiorna_range_ok` (PATCH happy path)
+- Frontend: `tsc -b --noEmit` ✅. Vitest ✅ **53 passed** (no
+  regressioni).
+- Preview verifica visiva:
+  - Dialog "Nuovo programma materiale": blocco "Lunghezza giri
+    (giornate)" con 2 input + helper text + messaggio errore quando
+    si setta max=2 < min=4.
+  - Dettaglio programma 7219: `LUNGHEZZA GIRI · 4-12 giornate` visibile
+    sotto "Fascia oraria tolerance".
+
+### Stato
+
+- ✅ MR 1 (schema + UI): chiuso.
+- 🔄 MR 2 (builder pool con esclusione progressiva + cap soft/hard):
+  prossimo step.
+- ⏳ MR 3 (etichette varianti stile Trenord: `Lv` / `F` / `P escl.
+  3-4-5/3` / `Si eff. 3-4-5/3` / `LV 1:5 esclusi 2-3-4/3` / `Effettuato
+  6F`): in coda.
+- ⏳ MR 4 (Gantt: nomi stazioni al posto dei codici).
+- ⏳ MR 5 (Dashboard: riassunto convogli necessari).
+
+### Prossimo step
+
+MR 2: refactor del builder per:
+
+1. Greedy "una catena alla volta" su pool di corse iniziale (=
+   tutte le corse del periodo che matchano il programma).
+2. `n_giornate_max` come **hard cap** sulla singola catena (rifiuta
+   estensioni oltre).
+3. `n_giornate_min` come **soft floor**: se la catena costruita ha
+   `< n_min` giornate, viene tenuta solo se è di "chiusura" (cioè
+   stiamo svuotando le ultime corse residue del pool).
+4. Esclusione progressiva: dopo aver chiuso una catena, le sue corse
+   sono rimosse dal pool e i giri successivi non possono riprenderle.
+5. Stop quando il pool è vuoto.
+
+Il refactor coinvolge `multi_giornata.py`, `builder.py`,
+`aggregazione_a2.py` (la chiave A2 va ripensata: invece di
+`(materiale, sede, n_giornate)`, ora `n_giornate` è una proprietà
+emergente vincolata al range, e l'aggregazione A2 può lavorare su
+più giornate raggruppando varianti per giornata-tipo del nuovo
+modello).
+
+---
+
 ## 2026-05-03 (98) — Fix "Failed to fetch" su genera-giri: seed accoppiamenti + cattura ComposizioneNonAmmessaError
 
 ### Contesto

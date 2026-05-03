@@ -247,6 +247,9 @@ class ProgrammaMaterialeRead(BaseModel):
     km_max_giornaliero: int | None = None
     km_max_ciclo: int | None = None
     n_giornate_default: int
+    # Sprint 7.8: range lunghezza giri generati (soft min, hard max).
+    n_giornate_min: int = 4
+    n_giornate_max: int = 12
     fascia_oraria_tolerance_min: int
     strict_options_json: dict[str, Any]
     stazioni_sosta_extra_json: list[str] = Field(default_factory=list)
@@ -298,6 +301,9 @@ class ProgrammaMaterialeCreate(BaseModel):
     km_max_giornaliero: int | None = Field(default=None, ge=1)
     km_max_ciclo: int | None = Field(default=None, ge=1)
     n_giornate_default: int = Field(default=1, ge=1)
+    # Sprint 7.8: range lunghezza giri (soft min, hard max).
+    n_giornate_min: int = Field(default=4, ge=1, le=30)
+    n_giornate_max: int = Field(default=12, ge=1, le=30)
     fascia_oraria_tolerance_min: int = Field(default=30, ge=0, le=120)
     strict_options_json: StrictOptions = Field(default_factory=StrictOptions)
     stazioni_sosta_extra_json: list[str] = Field(default_factory=list)
@@ -307,6 +313,11 @@ class ProgrammaMaterialeCreate(BaseModel):
     def _check_validita(self) -> ProgrammaMaterialeCreate:
         if self.valido_a < self.valido_da:
             raise ValueError("valido_a deve essere >= valido_da")
+        if self.n_giornate_max < self.n_giornate_min:
+            raise ValueError(
+                f"n_giornate_max ({self.n_giornate_max}) deve essere >= "
+                f"n_giornate_min ({self.n_giornate_min})"
+            )
         return self
 
 
@@ -322,6 +333,9 @@ class ProgrammaMaterialeUpdate(BaseModel):
     km_max_giornaliero: int | None = Field(default=None, ge=1)
     km_max_ciclo: int | None = Field(default=None, ge=1)
     n_giornate_default: int | None = Field(default=None, ge=1)
+    # Sprint 7.8: range lunghezza giri (soft min, hard max).
+    n_giornate_min: int | None = Field(default=None, ge=1, le=30)
+    n_giornate_max: int | None = Field(default=None, ge=1, le=30)
     fascia_oraria_tolerance_min: int | None = Field(default=None, ge=0, le=120)
     strict_options_json: StrictOptions | None = None
     stazioni_sosta_extra_json: list[str] | None = None

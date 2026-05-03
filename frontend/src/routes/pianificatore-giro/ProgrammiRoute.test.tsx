@@ -16,6 +16,8 @@ function makeProgramma(over: Partial<ProgrammaMaterialeRead> = {}): ProgrammaMat
     km_max_giornaliero: null,
     km_max_ciclo: 10000,
     n_giornate_default: 30,
+    n_giornate_min: 4,
+    n_giornate_max: 12,
     fascia_oraria_tolerance_min: 30,
     strict_options_json: {
       no_corse_residue: false,

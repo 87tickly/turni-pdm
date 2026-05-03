@@ -135,6 +135,9 @@ def test_create_programma_minimo_ok(client: TestClient) -> None:
     assert body["stato"] == "bozza"
     assert body["azienda_id"] is not None
     assert body["n_giornate_default"] == 1
+    # Sprint 7.8: default range giornate
+    assert body["n_giornate_min"] == 4
+    assert body["n_giornate_max"] == 12
     assert body["fascia_oraria_tolerance_min"] == 30
     assert body["strict_options_json"]["no_corse_residue"] is False
 
@@ -275,6 +278,66 @@ def test_patch_404_inesistente(client: TestClient) -> None:
         headers=_auth_headers(token),
     )
     assert res.status_code == 404
+
+
+# =====================================================================
+# Sprint 7.8 — range n_giornate_min/max
+# =====================================================================
+
+
+def test_create_programma_con_range_giornate_custom(client: TestClient) -> None:
+    """POST con n_giornate_min/max custom → entrambi salvati."""
+    token = _login(client, "admin", "admin12345")
+    payload = {**_PAYLOAD_MIN, "n_giornate_min": 6, "n_giornate_max": 14}
+    res = client.post("/api/programmi", json=payload, headers=_auth_headers(token))
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["n_giornate_min"] == 6
+    assert body["n_giornate_max"] == 14
+
+
+def test_create_programma_max_inferiore_min_422(client: TestClient) -> None:
+    """POST con max < min → 422 da Pydantic model_validator."""
+    token = _login(client, "admin", "admin12345")
+    payload = {**_PAYLOAD_MIN, "n_giornate_min": 10, "n_giornate_max": 5}
+    res = client.post("/api/programmi", json=payload, headers=_auth_headers(token))
+    assert res.status_code == 422
+    assert "n_giornate_max" in res.text
+
+
+def test_patch_range_solo_max_inferiore_min_400(client: TestClient) -> None:
+    """PATCH che setta solo max sotto min esistente → 400 (non 500 da DB check)."""
+    token = _login(client, "admin", "admin12345")
+    # Crea con min=8, max=12
+    payload = {**_PAYLOAD_MIN, "n_giornate_min": 8, "n_giornate_max": 12}
+    res = client.post("/api/programmi", json=payload, headers=_auth_headers(token))
+    pid = res.json()["id"]
+
+    # Patch solo max=5 (< min=8) → la validazione applicativa intercetta.
+    res2 = client.patch(
+        f"/api/programmi/{pid}",
+        json={"n_giornate_max": 5},
+        headers=_auth_headers(token),
+    )
+    assert res2.status_code == 400, res2.text
+    assert "n_giornate_max" in res2.json()["detail"]
+
+
+def test_patch_aggiorna_range_ok(client: TestClient) -> None:
+    """PATCH valido che aggiorna entrambi range → applicato."""
+    token = _login(client, "admin", "admin12345")
+    res = client.post("/api/programmi", json=_PAYLOAD_MIN, headers=_auth_headers(token))
+    pid = res.json()["id"]
+
+    res2 = client.patch(
+        f"/api/programmi/{pid}",
+        json={"n_giornate_min": 6, "n_giornate_max": 10},
+        headers=_auth_headers(token),
+    )
+    assert res2.status_code == 200, res2.text
+    body = res2.json()
+    assert body["n_giornate_min"] == 6
+    assert body["n_giornate_max"] == 10
 
 
 # =====================================================================

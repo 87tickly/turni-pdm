@@ -33,6 +33,10 @@ export interface ProgrammaMaterialeRead {
   km_max_giornaliero: number | null;
   km_max_ciclo: number | null;
   n_giornate_default: number;
+  /** Sprint 7.8: lunghezza minima dei giri (soft, sotto solo per chiusure). */
+  n_giornate_min: number;
+  /** Sprint 7.8: lunghezza massima dei giri (hard cap). */
+  n_giornate_max: number;
   fascia_oraria_tolerance_min: number;
   strict_options_json: StrictOptions;
   stazioni_sosta_extra_json: string[];
@@ -90,6 +94,10 @@ export interface ProgrammaMaterialeCreate {
   km_max_giornaliero?: number | null;
   km_max_ciclo?: number | null;
   n_giornate_default?: number;
+  /** Sprint 7.8: default 4. */
+  n_giornate_min?: number;
+  /** Sprint 7.8: default 12. */
+  n_giornate_max?: number;
   fascia_oraria_tolerance_min?: number;
   strict_options_json?: Partial<StrictOptions>;
   stazioni_sosta_extra_json?: string[];
@@ -103,6 +111,10 @@ export interface ProgrammaMaterialeUpdate {
   km_max_giornaliero?: number | null;
   km_max_ciclo?: number | null;
   n_giornate_default?: number;
+  /** Sprint 7.8: aggiorna lunghezza minima (soft) dei giri. */
+  n_giornate_min?: number;
+  /** Sprint 7.8: aggiorna lunghezza massima (hard) dei giri. */
+  n_giornate_max?: number;
   fascia_oraria_tolerance_min?: number;
   strict_options_json?: Partial<StrictOptions>;
   stazioni_sosta_extra_json?: string[];

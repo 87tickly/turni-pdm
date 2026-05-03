@@ -379,6 +379,10 @@ function ConfigurazioneSection({
             }
           />
           <ScalarRow
+            label="Lunghezza giri"
+            value={`${programma.n_giornate_min}–${programma.n_giornate_max} giornate`}
+          />
+          <ScalarRow
             label="Km max / ciclo (legacy)"
             value={
               programma.km_max_ciclo === null

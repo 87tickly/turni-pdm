@@ -27,12 +27,18 @@ interface FormState {
   nome: string;
   valido_da: string;
   valido_a: string;
+  /** Sprint 7.8: lunghezza minima giri (soft, default 4). */
+  n_giornate_min: string;
+  /** Sprint 7.8: lunghezza massima giri (hard cap, default 12). */
+  n_giornate_max: string;
 }
 
 const INITIAL: FormState = {
   nome: "",
   valido_da: "",
   valido_a: "",
+  n_giornate_min: "4",
+  n_giornate_max: "12",
 };
 
 /**
@@ -57,11 +63,22 @@ export function CreaProgrammaDialog({ open, onOpenChange, onCreated }: CreaProgr
   const [error, setError] = useState<string | null>(null);
   const createMutation = useCreateProgramma();
 
+  const minN = Number.parseInt(form.n_giornate_min, 10);
+  const maxN = Number.parseInt(form.n_giornate_max, 10);
+  const rangeOk =
+    Number.isInteger(minN) &&
+    Number.isInteger(maxN) &&
+    minN >= 1 &&
+    minN <= 30 &&
+    maxN >= minN &&
+    maxN <= 30;
+
   const isValid =
     form.nome.length > 0 &&
     form.valido_da.length > 0 &&
     form.valido_a.length > 0 &&
-    form.valido_a >= form.valido_da;
+    form.valido_a >= form.valido_da &&
+    rangeOk;
 
   const handleClose = (next: boolean) => {
     if (!next) {
@@ -81,6 +98,8 @@ export function CreaProgrammaDialog({ open, onOpenChange, onCreated }: CreaProgr
         nome: form.nome.trim(),
         valido_da: form.valido_da,
         valido_a: form.valido_a,
+        n_giornate_min: minN,
+        n_giornate_max: maxN,
         // Sprint 7.7 MR 1: niente km_max_ciclo qui (sposta sotto regola).
         // Sprint 7.6: niente n_giornate_default (backend default 1).
       });
@@ -149,6 +168,48 @@ export function CreaProgrammaDialog({ open, onOpenChange, onCreated }: CreaProgr
                 disabled={createMutation.isPending}
               />
             </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label>Lunghezza giri (giornate)</Label>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex flex-col gap-1">
+                <Input
+                  id="n_giornate_min"
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={form.n_giornate_min}
+                  onChange={(e) => update("n_giornate_min", e.target.value)}
+                  disabled={createMutation.isPending}
+                  aria-label="Lunghezza minima giri"
+                />
+                <span className="text-xs text-muted-foreground">
+                  Minimo (soft) — il builder può scendere sotto solo per chiudere le
+                  corse residue.
+                </span>
+              </div>
+              <div className="flex flex-col gap-1">
+                <Input
+                  id="n_giornate_max"
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={form.n_giornate_max}
+                  onChange={(e) => update("n_giornate_max", e.target.value)}
+                  disabled={createMutation.isPending}
+                  aria-label="Lunghezza massima giri"
+                />
+                <span className="text-xs text-muted-foreground">
+                  Massimo (hard) — nessun giro supera questa lunghezza.
+                </span>
+              </div>
+            </div>
+            {!rangeOk && (form.n_giornate_min !== "" || form.n_giornate_max !== "") && (
+              <p className="text-xs text-destructive">
+                Inserisci due interi tra 1 e 30 con max ≥ min.
+              </p>
+            )}
           </div>
 
           {error !== null && (
