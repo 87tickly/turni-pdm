@@ -10,6 +10,60 @@
 
 ---
 
+## 2026-05-03 (112) — Sprint 7.9 MR 11A: gap_max=360 (6h) chiude catene con sosta troppo lunga
+
+### Contesto
+
+Smoke utente post-MR 10 sul programma 9151 G-FIO-004-ETR522 G3 v0:
+
+```
+seq=1 corsa_commerciale ALESSANDRIA → VOGHERA  06:28 → 06:58  | 2301
+seq=2 corsa_commerciale VOGHERA → CENTRALE     19:01 → 19:57  | 2304
+```
+
+Sosta a Voghera 12h 3min tra due treni. Operativamente Trenord non
+lascia mai un convoglio fermo così tanto in stazione intermedia.
+
+> "non è possibile possa sostare cosi tanto tempo in un giorno feriale,
+> al massimo posso accettare 6 ore non di piu"
+
+(Decisione utente che ribalta la memoria precedente
+`feedback_giro_materiale_no_pdc_no_gap.md` "no soglia gap": ora
+introduciamo una soglia esplicita `gap_max=360`.)
+
+### Modifiche
+
+`backend/src/colazione/domain/builder_giro/catena.py`:
+- `ParamCatena.gap_max: int = 360` (nuovo parametro, default 6h).
+- `_trova_prossima` rifiuta corse con `partenza_min > arrivo_min +
+  gap_max`. Catena si chiude naturalmente quando nessuna corsa
+  successiva è dentro la finestra `[gap_min, gap_max]`.
+- `costruisci_catene` propaga `params.gap_max` al `_trova_prossima`.
+
+`backend/tests/test_catena.py`: tre nuovi test
+- `test_gap_oltre_max_chiude_la_catena` (caso reale 12h Voghera).
+- `test_gap_entro_max_incatena` (5h59 entro soglia, catena unica).
+- `test_gap_max_personalizzato` (gap_max=120 chiude su 3h).
+
+### Verifiche
+
+- `mypy --strict` ✅ 58 file clean.
+- `pytest` ✅ **540 passed, 12 skipped** (3 nuovi test).
+- Smoke: da rifare da utente sul programma reale per verificare che
+  la sosta 12h non si formi più (il nuovo programma 9259 dell'utente
+  ha problemi diversi, vedi entry futura).
+
+### Stato
+
+- ✅ MR 11A `gap_max=360`.
+- 🟡 MR 11B: capacity-based assignment (eliminare ambiguità priorità,
+  introdurre quantità pezzi disponibili come vincolo).
+- 🟡 MR 11C: check copertura PdE post-generazione ("quanti treni
+  ancora mancano").
+- 🟡 Diagnosi cluster A1 frammentazione (richiesta utente).
+
+---
+
 ## 2026-05-03 (111) — Sprint 7.9 fix: rientro_sede non duplica più vuoto_coda
 
 ### Contesto

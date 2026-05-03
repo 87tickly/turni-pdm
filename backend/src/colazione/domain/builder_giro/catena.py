@@ -60,9 +60,19 @@ class ParamCatena:
     Attributi:
         gap_min: minuti minimi tra ``ora_arrivo`` di una corsa e
             ``ora_partenza`` della successiva. Default 5'.
+        gap_max: minuti MASSIMI tra ``ora_arrivo`` di una corsa e
+            ``ora_partenza`` della successiva. Sopra questa soglia la
+            catena si chiude (= il convoglio non resta fermo in
+            stazione, fa altri servizi o rientra in deposito). Default
+            360' (6h), decisione utente Sprint 7.9 entry 112: in giorno
+            feriale una sosta intermedia > 6h non è realistica.
+            Pre-entry 112 il valore era effettivo "infinito" (niente
+            check), che produceva catene con sosta 12h+ a stazioni
+            intermedie tipo Voghera.
     """
 
     gap_min: int = 5
+    gap_max: int = 360
 
 
 # Singleton condivisibile (frozen → safe come default arg).
@@ -106,14 +116,17 @@ def _trova_prossima(
     visitate: set[int],
     ultima: _CorsaLike,
     gap_min: int,
+    gap_max: int,
 ) -> _CorsaLike | None:
     """Heuristic greedy: la corsa libera col matching geografico + gap che
-    parte prima.
+    parte prima, dentro la finestra ``[gap_min, gap_max]``.
 
     A parità di ``ora_partenza`` vince la prima incontrata nel ``pool``,
     che è già ordinato → output deterministico.
     """
-    soglia_min = _time_to_min(ultima.ora_arrivo) + gap_min
+    arrivo_min = _time_to_min(ultima.ora_arrivo)
+    soglia_min = arrivo_min + gap_min
+    soglia_max = arrivo_min + gap_max
 
     miglior: _CorsaLike | None = None
     miglior_partenza_min: int | None = None
@@ -125,6 +138,8 @@ def _trova_prossima(
             continue
         partenza_min = _time_to_min(c.ora_partenza)
         if partenza_min < soglia_min:
+            continue
+        if partenza_min > soglia_max:
             continue
         if miglior_partenza_min is None or partenza_min < miglior_partenza_min:
             miglior = c
@@ -209,7 +224,9 @@ def costruisci_catene(
                 # non si ragiona. Multi-giornata in Sprint 4.4.3.
                 break
 
-            prossima = _trova_prossima(pool_ordinato, visitate, ultima, params.gap_min)
+            prossima = _trova_prossima(
+                pool_ordinato, visitate, ultima, params.gap_min, params.gap_max
+            )
             if prossima is None:
                 break
 

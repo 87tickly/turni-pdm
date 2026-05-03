@@ -118,6 +118,49 @@ def test_gap_min_zero_incatena_consecutive() -> None:
     assert len(catene) == 1
 
 
+def test_gap_oltre_max_chiude_la_catena() -> None:
+    """Sprint 7.9 entry 112 (decisione utente 2026-05-03):
+    se la corsa successiva parte oltre `gap_max` minuti dopo l'arrivo
+    della precedente, la catena si chiude.
+
+    Caso reale (giro 74847 G3 v0): treni 2301 (06:58 arrivo Voghera)
+    e 2304 (19:01 partenza Voghera) → gap 12h, sosta intermedia non
+    operativa per Trenord.
+    """
+    a = _c("MI", "VOGHERA", (6, 28), (6, 58))
+    # Partenza 19:01 = arrivo + 12h 3min (= 723 min). Default gap_max=360
+    # → la catena dovrebbe chiudersi.
+    b = _c("VOGHERA", "MI", (19, 1), (19, 57))
+    catene = costruisci_catene([a, b])
+    assert len(catene) == 2, (
+        "Con gap 12h e gap_max=360 default, le 2 corse devono restare "
+        "in catene separate"
+    )
+
+
+def test_gap_entro_max_incatena() -> None:
+    """gap di 5h59 (= 359 min) entro gap_max=360 → catena unica."""
+    a = _c("MI", "BG", (8, 0), (9, 0))
+    # 9:00 + 5h59 = 14:59 → entro gap_max=360
+    b = _c("BG", "BS", (14, 59), (15, 30))
+    catene = costruisci_catene([a, b])
+    assert len(catene) == 1
+    assert catene[0].corse == (a, b)
+
+
+def test_gap_max_personalizzato() -> None:
+    """`gap_max` configurabile via ParamCatena: con gap_max=120 (2h)
+    una sosta di 3h chiude la catena.
+    """
+    a = _c("MI", "BG", (8, 0), (9, 0))
+    b = _c("BG", "BS", (12, 0), (12, 30))  # gap 3h = 180 min
+    # Default gap_max=360 → catena unica
+    assert len(costruisci_catene([a, b])) == 1
+    # gap_max=120 → 2 catene (gap 180 > 120)
+    catene = costruisci_catene([a, b], ParamCatena(gap_max=120))
+    assert len(catene) == 2
+
+
 # =====================================================================
 # Ordinamento input
 # =====================================================================
