@@ -43,7 +43,10 @@ from colazione.domain.builder_giro.builder import (
 )
 from colazione.domain.builder_giro.etichetta import calcola_etichetta_variante
 from colazione.domain.builder_giro.persister import LocalitaNonTrovataError
-from colazione.domain.builder_giro.risolvi_corsa import RegolaAmbiguaError
+from colazione.domain.builder_giro.risolvi_corsa import (
+    ComposizioneNonAmmessaError,
+    RegolaAmbiguaError,
+)
 from colazione.models.anagrafica import Stazione
 from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
 from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
@@ -144,7 +147,8 @@ async def genera_giri_endpoint(
 
     - **404**: programma o località non trovati per l'azienda corrente.
     - **400**: programma non in stato 'attivo', o ``n_giornate`` invalido,
-      o regole ambigue, o strict mode violato.
+      o regole ambigue, o strict mode violato, o composizione regola
+      con coppia non in ``materiale_accoppiamento_ammesso``.
     - **409**: il programma ha già giri persistiti — passa
       ``?force=true`` per cancellare e rigenerare.
     - **422**: ``data_inizio`` fuori dal periodo del programma.
@@ -177,6 +181,8 @@ async def genera_giri_endpoint(
     except StrictModeViolation as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RegolaAmbiguaError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except ComposizioneNonAmmessaError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return _to_response(result)

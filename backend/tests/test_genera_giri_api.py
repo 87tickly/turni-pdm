@@ -463,3 +463,45 @@ async def test_genera_solo_data_inizio_estende_a_valido_a(
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["n_giri_creati"] >= 1
+
+
+async def test_composizione_non_ammessa_400(client: TestClient) -> None:
+    """Regola con composizione doppia non in `materiale_accoppiamento_ammesso`
+    → 400 con messaggio chiaro (regressione: prima era 500 ASGI propagato,
+    che il browser vedeva come "Failed to fetch").
+
+    La coppia `(ETR421, ETR526)` non è registrata come ammessa nel seed
+    canonico (vedi `scripts/seed_whitelist_e_accoppiamenti.py`).
+    """
+    prog_id = await _setup_db_completo()
+    # Sostituisci la regola di default con una a composizione doppia
+    # non ammessa.
+    async with session_scope() as session:
+        await session.execute(
+            text(
+                "UPDATE programma_regola_assegnazione "
+                "SET composizione_json = :comp, "
+                "    materiale_tipo_codice = 'ETR421', numero_pezzi = 1, "
+                "    is_composizione_manuale = false "
+                "WHERE programma_id = :pid"
+            ),
+            {
+                "comp": (
+                    '[{"materiale_tipo_codice": "ETR421", "n_pezzi": 1}, '
+                    '{"materiale_tipo_codice": "ETR526", "n_pezzi": 1}]'
+                ),
+                "pid": prog_id,
+            },
+        )
+
+    token = _login(client, "admin", "admin12345")
+    res = client.post(
+        f"/api/programmi/{prog_id}/genera-giri",
+        params=_PARAMS_OK,
+        headers=_auth(token),
+    )
+    assert res.status_code == 400, res.text
+    detail = res.json()["detail"].lower()
+    assert "composizione" in detail
+    assert "etr421" in detail
+    assert "etr526" in detail

@@ -10,6 +10,131 @@
 
 ---
 
+## 2026-05-03 (98) — Fix "Failed to fetch" su genera-giri: seed accoppiamenti + cattura ComposizioneNonAmmessaError
+
+### Contesto
+
+Screenshot utente: il dialog "Genera giri materiali" del programma
+6586 ("prova 2026") mostra **"Failed to fetch"** dopo click su
+"Avvia generazione". Sede selezionata: FIO (IMPMAN_MILANO_FIORENZA).
+Il programma aveva 1 regola PRIO 60 con composizione doppia
+`ETR421 × 1, ETR421 × 1`.
+
+Dal log backend:
+
+```
+ComposizioneNonAmmessaError: Regola 3995: composizione contiene la
+coppia ('ETR421', 'ETR421') NON in materiale_accoppiamento_ammesso.
+```
+
+L'eccezione non era catturata dall'endpoint → 500 con traceback ASGI
+→ connessione abortita → browser vede generico "Failed to fetch".
+
+### Diagnosi
+
+Due cause concorrenti:
+
+1. **DB seed mancante**: la tabella `materiale_accoppiamento_ammesso`
+   era **vuota** (0 righe). Le altre due sezioni del seed
+   (`materiale_tipo` 90 righe, `localita_stazione_vicina` 14 righe)
+   erano OK, ma la sezione 3 di
+   `scripts/seed_whitelist_e_accoppiamenti.py` non era mai stata
+   eseguita su questo DB. Lo script ha già `("ETR421","ETR421")` +
+   altre 7 coppie canoniche Trenord.
+
+2. **Bug API**: in `api/giri.py`
+   `genera_giri_endpoint()` cattura `ProgrammaNonTrovatoError`,
+   `LocalitaNonTrovataError`, `ProgrammaNonAttivoError`,
+   `PeriodoFuoriProgrammaError`, `GiriEsistentiError`,
+   `StrictModeViolation`, `RegolaAmbiguaError`. Ma non
+   `ComposizioneNonAmmessaError` (introdotta in Sprint 5.5
+   composizioni multi-materiale).
+
+### Modifiche
+
+#### Step A — DB seed accoppiamenti
+
+Eseguito `scripts/seed_whitelist_e_accoppiamenti.py --azienda
+trenord` (idempotente). Risultato:
+
+- 0 inserimenti su materiali famiglia (16 già presenti)
+- 0 inserimenti su whitelist sedi (14 già presenti)
+- **+8 accoppiamenti inseriti**: ATR115+ATR125, ATR125+ATR125,
+  E464+MD, E464+Vivalto, ETR204+ETR204, **ETR421+ETR421**,
+  ETR425+ETR526, ETR526+ETR526.
+
+#### Step B — Cattura ComposizioneNonAmmessaError
+
+`backend/src/colazione/api/giri.py`:
+
+- Import esteso: `from colazione.domain.builder_giro.risolvi_corsa
+  import ComposizioneNonAmmessaError, RegolaAmbiguaError`.
+- Aggiunto `except ComposizioneNonAmmessaError as exc: raise
+  HTTPException(400, detail=str(exc))` in `genera_giri_endpoint`.
+- Docstring aggiornato (elenco errori HTTP).
+
+#### Step B bis — Test di regressione
+
+`backend/tests/test_genera_giri_api.py`:
+
+- Nuovo test `test_composizione_non_ammessa_400`: crea programma
+  con regola a composizione doppia `(ETR421, ETR526)` (coppia non
+  ammessa nel seed), verifica che l'endpoint ritorni 400 con
+  messaggio dominio (contiene "composizione", "etr421", "etr526").
+
+### Verifiche
+
+- `mypy --strict` su `api/giri.py` ✅ clean.
+- `pytest tests/` ✅ **524 passed, 12 skipped** (era 523, +1
+  nuovo).
+- Endpoint testato col login admin: ritorna 404 sui programmi
+  inesistenti (vedi sotto), pattern errore chiaro.
+
+### Effetto collaterale (segnalato all'utente)
+
+L'esecuzione di `pytest tests/` ha attivato la fixture `autouse` in
+`tests/test_programmi_api.py:52` che esegue `DELETE FROM
+programma_materiale` **senza WHERE** prima di ogni test (23 test).
+Risultato: i programmi dell'utente (6584, 6586 "prova 2026", 6587)
+sono stati cancellati. Solo il programma archiviato 6942 è
+sopravvissuto.
+
+Tabelle ANAGRAFICHE intatte: 6536 corse PdE, 132 stazioni, 90
+materiale_tipo, 14 whitelist, 8 accoppiamenti.
+
+**Causa**: il fixture `_wipe_programmi()` di
+`test_programmi_api.py` non filtra per `nome LIKE 'TEST_%'` come
+fanno gli altri test files (`test_genera_giri_api.py`,
+`test_persister.py`, ecc.). Stesso pattern in
+`test_pde_importer_db.py` (più aggressivo: cancella anche stazioni,
+corse, accoppiamenti — non eseguito stavolta perché probabilmente
+skipped, ma è una mina in attesa).
+
+**Mitigazione possibile** (scope futuro): allineare tutti i wipe
+test al pattern `WHERE nome LIKE 'TEST_%'`. Per `test_pde_importer_db.py`
+la pulizia totale è intenzionale (testa importer da zero) — andrebbe
+isolato in un DB separato (test container Postgres con
+testcontainers o fixture transazionale).
+
+### Stato
+
+- ✅ Bug "Failed to fetch" risolto a livello dati (seed) + codice
+  (cattura eccezione).
+- ⚠️ Programma "prova 2026" perso causa pytest run. L'utente deve
+  ricrearlo via UI per testare visivamente la generazione (~5
+  minuti).
+- 🔓 Mina pytest documentata, non risolta in questo MR (richiede
+  decisione di scope su test isolation strategy).
+
+### Prossimo step
+
+1. Utente ricrea programma di test via UI.
+2. Click "Genera giri" → ora deve funzionare (seed + fix attivi).
+3. Decidere se intercalare cleanup test wipe pattern (Step opzionale)
+   o procedere con altri task.
+
+---
+
 ## 2026-05-03 (97) — Vincoli inviolabili V4: spostati dal POST regola al builder
 
 ### Contesto
