@@ -52,6 +52,7 @@ from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.domain.builder_giro.aggregazione_a2 import aggrega_a2
+from colazione.domain.builder_giro.fusione_cluster_a1 import fonde_cluster_simili
 from colazione.domain.builder_giro.catena import costruisci_catene
 from colazione.domain.builder_giro.composizione import (
     GiroAssegnato,
@@ -899,12 +900,20 @@ async def genera_giri(
     # 6. Strict mode pre-persistenza (sui giri pre-aggregazione)
     _check_strict_mode(programma, giri_assegnati)
 
-    # 7. Aggregazione A2 (Sprint 7.7 MR 5, decisione utente "B1"):
-    #    fonde più cluster A1 in cicli materiali aggregati per chiave
-    #    ``(materiale_tipo_codice, localita_codice, n_giornate)``.
-    #    Le sequenze diverse di una stessa giornata-tipo emergono come
-    #    varianti calendariali per quella giornata.
-    giri_aggregati = aggrega_a2(giri_assegnati)
+    # 6.5 Fusione cluster A1 simili (Sprint 7.9 MR 12, entry 114):
+    #    riduce la frammentazione del clustering A1 fondendo cluster
+    #    con sequenze simili (Jaccard ≥ 0.7) in cluster unificati.
+    #    Modello target PDF Trenord 1134: poche varianti per giornata-K,
+    #    ognuna con etichetta "tutto il periodo + eccezioni" — non
+    #    centinaia di micro-cluster da 1 data ciascuno.
+    giri_fusi = fonde_cluster_simili(giri_assegnati)
+
+    # 7. Aggregazione A2 (Sprint 7.8 MR 2.5 + 7.9 MR 10):
+    #    bin-packing convogli paralleli per chiave (materiale, sede).
+    #    Cluster A1 con date sovrapposte → turni separati (= convogli
+    #    fisici diversi). Cluster con date disgiunte → varianti
+    #    calendariali dello stesso turno.
+    giri_aggregati = aggrega_a2(giri_fusi)
 
     # 8. Genera numero_turno + persisti.
     # Sprint 7.7 MR 1 (Fix C "rientro intelligente"): genera_rientro_sede

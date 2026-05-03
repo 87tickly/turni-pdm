@@ -10,6 +10,115 @@
 
 ---
 
+## 2026-05-03 (114) — Sprint 7.9 MR 12: fusione cluster A1 simili (riduce frammentazione)
+
+### Contesto
+
+Smoke utente sui giri 75032/75034/75035 + programma 9352:
+
+> "il cluster molto spesso perde treni nelle varie varianti, quindi
+> abbiamo un piccolo problema di bug. crea solo una giornata festiva
+> con un treno isolato. ma quel treno a chiavenna come ci è arrivato?
+> non popola abbastanza treni"
+
+> "io voglio avere questo risultato [PDF Trenord 1134], ma perchè è
+> piu chiaro, oggi crei solo una giornata con 1000 varianti ma per
+> vederle devo ogni volta schiacciare"
+
+Sintomi convergenti su una causa unica = **frammentazione clustering A1**:
+- 90% varianti con 1 sola data (programma 9259, screenshot precedenti)
+- giri "poveri" con 1-2 treni per giornata (giro 75032 linea Tirano)
+- giornate festive isolate senza spiegazione (giro 75034 CHIAVENNA)
+- alert "congruenza" tra notti per discontinuità sequenze ai bordi
+
+### Diagnosi
+
+`backend/src/colazione/domain/builder_giro/multi_giornata.py` raggruppa
+le catene cross-notte per **identità esatta** della sequenza di treni.
+Una piccola variazione (un treno che non gira il sabato, un cambio
+orario, una corsa applicabile solo certe date) genera un cluster A1
+nuovo. Nel PdE Trenord 2025-2026 le variazioni sono frequenti → cluster
+A1 micro-frammentati → ogni cluster con 1-2 date e pochi treni.
+
+Il modello target (PDF Trenord 1134) ha invece poche varianti per
+giornata-K, ognuna con etichetta "tutto il periodo + eccezioni" (es.
+"LV 1:5 esclusi 2-3-4-5/3" raggruppa 25 date in una variante).
+
+### Modifiche
+
+`backend/src/colazione/domain/builder_giro/fusione_cluster_a1.py`
+(modulo nuovo, ~280 righe):
+
+- `_treni_del_cluster(giro)`: fingerprint = insieme degli `id` corsa
+  commerciale di tutte le catene di tutte le giornate.
+- `_jaccard(a, b)`: similarità Jaccard `|A ∩ B| / |A ∪ B|`.
+- `_UnionFind`: DSU classico per raggruppare cluster simili in
+  componenti connesse (similarità transitiva).
+- `_fonde_cluster_componente`: cluster principale = quello con più date
+  totali; per ogni giornata K l'output ha la sequenza canonica del
+  principale + `dates_apply` = unione delle date di tutti i cluster del
+  componente alla giornata K.
+- `fonde_cluster_simili(giri_a1, soglia=0.7)`: API pubblica. Raggruppa
+  per `(materiale, sede, n_giornate)` poi applica Jaccard + Union-Find
+  + fusione per componente. Cluster orfani (no materiale) → pass-through.
+
+`backend/src/colazione/domain/builder_giro/builder.py`:
+- Step 6.5 nuovo: `giri_fusi = fonde_cluster_simili(giri_assegnati)`
+  invocato tra strict mode check e `aggrega_a2`.
+- Aggiornati commenti del step 7 per riflettere modello post-MR 10.
+
+`backend/tests/test_fusione_cluster_a1.py`: 10 test:
+- input vuoto / single cluster pass-through
+- cluster identici fusi (Jaccard=1)
+- cluster simili sopra soglia (3/4 = 0.75) fusi
+- cluster diversi sotto soglia (1/5 = 0.2) separati
+- materiali diversi non fusi
+- n_giornate diverse non fusi
+- componente connessa transitiva (A~B + B~C → tutti fusi anche se NOT(A~C))
+- giro orfano pass-through
+- sequenza canonica = cluster con più date totali
+
+### Conseguenze attese
+
+- Meno cluster A1 → meno varianti per giornata-K nel modello A2
+- Etichette varianti più ricche (più date per variante via
+  `etichetta.calcola_etichetta_variante`)
+- Giri con più treni (= sequenza canonica del cluster principale)
+- Continuità giornate K ↔ K+1 più solida (sequenze ai bordi più
+  stabili)
+
+Trade-off accettato: la sequenza canonica del cluster fuso usa i treni
+del cluster più popolato; le piccole eccezioni di sequenza degli altri
+cluster vengono perse. Decisione utente: pulizia rappresentazione >
+fedeltà micro-eccezioni.
+
+### Verifiche
+
+- `mypy --strict` ✅ 59 file clean (1 nuovo).
+- `pytest` ✅ **550 passed, 12 skipped** (10 nuovi test fusione).
+- Smoke E2E: utente rigenera giri sul programma reale post-deploy per
+  verificare riduzione varianti + ricchezza giri.
+
+### Stato
+
+- ✅ MR 12 fusione cluster A1 simili (post-processing).
+- 🟡 MR 11B capacity-based assignment ancora pendente.
+- 🟡 MR 11C check copertura PdE ancora pendente.
+- 🟡 MR 13 UI sblocco modifica regole su programma attivo.
+
+### Prossimo step
+
+Utente rigenera giri e valuta:
+1. Numero varianti per giornata sceso da 30+/giornata a ~3-6 (target Trenord PDF 1134).
+2. Etichette più ricche tipo `Lv esclusi DD/MM` o `Si eff. DD-MM/M`
+   anziché `Solo DD/M/YY` ripetuti.
+3. Giri "popolati" con più treni per giornata (no più 1-2 treni isolati).
+
+Se i numeri tornano: dopo deploy su Railway (decisione utente in
+attesa) si chiude lo Sprint 7.9.
+
+---
+
 ## 2026-05-03 (113) — Sprint 7.9 fix: calcolo "Convogli necessari" coerente con MR 10
 
 ### Contesto
