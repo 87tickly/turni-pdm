@@ -10,6 +10,64 @@
 
 ---
 
+## 2026-05-03 (98) — Code review completa repo COLAZIONE (docs/CODE-REVIEW-2026-04-30.md)
+
+### Contesto
+
+Review senior richiesta dall'utente per documentare lo stato di qualità
+del codebase prima dello Sprint 7.3 (Dashboard Pianificatore PdC).
+Scope: backend/, frontend/, data/, tests/, scripts/. Lettura preventiva
+di CLAUDE.md, TN-UPDATE.md, METODO-DI-LAVORO.md, NORMATIVA-PDC.md,
+MODELLO-DATI.md. Nessuna modifica al codice di produzione — solo il
+documento di review.
+
+### Modifiche
+
+Creato `docs/CODE-REVIEW-2026-04-30.md` (file unico in PR).
+
+**6 CRITICI**:
+- **C1** `builder.py:533` — anti-rigenerazione con full table scan O(N²)
+  (noto da review 05-01, ancora aperto)
+- **C2** `split_cv.py:150` — `_eccede_limiti()` usa `is_notturno` per
+  determinare il cap 420', ma `is_notturno` è overloaded (presa early +
+  fine>22:00 + cross-mezzanotte). §11.8 normativa richiede solo
+  `60 ≤ ora_presa < 300`. Fix: usare direttamente `ora_presa_min`.
+- **C3** `builder.py:47` — `ACCESSORI_MIN_STANDARD=40` hardcoded; il
+  preriscaldo invernale §3.3 (80' dic-feb) non è mai applicato.
+- **C4** `builder.py:218` — PK emesso per qualsiasi gap>0, senza il
+  minimo di 20' previsto da §4.4.
+- **C5** `.env.example:14` — `JWT_ACCESS_TOKEN_EXPIRE_MIN=4320` (72h);
+  production default dovrebbe essere 15-30'.
+- **C6** `domain/normativa/__init__.py:1` — modulo promette SSoT per
+  le costanti normative ma è vuoto; costanti sparse in builder.py e
+  split_cv.py senza fonte comune.
+
+**11 IMPORTANTI** (I1–I11): impianto sbagliato in TurnoPdc (tipo_materiale
+invece di deposito PdC), `datetime.utcnow()` deprecated, check #3
+pubblicazione non implementato, mancanza UNIQUE su turno_pdc, updated_at
+senza onupdate, RevisioneProvvisoria dead model, n_varianti da JSONB
+fragile, asimmetria auth su list giri, 30' hardcoded nel rientro sede,
+MORTARA/TIRANO frozenset senza doc normativo, test mancante su
+`valida_regola()`.
+
+**7 MINORI** (M1–M7): dead imports noqa, commenti sprint in codice
+produzione, is_notturno overloading semantico, troncamento silente
+String(80), cap arbitrario 14 in builder, stazioni nullable senza
+commento, possibile circular import futuro.
+
+### Stato
+
+`docs/CODE-REVIEW-2026-04-30.md` scritto. Nessuna modifica al codice.
+PR aperta con solo questo file + TN-UPDATE. L'utente decide se e quali
+finding affrontare prima dello Sprint 7.3.
+
+### Prossimo step
+
+Sprint 7.3 — Dashboard Pianificatore Turno PdC (2° ruolo), oppure
+intercalare fix veloci dai CRITICI (C2, C3, C4 ciascuno < 1h).
+
+---
+
 ## 2026-05-03 (97) — Vincoli inviolabili V4: spostati dal POST regola al builder
 
 ### Contesto
