@@ -10,6 +10,7 @@ import { ProgrammaStatoBadge } from "@/components/domain/ProgrammaStatoBadge";
 import { useGiriProgramma } from "@/hooks/useGiri";
 import { useArchiviaProgramma, useProgramma, usePubblicaProgramma } from "@/hooks/useProgrammi";
 import { ApiError } from "@/lib/api/client";
+import type { GiroListItem } from "@/lib/api/giri";
 import type {
   ProgrammaDettaglioRead,
   StrictOptions,
@@ -89,6 +90,11 @@ export function ProgrammaDettaglioRoute() {
 
       {/* ═══ 2 · CONFIGURAZIONE ═════════════════════════════════ */}
       <ConfigurazioneSection programma={programma} editable={editable} />
+
+      {/* ═══ 2.5 · CONVOGLI NECESSARI (Sprint 7.8 MR 5) ═════════ */}
+      {giri.length > 0 && (
+        <ConvogliNecessariSection programma={programma} giri={giri} />
+      )}
 
       {/* ═══ 3 · REGOLE DI ASSEGNAZIONE ═════════════════════════ */}
       <RegoleSection
@@ -470,6 +476,138 @@ function StrictChip({ name, active }: { name: string; active: boolean }) {
     </span>
   );
 }
+
+// =====================================================================
+// 2.5 · Convogli necessari (Sprint 7.8 MR 5)
+// =====================================================================
+
+/**
+ * Sintesi del materiale rotabile necessario per coprire il programma.
+ *
+ * Modello operativo Trenord (PDF turno 1134, decisione utente
+ * 2026-05-03): un giro a N giornate richiede **N convogli simultanei**
+ * — uno per ogni giornata-pattern. Ogni convoglio applica la
+ * composizione della regola (es. ETR421+ETR421 = 2 pezzi singoli).
+ *
+ * Output: per ogni regola, il numero di convogli + i pezzi totali per
+ * tipo materiale, sommati su tutti i giri della regola (= per
+ * materiale_tipo_codice del giro).
+ */
+function ConvogliNecessariSection({
+  programma,
+  giri,
+}: {
+  programma: ProgrammaDettaglioRead;
+  giri: GiroListItem[];
+}) {
+  // Per ogni regola, lega i giri il cui `materiale_tipo_codice` è in
+  // `composizione_json` (= materiale principale). Una regola può
+  // generare 1+ giri se è multi-sede o se l'aggregazione A2 produce
+  // più chiavi (oggi raro: 1 sede × 1 materiale → 1 giro tipico).
+  const sintesi = programma.regole.map((r) => {
+    const materiali_regola = new Set(
+      r.composizione_json.map((c) => c.materiale_tipo_codice),
+    );
+    const giri_regola = giri.filter(
+      (g) => g.materiale_tipo_codice !== null && materiali_regola.has(g.materiale_tipo_codice),
+    );
+    const giornate_totali = giri_regola.reduce((acc, g) => acc + g.numero_giornate, 0);
+    // Pezzi totali per tipo: per ogni pezzo della composizione, conta
+    // quanti convogli simultanei × pezzi del componente.
+    const pezzi_per_tipo = r.composizione_json.map((c) => ({
+      tipo: c.materiale_tipo_codice,
+      pezzi: c.n_pezzi * giornate_totali,
+    }));
+    return {
+      regola_id: r.id,
+      composizione: r.composizione_json,
+      giri_count: giri_regola.length,
+      convogli: giornate_totali,
+      pezzi_per_tipo,
+    };
+  });
+
+  // Totali aggregati su tutte le regole.
+  const tot_convogli = sintesi.reduce((acc, s) => acc + s.convogli, 0);
+  const tot_pezzi: Record<string, number> = {};
+  for (const s of sintesi) {
+    for (const p of s.pezzi_per_tipo) {
+      tot_pezzi[p.tipo] = (tot_pezzi[p.tipo] ?? 0) + p.pezzi;
+    }
+  }
+
+  return (
+    <Card className="p-6">
+      <div className="mb-4 flex items-baseline gap-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">
+          Convogli necessari
+        </h2>
+        <span className="text-xs text-muted-foreground">
+          {tot_convogli} convogli · {Object.values(tot_pezzi).reduce((a, b) => a + b, 0)} pezzi
+          singoli totali
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {sintesi.map((s) => (
+          <div
+            key={s.regola_id}
+            className="rounded-md border border-border bg-secondary/40 p-4"
+          >
+            <div className="mb-2 flex items-center gap-2">
+              <Badge variant="muted">Regola #{s.regola_id}</Badge>
+              <span className="font-mono text-xs text-muted-foreground">
+                {s.composizione.map((c) => `${c.materiale_tipo_codice} × ${c.n_pezzi}`).join(" + ")}
+              </span>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Giri (turni)
+                </div>
+                <div className="mt-0.5 text-2xl font-semibold tabular-nums text-foreground">
+                  {s.giri_count}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Convogli simultanei
+                </div>
+                <div className="mt-0.5 text-2xl font-semibold tabular-nums text-foreground">
+                  {s.convogli}
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 border-t border-border pt-3">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                Pezzi singoli necessari
+              </div>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {s.pezzi_per_tipo.map((p) => (
+                  <span
+                    key={p.tipo}
+                    className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-0.5 font-mono text-xs"
+                  >
+                    <span className="text-foreground">{p.tipo}</span>
+                    <span className="text-muted-foreground">×</span>
+                    <span className="font-semibold tabular-nums text-foreground">{p.pezzi}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <p className="mt-4 text-xs italic text-muted-foreground">
+        Sprint 7.8 MR 5: 1 giro a N giornate richiede N convogli simultanei (modello PDF
+        Trenord 1134). I pezzi sono dati indicativi calcolati dal builder; il pianificatore
+        può rivedere la composizione per regola se la dotazione fisica è inferiore.
+      </p>
+    </Card>
+  );
+}
+
 
 // =====================================================================
 // 3 · Regole di assegnazione

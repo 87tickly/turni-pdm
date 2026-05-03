@@ -42,9 +42,22 @@ _LABEL_CATEGORIA: dict[str, str] = {
     "prefestivo": "Prefestivo",
     "festivo": "Festivo",
 }
+# Sprint 7.8 MR 3: sigle stile Trenord (PDF turno 1134) per il rendering
+# compatto delle etichette varianti. Più corto = più leggibile sul
+# Gantt. Ordine: matching `tipo_giorno_categoria`.
+_SIGLA_CATEGORIA: dict[str, str] = {
+    "lavorativo": "Lv",
+    "prefestivo": "P",
+    "festivo": "F",
+}
 # Ordine deterministico per il caso misto (calendariale: lavorativo
 # prima, prefestivo medio, festivo ultimo).
 _ORDINE_CATEGORIE: tuple[str, ...] = ("lavorativo", "prefestivo", "festivo")
+# Sprint 7.8 MR 3: max numero di date elencate inline nelle etichette
+# stile Trenord ("Si eff. 3-4-5/3" o "P escl. 21-28/3, 11/4"). Sopra
+# questa soglia, l'etichetta degrada a `{Sigla} ({n} date)` per non
+# saturare l'UI. Trenord usa tipicamente 3-5 date inline.
+_MAX_DATE_INLINE: int = 5
 
 
 def calcola_etichetta_giro(
@@ -114,45 +127,61 @@ def calcola_etichetta_giro(
     return ("personalizzata", "+".join(presenti))
 
 
+def _format_date_short(d: date) -> str:
+    """Formato data Trenord: DD/M (no anno, mese senza zero leading)."""
+    return f"{d.day}/{d.month}"
+
+
+def _format_date_list(dates: Iterable[date]) -> str:
+    """Lista date compatte separate da virgola: 3/3, 4/3, 11/4."""
+    return ", ".join(_format_date_short(d) for d in sorted(dates))
+
+
 def calcola_etichetta_variante(
     dates_apply: Iterable[date],
     festivita: frozenset[date],
+    periodo_categoria_dates: dict[str, frozenset[date]] | None = None,
 ) -> str:
-    """Etichetta UI semantica per una variante calendariale (Sprint 7.7 MR 6).
+    """Etichetta UI stile Trenord per una variante calendariale.
 
-    Decisione utente 2026-05-02 (memoria
-    ``feedback_etichetta_categoria_variante.md``): il pianificatore
-    deve vedere SUBITO se la variante riguarda lavorativi, prefestivi
-    o festivi — non il testo grezzo PdE (``"Circola giornalmente.
-    Soppresso..."``). Le 3 categorie operative seguono la
-    classificazione di ``tipo_giorno_categoria``:
+    Sprint 7.8 MR 3 (decisione utente 2026-05-03 + PDF turno 1134):
+    riscrittura con sigle compatte (`Lv`/`F`/`P`) e formato
+    inclusioni/esclusioni:
 
-    Output:
+    - 1 data → ``"Solo DD/M/YY"`` (compatto).
+    - 1 categoria, copre TUTTE le date di quella categoria nel periodo
+      (dato `periodo_categoria_dates`) → ``"Lv"`` / ``"F"`` / ``"P"``.
+    - 1 categoria, copre la maggior parte ma con N≤5 esclusioni
+      (e ``periodo_categoria_dates`` fornito) →
+      ``"Lv esclusi 21/3, 28/3, 11/4"``.
+    - 1 categoria, copre poche date elencabili (n≤5) →
+      ``"Si eff. 3/3, 4/3, 5/3"``.
+    - 1 categoria, troppe date per elencare → ``"Lv (12 date)"``.
+    - Più categorie → ``"Misto: Lv+F (N date)"`` (sigle joinate).
+    - 0 date → ``"(nessuna data)"``.
 
-    - ``"Solo DD/MM/YYYY"`` se la variante vale per UNA sola data.
-    - ``"Lavorativo · N date"`` se tutte le date sono lavorative.
-    - ``"Prefestivo · N date"`` se tutte le date sono prefestive.
-    - ``"Festivo · N date"`` se tutte le date sono festive (incluse
-      domeniche).
-    - ``"Misto: A+B[+C] · N date"`` se la variante mescola categorie
-      diverse (label uniche in ordine calendariale, joinate con ``+``).
-    - ``"(nessuna data)"`` se l'iterable è vuoto.
+    `periodo_categoria_dates` è opzionale: se omesso, la funzione opera
+    senza confronto col periodo (no "esclusi" né "Lv" intero), quindi
+    fallback semantico più conservativo (sempre numero date).
 
     Args:
-        dates_apply: date in cui la variante si applica (tipico:
-            ``variante.dates_apply`` del builder, oppure
-            ``[date.fromisoformat(s) for s in dates_apply_json]``
-            quando si parte dal DB).
-        festivita: festività rilevanti per gli anni coperti DA E
-            includendo il giorno successivo (per riconoscere il
-            prefestivo del 31/12 servono le festività del 1/1 anno+1).
-            Caller responsabile della costruzione.
+        dates_apply: date in cui la variante si applica.
+        festivita: festività rilevanti per gli anni coperti.
+            Necessario per ``tipo_giorno_categoria`` (riconoscere
+            festivi vs feriali vs prefestivi).
+        periodo_categoria_dates: opzionale, mappa
+            ``{"lavorativo": frozenset(date), "prefestivo": ...,
+            "festivo": ...}`` con TUTTE le date del periodo della
+            giornata-pattern raggruppate per categoria. Tipicamente
+            costruito dal caller raccogliendo dates_apply di tutte le
+            varianti della stessa giornata-K e applicando
+            ``tipo_giorno_categoria``.
 
     Esempi:
 
         >>> from datetime import date
         >>> calcola_etichetta_variante([date(2026, 5, 4)], frozenset())
-        'Solo 04/05/2026'
+        'Solo 4/5/26'
         >>> calcola_etichetta_variante([], frozenset())
         '(nessuna data)'
     """
@@ -163,14 +192,39 @@ def calcola_etichetta_variante(
         return "(nessuna data)"
 
     if n == 1:
-        return f"Solo {date_uniche[0].strftime('%d/%m/%Y')}"
+        d = date_uniche[0]
+        return f"Solo {d.day}/{d.month}/{d.year % 100:02d}"
 
-    tipi = {tipo_giorno_categoria(d, festivita) for d in date_uniche}
-    suffix = f"{n} date"
+    tipi_per_data = {d: tipo_giorno_categoria(d, festivita) for d in date_uniche}
+    tipi_unici = set(tipi_per_data.values())
 
-    if len(tipi) == 1:
-        unico = next(iter(tipi))
-        return f"{_LABEL_CATEGORIA[unico]} · {suffix}"
+    # Caso multi-categoria: etichetta "Misto" con sigle.
+    if len(tipi_unici) > 1:
+        sigle = [_SIGLA_CATEGORIA[t] for t in _ORDINE_CATEGORIE if t in tipi_unici]
+        return f"Misto: {'+'.join(sigle)} ({n} date)"
 
-    presenti = [_LABEL_CATEGORIA[t] for t in _ORDINE_CATEGORIE if t in tipi]
-    return f"Misto: {'+'.join(presenti)} · {suffix}"
+    # Mono-categoria: confronta col periodo se fornito.
+    cat_unica = next(iter(tipi_unici))
+    sigla = _SIGLA_CATEGORIA[cat_unica]
+
+    if periodo_categoria_dates is not None:
+        date_categoria_periodo = periodo_categoria_dates.get(cat_unica, frozenset())
+        if date_categoria_periodo:
+            esclusi = sorted(date_categoria_periodo - set(date_uniche))
+            n_periodo = len(date_categoria_periodo)
+            # Copertura totale → sigla pura
+            if not esclusi:
+                return sigla
+            # Maggioranza coperta + esclusioni elencabili → "esclusi"
+            if len(esclusi) <= _MAX_DATE_INLINE and n > n_periodo // 2:
+                return f"{sigla} esclusi {_format_date_list(esclusi)}"
+            # Minoranza coperta + date elencabili → "Si eff."
+            if n <= _MAX_DATE_INLINE:
+                return f"Si eff. {_format_date_list(date_uniche)} ({sigla})"
+            # Troppe sia esclusi che incluse: fallback conteggio.
+            return f"{sigla} ({n} di {n_periodo} date)"
+
+    # Senza periodo: fallback su elenco esplicito o conteggio.
+    if n <= _MAX_DATE_INLINE:
+        return f"Si eff. {_format_date_list(date_uniche)} ({sigla})"
+    return f"{sigla} ({n} date)"

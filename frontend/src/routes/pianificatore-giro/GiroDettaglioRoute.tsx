@@ -880,8 +880,11 @@ function CommercialeBlocco({
 }) {
   const direction = inferDirection(blocco);
   const arrow = direction === "ret" ? "←" : "→";
-  const stazioneDa = stazioneShort(blocco.stazione_da_codice);
-  const stazioneA = stazioneShort(blocco.stazione_a_codice);
+  // Sprint 7.8 MR 4 (decisione utente 2026-05-03): preferisci il nome
+  // umano leggibile (es. "MILANO ROGOREDO") al codice tecnico (S01717).
+  // Fallback al codice se il nome manca dal payload.
+  const stazioneDa = stazioneShort(blocco.stazione_da_nome ?? blocco.stazione_da_codice);
+  const stazioneA = stazioneShort(blocco.stazione_a_nome ?? blocco.stazione_a_codice);
   return (
     <button
       type="button"
@@ -927,11 +930,24 @@ function inferDirection(b: GiroBlocco): "out" | "ret" {
   return "out";
 }
 
-function stazioneShort(codice: string | null): string {
-  if (codice === null) return "—";
-  // Trenord codici stazione tipici: "MI.CLE", "TIR", "BRE", "FIO", ecc.
-  // Tronca a 6 char per mantenere leggibilità nel design v3.
-  return codice.length <= 7 ? codice : codice.substring(0, 6) + "…";
+function stazioneShort(label: string | null): string {
+  if (label === null) return "—";
+  const trimmed = label.trim();
+  if (trimmed.length === 0) return "—";
+  // Sprint 7.8 MR 4: ora riceviamo il NOME (es. "MILANO ROGOREDO") e
+  // non più il codice tecnico ("S01717"). Strategia di compressione:
+  // 1. Se è già corto (≤9 char) → ritorna intero ("BRESCIA", "TIRANO").
+  // 2. Se ha 2+ parole, cerca di mantenere il pezzo distintivo (parte
+  //    dopo la città principale). Es. "MILANO ROGOREDO" → "ROGOREDO".
+  // 3. Fallback troncamento a 8 + ellipsis.
+  if (trimmed.length <= 9) return trimmed;
+  const parole = trimmed.split(/\s+/);
+  if (parole.length >= 2) {
+    // Mantieni la parte distintiva (ultima parola se diversa dalla città).
+    const last = parole[parole.length - 1];
+    if (last.length >= 3 && last.length <= 12) return last;
+  }
+  return trimmed.substring(0, 8) + "…";
 }
 
 function formatTimeShort(t: string | null): string {

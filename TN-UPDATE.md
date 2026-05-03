@@ -10,6 +10,147 @@
 
 ---
 
+## 2026-05-03 (102) — Sprint 7.8 MR 3 + 4 + 5: etichette stile Trenord + nomi stazioni + dashboard convogli
+
+### Contesto
+
+Catena di chiusura del 7.8: dopo MR 2.5 il giro aggregato ha 1728
+varianti totali su 12 giornate, gestibili solo se etichettate con
+sigle Trenord. Insieme: nomi stazioni nel Gantt al posto dei codici
+tecnici, e una nuova sezione "Convogli necessari" nella dashboard.
+
+### MR 3 — Etichette varianti stile Trenord
+
+`domain/builder_giro/etichetta.py`:
+
+- Nuovo dizionario `_SIGLA_CATEGORIA` (`Lv`, `P`, `F`).
+- `_format_date_short(d)` → ``"DD/M"`` (no anno, mese senza zero).
+- `_format_date_list(...)` separator ", ".
+- Costante `_MAX_DATE_INLINE = 5` per la soglia inline esclusioni.
+- `calcola_etichetta_variante` accetta nuovo parametro opzionale
+  ``periodo_categoria_dates: dict[str, frozenset[date]]``.
+  Output cases:
+  - 1 data → ``"Solo D/M/YY"``.
+  - Mono-categoria con `periodo_categoria_dates`:
+    - copertura totale → sigla pura (``"Lv"``).
+    - maggioranza coperta + ≤5 esclusioni → ``"Lv esclusi 6/5, 7/5"``.
+    - minoranza con ≤5 date → ``"Si eff. 3/3, 4/3, 5/3 (Lv)"``.
+    - troppe da elencare → ``"Lv (8 di 20 date)"``.
+  - Mono-categoria senza periodo: ``"Si eff. ..."`` se ≤5,
+    altrimenti ``"Lv (N date)"``.
+  - Multi-categoria → ``"Misto: Lv+F (N date)"``.
+
+`api/giri.py`:
+
+- Costruzione `periodo_per_giornata: dict[gg_id, dict[cat, frozenset]]`
+  raccogliendo le `dates_apply` di tutte le varianti per ciascuna
+  giornata K, raggruppate per `tipo_giorno_categoria`.
+- `_etichetta_parlante(v)` passa `periodo_per_giornata[v.giro_giornata_id]`
+  alla nuova firma.
+
+`tests/test_etichetta.py`: 14 test della classe `TestCalcolaEtichetta
+Variante` riscritti per il nuovo formato (sigle, ``D/M/YY``,
+``Misto: Lv+F (N date)``, ``Si eff. ...``, ``esclusi ...``,
+``X di Y date``).
+
+`tests/test_genera_giri_api.py`: aggiornato 1 test
+(`test_get_giro_dettaglio`) per il nuovo formato data unica
+``"Solo 27/4/26"``.
+
+### MR 4 — Nomi stazioni nel Gantt
+
+`routes/pianificatore-giro/GiroDettaglioRoute.tsx`:
+
+- `CommercialeBlocco`: usa `blocco.stazione_da_nome ??
+  blocco.stazione_da_codice` (idem per `_a_`). Il payload aveva
+  già il campo nome (entry 96), bastava preferirlo.
+- `stazioneShort` riscritto: se nome ≤9 char → intero
+  (``"BRESCIA"``, ``"TIRANO"``); se 2+ parole → ultima parola
+  distintiva (``"MILANO ROGOREDO" → "ROGOREDO"``); fallback
+  troncamento 8 + ellipsis.
+
+### MR 5 — Sezione "Convogli necessari" nella dashboard
+
+`routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`:
+
+- Nuovo componente `ConvogliNecessariSection` inserito tra
+  Configurazione e Regole, condizionato a `giri.length > 0`.
+- Calcolo client-side: per ogni regola, `convogli = sum(g.numero_giornate)`
+  per i giri il cui materiale appare nella composizione. Pezzi per
+  tipo = `n_pezzi_in_composizione × convogli`. Header riassuntivo:
+  ``"12 convogli · 24 pezzi singoli totali"``.
+- Card per regola: badge regola_id + composizione, KPI giri/convogli,
+  chip pezzi per tipo materiale.
+- Nota in fondo: ``"1 giro a N giornate richiede N convogli
+  simultanei (modello PDF Trenord 1134)"``.
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 58 file clean.
+- Backend `pytest` ✅ **535 passed, 12 skipped** (era 532, +3 nuovi:
+  esclusioni inline, periodo completo sigla pura, conteggio fallback).
+- Frontend `tsc -b --noEmit` ✅.
+- Frontend `vitest` ✅ **53 passed**.
+
+#### Smoke E2E su programma 7868 (PdE 19/05–07/06, ETR421+ETR421, FIO)
+
+- 1 giro aggregato (id 73826) da 12 giornate (era 12 giri da 1 a
+  12). 1728 varianti totali distribuite per giornata.
+- Etichette varianti formato compatto: ``"Solo 19/5/26"``,
+  ``"Solo 20/5/26"``, ecc. (data unica), in linea col PDF Trenord.
+- Gantt mostra nomi stazioni (CREMONA, MILANO, BRESCIA, GARIBALDI,
+  ROGOREDO, COLICO, LECCO, MORTARA) invece dei codici S01xxx.
+- Dashboard programma: sezione "Convogli necessari" con
+  ``"12 convogli · 24 pezzi singoli totali"``, card per regola
+  con KPI giri=1, convogli=12, pezzi ETR421×12 + ETR421×12.
+
+### Limitazioni note (out-of-scope MR3-5)
+
+- **Sovrapposizione label sui blocchi stretti**: nei segmenti del
+  Gantt molto corti (es. corse di 30-45 min), i nomi stazioni di
+  partenza/arrivo si toccano graficamente. Soluzione: nascondere
+  una delle due label se la width < threshold, o usare un'unica
+  label centrata. Iterazione UI separata.
+- **Nomi pezzi singoli ridondanti**: con composizione `[ETR421 × 1,
+  ETR421 × 1]` la card mostra ``"ETR421 × 12"`` due volte. Sarebbe
+  più leggibile aggregare per tipo unico (``"ETR421 × 24"``). Fix
+  cosmetico futuro.
+- **n_giornate_min soft floor non visibile in UI**: i giri di
+  "chiusura" sotto min sono distinguibili solo via
+  `motivo_chiusura == "sotto_min"` su ogni cluster A1 sottostante.
+  La dashboard non lo evidenzia.
+
+### Stato finale Sprint 7.8
+
+| MR | Cosa | Stato |
+|---|---|---|
+| 1 | Schema range giornate + UI form | ✅ entry 99 |
+| 2 | Builder cap soft/hard + motivo sotto_min | ✅ entry 100 |
+| 2.5 | Refactor chiave A2 → 1 turno | ✅ entry 101 |
+| 3 | Etichette varianti stile Trenord | ✅ ora |
+| 4 | Gantt nomi stazioni | ✅ ora |
+| 5 | Dashboard convogli necessari | ✅ ora |
+
+**Risultato**: il programma con regola ETR421+ETR421 sede FIO, su
+PdE 19/05–07/06, produce ora UN turno da 12 giornate (= 12 convogli
+simultanei = 24 pezzi ETR421 fisici), con etichette varianti
+compatte (``Solo D/M/YY``, ``Misto: Lv+F (N date)``, ``P escl.
+3/3, 4/3``) e nomi stazioni leggibili. Modello allineato al PDF
+Trenord turno 1134.
+
+### Prossimo step
+
+Validazione utente del flusso completo:
+1. Dashboard programma → "Convogli necessari" come previsto?
+2. Gantt dei giri → nomi stazioni leggibili?
+3. Etichette varianti → linguaggio Trenord?
+
+Se OK, restano le iterazioni UI minori (overlap label, aggregazione
+pezzi, indicatore visivo `sotto_min`). Altrimenti, retroaction sul
+modello prima di procedere con altri sprint.
+
+---
+
 ## 2026-05-03 (101) — Sprint 7.8 MR 2.5: refactor chiave A2 (materiale, sede) → 1 turno con N giornate canoniche
 
 ### Contesto

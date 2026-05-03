@@ -578,22 +578,43 @@ async def get_giro_dettaglio(
                 session, user.azienda_id, min_date, max_date_plus1
             )
 
-    def _etichetta_parlante(v: GiroVariante) -> str:
-        """Sprint 7.7 MR 6: etichetta categorica della variante.
+    # Sprint 7.8 MR 3: per generare etichette stile Trenord
+    # (`Lv` / `F` / `P escl. 3/3, 4/3` / `Si eff. 3/3, 4/3, 5/3`),
+    # `calcola_etichetta_variante` ha bisogno del periodo per categoria
+    # della GIORNATA-PATTERN. Costruiamo un dizionario per giornata-K
+    # raccogliendo `dates_apply` di tutte le sue varianti, raggruppate
+    # per ``tipo_giorno_categoria``. Le varianti della stessa giornata
+    # hanno date disgiunte per costruzione del clustering A1+A2.
+    from colazione.domain.calendario import tipo_giorno_categoria
 
-        Output esempi: ``"Lavorativo · 12 date"``, ``"Festivo · 8 date"``,
-        ``"Prefestivo · 4 date"``, ``"Solo 04/05/2026"``,
-        ``"Misto: Lavorativo+Festivo · 7 date"``. Categorizzazione via
-        ``tipo_giorno_categoria`` (festivo include domeniche, prefestivo
-        è la vigilia di un festivo). Il ``validita_testo`` PdE grezzo
-        resta nello schema per riferimento ma non è più mostrato come
-        etichetta principale.
+    periodo_per_giornata: dict[int, dict[str, frozenset[date]]] = {}
+    for gv in varianti_orm:
+        dates_v: set[date] = set()
+        for d_str in gv.dates_apply_json or []:
+            if isinstance(d_str, str):
+                dates_v.add(date.fromisoformat(d_str))
+        periodo_per_giornata.setdefault(gv.giro_giornata_id, {})
+        for d in dates_v:
+            cat = tipo_giorno_categoria(d, festivita)
+            cat_set = set(periodo_per_giornata[gv.giro_giornata_id].get(cat, frozenset()))
+            cat_set.add(d)
+            periodo_per_giornata[gv.giro_giornata_id][cat] = frozenset(cat_set)
+
+    def _etichetta_parlante(v: GiroVariante) -> str:
+        """Sprint 7.8 MR 3: etichetta stile Trenord (sigle Lv/F/P
+        + esclusioni inline).
+
+        Output esempi: ``"Lv"`` (tutti i lavorativi del periodo),
+        ``"P esclusi 3/3, 4/3"`` (prefestivi tranne 3, 4 marzo),
+        ``"Si eff. 3/3, 4/3, 5/3 (Lv)"`` (solo 3 lavorativi specifici),
+        ``"Misto: Lv+F (7 date)"``, ``"Solo 4/5/26"``.
         """
         dates_apply: list[date] = []
         for d_str in v.dates_apply_json or []:
             if isinstance(d_str, str):
                 dates_apply.append(date.fromisoformat(d_str))
-        return calcola_etichetta_variante(dates_apply, festivita)
+        periodo_cat = periodo_per_giornata.get(v.giro_giornata_id)
+        return calcola_etichetta_variante(dates_apply, festivita, periodo_cat)
 
     # Sprint 7.7 MR 5: blocchi raggruppati per variante; varianti
     # raggruppate per giornata.

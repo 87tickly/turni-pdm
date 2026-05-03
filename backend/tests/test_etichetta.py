@@ -180,103 +180,113 @@ def test_festivita_locale_aggiunta_set_diventa_festiva() -> None:
 
 
 class TestCalcolaEtichettaVariante:
-    """Etichetta UI categorica per una variante calendariale.
-
-    Output:
-    - "Solo DD/MM/YYYY" per data unica
-    - "Lavorativo · N date" / "Prefestivo · N date" / "Festivo · N date"
-      per varianti monotipo
-    - "Misto: A+B[+C] · N date" per varianti che mescolano categorie
-    - "(nessuna data)" per iterable vuoto
+    """Sprint 7.8 MR 3: etichette UI stile Trenord (sigle Lv/F/P,
+    formato `Solo D/M/YY`, esclusioni inline, `Si eff.`, `Misto: ...`).
     """
 
     def test_iterable_vuoto_ritorna_placeholder(self) -> None:
         assert calcola_etichetta_variante([], frozenset()) == "(nessuna data)"
 
     def test_data_unica_formato_italiano(self) -> None:
+        # Sprint 7.8 MR 3: formato compatto D/M/YY.
         assert (
             calcola_etichetta_variante([date(2026, 5, 4)], frozenset())
-            == "Solo 04/05/2026"
+            == "Solo 4/5/26"
         )
 
     def test_data_unica_duplicati_collassano(self) -> None:
-        # Stessa data ripetuta 3× → comunque "Solo …"
         d = date(2026, 5, 4)
-        assert calcola_etichetta_variante([d, d, d], frozenset()) == "Solo 04/05/2026"
+        assert calcola_etichetta_variante([d, d, d], frozenset()) == "Solo 4/5/26"
 
-    def test_tutte_lavorativi(self) -> None:
-        # 4-8 maggio 2026: lun, mar, mer, gio, ven (1/5 fuori range)
+    def test_tutte_lavorativi_pochi_si_eff(self) -> None:
+        # 4 lavorativi senza periodo_categoria → fallback "Si eff. ..."
         feriali = [date(2026, 5, 4), date(2026, 5, 5), date(2026, 5, 6), date(2026, 5, 7)]
         assert (
             calcola_etichetta_variante(feriali, _festivita_2026())
-            == "Lavorativo · 4 date"
+            == "Si eff. 4/5, 5/5, 6/5, 7/5 (Lv)"
         )
 
-    def test_tutti_prefestivi_sabati(self) -> None:
-        # 3 sabati maggio 2026: 2, 9, 16 → tutti prefestivi (vigilie domenica)
+    def test_tutti_lavorativi_periodo_completo_sigla_pura(self) -> None:
+        # 4 lavorativi che coprono TUTTI i lavorativi del periodo → "Lv"
+        feriali = [date(2026, 5, 4), date(2026, 5, 5), date(2026, 5, 6), date(2026, 5, 7)]
+        periodo_cat = {"lavorativo": frozenset(feriali)}
+        assert (
+            calcola_etichetta_variante(feriali, _festivita_2026(), periodo_cat)
+            == "Lv"
+        )
+
+    def test_lavorativi_con_esclusioni_inline(self) -> None:
+        # Periodo ha 5 lavorativi, variante ne copre 3 → "Lv esclusi 6/5, 7/5"
+        feriali_periodo = [
+            date(2026, 5, 4), date(2026, 5, 5), date(2026, 5, 6),
+            date(2026, 5, 7), date(2026, 5, 8),
+        ]
+        variante = [date(2026, 5, 4), date(2026, 5, 5), date(2026, 5, 8)]
+        periodo_cat = {"lavorativo": frozenset(feriali_periodo)}
+        out = calcola_etichetta_variante(variante, _festivita_2026(), periodo_cat)
+        assert out == "Lv esclusi 6/5, 7/5"
+
+    def test_tutti_prefestivi_sabati_si_eff(self) -> None:
         sabati = [date(2026, 5, 2), date(2026, 5, 9), date(2026, 5, 16)]
         assert (
             calcola_etichetta_variante(sabati, _festivita_2026())
-            == "Prefestivo · 3 date"
+            == "Si eff. 2/5, 9/5, 16/5 (P)"
         )
 
-    def test_tutti_festivi_domeniche(self) -> None:
-        # Domeniche di maggio 2026: 3, 10, 17 → tutte festivo
+    def test_tutti_festivi_domeniche_si_eff(self) -> None:
         domeniche = [date(2026, 5, 3), date(2026, 5, 10), date(2026, 5, 17)]
         assert (
             calcola_etichetta_variante(domeniche, _festivita_2026())
-            == "Festivo · 3 date"
+            == "Si eff. 3/5, 10/5, 17/5 (F)"
         )
 
     def test_misto_lavorativo_prefestivo(self) -> None:
-        # Mix lavorativi (lun-ven) + sabati prefestivi
         misto = [
             date(2026, 5, 4),  # lunedì → lavorativo
             date(2026, 5, 5),  # martedì → lavorativo
-            date(2026, 5, 9),  # sabato → prefestivo (vigilia domenica)
+            date(2026, 5, 9),  # sabato → prefestivo
         ]
         out = calcola_etichetta_variante(misto, _festivita_2026())
-        assert out == "Misto: Lavorativo+Prefestivo · 3 date"
+        # Sprint 7.8 MR 3: sigle Lv/P/F con conteggio.
+        assert out == "Misto: Lv+P (3 date)"
 
     def test_misto_lavorativo_festivo_ordine_label(self) -> None:
-        # Mix lavorativi + domeniche → label ordinata calendariale
-        misto = [
-            date(2026, 5, 4),  # lunedì
-            date(2026, 5, 3),  # domenica
-        ]
+        misto = [date(2026, 5, 4), date(2026, 5, 3)]
         out = calcola_etichetta_variante(misto, _festivita_2026())
-        assert out == "Misto: Lavorativo+Festivo · 2 date"
+        assert out == "Misto: Lv+F (2 date)"
 
     def test_misto_3_categorie_complete(self) -> None:
-        # Mix lavorativo + prefestivo + festivo
-        misto = [
-            date(2026, 5, 4),  # lun → lavorativo
-            date(2026, 5, 2),  # sab → prefestivo
-            date(2026, 5, 3),  # dom → festivo
-        ]
+        misto = [date(2026, 5, 4), date(2026, 5, 2), date(2026, 5, 3)]
         out = calcola_etichetta_variante(misto, _festivita_2026())
-        assert out == "Misto: Lavorativo+Prefestivo+Festivo · 3 date"
+        assert out == "Misto: Lv+P+F (3 date)"
 
     def test_festivita_nazionale_di_sabato_resta_festivo(self) -> None:
-        # Sabato 25/4/2026 = Liberazione → festivo (precedenza su prefestivo)
-        # Senza altra data, "Solo …"; con un'altra data lavorativa: misto
         out = calcola_etichetta_variante(
             [date(2026, 4, 25), date(2026, 5, 4)], _festivita_2026()
         )
-        assert out == "Misto: Lavorativo+Festivo · 2 date"
+        assert out == "Misto: Lv+F (2 date)"
 
     def test_venerdi_24_aprile_2026_e_prefestivo(self) -> None:
-        # Vigilia di 25/4 (Liberazione, sabato festivo) → 24/4 prefestivo
         out = calcola_etichetta_variante(
-            [date(2026, 4, 24), date(2026, 5, 8)],  # ven 24/4 + ven 8/5
-            _festivita_2026(),
+            [date(2026, 4, 24), date(2026, 5, 8)], _festivita_2026()
         )
-        # 8/5/2026 = venerdì lavorativo, 24/4 = prefestivo (vigilia 25/4)
-        assert out == "Misto: Lavorativo+Prefestivo · 2 date"
+        assert out == "Misto: Lv+P (2 date)"
 
     def test_due_date_uniche_uguali_collassano_a_solo(self) -> None:
-        # Pur passando 2 elementi, se sono la stessa data → "Solo …"
         out = calcola_etichetta_variante(
             [date(2026, 5, 4), date(2026, 5, 4)], frozenset()
         )
-        assert out == "Solo 04/05/2026"
+        assert out == "Solo 4/5/26"
+
+    def test_periodo_categoria_troppe_da_elencare_conteggio(self) -> None:
+        # 20 lavorativi nel periodo, 8 nella variante → 12 esclusi
+        # (>MAX=5) e 8 incluse (>MAX) → fallback conteggio.
+        # Date scelte tra lavorativi maggio 2026 (lun-ven, no festivi).
+        lavorativi_maggio_2026 = [
+            date(2026, 5, d) for d in
+            (4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22, 25, 26, 27, 28, 29)
+        ]
+        variante = lavorativi_maggio_2026[:8]
+        periodo_cat = {"lavorativo": frozenset(lavorativi_maggio_2026)}
+        out = calcola_etichetta_variante(variante, _festivita_2026(), periodo_cat)
+        assert out == "Lv (8 di 20 date)"
