@@ -96,6 +96,12 @@ export interface GiroVariante {
    */
   etichetta_parlante: string;
   blocchi: GiroBlocco[];
+  /**
+   * Sprint 7.9 MR 8A: lista dei `variant_index` originari (pre-aggregazione
+   * MR6) dei cluster A1 confluiti in questa variante. Permette
+   * highlight/propagazione tra giornate via intersezione di insiemi.
+   */
+  cluster_a1_ids: number[];
 }
 
 export interface GiroGiornata {

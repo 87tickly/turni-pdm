@@ -369,6 +369,8 @@ async def _persisti_blocchi_variante(
     seq_vuoto_giro_inizio: int,
     session: AsyncSession,
     seq_blocco_inizio: int = 1,
+    *,
+    marca_uscita_ciclo: bool = False,
 ) -> tuple[int, int]:
     """Persiste i blocchi di una variante in ordine sequenziale.
 
@@ -419,6 +421,12 @@ async def _persisti_blocchi_variante(
                 metadata_json={
                     "motivo": cat_pos.vuoto_testa.motivo,
                     "cross_notte_giorno_precedente": cat_pos.vuoto_testa.cross_notte_giorno_precedente,
+                    # Sprint 7.9 MR 8B: flag "uscita assoluta dal
+                    # deposito" per il vuoto_testa della prima
+                    # giornata del ciclo (canonica). Il convoglio
+                    # esce qui dall'officina per la prima volta;
+                    # le altre giornate continuano cross-notte.
+                    "is_uscita_ciclo": marca_uscita_ciclo,
                 },
             )
         )
@@ -624,6 +632,13 @@ async def _persisti_un_giro(
             # automaticamente qui.
             _ = is_prima_giornata  # reserved per futuri scenari
 
+            # Sprint 7.9 MR 8B: il vuoto_testa della PRIMA variante
+            # della PRIMA giornata è l'uscita assoluta del convoglio
+            # dal deposito (= inizio del ciclo). Le altre varianti
+            # della G1 sono pattern alternativi per date diverse, ma
+            # la canonica (variant_index=0) è la "principale" e
+            # rappresenta il primo treno operativo del ciclo.
+            marca_uscita_ciclo = is_prima_giornata and variant_index == 0
             seq_vuoto_giro, last_seq_blocco = await _persisti_blocchi_variante(
                 variante,
                 gv.id,
@@ -633,6 +648,7 @@ async def _persisti_un_giro(
                 seq_vuoto_giro,
                 session,
                 seq_blocco_inizio=seq_blocco_inizio,
+                marca_uscita_ciclo=marca_uscita_ciclo,
             )
             last_gv_id = gv.id
 

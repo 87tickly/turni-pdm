@@ -269,6 +269,13 @@ class GiroVarianteRead(BaseModel):
     dates_skip_json: list[Any]
     etichetta_parlante: str
     blocchi: list[GiroBloccoRead]
+    # Sprint 7.9 MR 8A (decisione utente 2026-05-03): lista dei
+    # `variant_index` originari (PRE-aggregazione MR6) dei cluster A1
+    # confluiti in questa variante. Permette al frontend di propagare
+    # la selezione tra giornate basandosi sull'identità del cluster
+    # A1 sottostante (intersezione non vuota = stessa traiettoria
+    # del convoglio attraverso il ciclo).
+    cluster_a1_ids: list[int] = []
 
 
 class GiroGiornataRead(BaseModel):
@@ -655,6 +662,9 @@ async def get_giro_dettaglio(
         etichetta = calcola_etichetta_variante(
             dates_unite, festivita, periodo_per_giornata.get(gg_id)
         )
+        # Sprint 7.9 MR 8A: lista cluster A1 sottostanti per la
+        # propagazione tra giornate.
+        cluster_a1_ids = sorted(g.variant_index for g in gruppo)
         varianti_per_giornata.setdefault(gg_id, []).append(
             GiroVarianteRead(
                 id=canonico.id,
@@ -664,6 +674,7 @@ async def get_giro_dettaglio(
                 dates_skip_json=list(canonico.dates_skip_json or []),
                 etichetta_parlante=etichetta,
                 blocchi=blocchi_per_variante.get(canonico.id, []),
+                cluster_a1_ids=cluster_a1_ids,
             )
         )
 

@@ -10,6 +10,132 @@
 
 ---
 
+## 2026-05-03 (106) — Sprint 7.9 MR 8: continuità reale via cluster_a1_ids + marker "uscita ciclo"
+
+### Contesto
+
+Decisione utente 2026-05-03 dopo rollback fix UX (entry 105):
+
+> "procedi a fare anche questo Limiti residui (scope futuro).
+> Continuità automatica tra giornate. Inizio assoluto ciclo."
+
+Affronta i 2 punti rimasti aperti dopo MR 7B/7C rollback.
+
+### MR 8A — Continuità automatica via cluster_a1_ids
+
+Problema MR 7B (entry 104): la propagazione cliccando un tab su una
+giornata era basata sul `variant_index` POST-aggregazione MR6, che
+NON è stabile attraverso le giornate (varia col cluster aggregato
+canonico). Risultato: match falsi e indicatore "ciclo non si estende
+qui" appariva ovunque.
+
+Soluzione: esporre la lista dei `variant_index` ORIGINARI (pre-MR6)
+dei cluster A1 confluiti in ciascuna variante aggregata.
+L'identificatore di "traiettoria" del convoglio è la presenza dello
+stesso cluster A1 sottostante.
+
+`backend/src/colazione/api/giri.py`:
+- `GiroVarianteRead.cluster_a1_ids: list[int]` — lista variant_index
+  originali del cluster A1 nel gruppo aggregato per (giornata,
+  categoria_primaria).
+- Loop di aggregazione: `cluster_a1_ids = sorted(g.variant_index for
+  g in gruppo)` popolato per ogni variante aggregata.
+
+`frontend/src/lib/api/giri.ts`:
+- `GiroVariante.cluster_a1_ids: number[]` aggiunto al tipo.
+
+`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`:
+- Nuovo state `selectedClusterA1Ids: Set<number> | null`.
+- Click variante in giornata K: legge `variante.cluster_a1_ids`,
+  setta lo state, e propaga a TUTTE le altre giornate scegliendo
+  la PRIMA variante con intersezione non vuota di cluster_a1_ids.
+- Le giornate dove nessuna variante condivide cluster A1 mostrano
+  badge amber "ⓘ ciclo non si estende qui" via flag `clusterEsteso`
+  in `GiornataHeaderRow`.
+
+Smoke giro 74417: cliccando F su G2, G1 e G3 auto-selezionano la
+variante coerente. Cliccando "Solo 7/6/26" su G4 (cluster A1 corto),
+6 giornate mostrano "ⓘ ciclo non si estende qui" (= il convoglio
+chiude prima per quelle date).
+
+### MR 8B — Marker "uscita ciclo" sul vuoto_testa del primo giorno
+
+Distinzione semantica fra due tipi di vuoto:
+- **Vuoto_testa intra-ciclo**: posizionamento per giornate K≥2 del
+  ciclo. Il convoglio era già in linea cross-notte K-1.
+- **Uscita ciclo**: PRIMA giornata, PRIMA variante (canonica) del
+  giro = il convoglio esce dall'officina per la prima volta.
+
+`backend/src/colazione/domain/builder_giro/persister.py`:
+- `_persisti_blocchi_variante` accetta nuovo kw-only param
+  `marca_uscita_ciclo: bool = False`. Se True, il vuoto_testa
+  persistito riceve `metadata_json.is_uscita_ciclo = True`.
+- Loop varianti: `marca_uscita_ciclo = is_prima_giornata and
+  variant_index == 0` → solo la canonica della G1.
+
+`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`
+(BloccoSegment per `materiale_vuoto`):
+- Badge blu "🏠→ uscita ciclo" sopra il blocco se
+  `metadata_json.is_uscita_ciclo === true`.
+- Badge viola "🏠← rientro" se `metadata_json.motivo === "rientro_sede"`
+  (= vuoto di chiusura ciclo, simmetrico).
+- Tooltip dettagliato per ciascun badge.
+
+Smoke giro 74417 G1 V0: blocco seq=1 vuoto S01640→S01700 con
+`is_uscita_ciclo=true` ✓. V1 e V2: false/no metadata ✓.
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 58 file clean.
+- Backend `pytest` ✅ **536 passed, 12 skipped**.
+- Frontend `tsc -b --noEmit` ✅.
+- Frontend `vitest` 52/53 (1 timeout flaky preesistente).
+- Smoke E2E:
+  - Click F su G2 → G1+G3 auto-selezionate (continuità ✓).
+  - 6 giornate "ciclo non si estende qui" cliccando una variante
+    di cluster A1 corto.
+  - Badge "🏠→ uscita ciclo" visibile su G1 V canonica del giro
+    74417 (testo blu, posizionato sopra il blocco vuoto).
+
+### Limitazioni note
+
+- **Continuità basata su intersezione**: una variante aggregata
+  può contenere N cluster A1. Quando l'utente clicca, la
+  propagazione cerca la PRIMA variante in altra giornata con
+  intersezione non vuota. Se più varianti hanno match, vince la
+  prima (per `variant_index` del canonico). UX: il pianificatore
+  vede una traiettoria coerente ma non ha garanzia che sia ESATTAMENTE
+  quella del cluster A1 originario singolo. Per granularità per
+  cluster A1 servirebbe tab per ogni cluster non aggregata.
+- **Uscita ciclo solo sulla canonica**: il marker `is_uscita_ciclo`
+  è limitato alla variante canonica (variant_index=0) della prima
+  giornata. Le altre varianti di G1 (cluster A1 più corti) hanno
+  `is_uscita_ciclo=false`. Semanticamente: il "ciclo" è UNO solo,
+  rappresentato dal cluster A1 più lungo; le varianti corte sono
+  pattern alternativi che applicano per certe date — ognuna ha il
+  proprio vuoto_testa naturale ma non è "l'uscita assoluta del
+  ciclo principale".
+
+### Stato
+
+- ✅ MR 8A continuità via cluster_a1_ids
+- ✅ MR 8B marker uscita ciclo sul vuoto_testa canonico
+- 🟢 Sprint 7.9 chiuso: 5 MR (7A/7B/7C/7D/7E) → fix UX → 2 MR (8A/8B)
+
+### Prossimo step
+
+Validazione utente:
+1. Click variante propaga correttamente attraverso giornate?
+2. Indicatore "ciclo non si estende qui" appare quando dovuto?
+3. Badge "🏠→ uscita ciclo" visibile sul primo blocco?
+
+Scope futuro:
+- Granularità per cluster A1 (tab per ogni cluster) se servisse.
+- "Uscita ciclo" su ALTRE varianti di G1 (non solo canonica) se
+  utente vuole tracciare uscite alternative.
+
+---
+
 ## 2026-05-03 (105) — Sprint 7.9 fix UX: rollback MR 7C uscita_sede + MR 7B propagazione + etichette "Misto" più chiare
 
 ### Contesto

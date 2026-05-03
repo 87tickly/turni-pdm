@@ -81,6 +81,14 @@ export function GiroDettaglioRoute() {
   const [activeVariantByGiornata, setActiveVariantByGiornata] = useState<
     Record<number, number>
   >({});
+  // Sprint 7.9 MR 8A: insieme di cluster A1 originari attualmente
+  // selezionati (intersezione tra le varianti cliccate). Quando
+  // l'utente clicca una variante, si traccia la sua lista
+  // `cluster_a1_ids`; per ogni altra giornata, la propagazione
+  // sceglie la prima variante con intersezione non vuota.
+  const [selectedClusterA1Ids, setSelectedClusterA1Ids] = useState<
+    Set<number> | null
+  >(null);
 
   if (giroId === undefined || Number.isNaN(giroId)) {
     return <ErrorBlock message="ID giro non valido nell'URL." />;
@@ -133,19 +141,33 @@ export function GiroDettaglioRoute() {
             selectedBlocco={selectedBlocco}
             onSelectBlocco={setSelectedBlocco}
             activeVariantByGiornata={activeVariantByGiornata}
-            onChangeActiveVariant={(giornataId, idx) =>
-              // Sprint 7.9 fix UX (decisione utente 2026-05-03): MR 7B
-              // (propagazione automatica cluster A1 attraverso giornate)
-              // ROLLED BACK perché il `variant_index` post-aggregazione
-              // MR6 non è un identificatore stabile del cluster A1
-              // attraverso le giornate, generando falsi indicatori
-              // "ciclo non si estende qui". Per ora il click cambia
-              // solo la giornata cliccata; la coerenza tra giornate è
-              // responsabilità dell'utente. Refactor futuro:
-              // esposizione `cluster_a1_id` originario nelle varianti
-              // aggregate per consentire highlight reale.
-              setActiveVariantByGiornata((prev) => ({ ...prev, [giornataId]: idx }))
-            }
+            selectedClusterA1Ids={selectedClusterA1Ids}
+            onChangeActiveVariant={(giornataId, idx) => {
+              // Sprint 7.9 MR 8A: propagazione via cluster_a1_ids.
+              // Quando l'utente clicca una variante, prendiamo la sua
+              // lista `cluster_a1_ids` (= cluster A1 originali pre-MR6).
+              // Per ogni altra giornata, troviamo la PRIMA variante
+              // che ha intersezione non vuota → stessa traiettoria
+              // del convoglio. Le giornate dove nessuna variante
+              // condivide cluster A1 con quella selezionata mostrano
+              // "ciclo non si estende qui" via il flag clusterEsteso.
+              const giornataK = giro.giornate.find((g) => g.id === giornataId);
+              const variante = giornataK?.varianti[idx];
+              if (variante === undefined) return;
+              const targetIds = new Set(variante.cluster_a1_ids);
+              setSelectedClusterA1Ids(targetIds);
+              setActiveVariantByGiornata((prev) => {
+                const next: Record<number, number> = { ...prev, [giornataId]: idx };
+                for (const g of giro.giornate) {
+                  if (g.id === giornataId) continue;
+                  const matchIdx = g.varianti.findIndex((v) =>
+                    v.cluster_a1_ids.some((id) => targetIds.has(id)),
+                  );
+                  if (matchIdx >= 0) next[g.id] = matchIdx;
+                }
+                return next;
+              });
+            }}
           />
         </div>
 
@@ -396,12 +418,14 @@ function GanttSection({
   selectedBlocco,
   onSelectBlocco,
   activeVariantByGiornata,
+  selectedClusterA1Ids,
   onChangeActiveVariant,
 }: {
   giro: GiroDettaglio;
   selectedBlocco: GiroBlocco | null;
   onSelectBlocco: (b: GiroBlocco | null) => void;
   activeVariantByGiornata: Record<number, number>;
+  selectedClusterA1Ids: Set<number> | null;
   onChangeActiveVariant: (giornataId: number, idx: number) => void;
 }) {
   const stats = useMemo(() => computeGiroKpi(giro), [giro]);
@@ -441,6 +465,7 @@ function GanttSection({
                 <GiornataHeaderRow
                   giornata={g}
                   activeIdx={activeIdx}
+                  selectedClusterA1Ids={selectedClusterA1Ids}
                   onChangeActive={(i) => onChangeActiveVariant(g.id, i)}
                 />
                 {active !== undefined && (
@@ -530,16 +555,25 @@ function AxisHeader() {
 function GiornataHeaderRow({
   giornata,
   activeIdx,
+  selectedClusterA1Ids,
   onChangeActive,
 }: {
   giornata: GiroGiornata;
   activeIdx: number;
+  selectedClusterA1Ids: Set<number> | null;
   onChangeActive: (idx: number) => void;
 }) {
   const varianti = giornata.varianti;
   const hasMultiple = varianti.length > 1;
   const active = varianti[activeIdx] ?? varianti[0];
   const giornataLabel = bloccoCategoryFromVariant(active);
+  // Sprint 7.9 MR 8A: questa giornata contiene almeno un cluster A1
+  // del set selezionato? Se NO, il ciclo si chiude prima qui.
+  const clusterEsteso =
+    selectedClusterA1Ids === null ||
+    varianti.some((v) =>
+      v.cluster_a1_ids.some((id) => selectedClusterA1Ids.has(id)),
+    );
 
   return (
     <div className="flex border-b border-border bg-muted/30">
@@ -581,6 +615,14 @@ function GiornataHeaderRow({
         {hasMultiple && (
           <span className="ml-2 text-[10px] italic text-muted-foreground/70">
             {varianti.length} varianti · stai vedendo "{truncateLabel(active?.etichetta_parlante ?? "")}"
+          </span>
+        )}
+        {!clusterEsteso && (
+          <span
+            className="ml-2 inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-900"
+            title="Il ciclo selezionato in un'altra giornata non copre questa: il convoglio chiude prima."
+          >
+            ⓘ ciclo non si estende qui
           </span>
         )}
       </div>
@@ -753,6 +795,14 @@ function BloccoSegment({
 
   // Vuoto: linea sottile rosso tratteggiato (h-1) sulla mid-line, no etichette.
   if (tipo === "materiale_vuoto") {
+    // Sprint 7.9 MR 8B: il vuoto_testa della PRIMA giornata variante
+    // canonica è l'"uscita ciclo" (= il convoglio esce dal deposito
+    // per la prima volta). Si distingue visivamente dal vuoto tecnico
+    // intra-ciclo con un badge "🏠→" sopra.
+    const isUscitaCiclo = blocco.metadata_json?.is_uscita_ciclo === true;
+    const motivo = typeof blocco.metadata_json?.motivo === "string"
+      ? blocco.metadata_json.motivo as string
+      : null;
     return (
       <button
         type="button"
@@ -765,6 +815,22 @@ function BloccoSegment({
         )}
         style={{ left: startPx, top: 42, width: widthPx }}
       >
+        {isUscitaCiclo && (
+          <span
+            className="absolute -top-3 left-0 whitespace-nowrap rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
+            title="Uscita assoluta del convoglio dal deposito (inizio del ciclo)"
+          >
+            🏠→ uscita ciclo
+          </span>
+        )}
+        {motivo === "rientro_sede" && (
+          <span
+            className="absolute -top-3 right-0 whitespace-nowrap rounded bg-violet-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
+            title="Rientro a deposito (chiusura del ciclo)"
+          >
+            🏠← rientro
+          </span>
+        )}
         <div className="seg-vuoto h-1" />
       </button>
     );
