@@ -10,6 +10,90 @@
 
 ---
 
+## 2026-05-03 (109) — Sprint 7.9 MR 10: bin-packing convogli paralleli in turni separati
+
+### Contesto
+
+Smoke MR 9A su programma "GGGG" (id 9058, ETR421+FIO):
+- Giro 74769 → 61 varianti su 10 giornate
+- 90% varianti hanno 1 sola data (`Solo DD/MM/YY`)
+- G2 mostrava 3 varianti TUTTE applicate alla data 11/5/26 con sequenze
+  diverse (9, 11, 12 blocchi)
+
+Diagnosi: violato il principio dichiarato in `aggregazione_a2.py:36-45`
+("date di applicazione disgiunte tra cluster A1 dello stesso giro").
+
+Decisione utente 2026-05-03:
+
+> "se l'algoritmo crea 3 varianti applicate nello stesso giorno è un
+> bene, ma deve allora creare 3 turni diversi con le proprie giornate
+> specifiche"
+
+Causa profonda: il modello A2 con chiave `(materiale, sede)` mette
+tutti i convogli paralleli (= cluster A1 con date di applicazione
+sovrapposte) sotto UN solo `GiroAggregato`. Ma il modello Trenord
+(PDF 1134) descrive UN turno = UN convoglio fisico, con varianti
+calendariali (date diverse, percorsi diversi).
+
+### Modifiche
+
+`backend/src/colazione/domain/builder_giro/aggregazione_a2.py`:
+- Aggiunto helper `_date_occupazione(giro)` che restituisce l'unione
+  delle `dates_apply_or_data` di tutte le giornate del cluster A1.
+- Riscritto `aggrega_a2`: dopo il raggruppamento per (materiale, sede),
+  applico bin-packing greedy. Per ogni gruppo:
+  - Ordino i cluster per (lunghezza desc, data minima asc).
+  - Apro un turno col cluster più lungo.
+  - Per ogni cluster successivo, lo assegno al PRIMO turno con date
+    di occupazione disgiunte. Se nessuno è compatibile → apre un nuovo
+    turno.
+- Output ordinato per `(materiale, sede, data minima del canonico)`.
+
+`backend/tests/test_aggregazione_a2.py`:
+- `test_n_giornate_diverse_si_fondono_in_canonico_max` rinominato in
+  `test_n_giornate_diverse_date_disgiunte_si_fondono` con date
+  disgiunte (g_5 spostato a giugno) per riflettere la nuova semantica.
+- Nuovo test `test_date_sovrapposte_creano_turni_separati` che
+  verifica esplicitamente: 2 cluster con date sovrapposte → 2
+  aggregati distinti.
+
+### Conseguenze attese
+
+Per programma "GGGG" (ETR421+FIO con 472 treni e 608 km/giorno medi):
+- Pre-MR 10: 1 giro `G-FIO-001-ETR421` con 61 varianti su 10 giornate
+- Post-MR 10 atteso: ~9 giri `G-FIO-001..009-ETR421`, ognuno con 10
+  giornate × ~6 varianti calendariali (modello PDF 1134)
+
+I cluster con date sovrapposte (= convogli fisici diversi in
+parallelo) finiscono in turni separati. Le varianti dentro un singolo
+turno hanno date disgiunte per costruzione del bin-packing.
+
+### Verifiche
+
+- `mypy --strict` ✅ 58 file clean.
+- `pytest` ✅ **537 passed, 12 skipped** (1 test in più: split del
+  test originale + nuovo test convogli paralleli).
+- Frontend `tsc -b --noEmit` ✅.
+- Smoke E2E: il programma "GGGG" è stato cancellato dalla suite
+  pytest. Da rigenerare in UI dopo deploy.
+
+### Stato
+
+- ✅ MR 10 bin-packing convogli paralleli.
+- 🟡 Smoke su programma reale (UI dopo ripubblicazione).
+- 🟡 Fix UI scritte sovrapposte sul Gantt (probabile conseguenza del
+  numero alto di varianti — verificare se sparisce dopo MR 10).
+
+### Prossimo step
+
+1. Utente ripubblica programma `GGGG` + rigenera giri → verifica visiva
+   del numero di giri prodotti e delle etichette varianti.
+2. Se le scritte stazione/treno sul Gantt sono ancora sovrapposte,
+   investigare il rendering (probabilmente `BloccoSegment.tsx` o
+   simile in `frontend/src/routes/pianificatore-giro/`).
+
+---
+
 ## 2026-05-03 (108) — Sprint 7.9 MR 9A: rimossa aggregazione MR6 per categoria semantica
 
 ### Contesto

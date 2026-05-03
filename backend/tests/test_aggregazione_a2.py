@@ -201,41 +201,99 @@ def test_due_giri_chiave_diversa_restano_aggregati_distinti() -> None:
     assert materiali == {"ETR204", "ETR425"}
 
 
-def test_n_giornate_diverse_si_fondono_in_canonico_max() -> None:
-    """Sprint 7.8 MR 2.5: stesso materiale + sede ma n_giornate
-    diversi → fusione in UN aggregato di lunghezza max. Il cluster più
-    corto contribuisce varianti SOLO alle prime K giornate.
+def test_n_giornate_diverse_date_disgiunte_si_fondono() -> None:
+    """Sprint 7.9 MR 10 (entry 109): cluster con n_giornate diversi MA
+    date di applicazione DISGIUNTE → fondono in UN aggregato di
+    lunghezza max. Il cluster corto contribuisce varianti alle prime K
+    giornate. Modello Trenord: "stesso convoglio in date diverse fa
+    percorsi diversi".
     """
     g_8 = _giro(
         materiale="ETR204",
         giornate=tuple(
-            _giornata(data=date(2026, 5, 4 + i), materiale="ETR204")
+            _giornata(
+                data=date(2026, 5, 4 + i),
+                materiale="ETR204",
+                dates_apply=(date(2026, 5, 4 + i),),
+            )
+            for i in range(8)
+        ),
+    )
+    # g_5 a giugno (disgiunto da g_8 a maggio)
+    g_5 = _giro(
+        materiale="ETR204",
+        giornate=tuple(
+            _giornata(
+                data=date(2026, 6, 1 + i),
+                materiale="ETR204",
+                dates_apply=(date(2026, 6, 1 + i),),
+            )
+            for i in range(5)
+        ),
+    )
+    out = aggrega_a2([g_8, g_5])
+    # 1 solo aggregato (date disgiunte), lunghezza canonica 8 (= max).
+    assert len(out) == 1
+    agg = out[0]
+    assert len(agg.giornate) == 8
+    assert agg.n_cluster_a1 == 2
+    # Giornate 1-5: entrambi i cluster contribuiscono (2 varianti).
+    for k in range(5):
+        assert len(agg.giornate[k].varianti) == 2, (
+            f"giornata {k+1}: attese 2 varianti, ottenute {len(agg.giornate[k].varianti)}"
+        )
+    # Giornate 6-8: solo il cluster lungo contribuisce (1 variante).
+    for k in range(5, 8):
+        assert len(agg.giornate[k].varianti) == 1, (
+            f"giornata {k+1}: attesa 1 variante, ottenute {len(agg.giornate[k].varianti)}"
+        )
+
+
+def test_date_sovrapposte_creano_turni_separati() -> None:
+    """Sprint 7.9 MR 10 (entry 109): cluster con date di applicazione
+    SOVRAPPOSTE rappresentano convogli FISICI DIVERSI in parallelo,
+    quindi vanno in turni materiali separati (non come varianti dello
+    stesso turno).
+
+    Caso reale: PdE Trenord ETR421+FIO con N convogli paralleli — il
+    builder produce N cluster A1 con date di applicazione sovrapposte;
+    A2 li separa in N turni, uno per convoglio fisico.
+    """
+    # Stesso periodo (4-11 maggio) per entrambi → date sovrapposte.
+    g_8 = _giro(
+        materiale="ETR204",
+        giornate=tuple(
+            _giornata(
+                data=date(2026, 5, 4 + i),
+                materiale="ETR204",
+                dates_apply=(date(2026, 5, 4 + i),),
+            )
             for i in range(8)
         ),
     )
     g_5 = _giro(
         materiale="ETR204",
         giornate=tuple(
-            _giornata(data=date(2026, 5, 4 + i), materiale="ETR204")
+            _giornata(
+                data=date(2026, 5, 4 + i),
+                materiale="ETR204",
+                dates_apply=(date(2026, 5, 4 + i),),
+            )
             for i in range(5)
         ),
     )
     out = aggrega_a2([g_8, g_5])
-    # 1 solo aggregato, lunghezza canonica 8 (= max)
-    assert len(out) == 1
-    agg = out[0]
-    assert len(agg.giornate) == 8
-    assert agg.n_cluster_a1 == 2
-    # Giornate 1-5: entrambi i cluster contribuiscono (2 varianti)
-    for k in range(5):
-        assert len(agg.giornate[k].varianti) == 2, (
-            f"giornata {k+1}: attese 2 varianti, ottenute {len(agg.giornate[k].varianti)}"
-        )
-    # Giornate 6-8: solo il cluster lungo contribuisce (1 variante)
-    for k in range(5, 8):
-        assert len(agg.giornate[k].varianti) == 1, (
-            f"giornata {k+1}: attesa 1 variante, ottenute {len(agg.giornate[k].varianti)}"
-        )
+    # 2 aggregati distinti (turni materiali per convogli paralleli).
+    assert len(out) == 2
+    # Entrambi stessa coppia (materiale, sede) ma turni separati.
+    for agg in out:
+        assert agg.materiale_tipo_codice == "ETR204"
+        assert agg.localita_codice == "LOC_X"
+        assert agg.n_cluster_a1 == 1
+    # Lunghezze: il primo turno è il canonico (8 giornate, cluster più
+    # lungo), il secondo è il convoglio parallelo (5 giornate).
+    lunghezze = sorted(len(a.giornate) for a in out)
+    assert lunghezze == [5, 8]
 
 
 def test_giro_orfano_senza_composizione_viene_scartato() -> None:
