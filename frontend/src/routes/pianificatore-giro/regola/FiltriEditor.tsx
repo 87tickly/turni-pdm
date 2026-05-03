@@ -58,9 +58,13 @@ export function FiltriEditor({ filtri, onChange, disabled = false }: FiltriEdito
   return (
     <div className="flex flex-col gap-3">
       {filtri.length === 0 ? (
-        <p className="rounded-md border border-dashed border-border bg-secondary/40 px-3 py-3 text-sm text-muted-foreground">
-          Nessun filtro: la regola si applica a tutte le corse del programma. Aggiungi un filtro per
-          restringere (es. solo direttrice X, solo categoria REG).
+        <p
+          role="alert"
+          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900"
+        >
+          <strong>Almeno un filtro è obbligatorio.</strong> Sprint 7.9: una regola senza filtri
+          coprirebbe TUTTE le corse del programma con un solo materiale → output ingestibile.
+          Aggiungi una Linea o un Tipo treno (Diretto/Regionale).
         </p>
       ) : filtri.length > 1 ? (
         <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">

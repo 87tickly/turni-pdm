@@ -127,6 +127,15 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
       return;
     }
 
+    // Sprint 7.9 MR 7A: filtri obbligatori (almeno 1).
+    if (filtri.length === 0) {
+      setError(
+        "Aggiungi almeno un filtro (Linea o Tipo treno). Una regola senza filtri " +
+          "catturerebbe TUTTE le corse del programma e produrrebbe un output ingestibile.",
+      );
+      return;
+    }
+
     let filtriPayload: Array<{ campo: string; op: string; valore: unknown }>;
     try {
       filtriPayload = filtri.map(rowToPayload);

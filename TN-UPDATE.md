@@ -10,6 +10,170 @@
 
 ---
 
+## 2026-05-03 (104) — Sprint 7.9: filtri obbligatori + continuità + vuoti uscita sede + dotazione + capacity warning
+
+### Contesto
+
+Feedback utente sul giro 73903 (post entry 103):
+
+> "non crei continuità quando fai una variazione festiva non crei
+> continuità. stai ancora mischiando i materiali. ad esempio P che
+> credo voglia dire prefestivo giusto? il giro inizia da BG, ma il
+> materiale come ci arriva a BG?"
+
+> "abbiamo 71 522, 44 421, 11 526, 18 425, 18 464, 15 ATR 125, 6 ATR
+> 115, 12 ETR 245, 60 Ale711/710, 20 ATR803, 5 521, 35 ETR 204, 10
+> 103 E 8 104. MANCANO I FLIRT, MA NON SO I NUMERI MA COPRONO TUTTI
+> I TURNI FLIRT TILO."
+
+5 MR atomici che chiudono i punti:
+
+### MR 7A — Filtri obbligatori sulla regola
+
+`backend/src/colazione/schemas/programmi.py`:
+- `ProgrammaRegolaAssegnazioneCreate.filtri_json` ora ha
+  `Field(min_length=1)` (era `default_factory=list`).
+
+`frontend/src/routes/pianificatore-giro/regola/RegolaEditor.tsx`:
+- `handleSubmit` rifiuta se `filtri.length === 0` con messaggio
+  esplicativo: "Una regola senza filtri catturerebbe TUTTE le corse
+  del programma e produrrebbe un output ingestibile".
+
+`frontend/src/routes/pianificatore-giro/regola/FiltriEditor.tsx`:
+- Box "Nessun filtro" cambiato da informativo a alert obbligatorio
+  ("Almeno un filtro è obbligatorio. Sprint 7.9: ...").
+
+`tests/test_programmi.py`:
+- `test_regola_create_composizione_mista_ok` aggiornato (passa
+  filtri_json non vuoto).
+- Nuovo `test_regola_create_filtri_vuoti_422` per la regression.
+
+### MR 7B — Continuità tra giornate (cluster A1 highlight)
+
+`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`:
+- Click su tab variante → propaga la selezione a TUTTE le altre
+  giornate cercando la variante con stesso `variant_index`
+  (= cluster A1 origine). Se una giornata non ha quella variante
+  (cluster A1 più corto), si lascia invariata. Risultato: il
+  pianificatore vede la "linea" coerente del convoglio attraverso
+  G1 → G2 → ... → GN selezionando una sola tab.
+
+### MR 7C — Vuoto "uscita sede" sui bordi del ciclo
+
+`backend/src/colazione/domain/builder_giro/persister.py`:
+- Nuova funzione `_crea_blocco_uscita_sede` simmetrica al rientro.
+- Per la PRIMA giornata del ciclo (`numero_giornata == 1`), per
+  OGNI variante: se `vuoto_testa` è None E la prima corsa NON parte
+  dalla sede, viene generato un blocco `materiale_vuoto` sintetico
+  (seq=1) da `loc.stazione_collegata_codice` alla prima stazione.
+  Orario: arrivo = ora_partenza prima corsa, partenza = -30 min.
+- `_persisti_blocchi_variante` accetta nuovo parametro
+  `seq_blocco_inizio: int = 1` per consentire il prefisso uscita_sede.
+
+Smoke conferma: nel giro 74269 G1 V2, blocco seq=1 `uscita_sede`
+S01640 → S01520 (LECCO) 05:36-06:06, prima del primo treno
+commerciale alle 06:06.
+
+### MR 7D — Anagrafica dotazione azienda (DB + seed Trenord)
+
+Migrazione `0020_materiale_dotazione_azienda.py`:
+- Nuova tabella `materiale_dotazione_azienda(azienda_id,
+  materiale_codice, pezzi_disponibili, note)`.
+- PK composta `(azienda_id, materiale_codice)`.
+- `pezzi_disponibili` NULLABLE → capacity illimitata (es. FLIRT
+  TILO).
+- Check `pezzi_disponibili IS NULL OR pezzi_disponibili >= 0`.
+- FK CASCADE su azienda, RESTRICT su materiale_tipo.
+
+`models/anagrafica.py`: nuova classe `MaterialeDotazioneAzienda`.
+`models/__init__.py`: export aggiornato (37 entità totali, era 36).
+
+`scripts/seed_dotazione_trenord.py` (nuovo):
+- Seed dei 16 materiali Trenord comunicati dall'utente
+  (333 pezzi totali + ETR524 illimitato).
+- Mapping ETR245 → `ALe245_treno`, ALe711/710 cumulativi 60 → split
+  30/30 fra `ALe711_3` e `ALe711_4` (granularità per variante richiede
+  conferma utente futura).
+- Idempotente via `ON CONFLICT (azienda_id, materiale_codice) DO UPDATE`.
+
+`api/anagrafiche.py`:
+- `MaterialeRead.pezzi_disponibili: int | None` aggiunto.
+- `GET /api/materiali` ora carica la dotazione in batch e popola il
+  campo (None se non registrato o capacity illimitata).
+
+### MR 7E — Capacity warning nella dashboard "Convogli necessari"
+
+`frontend/src/lib/api/anagrafiche.ts`: tipo `MaterialeRead` esteso.
+
+`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`:
+- `ConvogliNecessariSection` ora chiama `useMateriali()` per leggere
+  la dotazione.
+- I chip pezzi sono colorati:
+  - **rosso** (border-destructive bg-destructive/10) se i pezzi
+    necessari > pezzi disponibili → over-capacity.
+  - **verde** (border-emerald) se entro capacity (incluso `∞`).
+  - **giallo** (border-amber) se dotazione non registrata per quel
+    materiale.
+  - Tooltip con dettaglio "X di Y disponibili" / "Capacity illimitata".
+- Banner alert sotto i chip di una regola se almeno un materiale
+  supera la capacity: "⚠ Questa regola supera la dotazione fisica
+  per almeno un materiale. Aggiungi altre regole per ripartire le
+  corse, o usa filtri più restrittivi."
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 58 file clean.
+- Backend `pytest` ✅ **536 passed, 12 skipped** (era 536, +1
+  test_programmi, -0 net per via di test_models EXPECTED_TABLE_COUNT
+  aggiornato 36 → 37).
+- Frontend `tsc -b --noEmit` ✅.
+- Frontend `vitest` ✅ 52 passed (1 timeout casuale flaky non
+  legato a queste modifiche, conferma post-rerun).
+- Smoke E2E programma 8427 (Sprint 7.9):
+  - `n_giri_creati = 1`, dotazione esposta in `/api/materiali`.
+  - Giro 74269 G1 V2: blocco `uscita_sede` confermato (S01640 →
+    S01520, 05:36 → 06:06, motivo='uscita_sede').
+- Verifica visiva preview MR 7A: dialog "Nuova regola" con banner
+  giallo "Almeno un filtro è obbligatorio".
+
+### Limitazioni note
+
+- **Variante ETR245**: nel DB è registrato come `ALe245_treno`. La
+  dotazione "12 ETR245" è mappata su `ALe245_treno` come "12 treni
+  completi" (motrice + rimorchiata). Verificare con utente se
+  intende 12 treni o 12 motrici.
+- **Split ALe711_3 / ALe711_4**: i 60 cumulativi sono splittati
+  30/30 per default. Reale split può essere diverso — chiedere
+  utente se serve granularità.
+- **Dotazione editabile da UI**: oggi la dotazione si modifica solo
+  via script seed o SQL diretto. UI dedicata in
+  ``/anagrafica/materiali`` è scope futuro.
+- **Capacity warning per programma è LOCALE**: il warning oggi
+  considera solo la regola corrente vs dotazione totale azienda.
+  Non somma i convogli richiesti da OTHER programmi attivi
+  contemporanei. Cross-programma capacity check è scope futuro.
+
+### Stato Sprint 7.9
+
+- ✅ MR 7A filtri obbligatori
+- ✅ MR 7B continuità cluster A1
+- ✅ MR 7C vuoti uscita sede
+- ✅ MR 7D anagrafica dotazione
+- ✅ MR 7E capacity warning UI
+
+### Prossimo step
+
+Validazione utente su:
+1. Form regola — filtri obbligatori sono chiari?
+2. Click variante "Lv" su G1 → si propaga a G2/G3/...?
+3. Vuoti uscita sede visibili nel Gantt G1?
+4. Capacity chip rosso/verde/giallo distinguibile?
+
+Se OK, scope futuro: editor dotazione UI, mapping ETR245, granularità
+ALe711, capacity check cross-programma.
+
+---
+
 ## 2026-05-03 (103) — Sprint 7.8 MR 6: aggregazione varianti per categoria + UI form regola semplificata
 
 ### Contesto

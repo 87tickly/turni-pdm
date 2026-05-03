@@ -275,11 +275,18 @@ class ProgrammaRegolaAssegnazioneCreate(BaseModel):
     campi singoli `materiale_tipo_codice + numero_pezzi`. L'handler API
     salva `composizione_json` e ri-popola i campi legacy dal primo
     elemento per retrocompat con `risolvi_corsa()` fino a Sub 5.5.
+
+    Sprint 7.9 MR 7A (decisione utente 2026-05-03): ``filtri_json`` è
+    OBBLIGATORIO (min_length=1). Una regola senza filtri catturerebbe
+    TUTTE le corse del programma, costringendo il builder a coprirle
+    con un singolo materiale → output ingestibile (caos di varianti).
+    Il pianificatore deve definire scope esplicito (es. linea X +
+    tipo treno Y) per ogni regola.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    filtri_json: list[FiltroRegola] = Field(default_factory=list)
+    filtri_json: list[FiltroRegola] = Field(min_length=1)
     composizione: list[ComposizioneItem] = Field(min_length=1)
     is_composizione_manuale: bool = False
     priorita: int = Field(default=60, ge=0, le=100)

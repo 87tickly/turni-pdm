@@ -18,6 +18,10 @@ export interface MaterialeRead {
   codice: string;
   nome_commerciale: string | null;
   famiglia: string | null;
+  /** Sprint 7.9 MR 7D: pezzi singoli in dotazione per l'azienda corrente.
+   * `null` = capacity illimitata (es. ETR524 FLIRT TILO) o non registrata.
+   */
+  pezzi_disponibili: number | null;
 }
 
 export interface DepotRead {

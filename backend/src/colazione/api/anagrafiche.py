@@ -33,6 +33,7 @@ from colazione.models.anagrafica import (
     Depot,
     FestivitaUfficiale,
     LocalitaManutenzione,
+    MaterialeDotazioneAzienda,
     MaterialeTipo,
     Stazione,
 )
@@ -55,6 +56,10 @@ class MaterialeRead(BaseModel):
     codice: str
     nome_commerciale: str | None
     famiglia: str | None
+    # Sprint 7.9 MR 7D: dotazione fisica per l'azienda corrente.
+    # ``None`` = capacity illimitata (es. ETR524 FLIRT TILO) o non
+    # registrata in `materiale_dotazione_azienda`.
+    pezzi_disponibili: int | None = None
 
 
 class DepotRead(BaseModel):
@@ -101,6 +106,11 @@ async def list_materiali(
 
     Usato dal frontend per popolare il menu a tendina della composizione
     regola (es. selezione ETR526 + ETR425).
+
+    Sprint 7.9 MR 7D: include ``pezzi_disponibili`` da
+    ``materiale_dotazione_azienda`` per la capacity check nella
+    dashboard "Convogli necessari". ``None`` se la dotazione non è
+    registrata o se è esplicitamente illimitata (es. FLIRT TILO).
     """
     stmt = (
         select(MaterialeTipo)
@@ -108,7 +118,21 @@ async def list_materiali(
         .order_by(MaterialeTipo.codice)
     )
     rows = (await session.execute(stmt)).scalars().all()
-    return [MaterialeRead.model_validate(r) for r in rows]
+    # Carica dotazione in batch
+    dotazione_stmt = select(MaterialeDotazioneAzienda).where(
+        MaterialeDotazioneAzienda.azienda_id == user.azienda_id
+    )
+    dotazioni = {
+        d.materiale_codice: d.pezzi_disponibili
+        for d in (await session.execute(dotazione_stmt)).scalars().all()
+    }
+    out: list[MaterialeRead] = []
+    for r in rows:
+        item = MaterialeRead.model_validate(r)
+        if r.codice in dotazioni:
+            item.pezzi_disponibili = dotazioni[r.codice]
+        out.append(item)
+    return out
 
 
 @router.get("/depots", response_model=list[DepotRead])

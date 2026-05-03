@@ -229,3 +229,37 @@ class MaterialeAccoppiamentoAmmesso(Base):
     )
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MaterialeDotazioneAzienda(Base):
+    """Sprint 7.9 MR 7D: dotazione fisica per (azienda, materiale).
+
+    Rappresenta il numero di pezzi singoli che un'azienda possiede di
+    un certo tipo di materiale. Usato dalla dashboard "Convogli
+    necessari" per warning di capacity.
+
+    ``pezzi_disponibili = NULL`` → capacity illimitata (es. ETR524
+    FLIRT TILO copre tutti i turni TILO senza un numero specifico).
+
+    PK composta `(azienda_id, materiale_codice)` — al massimo 1 riga
+    per coppia.
+    """
+
+    __tablename__ = "materiale_dotazione_azienda"
+
+    azienda_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("azienda.id", ondelete="CASCADE"), primary_key=True
+    )
+    materiale_codice: Mapped[str] = mapped_column(
+        String(50),
+        ForeignKey("materiale_tipo.codice", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    pezzi_disponibili: Mapped[int | None] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

@@ -133,9 +133,30 @@ export function GiroDettaglioRoute() {
             selectedBlocco={selectedBlocco}
             onSelectBlocco={setSelectedBlocco}
             activeVariantByGiornata={activeVariantByGiornata}
-            onChangeActiveVariant={(giornataId, idx) =>
-              setActiveVariantByGiornata((prev) => ({ ...prev, [giornataId]: idx }))
-            }
+            onChangeActiveVariant={(giornataId, idx) => {
+              // Sprint 7.9 MR 7B: propagazione del cluster A1 attraverso
+              // le giornate per garantire CONTINUITÀ del ciclo. Quando
+              // l'utente seleziona una variante in giornata G_K, leggiamo
+              // il `variant_index` (= cluster A1 origine) e selezioniamo
+              // automaticamente la variante con stesso variant_index in
+              // TUTTE le altre giornate. Se una giornata non ha quella
+              // variante (cluster A1 più corto), si lascia invariata.
+              const giornataK = giro.giornate.find((g) => g.id === giornataId);
+              const variante = giornataK?.varianti[idx];
+              if (variante === undefined) return;
+              const targetClusterId = variante.variant_index;
+              setActiveVariantByGiornata((prev) => {
+                const next: Record<number, number> = { ...prev, [giornataId]: idx };
+                for (const g of giro.giornate) {
+                  if (g.id === giornataId) continue;
+                  const matchIdx = g.varianti.findIndex(
+                    (v) => v.variant_index === targetClusterId,
+                  );
+                  if (matchIdx >= 0) next[g.id] = matchIdx;
+                }
+                return next;
+              });
+            }}
           />
         </div>
 

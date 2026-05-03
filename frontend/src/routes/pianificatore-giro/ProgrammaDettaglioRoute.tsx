@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { ProgrammaStatoBadge } from "@/components/domain/ProgrammaStatoBadge";
+import { useMateriali } from "@/hooks/useAnagrafiche";
 import { useGiriProgramma } from "@/hooks/useGiri";
 import { useArchiviaProgramma, useProgramma, usePubblicaProgramma } from "@/hooks/useProgrammi";
 import { ApiError } from "@/lib/api/client";
@@ -500,6 +501,12 @@ function ConvogliNecessariSection({
   programma: ProgrammaDettaglioRead;
   giri: GiroListItem[];
 }) {
+  // Sprint 7.9 MR 7E: dotazione per capacity warning.
+  const materialiQuery = useMateriali();
+  const dotazione: Record<string, number | null> = {};
+  for (const m of materialiQuery.data ?? []) {
+    dotazione[m.codice] = m.pezzi_disponibili;
+  }
   // Per ogni regola, lega i giri il cui `materiale_tipo_codice` è in
   // `composizione_json` (= materiale principale). Una regola può
   // generare 1+ giri se è multi-sede o se l'aggregazione A2 produce
@@ -583,17 +590,57 @@ function ConvogliNecessariSection({
                 Pezzi singoli necessari
               </div>
               <div className="mt-1 flex flex-wrap gap-2">
-                {s.pezzi_per_tipo.map((p) => (
-                  <span
-                    key={p.tipo}
-                    className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-0.5 font-mono text-xs"
-                  >
-                    <span className="text-foreground">{p.tipo}</span>
-                    <span className="text-muted-foreground">×</span>
-                    <span className="font-semibold tabular-nums text-foreground">{p.pezzi}</span>
-                  </span>
-                ))}
+                {s.pezzi_per_tipo.map((p) => {
+                  // Sprint 7.9 MR 7E: capacity check vs dotazione.
+                  const disponibili = dotazione[p.tipo];
+                  const isOverCapacity =
+                    disponibili !== undefined &&
+                    disponibili !== null &&
+                    p.pezzi > disponibili;
+                  const isUnknown = disponibili === undefined;
+                  return (
+                    <span
+                      key={p.tipo}
+                      title={
+                        isOverCapacity
+                          ? `Servono ${p.pezzi} pezzi ma in flotta ce ne sono solo ${disponibili}`
+                          : disponibili !== undefined && disponibili !== null
+                            ? `${p.pezzi} di ${disponibili} disponibili`
+                            : disponibili === null
+                              ? "Capacity illimitata (es. FLIRT TILO)"
+                              : "Dotazione non registrata"
+                      }
+                      className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 font-mono text-xs ${
+                        isOverCapacity
+                          ? "border-destructive bg-destructive/10 text-destructive"
+                          : isUnknown
+                            ? "border-amber-300 bg-amber-50 text-amber-900"
+                            : "border-emerald-300 bg-emerald-50 text-emerald-900"
+                      }`}
+                    >
+                      <span>{p.tipo}</span>
+                      <span className="opacity-50">×</span>
+                      <span className="font-semibold tabular-nums">{p.pezzi}</span>
+                      {disponibili !== undefined && disponibili !== null && (
+                        <span className="opacity-70">/ {disponibili}</span>
+                      )}
+                      {disponibili === null && <span className="opacity-70">/ ∞</span>}
+                    </span>
+                  );
+                })}
               </div>
+              {s.pezzi_per_tipo.some((p) => {
+                const d = dotazione[p.tipo];
+                return d !== undefined && d !== null && p.pezzi > d;
+              }) && (
+                <p
+                  role="alert"
+                  className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1 text-xs text-destructive"
+                >
+                  ⚠ Questa regola supera la dotazione fisica per almeno un materiale. Aggiungi
+                  altre regole per ripartire le corse, o usa filtri più restrittivi.
+                </p>
+              )}
             </div>
           </div>
         ))}

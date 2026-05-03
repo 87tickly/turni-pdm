@@ -368,6 +368,7 @@ async def _persisti_blocchi_variante(
     numero_turno: str,
     seq_vuoto_giro_inizio: int,
     session: AsyncSession,
+    seq_blocco_inizio: int = 1,
 ) -> tuple[int, int]:
     """Persiste i blocchi di una variante in ordine sequenziale.
 
@@ -375,11 +376,15 @@ async def _persisti_blocchi_variante(
     (vuoto_testa? → [evento? → corsa]* → vuoto_coda?). La FK punta a
     ``giro_variante_id``.
 
+    Sprint 7.9 MR 7C: ``seq_blocco_inizio`` (default 1) consente al
+    chiamante di pre-inserire un blocco "uscita_sede" sintetico con
+    seq=1 e far partire la sequenza canonica da seq=2.
+
     Returns:
         ``(seq_vuoto_giro, seq_blocco_next)`` per propagazione fra
         varianti dello stesso giro.
     """
-    seq_blocco = 1  # progressivo dentro la variante (CHECK seq >= 1)
+    seq_blocco = seq_blocco_inizio  # progressivo dentro la variante (CHECK seq >= 1)
     seq_vuoto = seq_vuoto_giro_inizio
     cat_pos = variante.catena_posizionata
 
@@ -587,6 +592,7 @@ async def _persisti_un_giro(
         await session.flush()
 
         # Sprint 7.7 MR 5: persisti N varianti per la giornata.
+        is_prima_giornata = giornata.numero_giornata == 1
         for variant_index, variante in enumerate(giornata.varianti):
             testo_val, dates_val = _estrai_validita_variante(variante)
             gv = GiroVariante(
@@ -598,6 +604,35 @@ async def _persisti_un_giro(
             )
             session.add(gv)
             await session.flush()
+
+            # Sprint 7.9 MR 7C: blocco "uscita_sede" sintetico per la
+            # prima giornata del ciclo. Rappresenta il convoglio che
+            # esce dal deposito (sede manutentiva) verso la prima
+            # stazione commerciale, anche se questa è fuori whitelist
+            # (= linee lontane). Si applica solo se non c'è già un
+            # vuoto_testa naturale e la prima corsa NON parte dalla
+            # sede stessa.
+            seq_blocco_inizio = 1
+            corse_var = variante.catena_posizionata.catena.corse
+            if (
+                is_prima_giornata
+                and variante.catena_posizionata.vuoto_testa is None
+                and corse_var
+                and loc.stazione_collegata_codice is not None
+                and corse_var[0].codice_origine != loc.stazione_collegata_codice
+            ):
+                await _crea_blocco_uscita_sede(
+                    session=session,
+                    giro_variante_id=gv.id,
+                    giro_materiale_id=gm_id,
+                    azienda_id=azienda_id,
+                    seq=1,
+                    stazione_da=loc.stazione_collegata_codice,
+                    stazione_a=corse_var[0].codice_origine,
+                    ora_arrivo=corse_var[0].ora_partenza,
+                )
+                seq_blocco_inizio = 2
+
             seq_vuoto_giro, last_seq_blocco = await _persisti_blocchi_variante(
                 variante,
                 gv.id,
@@ -606,6 +641,7 @@ async def _persisti_un_giro(
                 entry.numero_turno,
                 seq_vuoto_giro,
                 session,
+                seq_blocco_inizio=seq_blocco_inizio,
             )
             last_gv_id = gv.id
 
@@ -650,6 +686,74 @@ async def _persisti_un_giro(
                     )
 
     return gm_id
+
+
+async def _crea_blocco_uscita_sede(
+    *,
+    session: AsyncSession,
+    giro_variante_id: int,
+    giro_materiale_id: int,
+    azienda_id: int,
+    seq: int,
+    stazione_da: str,
+    stazione_a: str,
+    ora_arrivo: Any,
+) -> None:
+    """Sprint 7.9 MR 7C: blocco "uscita_sede" simmetrico al rientro.
+
+    Crea un ``materiale_vuoto`` sintetico per rappresentare l'uscita
+    del convoglio dal deposito ``stazione_da`` (sede) verso
+    ``stazione_a`` (prima stazione commerciale del ciclo). L'orario
+    di arrivo coincide con la partenza della prima corsa; la
+    partenza è 30 minuti prima.
+
+    Differenza dal vuoto_testa di ``posizionamento.py``: questo è
+    SEMPRE generato per la prima giornata del ciclo se la prima
+    stazione è diversa dalla sede, anche se la prima stazione è
+    fuori whitelist (= linee lontane es. Bergamo, Brescia, Tirano).
+    """
+    from datetime import time as _time
+
+    h, m = ora_arrivo.hour, ora_arrivo.minute
+    partenza_min = (h * 60 + m - 30) % (24 * 60)
+    ora_partenza = _time(partenza_min // 60, partenza_min % 60)
+    numero = await _next_numero_rientro_sede(session)
+
+    cmv = CorsaMaterialeVuoto(
+        azienda_id=azienda_id,
+        numero_treno_vuoto=numero,
+        codice_origine=stazione_da,
+        codice_destinazione=stazione_a,
+        ora_partenza=ora_partenza,
+        ora_arrivo=ora_arrivo,
+        min_tratta=30,
+        km_tratta=None,
+        origine="generato_da_giro_materiale",
+        giro_materiale_id=giro_materiale_id,
+        valido_in_date_json=[],
+        valido_da=None,
+        valido_a=None,
+    )
+    session.add(cmv)
+    await session.flush()
+
+    session.add(
+        GiroBlocco(
+            giro_variante_id=giro_variante_id,
+            seq=seq,
+            tipo_blocco="materiale_vuoto",
+            corsa_commerciale_id=None,
+            corsa_materiale_vuoto_id=cmv.id,
+            stazione_da_codice=stazione_da,
+            stazione_a_codice=stazione_a,
+            ora_inizio=ora_partenza,
+            ora_fine=ora_arrivo,
+            descrizione=f"Uscita sede {numero}: {stazione_da} → {stazione_a}",
+            is_validato_utente=False,
+            metadata_json={"motivo": "uscita_sede", "numero_treno_placeholder": numero},
+        )
+    )
+    await session.flush()
 
 
 async def _crea_blocco_rientro_sede(

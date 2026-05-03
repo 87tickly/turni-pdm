@@ -264,7 +264,11 @@ def test_regola_create_priorita_oltre_100_raises() -> None:
 
 def test_regola_create_composizione_mista_ok() -> None:
     """Composizione di 2+ elementi (es. ETR526+ETR425 per Tirano)."""
+    # Sprint 7.9 MR 7A: filtri obbligatori (min_length=1).
     r = ProgrammaRegolaAssegnazioneCreate(
+        filtri_json=[
+            FiltroRegola(campo="direttrice", op="eq", valore="TIRANO-LECCO-MILANO")
+        ],
         composizione=[
             ComposizioneItem(materiale_tipo_codice="ETR526", n_pezzi=1),
             ComposizioneItem(materiale_tipo_codice="ETR425", n_pezzi=1),
@@ -274,6 +278,15 @@ def test_regola_create_composizione_mista_ok() -> None:
     assert len(r.composizione) == 2
     assert r.composizione[0].materiale_tipo_codice == "ETR526"
     assert r.composizione[1].materiale_tipo_codice == "ETR425"
+
+
+def test_regola_create_filtri_vuoti_422() -> None:
+    """Sprint 7.9 MR 7A: regola senza filtri rifiutata da Pydantic."""
+    with pytest.raises(ValidationError):
+        ProgrammaRegolaAssegnazioneCreate(
+            filtri_json=[],
+            composizione=[ComposizioneItem(materiale_tipo_codice="ALe711", n_pezzi=1)],
+        )
 
 
 # =====================================================================
