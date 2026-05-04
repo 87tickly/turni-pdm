@@ -793,16 +793,28 @@ function BloccoSegment({
     );
   }
 
-  // Vuoto: linea sottile rosso tratteggiato (h-1) sulla mid-line, no etichette.
+  // Vuoto: linea sottile rosso tratteggiato (h-1) sulla mid-line, con
+  // badge esplicito che dichiara la NATURA del vuoto (Sprint 7.9 MR β1).
   if (tipo === "materiale_vuoto") {
-    // Sprint 7.9 MR 8B: il vuoto_testa della PRIMA giornata variante
-    // canonica è l'"uscita ciclo" (= il convoglio esce dal deposito
-    // per la prima volta). Si distingue visivamente dal vuoto tecnico
-    // intra-ciclo con un badge "🏠→" sopra.
-    const isUscitaCiclo = blocco.metadata_json?.is_uscita_ciclo === true;
-    const motivo = typeof blocco.metadata_json?.motivo === "string"
-      ? blocco.metadata_json.motivo as string
-      : null;
+    const meta = blocco.metadata_json ?? {};
+    const tipoVuoto =
+      typeof meta.tipo_vuoto === "string" ? (meta.tipo_vuoto as string) : null;
+    const sedeCodice =
+      typeof meta.sede_codice === "string" ? (meta.sede_codice as string) : null;
+    // Fallback per record persistiti pre-MR β1 (nessun `tipo_vuoto`):
+    // la classificazione si ricava da `is_uscita_ciclo` + `motivo` come
+    // facevamo prima. Si rimuoverà quando la base dati sarà rigenerata.
+    const isUscitaCiclo =
+      tipoVuoto === "uscita_deposito" ||
+      (tipoVuoto === null && meta.is_uscita_ciclo === true);
+    const isRientroDeposito =
+      tipoVuoto === "rientro_deposito" ||
+      (tipoVuoto === null && meta.motivo === "rientro_sede");
+    const isRientroIntraArea = tipoVuoto === "rientro_intra_area";
+    const isPosizionamentoIntraArea =
+      tipoVuoto === "posizionamento_intra_area" ||
+      (tipoVuoto === null && !isUscitaCiclo && !isRientroDeposito);
+    const sedeLabel = sedeCodice ?? "deposito";
     return (
       <button
         type="button"
@@ -818,17 +830,33 @@ function BloccoSegment({
         {isUscitaCiclo && (
           <span
             className="absolute -top-3 left-0 whitespace-nowrap rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
-            title="Uscita assoluta del convoglio dal deposito (inizio del ciclo)"
+            title={`Uscita assoluta del convoglio dal deposito ${sedeLabel} (inizio del ciclo)`}
           >
-            🏠→ uscita ciclo
+            🏠→ Vuoto da deposito {sedeLabel}
           </span>
         )}
-        {motivo === "rientro_sede" && (
+        {isRientroDeposito && (
           <span
             className="absolute -top-3 right-0 whitespace-nowrap rounded bg-violet-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
-            title="Rientro a deposito (chiusura del ciclo)"
+            title={`Rientro al deposito ${sedeLabel} (chiusura del ciclo)`}
           >
-            🏠← rientro
+            🏠← Vuoto verso deposito {sedeLabel}
+          </span>
+        )}
+        {isRientroIntraArea && (
+          <span
+            className="absolute -top-3 right-0 whitespace-nowrap rounded bg-amber-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
+            title={`Posizionamento intra-area verso la stazione collegata al deposito ${sedeLabel}`}
+          >
+            ↳ Vuoto intra-area
+          </span>
+        )}
+        {isPosizionamentoIntraArea && !isUscitaCiclo && (
+          <span
+            className="absolute -top-3 left-0 whitespace-nowrap rounded bg-amber-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
+            title="Posizionamento tecnico intra-area (convoglio già in linea, si sposta dentro la whitelist sede)"
+          >
+            ↳ Vuoto intra-area
           </span>
         )}
         <div className="seg-vuoto h-1" />
@@ -1246,17 +1274,39 @@ function NotteRow({
       >
         {sostaInfo.stazione !== null ? (
           <>
+            {/* Sprint 7.9 MR β1: etichetta esplicita "Materiale in sosta a
+                X · da G(K-1) finita alle 22:14 · 7h59'". Niente più
+                inferenza implicita per il pianificatore: dichiariamo da
+                dove arriva il materiale e quanto resta in sosta. */}
             <span className="text-[10px] text-muted-foreground">
-              notte · sosta a{" "}
-              <span className="font-mono text-foreground">{sostaInfo.stazione}</span>
+              Materiale in sosta a{" "}
+              <span className="font-mono font-semibold text-foreground">
+                {sostaInfo.stazione}
+              </span>
+              {sostaInfo.terminaOra !== null && (
+                <>
+                  {" "}· da G{giornataPrev.numero_giornata} finita alle{" "}
+                  <span className="font-mono tabular-nums text-foreground">
+                    {sostaInfo.terminaOra}
+                  </span>
+                </>
+              )}
+              {sostaInfo.iniziaOra !== null && (
+                <>
+                  {" "}· riparte G{giornataNext.numero_giornata} alle{" "}
+                  <span className="font-mono tabular-nums text-foreground">
+                    {sostaInfo.iniziaOra}
+                  </span>
+                </>
+              )}
               {sostaInfo.duration !== null && ` · ${formatGap(sostaInfo.duration)}`}
             </span>
             {sostaInfo.discontinua && (
               <span
                 className="ml-3 inline-flex items-center gap-1 rounded bg-destructive/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-destructive"
-                title={`Anomalia: G${giornataPrev.numero_giornata} termina a ${sostaInfo.terminaA ?? "?"}, G${giornataNext.numero_giornata} inizia a ${sostaInfo.iniziaDa ?? "?"} — verificare congruenza`}
+                title={`Anomalia builder (post MR α non dovrebbe più esistere): G${giornataPrev.numero_giornata} termina a ${sostaInfo.terminaA ?? "?"}, G${giornataNext.numero_giornata} inizia a ${sostaInfo.iniziaDa ?? "?"}. Segnalare.`}
               >
-                ⚠ congruenza
+                ⚠ anomalia builder
               </span>
             )}
           </>
@@ -1275,21 +1325,38 @@ function NotteRow({
 }
 
 interface SostaNotturnaInfo {
+  /** Nome leggibile della stazione di sosta (preferito al codice). */
   stazione: string | null;
   /** Durata in minuti, se calcolabile. */
   duration: number | null;
   /** True se stazione_a (G_n) ≠ stazione_da (G_n+1). */
   discontinua: boolean;
+  /** Codice tecnico della stazione di terminazione G_n. */
   terminaA: string | null;
+  /** Codice tecnico della stazione di partenza G_n+1. */
   iniziaDa: string | null;
+  /** Sprint 7.9 MR β1: orario formato "HH:MM" della terminazione G_n. */
+  terminaOra: string | null;
+  /** Sprint 7.9 MR β1: orario formato "HH:MM" della partenza G_n+1. */
+  iniziaOra: string | null;
 }
+
+const _SOSTA_VUOTA: SostaNotturnaInfo = {
+  stazione: null,
+  duration: null,
+  discontinua: false,
+  terminaA: null,
+  iniziaDa: null,
+  terminaOra: null,
+  iniziaOra: null,
+};
 
 function computeSostaNotturna(
   prev: GiroVariante | undefined,
   next: GiroVariante | undefined,
 ): SostaNotturnaInfo {
   if (prev === undefined || next === undefined) {
-    return { stazione: null, duration: null, discontinua: false, terminaA: null, iniziaDa: null };
+    return _SOSTA_VUOTA;
   }
   const lastBlock = [...prev.blocchi]
     .filter((b) => parseTimeToMin(b.ora_fine) !== null)
@@ -1298,7 +1365,7 @@ function computeSostaNotturna(
     .filter((b) => parseTimeToMin(b.ora_inizio) !== null)
     .sort((a, b) => (parseTimeToMin(a.ora_inizio) ?? 0) - (parseTimeToMin(b.ora_inizio) ?? 0))[0];
   if (lastBlock === undefined || firstBlock === undefined) {
-    return { stazione: null, duration: null, discontinua: false, terminaA: null, iniziaDa: null };
+    return _SOSTA_VUOTA;
   }
   const terminaA = lastBlock.stazione_a_codice;
   const iniziaDa = firstBlock.stazione_da_codice;
@@ -1309,12 +1376,18 @@ function computeSostaNotturna(
   const fine = parseTimeToMin(lastBlock.ora_fine) ?? 0;
   const inizio = parseTimeToMin(firstBlock.ora_inizio) ?? 0;
   const duration = 24 * 60 - fine + inizio;
+  // Sprint 7.9 MR β1: preferisci il nome leggibile al codice tecnico per
+  // l'etichetta "Materiale in sosta a X".
+  const stazioneLabel =
+    lastBlock.stazione_a_nome ?? terminaA ?? firstBlock.stazione_da_nome ?? iniziaDa;
   return {
-    stazione: terminaA ?? iniziaDa,
+    stazione: stazioneLabel,
     duration: duration > 0 ? duration : null,
     discontinua,
     terminaA,
     iniziaDa,
+    terminaOra: formatTimeShort(lastBlock.ora_fine),
+    iniziaOra: formatTimeShort(firstBlock.ora_inizio),
   };
 }
 

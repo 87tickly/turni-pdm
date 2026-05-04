@@ -10,6 +10,91 @@
 
 ---
 
+## 2026-05-04 (124) — Sprint 7.9 MR β1: etichette esplicite vuoti + cross-notte
+
+### Contesto
+
+Decisione utente 2026-05-04 (subito dopo MR α):
+
+> "gli agganci vanno gestiti e calcolati. quindi se decidiamo di fare
+> un aggancio da qualche parte bisogna dire materiale in sosta lì...
+> oppure materiale per aggancio arriva da treno numero..."
+
+L'utente vuole che la UI dichiari esplicitamente la NATURA di ogni
+vuoto/aggancio, niente più inferenze implicite. MR β1 copre il caso
+semplice (cross-notte + vuoti tecnici); MR β2 (incrocio thread per
+agganci composizione "+N pezzi dal treno Y") è scope successivo.
+
+### Modifiche backend
+
+`backend/src/colazione/domain/builder_giro/persister.py`:
+
+- Helper nuovo `_classifica_vuoto_testa(vuoto, marca_uscita_ciclo)`:
+  ritorna `"uscita_deposito"` (vuoto della prima giornata canonica)
+  o `"posizionamento_intra_area"` (vuoto K≥2 o variante non canonica).
+- Metadata `vuoto_testa` arricchiti con:
+  - `tipo_vuoto`: classificazione esplicita per UI.
+  - `sede_codice`: codice sede del programma per etichette tipo
+    "Vuoto da deposito FIO".
+- Metadata `vuoto_coda` arricchiti con `tipo_vuoto =
+  "rientro_intra_area"` + `sede_codice`.
+- `_crea_blocco_rientro_sede` accetta nuovo parametro `sede_codice`,
+  lo include in `metadata_json` con `tipo_vuoto = "rientro_deposito"`.
+- `_persisti_blocchi_variante` accetta nuovo parametro kw-only
+  `sede_codice` propagato dal call-site `_persisti_un_giro` con
+  `loc.codice`.
+
+### Modifiche frontend
+
+`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`:
+
+- **Badge sopra blocchi `materiale_vuoto`** riscritto in base al
+  `metadata_json.tipo_vuoto` letto dal payload (con fallback
+  `is_uscita_ciclo`/`motivo` per record persistiti pre-MR β1):
+  - `"uscita_deposito"` → blu "🏠→ Vuoto da deposito {SEDE}"
+  - `"rientro_deposito"` → viola "🏠← Vuoto verso deposito {SEDE}"
+  - `"rientro_intra_area"` → ambra "↳ Vuoto intra-area"
+  - `"posizionamento_intra_area"` → ambra "↳ Vuoto intra-area"
+  Tooltip dettagliato con la natura operativa ciascuno.
+- **`SostaNotturnaInfo` esteso** con `terminaOra` / `iniziaOra` (orari
+  in formato "HH MM"). `stazione` ora restituisce il NOME leggibile
+  (es. "MILANO CENTRALE") invece del codice tecnico (S01640) quando
+  `stazione_a_nome` è disponibile.
+- **NotteRow** rimaneggiata: dall'asciutto "notte · sosta a S01420 ·
+  16h14'" all'esplicito "Materiale in sosta a **MILANO CENTRALE** ·
+  da G3 finita alle **22:14** · riparte G4 alle **06:14** · 7h59'".
+- Badge ⚠ congruenza rinominato "⚠ anomalia builder": dopo MR α non
+  dovrebbe più apparire per costruzione (mantenuto come safety net
+  con tooltip "se vedi questo è bug del builder, segnalare").
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 60 file clean.
+- Backend `pytest` ✅ **560 passed, 12 skipped**.
+- Frontend `tsc -b --noEmit` ✅.
+- Frontend `vitest` 52/53 (1 timeout flaky preesistente in
+  `ProgrammaDettaglioRoute.test.tsx`, non correlato).
+- Preview frontend in dev mode: render OK, console clean, layout
+  dashboard intatto.
+
+### Stato
+
+- ✅ MR β1 completato.
+- 🟡 Smoke utente Railway: rigenerare giri sul programma "prova"
+  (così i metadata `tipo_vuoto`/`sede_codice` saranno popolati) e
+  verificare:
+  1. Badge espliciti "Vuoto da deposito FIO" / "Vuoto verso deposito
+     FIO" / "Vuoto intra-area" sopra ogni blocco vuoto.
+  2. NotteRow legge "Materiale in sosta a [STAZIONE] · da G(K-1)
+     finita alle HH:MM · riparte G(K) alle HH:MM · durata".
+
+### Prossimo step
+
+MR β2 (incrocio thread per agganci composizione "+N pezzi dal treno
+Y") + MR γ (asse 1h=40px, layout senza scroll orizzontale).
+
+---
+
 ## 2026-05-04 (123) — Sprint 7.9 MR α: rollback chiave A2 a `(materiale, sede, n_giornate)`
 
 ### Contesto

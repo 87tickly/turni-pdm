@@ -173,6 +173,31 @@ async def _carica_localita(
     return loc
 
 
+def _classifica_vuoto_testa(
+    vuoto_testa: BloccoMaterialeVuoto, marca_uscita_ciclo: bool
+) -> str:
+    """Sprint 7.9 MR β1 — classifica esplicita per UI.
+
+    Tre categorie operative semanticamente distinte:
+
+    - ``"uscita_deposito"``: vuoto_testa della prima giornata canonica
+      (variant_index=0). Il convoglio esce realmente dal deposito per
+      iniziare il ciclo. Distingue il caso speciale ``cross_notte_K-1``
+      con suffisso visibile in UI ma stessa categoria.
+    - ``"posizionamento_intra_area"``: vuoto_testa di una giornata K≥2
+      o di una variante non canonica della G1. Il convoglio era già in
+      area-Milano dalla sera prima e si sposta dentro la whitelist (es.
+      CERTOSA→GARIBALDI). Niente "uscita deposito".
+
+    Il ``"rientro_intra_area"`` (vuoto_coda) e il ``"rientro_deposito"``
+    (blocco 9XXXX) sono classificati separatamente nei rispettivi
+    blocchi, non qui.
+    """
+    if marca_uscita_ciclo:
+        return "uscita_deposito"
+    return "posizionamento_intra_area"
+
+
 def _km_variante(variante: VarianteGiornata) -> float:
     """Somma ``km_tratta`` delle corse commerciali di una variante."""
     total = 0.0
@@ -371,6 +396,7 @@ async def _persisti_blocchi_variante(
     seq_blocco_inizio: int = 1,
     *,
     marca_uscita_ciclo: bool = False,
+    sede_codice: str | None = None,
 ) -> tuple[int, int]:
     """Persiste i blocchi di una variante in ordine sequenziale.
 
@@ -381,6 +407,11 @@ async def _persisti_blocchi_variante(
     Sprint 7.9 MR 7C: ``seq_blocco_inizio`` (default 1) consente al
     chiamante di pre-inserire un blocco "uscita_sede" sintetico con
     seq=1 e far partire la sequenza canonica da seq=2.
+
+    Sprint 7.9 MR β1: ``sede_codice`` propagato al ``metadata_json``
+    dei blocchi vuoti per consentire UI di mostrare etichette
+    esplicite ("Vuoto da deposito FIO" invece di "🏠→ uscita ciclo"
+    generico).
 
     Returns:
         ``(seq_vuoto_giro, seq_blocco_next)`` per propagazione fra
@@ -427,6 +458,15 @@ async def _persisti_blocchi_variante(
                     # esce qui dall'officina per la prima volta;
                     # le altre giornate continuano cross-notte.
                     "is_uscita_ciclo": marca_uscita_ciclo,
+                    # Sprint 7.9 MR β1: classificazione esplicita per
+                    # etichette UI senza più inferenze. La UI usa
+                    # ``tipo_vuoto`` per scegliere il badge corretto.
+                    "tipo_vuoto": _classifica_vuoto_testa(
+                        cat_pos.vuoto_testa, marca_uscita_ciclo
+                    ),
+                    # Sede del programma — serve all'UI per "Vuoto da
+                    # deposito FIO" / "Vuoto verso deposito NOV", ecc.
+                    "sede_codice": sede_codice,
                 },
             )
         )
@@ -515,7 +555,16 @@ async def _persisti_blocchi_variante(
                     f"→ {cat_pos.vuoto_coda.codice_destinazione}"
                 ),
                 is_validato_utente=True,
-                metadata_json={"motivo": cat_pos.vuoto_coda.motivo},
+                metadata_json={
+                    "motivo": cat_pos.vuoto_coda.motivo,
+                    # Sprint 7.9 MR β1: vuoto coda = posizionamento di
+                    # rientro intra-area verso la stazione collegata
+                    # alla sede (es. CADORNA → NOV). Il rientro vero
+                    # in deposito (9XXXX) è un blocco distinto creato
+                    # da `_crea_blocco_rientro_sede`.
+                    "tipo_vuoto": "rientro_intra_area",
+                    "sede_codice": sede_codice,
+                },
             )
         )
         seq_blocco += 1
@@ -649,6 +698,7 @@ async def _persisti_un_giro(
                 session,
                 seq_blocco_inizio=seq_blocco_inizio,
                 marca_uscita_ciclo=marca_uscita_ciclo,
+                sede_codice=loc.codice,
             )
             last_gv_id = gv.id
 
@@ -699,6 +749,7 @@ async def _persisti_un_giro(
                         stazione_da=ultima_dest,
                         stazione_a=loc.stazione_collegata_codice,
                         ora_inizio=corse_ultima[-1].ora_arrivo,
+                        sede_codice=loc.codice,
                     )
 
     return gm_id
@@ -782,8 +833,13 @@ async def _crea_blocco_rientro_sede(
     stazione_da: str,
     stazione_a: str,
     ora_inizio: Any,
+    sede_codice: str | None = None,
 ) -> None:
-    """Crea CorsaMaterialeVuoto + GiroBlocco per il rientro 9XXXX a sede."""
+    """Crea CorsaMaterialeVuoto + GiroBlocco per il rientro 9XXXX a sede.
+
+    Sprint 7.9 MR β1: ``sede_codice`` propagato al ``metadata_json``
+    per consentire all'UI di mostrare "Vuoto verso deposito {SEDE}".
+    """
     from datetime import time as _time
 
     numero = await _next_numero_rientro_sede(session)
@@ -822,7 +878,13 @@ async def _crea_blocco_rientro_sede(
             ora_fine=ora_fine,
             descrizione=f"Rientro sede {numero}: {stazione_da} → {stazione_a}",
             is_validato_utente=False,
-            metadata_json={"motivo": "rientro_sede", "numero_treno_placeholder": numero},
+            metadata_json={
+                "motivo": "rientro_sede",
+                "numero_treno_placeholder": numero,
+                # Sprint 7.9 MR β1: classificazione esplicita per UI.
+                "tipo_vuoto": "rientro_deposito",
+                "sede_codice": sede_codice,
+            },
         )
     )
     await session.flush()
