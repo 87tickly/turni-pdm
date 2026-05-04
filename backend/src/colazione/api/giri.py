@@ -48,7 +48,11 @@ from colazione.domain.builder_giro.risolvi_corsa import (
     ComposizioneNonAmmessaError,
     RegolaAmbiguaError,
 )
-from colazione.models.anagrafica import Stazione
+from colazione.models.anagrafica import (
+    MaterialeThread,
+    MaterialeThreadEvento,
+    Stazione,
+)
 from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
 from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
 from colazione.schemas.security import CurrentUser
@@ -710,4 +714,133 @@ async def get_giro_dettaglio(
         created_at=g.created_at,
         updated_at=g.updated_at,
         giornate=giornate_out,
+    )
+
+
+# =====================================================================
+# Sprint 7.9 MR β2-4 — Thread materiale (L2)
+# =====================================================================
+
+
+class MaterialeThreadListItem(BaseModel):
+    """Item lista thread di un giro per la UI."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    tipo_materiale_codice: str
+    matricola_id: int | None
+    km_totali: float
+    minuti_servizio: int
+    n_corse_commerciali: int
+
+
+class MaterialeThreadEventoRead(BaseModel):
+    """Evento singolo nella timeline di un thread."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    ordine: int
+    tipo: str
+    giro_blocco_id: int | None
+    stazione_da_codice: str | None
+    stazione_a_codice: str | None
+    ora_inizio: time | None
+    ora_fine: time | None
+    data_giorno: date | None
+    km_tratta: float | None
+    numero_treno: str | None
+    note: str | None
+
+
+class MaterialeThreadDettaglioRead(BaseModel):
+    """Dettaglio completo del thread con timeline eventi."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    tipo_materiale_codice: str
+    matricola_id: int | None
+    giro_materiale_id_origine: int
+    km_totali: float
+    minuti_servizio: int
+    n_corse_commerciali: int
+    eventi: list[MaterialeThreadEventoRead]
+
+
+@giri_dettaglio_router.get(
+    "/{giro_id}/threads",
+    response_model=list[MaterialeThreadListItem],
+    summary="Lista thread materiale del giro (L2 logici)",
+)
+async def list_threads_giro(
+    giro_id: int,
+    user: CurrentUser = _authz_read,
+    session: AsyncSession = Depends(get_session),
+) -> list[MaterialeThreadListItem]:
+    """Sprint 7.9 MR β2-4: lista dei thread logici del giro.
+
+    Per ogni "pezzo logico" della composizione massima del giro c'è
+    un thread con km_totali, minuti_servizio, n_corse_commerciali
+    aggregati. La UI mostra "thread di questo turno" con link al
+    dettaglio.
+    """
+    # Verifica esistenza giro per ritornare 404 prima dei thread.
+    g = (
+        await session.execute(
+            select(GiroMateriale).where(
+                GiroMateriale.id == giro_id,
+                GiroMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if g is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Giro {giro_id} non trovato.",
+        )
+    stmt = (
+        select(MaterialeThread)
+        .where(MaterialeThread.giro_materiale_id_origine == giro_id)
+        .order_by(MaterialeThread.tipo_materiale_codice, MaterialeThread.id)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return [MaterialeThreadListItem.model_validate(r) for r in rows]
+
+
+@giri_dettaglio_router.get(
+    "/threads/{thread_id}",
+    response_model=MaterialeThreadDettaglioRead,
+    summary="Dettaglio thread materiale + timeline eventi",
+)
+async def get_thread_dettaglio(
+    thread_id: int,
+    user: CurrentUser = _authz_read,
+    session: AsyncSession = Depends(get_session),
+) -> MaterialeThreadDettaglioRead:
+    """Sprint 7.9 MR β2-4: thread + lista eventi cronologica."""
+    # Carico il thread con check azienda
+    stmt = select(MaterialeThread).where(
+        MaterialeThread.id == thread_id,
+        MaterialeThread.azienda_id == user.azienda_id,
+    )
+    thread = (await session.execute(stmt)).scalar_one_or_none()
+    if thread is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Thread {thread_id} non trovato.",
+        )
+    eventi_stmt = (
+        select(MaterialeThreadEvento)
+        .where(MaterialeThreadEvento.thread_id == thread_id)
+        .order_by(MaterialeThreadEvento.ordine)
+    )
+    eventi = (await session.execute(eventi_stmt)).scalars().all()
+    return MaterialeThreadDettaglioRead(
+        id=thread.id,
+        tipo_materiale_codice=thread.tipo_materiale_codice,
+        matricola_id=thread.matricola_id,
+        giro_materiale_id_origine=thread.giro_materiale_id_origine,
+        km_totali=float(thread.km_totali),
+        minuti_servizio=thread.minuti_servizio,
+        n_corse_commerciali=thread.n_corse_commerciali,
+        eventi=[MaterialeThreadEventoRead.model_validate(e) for e in eventi],
     )

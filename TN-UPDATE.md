@@ -10,6 +10,110 @@
 
 ---
 
+## 2026-05-04 (134) — Sprint 7.9 MR β2-4: `MaterialeThread` + algoritmo proiezione (cuore β2)
+
+### Contesto
+
+Decisione utente 2026-05-04 (cuore di tutto β2):
+
+> "vogliamo tracciare ogni singolo pezzo continuo nei km, dalla
+> nascita al rientro, anche quando si fonde/separa da composizioni
+> diverse"
+
+MR β2-4 introduce il modello dati **L2 (thread logico)**: per ogni
+"pezzo logico" della composizione massima del giro, un
+`MaterialeThread` con la sua timeline di eventi (corsa singolo /
+doppia / tripla con posizione, vuoto, sosta, aggancio, sgancio,
+uscita/rientro deposito).
+
+### Modifiche backend
+
+`backend/src/colazione/models/anagrafica.py`:
+
+- Nuovo modello `MaterialeThread`:
+  - `id`, `azienda_id` (RESTRICT), `programma_id` (CASCADE),
+    `giro_materiale_id_origine` (CASCADE), `tipo_materiale_codice`,
+    `matricola_id` (NULLABLE → `MaterialeIstanza`, SET NULL).
+  - Stats aggregate: `km_totali NUMERIC(10,3)`, `minuti_servizio INT`,
+    `n_corse_commerciali INT`.
+- Nuovo modello `MaterialeThreadEvento`:
+  - `id`, `thread_id` (CASCADE), `ordine` (1-based progressivo),
+    `tipo` (corsa_singolo|corsa_doppia_pos1|...|sosta|aggancio|...),
+    `giro_blocco_id` (NULLABLE SET NULL), stazioni, ora, km, numero
+    treno, note.
+  - UNIQUE `(thread_id, ordine)` + indice `(thread, ordine)`.
+
+`backend/alembic/versions/0024_materiale_thread.py`:
+
+- Migration upgrade: 2 tabelle + indici + tutti i FK descritti.
+- Nessun seed (i thread sono proiettati dall'algoritmo durante la
+  generazione giri).
+
+`backend/src/colazione/domain/builder_giro/thread_proiezione.py`
+(modulo nuovo, ~250 righe):
+
+- `proietta_thread_giro(session, giro_materiale_id, azienda_id,
+  programma_id) → list[int]`: idempotente per giro (cancella thread
+  esistenti prima di ricostruire).
+- Algoritmo MVP step 1:
+  1. Carica blocchi della **variante canonica** (variant_index=0)
+     ordinati per giornata + seq.
+  2. Calcola **composizione max** del giro: per ogni materiale, max
+     n_pezzi visto in qualunque corsa.
+  3. Per ogni `(materiale, slot 1..N_max)` crea 1 thread.
+  4. Per ogni blocco genera 1 evento del tipo appropriato:
+     - `corsa_commerciale` con composizione contenente lo slot →
+       `corsa_singolo` / `corsa_doppia_pos{N}` / `corsa_tripla_pos{N}` /
+       `corsa_multipla_pos{N}`.
+     - `materiale_vuoto` con tipo_vuoto `uscita_deposito` →
+       `uscita_deposito`; `rientro_deposito` → omonimo; altrimenti
+       `vuoto_solo`.
+     - `aggancio`/`sgancio` se materiale matcha.
+  5. Aggrega `km_totali` (da `CorsaCommerciale.km_tratta`),
+     `minuti_servizio`, `n_corse_commerciali`.
+
+`backend/src/colazione/domain/builder_giro/persister.py`:
+
+- `persisti_giri` chiama `proietta_thread_giro` per ogni giro
+  appena persistito (idempotente, sicuro su rigenerazione).
+
+`backend/src/colazione/api/giri.py`:
+
+- `GET /api/giri/{id}/threads` → lista compatta thread del giro
+  (`MaterialeThreadListItem`).
+- `GET /api/giri/threads/{thread_id}` → dettaglio thread + timeline
+  eventi (`MaterialeThreadDettaglioRead`).
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 62 file clean (1 nuovo).
+- Backend `pytest` test puri 223 ✅ (nessuna regressione).
+
+### Stato
+
+- ✅ MR β2-4 completato.
+- 🟡 Smoke utente Railway: dopo migration 0024 + rigenerazione di un
+  giro, `GET /api/giri/{id}/threads` deve restituire N record (N =
+  somma pezzi composizione max). Es. ETR526×2 → 2 thread, ognuno con
+  km_totali pari ai km totali del giro (entrambi pezzi in linea).
+
+### Limitazioni note (scope futuro)
+
+- **Solo variante canonica**: le altre varianti calendariali generano
+  eventi propri se la sequenza diverge — TODO MR β2-4 step 2.
+- **Sosta tra sgancio/riaggancio** non modellata come evento
+  esplicito — TODO step 3 + integrazione `regola_invio_sosta` (β2-7).
+- **Cross-thread esterni** (= 2 giri scambiano un thread via
+  aggancio): il sourcing β2-3 lo descrive testualmente ma il thread
+  resta interno al giro origine. Bridge cross-giro = β2 v2.
+- `matricola_id` sempre NULL: assegnamento Manutenzione futuro.
+
+### Prossimo step
+
+β2-5: capacity istante-per-istante.
+
+---
+
 ## 2026-05-04 (133) — Sprint 7.9 MR β2-3: sourcing thread agganci/sganci + capacity check + bugfix render eventi UI
 
 ### Contesto

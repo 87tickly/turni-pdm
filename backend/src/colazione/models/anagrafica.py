@@ -16,6 +16,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    Numeric as sa_Numeric,
     String,
     Text,
     Time,
@@ -333,6 +334,139 @@ class RegolaInvioSosta(Base):
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class MaterialeThread(Base):
+    """Sprint 7.9 MR β2-4: thread logico (L2) di un singolo "pezzo" di
+    materiale dentro un giro materiale.
+
+    Concetto: quando 2 ETR526 viaggiano accoppiati (composizione di
+    2 pezzi sullo stesso treno commerciale), sono DUE thread logici
+    distinti. Ogni thread ha la sua sequenza temporale di eventi
+    (corsa singolo, corsa doppia, sosta in stazione, vuoto solo,
+    aggancio, sgancio, rientro deposito).
+
+    Decisione utente 2026-05-04:
+
+    > "Quando 2 ETR526 viaggiano accoppiati nello stesso treno, sono
+    > due materiali distinti che fanno cose anche diverse nel tempo
+    > (uno può essere agganciato a metà giornata, l'altro sganciato
+    > altrove). Vogliamo tracciare ogni singolo pezzo continuo nei km,
+    > dalla nascita al rientro, anche quando si fonde/separa da
+    > composizioni diverse."
+
+    Relazioni:
+    - ``giro_materiale_id_origine``: il giro che ha "creato" questo
+      thread (= thread proiettato dall'algoritmo β2-4 a partire da
+      una catena di quel giro). Un thread può attraversare più giri
+      se viaggia tramite agganci/sganci, ma la sua origine è un giro
+      specifico.
+    - ``matricola_id``: opzionale. Quando il ruolo Manutenzione
+      assegna il telaio fisico al thread, questa FK punta a una
+      ``MaterialeIstanza``. Per il pianificatore Giro Materiale resta
+      sempre NULL (è anonimo per lui).
+
+    Stats:
+    - ``km_totali``: somma km_tratta di tutte le corse commerciali
+      che il pezzo ha eseguito nel thread (= km del singolo pezzo
+      fisico nel ciclo, utile a Manutenzione per programmare revisioni).
+    """
+
+    __tablename__ = "materiale_thread"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    azienda_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("azienda.id", ondelete="RESTRICT")
+    )
+    programma_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("programma_materiale.id", ondelete="CASCADE"),
+    )
+    giro_materiale_id_origine: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("giro_materiale.id", ondelete="CASCADE")
+    )
+    tipo_materiale_codice: Mapped[str] = mapped_column(
+        String(50), ForeignKey("materiale_tipo.codice", ondelete="RESTRICT")
+    )
+    matricola_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("materiale_istanza.id", ondelete="SET NULL")
+    )
+    # Metriche aggregate calcolate dall'algoritmo proiezione.
+    km_totali: Mapped[float] = mapped_column(
+        sa_Numeric(10, 3), default=0, server_default="0"
+    )
+    minuti_servizio: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0"
+    )
+    n_corse_commerciali: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0"
+    )
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class MaterialeThreadEvento(Base):
+    """Sprint 7.9 MR β2-4: evento atomico nella timeline di un
+    `MaterialeThread`.
+
+    Tipi di evento:
+    - ``"corsa_singolo"``: il pezzo da solo svolge una corsa commerciale.
+    - ``"corsa_doppia_pos1"`` / ``"corsa_doppia_pos2"``: il pezzo è
+      parte di una composizione doppia, posizione 1 (testa) o 2 (coda).
+    - ``"corsa_tripla_pos1"`` / ``"_pos2"`` / ``"_pos3"``: tripla
+      composizione (es. 3×ETR421).
+    - ``"vuoto_solo"``: il pezzo si sposta vuoto da X a Y.
+    - ``"sosta_in_stazione"``: il pezzo è parcheggiato in una
+      stazione (es. tra sgancio e riaggancio).
+    - ``"aggancio"``: marker dell'evento di unione a un'altra
+      composizione (puntatore al `giro_blocco` aggancio).
+    - ``"sgancio"``: marker di separazione.
+    - ``"uscita_deposito"``: il pezzo esce per la prima volta.
+    - ``"rientro_deposito"``: chiusura ciclo, rientra in officina.
+
+    L'``ordine`` è progressivo dentro il thread (1-based). Per ogni
+    thread è garantita continuità geografica:
+    ``stazione_a[i] == stazione_da[i+1]`` (con possibile sosta o
+    vuoto fra i due se la stazione cambia).
+    """
+
+    __tablename__ = "materiale_thread_evento"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    thread_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("materiale_thread.id", ondelete="CASCADE")
+    )
+    ordine: Mapped[int] = mapped_column(Integer)  # progressivo 1-based
+    tipo: Mapped[str] = mapped_column(String(30))
+    # Riferimento al blocco originale del giro (per back-link UI).
+    giro_blocco_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("giro_blocco.id", ondelete="SET NULL")
+    )
+    stazione_da_codice: Mapped[str | None] = mapped_column(
+        String(20), ForeignKey("stazione.codice", ondelete="SET NULL")
+    )
+    stazione_a_codice: Mapped[str | None] = mapped_column(
+        String(20), ForeignKey("stazione.codice", ondelete="SET NULL")
+    )
+    ora_inizio: Mapped[time | None] = mapped_column(Time)
+    ora_fine: Mapped[time | None] = mapped_column(Time)
+    data_giorno: Mapped[date | None] = mapped_column(Date)
+    # km tratta (per corse commerciali) o NULL (per sosta/vuoto/marker).
+    km_tratta: Mapped[float | None] = mapped_column(sa_Numeric(10, 3))
+    # Numero treno commerciale (corsa) o virtuale 9XXX (vuoto), opaco
+    # per gli altri tipi.
+    numero_treno: Mapped[str | None] = mapped_column(String(20))
+    # Note libere (es. "Aggancio +1 ETR526 da treno 24812 a CENTRALE 09:55").
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("thread_id", "ordine", name="uq_thread_evento_ordine"),
     )
 
 

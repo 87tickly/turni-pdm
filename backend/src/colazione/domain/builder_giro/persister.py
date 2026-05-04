@@ -1016,6 +1016,10 @@ async def persisti_giri(
     if not giri_da_persistere:
         return []
 
+    from colazione.domain.builder_giro.thread_proiezione import (
+        proietta_thread_giro,
+    )
+
     giro_ids: list[int] = []
     for entry in giri_da_persistere:
         gid = await _persisti_un_giro(
@@ -1027,4 +1031,14 @@ async def persisti_giri(
             periodo_valido_a=periodo_valido_a,
         )
         giro_ids.append(gid)
+        # Sprint 7.9 MR β2-4: proietta i thread materiale subito dopo
+        # aver persistito il giro (richiede che i blocchi siano già
+        # in DB). Idempotente per giro: cancella thread esistenti
+        # prima di ricostruire.
+        await proietta_thread_giro(
+            session,
+            giro_materiale_id=gid,
+            azienda_id=azienda_id,
+            programma_id=programma_id,
+        )
     return giro_ids
