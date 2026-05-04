@@ -10,6 +10,122 @@
 
 ---
 
+## 2026-05-04 (127) — Sprint 7.11: dashboard intuitiva + integrazione anagrafica depositi PdC (3 MR + 1 hotfix Gantt)
+
+### Contesto
+
+Smoke utente sul deploy entry 126 ha rivelato 3 punti di feedback:
+
+1. **Gantt PdC non distintivo** — "il gantt del pdc non è stato modificato.
+   possiamo crearlo simile a quello del turno materiali con colori diversi?".
+   Il MR 7.10.6 aveva fatto evoluzione incrementale (fishbone, toggle asse,
+   barre h-12) ma non aveva portato il Gantt sulla grammatica visiva del
+   Gantt giro materiale (1° ruolo, single-line PDF Trenord).
+2. **Dashboard PdC dispersiva** — "la dashboard è dispersiva poco intuitiva".
+   La v1 (hero+checklist 3-step) era pensata per stato vuoto; con dati reali
+   (27 giri / 1 turno / 1 violazione) diventa rumore.
+3. **Manca l'anagrafica depositi PdC**. Confermato dall'utente: "dovremmo
+   anche iniziare a implementare i depositi dei pdc".
+
+### Modifiche (4 commit, di cui 1 hotfix Gantt + 3 Sprint 7.11)
+
+**Hotfix Gantt PdC — `frontend/src/routes/pianificatore-giro/TurnoPdcDettaglioRoute.tsx`**
+(commit `3ac5eca`, MR 7.10.7 fuori-Sprint):
+
+Riscrittura completa con pattern del Gantt giro materiale:
+- Card con toolbar in cima (titolo + giornate count + asse info + toggle)
+- Scroll wrapper con sticky AxisHeader (24 tick orari + corner sx/dx)
+- Per ogni giornata: single-line `ticks-bg` con blocchi posizionati
+  assolutamente, sticky-left "G{N}" + sticky-right "Prest./Cond."
+- 1h = 40px, TIMELINE_WIDTH_PX = 960
+- Helper `minToPx(min, offsetMin)` con shift modulo 24h
+- Distinzioni mantenute: asse default 00→23 (giornata umana, non 04→04
+  ciclo materiale), palette pastello dedicata PdC (CONDOTTA blu primary,
+  VETTURA sky, REFEZ emerald, ACC amber, CV orange, PK/SCOMP slate,
+  PRESA/FINE slate-dark, DORMITA viola)
+- Blocchi "thin" (PRESA/FINE/PK/SCOMP) renderizzati come barre h-3 sulla
+  mid-line, gli altri h-10
+- Sequenza blocchi tabella spostata sotto come `<details>`
+  collapsed-by-default per giornata
+
+**MR 7.11.1 — Dashboard PdC intuitiva**
+(commit `dbf5e5d`, `frontend/src/routes/pianificatore-pdc/DashboardRoute.tsx`):
+
+Riscrittura con concept "single-screen action-driven":
+- Header pagina compatto (no più hero verticale)
+- **CtaBanner** "Cosa fare ora" derivato dallo stato operativo:
+  - violazioni > 0 + turno noto → banner amber con bottone "Apri il turno"
+    link diretto al primo turno violato (lookup via useTurniPdcAzienda)
+  - giri > 0 e turni = 0 → CTA primary "Genera il primo turno"
+  - giri > turni → CTA primary "N giri ancora da convertire"
+  - tutto a posto → banner emerald success
+  - empty → coming-soon "Aspetta che il 1° ruolo pubblichi"
+- 4 KPI grandi (text-4xl) con border accent (amber/red) per stati
+  problematici. Sostituito KPI "Rev. cascading" con "Impianti coperti".
+- Layout 2-col sotto: SX "Ultimi turni" (lista 5 cliccabili) + DX
+  "Distribuzione per impianto" con mini-bar proporzionale al max
+  (visual quick-scan).
+- Footer scorciatoie compatto (preserva i link "Apri vista giri" /
+  "Apri lista turni" per coverage test esistente).
+
+**MR 7.11.2 — Integrazione anagrafica depot in TurniRoute + Dashboard**
+(commit `d83ea07`):
+
+Scoperta in fase di indagine: l'anagrafica completa dei 25 depositi PdC
+Trenord **esiste già** nel sistema (migration 0002, modello Depot,
+GET /api/depots, hook useDepots). Sprint 7.11 da 5 MR si è ridotto a 3.
+
+- `TurniRoute.tsx`: select "Filtra per impianto" popolato dalle 25 voci
+  canoniche via `useDepots()`. Retrocompatibile (fallback input free-text
+  se depot non disponibili — es. test che non mocka /api/depots).
+- `DashboardRoute.tsx`: KPI "Impianti coperti" diventa `N/25` con
+  denominatore reale. KpiCard estesa con prop opzionale `denominator`.
+
+**MR 7.11.3 — Route /pianificatore-pdc/depositi**
+(commit `c51302b`):
+
+- Nuova route `/pianificatore-pdc/depositi` (`DepositiRoute.tsx`):
+  tabella 25 righe (#/Codice/Nome esteso/Stazione principale/Turni PdC/dot
+  status). Cross-reference overview per turni count per deposito; link sul
+  count → Lista turni pre-filtrata `?impianto=CODICE`.
+- Voce sidebar "Depositi PdC" (icona `Building2`) nel gruppo Pianificatore
+  PdC, tra "Turni PdC" e "Rev. cascading".
+- AppRoutes.tsx: route registrata sotto `/pianificatore-pdc/`.
+- Anteprima ruolo GESTIONE_PERSONALE futuro: la route migrerà sotto
+  `/gestione-personale/depositi` quando il ruolo (4) sarà implementato.
+
+### Verifiche
+
+- pnpm typecheck: clean su tutti gli MR.
+- pnpm test: 52/53 passed (1 fail preesistente in
+  ProgrammaDettaglioRoute, già documentato in entry 124, non correlato).
+- Test specifici PdC (5 test files, 22 test totali): tutti verdi
+  (dashboard 5/5, giri 4/4, turni 5/5, turno-dettaglio 2/2, validazioni
+  6/6).
+
+### Stato
+
+- ✅ Hotfix Gantt PdC + 3 MR Sprint 7.11 completati (commit
+  `3ac5eca`/`dbf5e5d`/`d83ea07`/`c51302b`).
+- 🟡 Smoke utente Railway dopo deploy: verificare:
+  1. Gantt turno PdC ora ricalca il Gantt giro materiale (single-line,
+     ticks-bg, sticky cols, 1h=40px) con palette PdC dedicata.
+  2. Dashboard mostra banner "Cosa fare ora" contestuale (oggi: link
+     diretto al turno con violazione).
+  3. KPI "Impianti coperti" mostra `N/25` con il count reale.
+  4. Filtro "Impianto" in Lista turni è ora un select (non più input
+     free-text).
+  5. Nuova voce sidebar "Depositi PdC" → tabella 25 depositi cliccabile.
+
+### Prossimo step
+
+- Quando arriveremo a implementare il ruolo GESTIONE_PERSONALE (Sprint
+  futuro), spostare la route `/pianificatore-pdc/depositi` →
+  `/gestione-personale/depositi` con CRUD + assegnazioni + indisponibilità.
+- Eventuali micro-tweaks dashboard dopo smoke utente.
+
+---
+
 ## 2026-05-04 (126) — Sprint 7.10: implementazione handoff design Pianificatore PdC (6 MR)
 
 ### Contesto
