@@ -10,6 +10,66 @@
 
 ---
 
+## 2026-05-04 (119) — Code review post Sprint 7.5→7.9
+
+### Contesto
+
+Review incrementale sulla baseline `docs/CODE-REVIEW-2026-05-01.md`
+(post Sprint 7.4). Analizzato commit `b6a0b84` (entry 118, deploy
+Railway live). La review copre backend completo, frontend parziale,
+data/, tests/. Nessuna modifica al codice di produzione.
+
+### Modifiche
+
+Creato `docs/CODE-REVIEW-2026-05-04.md` con:
+
+**Stato finding precedenti**: 1 finding parzialmente chiuso (C3 — path
+SQL corretto, ORM non ancora adottato). Tutti gli altri 16 finding
+(C1–C6, I1–I11) rimangono aperti.
+
+**Nuovi finding CRITICI** (post-Sprint 7.9):
+- **NC1**: Due `session.commit()` separati in `genera_giri()` — crash
+  tra i due lascia giri orfani senza `BuilderRun` nel DB
+- **NC2**: FR §10.6 (max 1/sett, max 3/28gg) non enforced né segnalato
+  come warning
+- **NC3**: FR §10.5 (riposo minimo 6h) non verificato — `durata_pernotto`
+  calcolato ma non confrontato con la soglia normativa
+
+**Nuovi finding IMPORTANTI**:
+- **NC4**: `festivita` caricata da DB in ogni `genera_giri()` poi
+  immediatamente scartata (`_ = festivita  # noqa: F841`) — I/O inutile
+- **NC5**: Nessun `UniqueConstraint` su `TurnoPdc(azienda_id, codice)` —
+  duplicati possibili in caso di doppia generazione
+- **NC6**: `PRESTAZIONE_REFEZIONE_SOGLIA_MIN` e `REFEZIONE_MIN_RICHIESTI`
+  ridefiniti localmente in `api/turni_pdc.py:605–606` invece di essere
+  importati da `builder.py`
+- **NC7**: Query `text()` raw in `builder_giro/builder.py` (8 punti)
+  invece di ORM SQLAlchemy
+
+**Nuovi finding MINORI**:
+- **NM1**: `_genera_codice_turno` tronca silenziosamente a 48 char
+- **NM2**: `variante_calendario` default hardcoded senza CHECK constraint
+- **NM3**: Manca indice su `turno_pdc_blocco.turno_pdc_giornata_id`
+
+Totale finding: 6 CRITICI (3 riaperti + 3 nuovi), 12 IMPORTANTI
+(9 riaperti + 3 nuovi), 7 MINORI (4 riaperti + 3 nuovi).
+PR aperta con solo `docs/CODE-REVIEW-2026-05-04.md` (niente fix codice).
+
+### Stato
+
+Chiuso. Nessuna modifica al codice di produzione. PR in attesa di
+revisione.
+
+### Prossimo step
+
+Decidere quali finding intercalare prima di Sprint 7.3 (dashboard
+pianificatore PdC). Candidati immediati (<2h ciascuno): NC4 (rimozione
+festivita inutile), NC6 (import costanti), R-I1 (utcnow), R-I4
+(impianto), R-I2 (assert). Candidati urgenti (impatto normativo): NC1
+(transazione atomica), NC2 (warning FR limiti), NC3 (warning FR riposo).
+
+---
+
 ## 2026-05-04 (118) — Deploy Railway live + clone DB locale → produzione
 
 ### Contesto
