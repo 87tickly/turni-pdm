@@ -201,12 +201,19 @@ def test_due_giri_chiave_diversa_restano_aggregati_distinti() -> None:
     assert materiali == {"ETR204", "ETR425"}
 
 
-def test_n_giornate_diverse_date_disgiunte_si_fondono() -> None:
-    """Sprint 7.9 MR 10 (entry 109): cluster con n_giornate diversi MA
-    date di applicazione DISGIUNTE → fondono in UN aggregato di
-    lunghezza max. Il cluster corto contribuisce varianti alle prime K
-    giornate. Modello Trenord: "stesso convoglio in date diverse fa
-    percorsi diversi".
+def test_n_giornate_diverse_creano_turni_separati() -> None:
+    """Sprint 7.9 MR α (decisione utente 2026-05-04): cluster con
+    ``n_giornate`` diversi rappresentano pattern di servizio
+    semanticamente diversi (es. turno principale 8 giornate vs turno
+    di chiusura 5 giornate per il ponte) → turni A2 separati anche
+    quando le date di applicazione sono disgiunte.
+
+    Inverte il comportamento Sprint 7.8 MR 2.5: prima i due cluster
+    venivano fusi in un unico turno di 8 giornate, con il cluster da
+    5 che contribuiva varianti SOLO alle prime 5 giornate (giornate
+    6-8 con "ciclo non si estende qui" sull'UI). Modello PDF Trenord:
+    1134 = turno 8 giornate, 1135/1136/... = turni separati di
+    lunghezza diversa per pattern alternativi.
     """
     g_8 = _giro(
         materiale="ETR204",
@@ -232,21 +239,66 @@ def test_n_giornate_diverse_date_disgiunte_si_fondono() -> None:
         ),
     )
     out = aggrega_a2([g_8, g_5])
-    # 1 solo aggregato (date disgiunte), lunghezza canonica 8 (= max).
+    # 2 aggregati distinti per chiave (materiale, sede, n_giornate).
+    assert len(out) == 2
+    # Sort: stesso materiale+sede → ordine per n_giornate desc, quindi
+    # 8 giornate prima di 5 giornate.
+    lunghezze = [len(a.giornate) for a in out]
+    assert lunghezze == [8, 5]
+    for agg in out:
+        assert agg.materiale_tipo_codice == "ETR204"
+        assert agg.localita_codice == "LOC_X"
+        # Ogni turno = 1 cluster A1 (nessuna fusione cross-lunghezza).
+        assert agg.n_cluster_a1 == 1
+        # Ogni giornata di ogni turno ha esattamente 1 variante (il
+        # cluster A1 da cui proviene il turno).
+        for g in agg.giornate:
+            assert len(g.varianti) == 1
+
+
+def test_stessa_lunghezza_date_disgiunte_si_fondono() -> None:
+    """Sprint 7.9 MR α: cluster con stessa terna (materiale, sede,
+    n_giornate) E date disgiunte → varianti calendariali dello stesso
+    turno (M=2 per ogni giornata).
+
+    Caso reale: due pattern di servizio della stessa lunghezza per
+    settimane diverse del periodo di validità (es. variante "estiva"
+    vs variante "invernale" con stessa struttura ma percorsi diversi).
+    """
+    g_lv = _giro(
+        materiale="ETR204",
+        giornate=tuple(
+            _giornata(
+                data=date(2026, 5, 4 + i),
+                materiale="ETR204",
+                destinazione="TREVIGLIO",
+                dates_apply=(date(2026, 5, 4 + i),),
+            )
+            for i in range(5)
+        ),
+    )
+    g_var = _giro(
+        materiale="ETR204",
+        giornate=tuple(
+            _giornata(
+                data=date(2026, 6, 1 + i),
+                materiale="ETR204",
+                destinazione="CREMONA",
+                dates_apply=(date(2026, 6, 1 + i),),
+            )
+            for i in range(5)
+        ),
+    )
+    out = aggrega_a2([g_lv, g_var])
+    # 1 solo aggregato (stessa terna, date disgiunte, bin-packing OK).
     assert len(out) == 1
     agg = out[0]
-    assert len(agg.giornate) == 8
+    assert len(agg.giornate) == 5
     assert agg.n_cluster_a1 == 2
-    # Giornate 1-5: entrambi i cluster contribuiscono (2 varianti).
-    for k in range(5):
-        assert len(agg.giornate[k].varianti) == 2, (
-            f"giornata {k+1}: attese 2 varianti, ottenute {len(agg.giornate[k].varianti)}"
-        )
-    # Giornate 6-8: solo il cluster lungo contribuisce (1 variante).
-    for k in range(5, 8):
-        assert len(agg.giornate[k].varianti) == 1, (
-            f"giornata {k+1}: attesa 1 variante, ottenute {len(agg.giornate[k].varianti)}"
-        )
+    # Tutte le 5 giornate hanno 2 varianti (entrambi cluster
+    # contribuiscono per costruzione: stessa lunghezza).
+    for g in agg.giornate:
+        assert len(g.varianti) == 2
 
 
 def test_date_sovrapposte_creano_turni_separati() -> None:

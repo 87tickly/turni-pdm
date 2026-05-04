@@ -2,51 +2,50 @@
 materiali aggregati con varianti calendariali per giornata.
 
 Sprint 7.7 MR 5 (decisione utente "B1" del 2026-05-02) per il modello
-varianti-per-giornata. Sprint 7.8 MR 2.5 (decisione utente
-2026-05-03) ribalta la chiave A2 per chiudere la frammentazione:
+varianti-per-giornata. Sprint 7.8 MR 2.5 aveva poi unificato cluster
+di lunghezze diverse nello stesso turno (chiave senza ``n_giornate``)
+per evitare frammentazione. **Sprint 7.9 MR α (decisione utente
+2026-05-04) ripristina ``n_giornate`` nella chiave**: in MR 2.5 si era
+esagerato — fondere cluster di lunghezze diverse generava turni
+incoerenti per data, con varianti che esistevano solo su alcune
+giornate (warning UI "ciclo non si estende qui" + ⚠ congruenza notte).
 
-> "non è che tutte le giornate sono 8 possiamo mettere un minimo di
-> partenza fino a un max di 12, eccezion fatta quando dobbiamo
-> chiudere i treni che potrebbe capitare che escano solo 2 giornate"
+Decisione utente 2026-05-04:
 
-> "se ti chiedo un turno 421+421 lui deve generare un tot di giornate"
+> "il turno è relativo a un solo materiale no a molteplici materiali.
+> quindi va fixato e trovato l'algoritmo giusto." (sul fatto che
+> selezionando una variante in giornata K si vedeva un convoglio
+> diverso in giornata K+1)
 
-Modello di riferimento: PDF Trenord turno 1134 (ETR204 FIO 8 giornate)
-— UN turno con N giornate-pattern, ciascuna con M varianti
-calendariali. Il convoglio fisico ESEGUE giornata 1 → 2 → ... → N,
-poi ricomincia. Pre-7.8 MR 2.5 il modello produceva N turni separati,
-uno per ogni lunghezza emergente dal builder (1, 2, ..., 12) =
-frammentazione.
+Conseguenza: cluster A1 di lunghezze diverse → turni A2 distinti.
+Trenord usa lo stesso pattern (turno 1134 = 8 giornate ETR204, turno
+1135/1136/... per pattern di lunghezza ridotta). Più turni totali, ma
+ognuno coerente per costruzione: presa una data X qualunque
+appartenente al turno, seguendo le N giornate si ricostruisce la
+traiettoria fisica continua di UN solo convoglio.
 
-Chiave A2 (Sprint 7.8 MR 2.5): ``(materiale_tipo_codice,
-localita_codice)``. Tutti i ``GiroAssegnato`` con la stessa coppia
-materiale+sede confluiscono in UN ``GiroAggregato`` con
-``n_giornate = max(len(g.giornate) for g in cluster)``.
+**Chiave A2 (Sprint 7.9 MR α)**: ``(materiale_tipo_codice,
+localita_codice, n_giornate)`` con ``n_giornate = len(g.giornate)``.
+Tutti i ``GiroAssegnato`` con stessa terna confluiscono in UN
+``GiroAggregato`` di lunghezza ``n_giornate``, con M varianti per
+ciascuna delle N giornate (M = numero di cluster A1 di quella terna).
 
-Allineamento giornate (Sprint 7.8 MR 2.5):
-
-- I cluster A1 di lunghezza ``L < canonical`` contribuiscono varianti
-  alle PRIME L giornate-pattern. Per le giornate K > L, il cluster non
-  contribuisce variante (le sue date non hanno copertura per quelle
-  giornate del ciclo — sono pattern "di chiusura" sotto soft floor o
-  tronchi naturali).
-- Cluster con lunghezza == canonical contribuiscono varianti a TUTTE
-  le N giornate del ciclo.
+**Bin-packing convogli paralleli (Sprint 7.9 MR 10, entry 109)** —
+intatto, opera DENTRO il gruppo per chiave A2: cluster con date di
+applicazione SOVRAPPOSTE (= convogli fisici diversi in parallelo)
+restano in turni separati anche a parità di chiave A2.
 
 **Disgiunzione delle date** per costruzione del clustering A1: due
 cluster A1 distinti hanno sequenze di catene diverse → date di
-partenza disgiunte. Pre-7.8 MR 2.5 questo era garantito a livello
-giornata-K (chiave includeva n_giornate); ora resta garantito a
-livello cluster_di_origine ma due cluster di lunghezza diversa
-possono avere lo stesso pattern G1=G1 (prima giornata identica).
-Questo è OK: due varianti diverse della giornata K=1 con sequenze
-identiche e date disgiunte sono semanticamente equivalenti — il
-caller può fonderle se vuole (oggi le tiene separate per tracciare
-il cluster A1 di provenienza).
+partenza disgiunte. Con la nuova chiave A2 vincoliamo anche le
+lunghezze a coincidere, quindi ogni giornata-K del turno aggregato
+ha SEMPRE la stessa cardinalità di varianti (= numero di cluster A1
+nel gruppo) — non c'è più "buco" su giornate finali.
 
 **Stats aggregate**: il giro aggregato eredita ``chiuso``,
-``motivo_chiusura``, ``km_cumulati`` dal cluster CANONICO (= cluster
-con ``len(giornate) == canonical``, primo ordinato per data minima).
+``motivo_chiusura``, ``km_cumulati`` dal cluster CANONICO (= primo
+ordinato per data minima — tutti i cluster nel gruppo hanno stessa
+lunghezza, quindi non serve più tie-break per len).
 
 Il modulo è **DB-agnostic**.
 """
@@ -193,38 +192,42 @@ def _giornata_a_variante(g: GiornataAssegnata) -> VarianteGiornata:
 
 
 def aggrega_a2(giri_a1: list[GiroAssegnato]) -> list[GiroAggregato]:
-    """Aggrega i ``GiroAssegnato`` per chiave A2 ``(materiale, sede)``.
+    """Aggrega i ``GiroAssegnato`` per chiave A2 ``(materiale, sede,
+    n_giornate)``.
 
-    Sprint 7.8 MR 2.5 — refactor della chiave A2: ``n_giornate`` non
-    fa più parte della chiave. Tutti i cluster A1 con la stessa coppia
-    ``(materiale, sede)`` confluiscono in UN ``GiroAggregato`` di
-    lunghezza pari al massimo cluster (canonical). I cluster più corti
-    contribuiscono varianti alle prime K giornate.
+    Sprint 7.9 MR α — ripristino di ``n_giornate`` nella chiave (vedi
+    docstring del modulo). Cluster A1 di lunghezze diverse vanno in
+    turni A2 separati, garantendo che ogni giornata-K abbia varianti
+    coerenti per costruzione: presa una data X del turno e seguite
+    tutte le N giornate, la traiettoria del convoglio è fisicamente
+    continua.
 
     Pipeline:
 
     1. Filtra i giri "orfani" (senza ``materiale_tipo_codice``
        determinabile, = solo corse residue): vengono scartati.
-    2. Raggruppa per ``(materiale_tipo_codice, localita_codice)``.
-    3. Per ogni gruppo:
-       - ``canonical_len`` = max(``len(g.giornate)``).
-       - Ordina i cluster per ``(-len, data_partenza_minima)`` →
-         primo è il cluster canonico (max lunghezza, più antico).
-       - Per ogni K = 0..canonical_len-1, raccoglie le
-         ``GiornataAssegnata[K]`` SOLO dai cluster che hanno
-         ``len(giornate) > K``.
-    4. Eredita ``chiuso``, ``motivo_chiusura``, ``km_cumulati`` dal
-       canonico. Concatena ``corse_residue`` e
-       ``incompatibilita_materiale`` di TUTTI i cluster.
+    2. Raggruppa per ``(materiale_tipo_codice, localita_codice,
+       n_giornate)``. Tutti i cluster nello stesso gruppo hanno
+       stessa lunghezza per costruzione.
+    3. Bin-packing convogli paralleli (Sprint 7.9 MR 10, entry 109)
+       DENTRO ogni gruppo: cluster con date di occupazione sovrapposte
+       → turni separati (= convogli fisici in parallelo). Cluster con
+       date disgiunte → varianti calendariali dello stesso turno.
+    4. Per ogni turno, costruisce un ``GiroAggregato`` di N giornate
+       (= ``n_giornate`` della chiave). Ogni giornata-K ha M varianti
+       (= numero di cluster A1 fusi nel turno).
+    5. Eredita ``chiuso``, ``motivo_chiusura``, ``km_cumulati`` dal
+       canonico (= primo cluster per data minima). Concatena
+       ``corse_residue`` e ``incompatibilita_materiale`` di TUTTI i
+       cluster del turno.
 
     Args:
         giri_a1: lista di ``GiroAssegnato`` post-clustering A1.
 
     Returns:
-        Lista di ``GiroAggregato``, ordinata per chiave
-        ``(materiale, sede)``. Numero di giri = numero di coppie
-        distinte materiale×sede del programma (tipicamente 1 per
-        regola ETR421+ETR421 su sede FIO → 1 giro aggregato).
+        Lista di ``GiroAggregato``, ordinata per chiave ``(materiale,
+        sede, n_giornate, data_minima_canonico)``. Numero di giri
+        ≥ numero di terne distinte (≥ a causa del bin-packing).
 
     Esempi:
         Input vuoto:
@@ -232,42 +235,33 @@ def aggrega_a2(giri_a1: list[GiroAssegnato]) -> list[GiroAggregato]:
         >>> aggrega_a2([])
         []
     """
-    # 1. Raggruppa per chiave A2 (Sprint 7.8 MR 2.5: senza n_giornate).
-    per_chiave: dict[tuple[str, str], list[GiroAssegnato]] = {}
+    # 1. Raggruppa per chiave A2 (Sprint 7.9 MR α: include n_giornate).
+    per_chiave: dict[tuple[str, str, int], list[GiroAssegnato]] = {}
     for g in giri_a1:
         materiale = _materiale_codice_giro(g)
         if materiale is None:
             # Giro orfano (solo corse residue): scartato dall'A2.
             continue
-        chiave = (materiale, g.localita_codice)
+        chiave = (materiale, g.localita_codice, len(g.giornate))
         per_chiave.setdefault(chiave, []).append(g)
 
     # 2. Bin-packing convogli paralleli (Sprint 7.9 MR 10, entry 109).
     #
     # Decisione utente 2026-05-03: "se l'algoritmo crea 3 varianti
     # applicate nello stesso giorno è un bene, ma deve allora creare
-    # 3 turni diversi con le proprie giornate specifiche". Il modello
-    # Trenord (PDF 1134) descrive UN turno materiale = UN convoglio
-    # fisico, con varianti calendariali (date diverse, percorsi diversi).
-    # Cluster A1 con date di applicazione SOVRAPPOSTE rappresentano
-    # convogli fisici DIVERSI che operano in parallelo — vanno in turni
-    # separati, non come varianti dello stesso turno.
+    # 3 turni diversi con le proprie giornate specifiche". Cluster A1
+    # con date di applicazione SOVRAPPOSTE rappresentano convogli
+    # fisici DIVERSI in parallelo — turni separati. Cluster con date
+    # disgiunte → varianti calendariali dello stesso turno.
     #
-    # Algoritmo: greedy bin-packing per gruppo (materiale, sede). Ordina
-    # i cluster per (lunghezza desc, data minima asc) — il cluster più
-    # lungo apre il primo turno (= turno canonico), i restanti vengono
-    # assegnati al PRIMO turno con date di occupazione disgiunte. Se
-    # nessuno è compatibile, apre un nuovo turno. Numero turni risultante
-    # = max numero convogli fisici paralleli per quella coppia
-    # (materiale, sede). Per Trenord ETR421+FIO con 472 treni e
-    # 608 km/giorno medi → ci aspettiamo ~9 turni (= 9 convogli ETR421
-    # in parallelo a Fiorenza).
+    # Sprint 7.9 MR α: opera DENTRO ogni gruppo per chiave A2 (stessa
+    # terna materiale+sede+n_giornate). Cluster di lunghezze diverse
+    # sono già in gruppi distinti.
     aggregati: list[GiroAggregato] = []
-    for (materiale, localita), giri_cluster in per_chiave.items():
-        giri_ordinati = sorted(
-            giri_cluster,
-            key=lambda g: (-len(g.giornate), _data_partenza_minima(g)),
-        )
+    for (materiale, localita, _n), giri_cluster in per_chiave.items():
+        # Ordina per data minima asc (tutti i cluster hanno stessa
+        # lunghezza nel gruppo: niente più tie-break per len).
+        giri_ordinati = sorted(giri_cluster, key=_data_partenza_minima)
 
         # Bin-packing greedy: assegna ogni cluster al primo turno con
         # date di occupazione disgiunte. Se non esiste, apre un turno
@@ -287,21 +281,18 @@ def aggrega_a2(giri_a1: list[GiroAssegnato]) -> list[GiroAggregato]:
                 turni.append([giro])
                 date_per_turno.append(date_giro)
 
-        # 3. Per ogni turno, costruisci un GiroAggregato con le sue
-        #    giornate-pattern e le varianti calendariali interne.
+        # 3. Per ogni turno, costruisci un GiroAggregato con le sue N
+        #    giornate-pattern (tutte coperte per costruzione: i cluster
+        #    nel turno hanno tutti stessa lunghezza).
         for cluster_turno in turni:
-            canonical_len = max(len(g.giornate) for g in cluster_turno)
-            # Cluster_turno è già ordinato per lunghezza desc dato che
-            # eredita l'ordinamento di giri_ordinati. Il canonico è
-            # quindi il primo del turno.
             canonico = cluster_turno[0]
+            n_giornate = len(canonico.giornate)
 
             giornate_aggregate: list[GiornataAggregata] = []
-            for k in range(canonical_len):
+            for k in range(n_giornate):
                 varianti = tuple(
                     _giornata_a_variante(giro.giornate[k])
                     for giro in cluster_turno
-                    if k < len(giro.giornate)
                 )
                 giornate_aggregate.append(
                     GiornataAggregata(numero_giornata=k + 1, varianti=varianti)
@@ -327,13 +318,15 @@ def aggrega_a2(giri_a1: list[GiroAssegnato]) -> list[GiroAggregato]:
                 )
             )
 
-    # 4. Output ordinato per (materiale, sede, data minima del canonico).
-    #    Stessa coppia materiale+sede → turni vicini, ordinati per data
-    #    di partenza del canonico (= numerazione progressiva naturale).
+    # 4. Output ordinato per (materiale, sede, n_giornate desc, data
+    #    minima canonico). N_giornate desc → turno "principale" (più
+    #    lungo) prima dei suoi pattern di chiusura più corti, a parità
+    #    di materiale+sede.
     aggregati.sort(
         key=lambda a: (
             a.materiale_tipo_codice,
             a.localita_codice,
+            -len(a.giornate),
             min(
                 (d for g in a.giornate for v in g.varianti for d in v.dates_apply),
                 default=date.max,

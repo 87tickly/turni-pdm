@@ -10,6 +10,134 @@
 
 ---
 
+## 2026-05-04 (123) — Sprint 7.9 MR α: rollback chiave A2 a `(materiale, sede, n_giornate)`
+
+### Contesto
+
+Smoke utente sul giro post entry 122 ha rivelato un problema strutturale,
+non cosmetico:
+
+> "il turno è relativo a un solo materiale no a molteplici materiali.
+> quindi va fixato e trovato l'algoritmo giusto."
+
+Selezionando `Solo 10/6/26` su giornata 4 si vedeva sulle giornate
+successive una variante `LV` di un convoglio fisicamente diverso —
+giornata 4 finiva a CENTRALE/TIRANO ma giornata 5 partiva da SONDRIO.
+La UI mostrava i due warning corretti (`ⓘ ciclo non si estende qui` +
+`⚠ congruenza`) ma il modello dati permetteva la situazione di base.
+
+### Diagnosi
+
+Sprint 7.8 MR 2.5 (entry 101) aveva tolto `n_giornate` dalla chiave A2
+per "chiudere la frammentazione". Conseguenza: tutti i cluster A1 con
+stesso `(materiale, sede)` confluivano nello stesso `GiroAggregato`
+con `n_giornate = max(len)`. I cluster più corti contribuivano varianti
+solo alle prime K giornate ([aggregazione_a2.py:300 vecchio] `if k <
+len(giro.giornate)`). Da qui le varianti "monche" sulle giornate finali
+e la mix di convogli diversi nello stesso turno.
+
+### Decisione utente 2026-05-04
+
+Conferma esplicita su (a) della proposta architetturale:
+
+> "confermo a"
+
+Riportare `n_giornate` nella chiave A2. Cluster A1 di lunghezze diverse
+→ turni A2 separati per costruzione. Più turni totali (Trenord usa
+1134 = 8g, 1135 = pattern di chiusura 4g, ecc.), ognuno coerente per
+ogni data che vi appartiene.
+
+### Modifiche
+
+`backend/src/colazione/domain/builder_giro/aggregazione_a2.py`:
+
+- Chiave A2: `(materiale, sede)` → **`(materiale, sede, n_giornate)`**
+  con `n_giornate = len(g.giornate)`.
+- Loop varianti per giornata-K: rimosso `if k < len(giro.giornate)`,
+  ora tutti i cluster del gruppo contribuiscono a tutte le N giornate
+  per costruzione (stessa lunghezza).
+- Sort cluster: rimosso tie-break per `-len` (inutile, tutti uguali nel
+  gruppo); ora puro `data_partenza_minima`.
+- Sort output: aggiunto `-len(giornate)` come penultimo criterio →
+  turni più lunghi prima dei pattern di chiusura più corti, a parità
+  di materiale+sede.
+- Bin-packing convogli paralleli (Sprint 7.9 MR 10) **intatto**, opera
+  ora dentro ogni gruppo per chiave A2.
+- Docstring del modulo + funzione `aggrega_a2` riscritte per riflettere
+  il rollback semantico.
+
+`backend/src/colazione/domain/builder_giro/builder.py`:
+
+- `numero_turno` ora include suffisso `-{n_giornate}g`:
+  `G-FIO-001-ETR526-7g` vs `G-FIO-002-ETR526-1g`. Distingue a colpo
+  d'occhio i turni di lunghezza diversa stesso materiale+sede.
+  Dimensione massima stimata 25 char << `String(40)` colonna.
+
+`backend/tests/test_aggregazione_a2.py`:
+
+- `test_n_giornate_diverse_date_disgiunte_si_fondono` → riscritto come
+  `test_n_giornate_diverse_creano_turni_separati`: stesso input, ora
+  asserisce 2 aggregati distinti (uno 8g, uno 5g) con 1 variante
+  ciascuno invece dell'aggregato unico 8g con varianti monche.
+- Nuovo test `test_stessa_lunghezza_date_disgiunte_si_fondono`:
+  conferma il caso opposto (stessa terna + date disgiunte → varianti
+  calendariali nello stesso turno).
+
+`backend/tests/test_builder_giri.py`:
+
+- `test_happy_path_1_corsa_1_giro`: aggiornato `numero_turno` atteso
+  da `G-TBLD-001-ALe711` a `G-TBLD-001-ALe711-1g`.
+
+### Smoke locale
+
+Scenario simulato: cluster LV 7g + 2 cluster Solo 4g (date disgiunte) +
+1 cluster Solo 1g, tutti ETR526 sede FIO. Output:
+
+```
+T1: ETR526 sede=FIO N=7g cluster_a1=1   ← LV
+T2: ETR526 sede=FIO N=4g cluster_a1=2   ← 2 Solo 4g fusi (date disgiunte)
+T3: ETR526 sede=FIO N=1g cluster_a1=1   ← Solo 1g
+```
+
+Ogni turno: 100% delle giornate coperte (nessun "ciclo non si estende
+qui" possibile per costruzione).
+
+### Verifiche
+
+- `mypy --strict` ✅ 60 file clean.
+- `pytest` ✅ **560 passed, 12 skipped** (1 test riscritto, 1 nuovo, 1
+  numero_turno aggiornato).
+
+### Conseguenze attese in produzione
+
+- Numero turni aumenta sui programmi multi-cluster. Stima programma
+  "prova" Tirano: ETR526-FIO da 1 turno (7g, 13 varianti) → 3-5 turni
+  separati per lunghezza.
+- Sparisce il warning UI "ciclo non si estende qui" (= impossibile per
+  costruzione, non solo nascosto).
+- Sparisce il warning "⚠ congruenza" sulla notte tra giornate (=
+  varianti adiacenti appartengono sempre allo stesso convoglio fisico).
+- Numerazione turni: `G-FIO-001-ETR526-7g`, `G-FIO-002-ETR526-4g`, ecc.
+
+### Stato
+
+- ✅ MR α completato.
+- 🟡 Smoke utente Railway sul programma "prova" per validare:
+  1. Conteggio turni materiali risulta superiore a prima.
+  2. Selezionando una variante qualunque su una giornata, le altre
+     giornate del turno mostrano varianti coerenti (stessa traiettoria
+     fisica per ogni data).
+  3. Niente più badge "ciclo non si estende qui" né "⚠ congruenza".
+
+### Prossimo step
+
+MR β1 (etichette esplicite vuoti / cross-notte / "materiale in sosta a
+X") + MR β2 (modellare incrocio thread per agganci composizione "+N
+pezzi dal treno Y") + MR γ (layout asse 1h=40px). Da affrontare
+sequenzialmente in ordine di costo crescente.
+
+---
+
 ## 2026-05-04 (122) — Hotfix Railway: Dockerfile.backend copia `data/` per vincoli inviolabili
 
 ### Contesto

@@ -259,7 +259,8 @@ async def test_happy_path_1_corsa_1_giro(azienda_id: int) -> None:
                 select(GiroMateriale).where(GiroMateriale.id == result.giri_ids[0])
             )
         ).scalar_one()
-        assert gm.numero_turno == "G-TBLD-001-ALe711"
+        # Sprint 7.9 MR α: numero_turno include suffisso `-{n_giornate}g`.
+        assert gm.numero_turno == "G-TBLD-001-ALe711-1g"
         assert gm.materiale_tipo_codice == "ALe711"
         # generation_metadata_json contiene programma_id
         assert gm.generation_metadata_json["programma_id"] == prog_id

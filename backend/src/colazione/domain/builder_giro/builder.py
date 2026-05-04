@@ -933,23 +933,27 @@ async def genera_giri(
     #    centinaia di micro-cluster da 1 data ciascuno.
     giri_fusi = fonde_cluster_simili(giri_assegnati)
 
-    # 7. Aggregazione A2 (Sprint 7.8 MR 2.5 + 7.9 MR 10):
-    #    bin-packing convogli paralleli per chiave (materiale, sede).
-    #    Cluster A1 con date sovrapposte → turni separati (= convogli
-    #    fisici diversi). Cluster con date disgiunte → varianti
-    #    calendariali dello stesso turno.
+    # 7. Aggregazione A2 (Sprint 7.8 MR 2.5 + 7.9 MR 10 + 7.9 MR α):
+    #    chiave (materiale, sede, n_giornate). Cluster A1 di lunghezze
+    #    diverse → turni separati per costruzione (decisione utente
+    #    2026-05-04: ogni turno deve essere coerente per ogni data,
+    #    niente "ciclo non si estende qui"). Bin-packing per convogli
+    #    paralleli resta intatto dentro ogni gruppo per chiave A2.
     giri_aggregati = aggrega_a2(giri_fusi)
 
     # 8. Genera numero_turno + persisti.
     # Sprint 7.7 MR 1 (Fix C "rientro intelligente"): genera_rientro_sede
     # è SEMPRE True; il persister decide in base alla destinazione
     # dell'ultima variante dell'ultima giornata (vedi persister.py).
-    # Sprint 7.7 MR 4: numero_turno include il materiale
-    # (``G-{LOC}-{SEQ}-{MAT}``).
+    # Sprint 7.7 MR 4: numero_turno include il materiale.
+    # Sprint 7.9 MR α: aggiunto suffisso `-{n_giornate}g` per
+    # distinguere a colpo d'occhio turni di lunghezze diverse stesso
+    # materiale+sede (es. G-FIO-001-ETR526-7g vs G-FIO-002-ETR526-1g).
     giri_da_persistere: list[GiroDaPersistere] = []
     for idx, giro_agg in enumerate(giri_aggregati, start=1):
         numero_turno = (
             f"G-{localita.codice_breve}-{idx:03d}-{giro_agg.materiale_tipo_codice}"
+            f"-{len(giro_agg.giornate)}g"
         )
         giri_da_persistere.append(
             GiroDaPersistere(
