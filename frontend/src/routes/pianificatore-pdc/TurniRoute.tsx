@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { useTurniPdcAzienda } from "@/hooks/useTurniPdc";
+import { useDepots } from "@/hooks/useAnagrafiche";
 import { ApiError } from "@/lib/api/client";
 import type { TurnoPdcListItem } from "@/lib/api/turniPdc";
 import { formatDateIt, formatNumber } from "@/lib/format";
@@ -48,6 +49,10 @@ export function PianificatorePdcTurniRoute() {
     stato: stato.length > 0 ? stato : undefined,
     limit: PAGE_SIZE,
   });
+  // Sprint 7.11 MR 7.11.2: lista depot dall'anagrafica server-side per
+  // popolare il select "Impianto" con le 25 voci canoniche Trenord
+  // invece di lasciare un input free-text che poteva accettare typo.
+  const depotsQuery = useDepots();
 
   const data = turniQuery.data;
   const total = data?.length ?? 0;
@@ -217,13 +222,33 @@ export function PianificatorePdcTurniRoute() {
                       />
                     </th>
                     <th className="px-2 py-1.5">
-                      <input
-                        className={FILTER_INPUT_CLASS}
-                        placeholder="MILANO_GA, BRESCIA, …"
-                        value={impianto}
-                        onChange={(e) => setImpianto(e.target.value)}
-                        aria-label="Filtra per impianto"
-                      />
+                      {depotsQuery.data !== undefined && depotsQuery.data.length > 0 ? (
+                        <select
+                          className={FILTER_INPUT_CLASS}
+                          value={impianto}
+                          onChange={(e) => setImpianto(e.target.value)}
+                          aria-label="Filtra per impianto"
+                        >
+                          <option value="">
+                            Tutti ({depotsQuery.data.length})
+                          </option>
+                          {depotsQuery.data.map((d) => (
+                            <option key={d.codice} value={d.codice}>
+                              {d.codice}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        // Fallback: senza anagrafica depot (loading o error)
+                        // resta un input free-text retrocompatibile.
+                        <input
+                          className={FILTER_INPUT_CLASS}
+                          placeholder="MILANO_GA, BRESCIA, …"
+                          value={impianto}
+                          onChange={(e) => setImpianto(e.target.value)}
+                          aria-label="Filtra per impianto"
+                        />
+                      )}
                     </th>
                     <th className="px-2 py-1.5" />
                     <th className="px-2 py-1.5" />

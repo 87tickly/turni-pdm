@@ -15,6 +15,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { usePianificatorePdcOverview } from "@/hooks/usePianificatorePdc";
 import { useTurniPdcAzienda } from "@/hooks/useTurniPdc";
+import { useDepots } from "@/hooks/useAnagrafiche";
 import { cn } from "@/lib/utils";
 
 /**
@@ -43,6 +44,10 @@ export function PianificatorePdcDashboardRoute() {
   const { user } = useAuth();
   const overview = usePianificatorePdcOverview();
   const turniQuery = useTurniPdcAzienda({ limit: 10 });
+  // Sprint 7.11 MR 7.11.2: anagrafica depot per il denominatore del KPI
+  // "Impianti coperti" (N / TOTALE_DEPOSITI). Senza anagrafica resta solo
+  // il numeratore.
+  const depotsQuery = useDepots();
 
   const data = overview.data;
   const giriCount = data?.giri_materiali_count ?? 0;
@@ -50,6 +55,7 @@ export function PianificatorePdcDashboardRoute() {
     ? 0
     : data.turni_pdc_per_impianto.reduce((sum, item) => sum + item.count, 0);
   const impiantiCount = data?.turni_pdc_per_impianto.length ?? 0;
+  const impiantiTotali = depotsQuery.data?.length ?? null;
   const violazioniHard = data?.turni_con_violazioni_hard ?? 0;
 
   const turniList = turniQuery.data ?? [];
@@ -166,7 +172,12 @@ export function PianificatorePdcDashboardRoute() {
           value={impiantiCount}
           loading={overview.isLoading}
           error={overview.isError}
-          hint="Depositi PdC con almeno 1 turno"
+          hint={
+            impiantiTotali !== null
+              ? `Su ${impiantiTotali} depositi PdC totali`
+              : "Depositi PdC con almeno 1 turno"
+          }
+          denominator={impiantiTotali}
         />
       </section>
 
@@ -504,6 +515,8 @@ interface KpiCardProps {
   error: boolean;
   hint: string;
   accent?: "neutral" | "warning" | "danger";
+  /** Se presente, il valore è renderizzato come `value/denominator`. */
+  denominator?: number | null;
 }
 
 function KpiCard({
@@ -514,8 +527,15 @@ function KpiCard({
   error,
   hint,
   accent = "neutral",
+  denominator = null,
 }: KpiCardProps) {
-  const display = loading ? "…" : error ? "—" : String(value);
+  const display = loading
+    ? "…"
+    : error
+      ? "—"
+      : denominator !== null
+        ? `${value}/${denominator}`
+        : String(value);
   const accentBorder = {
     neutral: "border-border",
     warning: "border-amber-300 ring-1 ring-amber-100",
