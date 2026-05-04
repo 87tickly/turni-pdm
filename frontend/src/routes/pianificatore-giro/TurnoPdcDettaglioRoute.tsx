@@ -254,7 +254,10 @@ function Avvisi({
 const TIMELINE_WIDTH_PX = 960; // 1h = 40px (coerente col Gantt giro)
 const GIORNATA_LABEL_COL_PX = 110;
 const STATS_COL_PX = 140;
-const TIMELINE_ROW_HEIGHT_PX = 56;
+// Sprint 7.11 MR 7.11.4: row height aumentata da 56 a 80 per ospitare il
+// layout multi-line dei blocchi CONDOTTA/VETTURA (stazioni sopra + treno
+// centro + orari sotto), coerente col CommercialeBlocco del Gantt giro.
+const TIMELINE_ROW_HEIGHT_PX = 80;
 const HEADER_AXIS_HEIGHT_PX = 36;
 const AXIS_TOTAL_MIN = 24 * 60;
 
@@ -574,30 +577,184 @@ function BloccoSegment({
   const widthPx = Math.max(6, endPx - startPx);
 
   const tipo = blocco.tipo_evento;
-  const colorClass = colorForTipoEvento(tipo);
-  const isShort = widthPx < 30;
   const tooltip = bloccoTooltip(blocco);
-  const label = bloccoLabel(blocco);
 
-  // Vuoti (PRESA/FINE/PK/SCOMP/CV) e blocchi corti: barra più sottile,
-  // niente label inline (overflow troncato), tutto in tooltip.
-  const isThin = tipo === "PRESA" || tipo === "FINE" || tipo === "PK" || tipo === "SCOMP";
+  // CONDOTTA / VETTURA — layout multi-line ricco (stazioni sopra, treno
+  // dentro, orari sotto), coerente col CommercialeBlocco del Gantt giro.
+  // Per gli altri tipi (REFEZ/ACC/CV/PK/SCOMP/PRESA/FINE/DORMITA), blocco
+  // semplice a unica riga con label centrale.
+  if (tipo === "CONDOTTA" || tipo === "VETTURA") {
+    return (
+      <CommercialBlock
+        blocco={blocco}
+        startPx={startPx}
+        widthPx={widthPx}
+        tooltip={tooltip}
+      />
+    );
+  }
+
+  return (
+    <SimpleBlock
+      blocco={blocco}
+      startPx={startPx}
+      widthPx={widthPx}
+      tooltip={tooltip}
+    />
+  );
+}
+
+/**
+ * Blocco "ricco" multi-line per CONDOTTA / VETTURA — i tipi di blocco che
+ * portano effettivamente l'utente da A a B e meritano un layout esplicito
+ * con stazioni e orari, coerente col CommercialeBlocco del Gantt giro.
+ *
+ * Soglie scalate a 40px/h: ≥47px mostra stazioni, ≥33px mostra orari.
+ */
+function CommercialBlock({
+  blocco,
+  startPx,
+  widthPx,
+  tooltip,
+}: {
+  blocco: TurnoPdcBlocco;
+  startPx: number;
+  widthPx: number;
+  tooltip: string;
+}) {
+  const showStazioni = widthPx >= 47;
+  const showOrari = widthPx >= 33;
+  const stazioneDa = stazioneShort(blocco.stazione_da_nome ?? blocco.stazione_da_codice);
+  const stazioneA = stazioneShort(blocco.stazione_a_nome ?? blocco.stazione_a_codice);
+
+  const isCondotta = blocco.tipo_evento === "CONDOTTA";
+  // Palette: CONDOTTA = blu primary (cuore del lavoro PdC), VETTURA =
+  // sky-200 (passeggero). Centrale colorato + bordi laterali (etichette
+  // stazione, orari) trasparenti su sfondo timeline.
+  const stazioniColor = isCondotta ? "text-primary" : "text-sky-700";
+  const centerBg = isCondotta
+    ? "bg-primary text-primary-foreground"
+    : "bg-sky-200 text-sky-900";
+
+  const arrow = "→";
+  const treno =
+    blocco.numero_treno !== null && blocco.numero_treno.length > 0
+      ? blocco.numero_treno
+      : blocco.tipo_evento;
 
   return (
     <div
+      className="absolute overflow-visible"
+      style={{
+        left: `${startPx}px`,
+        width: `${widthPx}px`,
+        top: 6,
+        height: TIMELINE_ROW_HEIGHT_PX - 12,
+      }}
+      title={tooltip}
+    >
+      {/* Riga 1: stazione_da | stazione_a */}
+      {showStazioni ? (
+        <div
+          className={cn(
+            "flex justify-between gap-1 font-mono text-[10px] font-semibold leading-none",
+            stazioniColor,
+          )}
+        >
+          <span className="min-w-0 flex-1 truncate text-left">{stazioneDa}</span>
+          <span className="min-w-0 flex-1 truncate text-right">{stazioneA}</span>
+        </div>
+      ) : (
+        <div className="h-[10px]" aria-hidden />
+      )}
+
+      {/* Riga 2: barra colorata centrata con treno+freccia */}
+      <div
+        className={cn(
+          "relative mt-1.5 flex h-7 items-center justify-center rounded-sm shadow-sm",
+          centerBg,
+        )}
+      >
+        <span className="truncate px-1 font-mono text-[11px] font-semibold tabular-nums">
+          {arrow} {treno}
+        </span>
+      </div>
+
+      {/* Riga 3: ora_inizio | ora_fine */}
+      {showOrari ? (
+        <div className="mt-1 flex justify-between gap-1 font-mono text-[9px] leading-none tabular-nums text-muted-foreground">
+          <span className="truncate">{formatTimeShort(blocco.ora_inizio)}</span>
+          <span className="truncate">{formatTimeShort(blocco.ora_fine)}</span>
+        </div>
+      ) : (
+        <div className="mt-1 h-[9px]" aria-hidden />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Blocco semplice per REFEZ / ACC / CV / PK / SCOMP / PRESA / FINE /
+ * DORMITA — eventi accessori che non hanno la stessa rilevanza
+ * spaziale di una corsa. Layout a unica riga, label centrale, altezza
+ * media (più alto dei "thin" del MR precedente per continuità verticale
+ * col CommercialBlock h-7 + offset 6+1.5 = 14.5).
+ */
+function SimpleBlock({
+  blocco,
+  startPx,
+  widthPx,
+  tooltip,
+}: {
+  blocco: TurnoPdcBlocco;
+  startPx: number;
+  widthPx: number;
+  tooltip: string;
+}) {
+  const tipo = blocco.tipo_evento;
+  const colorClass = colorForTipoEvento(tipo);
+  const label = bloccoLabel(blocco);
+  const isShort = widthPx < 24;
+
+  // PRESA / FINE / PK / SCOMP — eventi "fermi": barra sottile h-3 sulla
+  // mid-line, segnale visivo che non c'è movimento commerciale.
+  const isThin = tipo === "PRESA" || tipo === "FINE" || tipo === "PK" || tipo === "SCOMP";
+
+  if (isThin) {
+    return (
+      <div
+        className={cn("absolute flex items-center justify-center rounded-sm", colorClass)}
+        style={{
+          left: `${startPx}px`,
+          width: `${widthPx}px`,
+          top: TIMELINE_ROW_HEIGHT_PX / 2 - 5,
+          height: 10,
+        }}
+        title={tooltip}
+        aria-label={tooltip}
+      />
+    );
+  }
+
+  // REFEZ / ACC / CV / DORMITA — eventi con durata significativa che
+  // meritano un blocco di altezza media (h-7 = 28px) ma a singola
+  // riga, allineato col centro della timeline.
+  const top = (TIMELINE_ROW_HEIGHT_PX - 28) / 2;
+  return (
+    <div
       className={cn(
-        "absolute flex items-center justify-start overflow-hidden rounded shadow-sm",
+        "absolute flex items-center justify-center overflow-hidden rounded shadow-sm",
         colorClass,
       )}
       style={{
         left: `${startPx}px`,
         width: `${widthPx}px`,
-        top: isThin ? TIMELINE_ROW_HEIGHT_PX / 2 - 6 : 8,
-        height: isThin ? 12 : TIMELINE_ROW_HEIGHT_PX - 16,
+        top,
+        height: 28,
       }}
       title={tooltip}
     >
-      {!isShort && !isThin && (
+      {!isShort && (
         <span className="truncate px-1.5 text-[11px] font-semibold leading-none">
           {label}
         </span>
@@ -659,6 +816,33 @@ function stazioneLabel(nome: string | null, codice: string | null): string {
   if (nome !== null && nome.length > 0) return nome;
   if (codice !== null && codice.length > 0) return codice;
   return "—";
+}
+
+/**
+ * Versione short del nome stazione per i blocchi multi-line del Gantt.
+ * Pattern condiviso col Gantt giro: nomi corti pass-through, nomi
+ * 2-parole tengono la parte distintiva (es. "MILANO ROGOREDO" → "ROGOREDO"),
+ * fallback troncamento a 8 char + ellipsis.
+ */
+function stazioneShort(label: string | null): string {
+  if (label === null) return "—";
+  const trimmed = label.trim();
+  if (trimmed.length === 0) return "—";
+  if (trimmed.length <= 9) return trimmed;
+  const parole = trimmed.split(/\s+/);
+  if (parole.length >= 2) {
+    const last = parole[parole.length - 1];
+    if (last.length >= 3 && last.length <= 12) return last;
+  }
+  return trimmed.substring(0, 8) + "…";
+}
+
+/** "HH:MM" → "HH MM" (font mono, separator visivo, no `:`). */
+function formatTimeShort(t: string | null): string {
+  if (t === null) return "— —";
+  const m = t.match(/^(\d{2}):(\d{2})/);
+  if (m === null) return t;
+  return `${m[1]} ${m[2]}`;
 }
 
 // ────────────────────────────────────────────────────────────────────────
