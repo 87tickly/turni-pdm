@@ -10,6 +10,130 @@
 
 ---
 
+## 2026-05-04 (133) — Sprint 7.9 MR β2-3: sourcing thread agganci/sganci + capacity check + bugfix render eventi UI
+
+### Contesto
+
+Decisione utente 2026-05-04 (durante design β2):
+
+> "se decidiamo di fare un aggancio da qualche parte bisogna dire
+> materiale in sosta lì... oppure materiale per aggancio arriva da
+> treno numero..."
+
+> "ovviamente non possiamo sganciare qualcosa che è in giro" (=
+> capacity check sulla dotazione, blocco se sforato senza sourcing).
+
+MR β2-3 implementa il sourcing **descrittivo** (no FK strutturate,
+quelle in β2-4) con capacity check minimal su dotazione azienda.
+
+### Bug pre-esistente intercettato
+
+Frontend `extractEventiComposizione` filtrava per `tipo_blocco IN
+('evento_composizione', 'cambio_composizione')`, ma il backend
+persiste con `tipo_blocco IN ('aggancio', 'sgancio')`. Risultato: i
+marker eventi composizione non sono MAI stati renderizzati nella UI.
+Confermato via SQL `SELECT DISTINCT tipo_blocco FROM giro_blocco`:
+solo `aggancio | corsa_commerciale | materiale_vuoto`. Fix in MR β2-3.
+
+### Modifiche backend
+
+`backend/src/colazione/domain/builder_giro/composizione.py`:
+
+- `EventoComposizione` arricchito con 3 nuovi campi opzionali:
+  - `source_descrizione: str | None`: per aggancio, "Pezzi da treno
+    X (arrivato Y HH:MM)" o "Pezzi da deposito FIO" o "NON SOURCEABLE
+    — dotazione satura".
+  - `dest_descrizione: str | None`: per sgancio, "Pezzi verso treno Y
+    (riaggancio Z HH:MM)" o "Pezzi a deposito FIO".
+  - `capacity_warning: bool`: True se sforata dotazione azienda.
+
+`backend/src/colazione/domain/builder_giro/sourcing.py` (modulo nuovo,
+~360 righe):
+
+- `arricchisci_sourcing(giri, sede_codice_breve, dotazione) →
+  (giri_arricchiti, warnings)`: funzione pura DB-agnostic.
+- Algoritmo:
+  1. Costruisce indice catene del pool: per ogni catena, registra
+     punto terminale (per sourcing aggancio) e iniziale (per sgancio).
+  2. Per ogni AGGANCIO ordina cronologicamente, cerca catena
+     terminale candidata: stessa data + stazione + materiale +
+     gap [1, 15] min prima dell'aggancio. Tie-break: catena più
+     recente. Idx consumati per evitare double-source.
+  3. Se non trovata: fallback "deposito sede" + check dotazione.
+     Se `pezzi_in_uso[mat] > dotazione[mat]` → `capacity_warning=True`
+     + warning nella lista.
+  4. SGANCIO simmetrico: cerca catena INIZIALE candidata che riprende
+     i pezzi entro [1, 15] min dopo lo sgancio.
+
+`backend/src/colazione/domain/builder_giro/builder.py`:
+
+- Step 6.45 nuovo (tra capacity routing e fusione cluster): chiama
+  `arricchisci_sourcing` su `giri_assegnati`. Warnings propagati al
+  `BuilderResult`.
+
+`backend/src/colazione/domain/builder_giro/persister.py`:
+
+- `_build_metadata_evento` include i 3 nuovi campi nel `metadata_json`
+  del blocco aggancio/sgancio.
+
+### Modifiche frontend
+
+`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`:
+
+- **Bugfix**: `extractEventiComposizione` ora filtra
+  `tipo_blocco IN ('aggancio', 'sgancio')` invece di
+  `evento_composizione/cambio_composizione`.
+- Interface `EventoComposizione` riscritta: `tipo`, `materiale`,
+  `pezziDelta`, `sourceDescrizione`, `destDescrizione`,
+  `capacityWarning`.
+- `EventoCompMarker` riscritto: barra colorata + label esterna
+  con segno `+N`/`-N` + materiale (es. `+1 ETR526`). Colori:
+  verde aggancio, rosso sgancio, giallo capacity warning. Tooltip
+  completo con tipo, ora, stazione, materiale, descrizione sourcing.
+
+### Test
+
+`backend/tests/test_sourcing.py` (modulo nuovo, 6 test):
+
+- Input vuoto.
+- Giro senza eventi passa invariato.
+- Aggancio sourceable da altra catena.
+- Aggancio non sourceable → fallback deposito.
+- Capacity warning quando dotazione satura (2 agganci, dot=1).
+- Sgancio destinabile a catena successiva.
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 61 file clean.
+- Backend `pytest` test puri 83 ok (217 totale + 6 nuovi).
+- Frontend `tsc -b --noEmit` ✅.
+
+### Stato
+
+- ✅ MR β2-3 completato.
+- 🟡 Smoke utente Railway: rigenerare giri sul programma "prova",
+  aprire un giro con eventi composizione, verificare:
+  1. Marker visibile sopra le corse (verde aggancio, rosso sgancio,
+     giallo se warning).
+  2. Hover mostra "Pezzi da treno X (arrivato Y HH:MM)".
+  3. Se ci sono molti agganci e dotazione satura, warning nella card
+     "Ultimo run".
+
+### Limitazioni note
+
+- Sourcing è **descrittivo** (testo); FK strutturate
+  (`thread_origine_blocco_id`) arrivano in β2-4 con `MaterialeThread`.
+- Capacity check è **count cumulativo per materiale**, non
+  istante-per-istante. Quello vero arriva in β2-5.
+- Le `regola_invio_sosta` (β2-7) non sono ancora consultate per
+  decidere la destinazione del sgancio — fallback al deposito sede.
+
+### Prossimo step
+
+β2-4: `MaterialeThread` + algoritmo proiezione.
+
+---
+
 ## 2026-05-04 (132) — Sprint 7.9 MR β2-1: `MaterialeIstanza` (matricole L3) + seed da dotazione
 
 ### Contesto

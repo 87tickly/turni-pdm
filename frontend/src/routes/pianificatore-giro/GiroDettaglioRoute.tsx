@@ -1225,38 +1225,63 @@ function GapMarker({ gap }: { gap: GapInfo }) {
 interface EventoComposizione {
   /** minuti dall'inizio giornata. */
   oraMin: number;
-  composizioneDa: string;
-  composizioneA: string;
+  /** "aggancio" (+N) o "sgancio" (-N). */
+  tipo: "aggancio" | "sgancio";
+  /** Materiale coinvolto (es. "ETR526"). */
+  materiale: string;
+  /** Variazione signed dei pezzi (+1, -2, ecc.). */
+  pezziDelta: number;
   stazione: string | null;
+  /** Sprint 7.9 MR β2-3: descrizione sourcing per AGGANCIO ("Pezzi da treno X..."). */
+  sourceDescrizione: string | null;
+  /** Sprint 7.9 MR β2-3: descrizione destinazione per SGANCIO ("Pezzi verso treno Y..."). */
+  destDescrizione: string | null;
+  /** Sprint 7.9 MR β2-3: True se il sourcing ha violato la dotazione. */
+  capacityWarning: boolean;
 }
 
 /**
- * Estrae eventi composizione dal `metadata_json` di ogni variante o
- * dal `descrizione` del blocco quando tipo = "evento_composizione".
- * Se il backend non popola eventi strutturati, accetta anche blocchi
- * tipo "evento_composizione" come marker.
+ * Estrae eventi composizione (aggancio/sgancio) dai blocchi della
+ * variante. Sprint 7.9 fix: il backend persiste con
+ * `tipo_blocco IN ('aggancio', 'sgancio')` (non
+ * 'evento_composizione' come fallback obsoleto).
+ *
+ * Sprint 7.9 MR β2-3: legge anche source_descrizione / dest_descrizione
+ * / capacity_warning dal metadata_json arricchito da `arricchisci_sourcing`.
  */
 function extractEventiComposizione(variante: GiroVariante): EventoComposizione[] {
   const out: EventoComposizione[] = [];
   for (const b of variante.blocchi) {
-    if (b.tipo_blocco !== "evento_composizione" && b.tipo_blocco !== "cambio_composizione") {
+    if (b.tipo_blocco !== "aggancio" && b.tipo_blocco !== "sgancio") {
       continue;
     }
     const min = parseTimeToMin(b.ora_inizio);
     if (min === null) continue;
-    const compDa =
-      typeof b.metadata_json?.composizione_da === "string"
-        ? (b.metadata_json.composizione_da as string)
+    const meta = b.metadata_json ?? {};
+    const materiale =
+      typeof meta.materiale_tipo_codice === "string"
+        ? (meta.materiale_tipo_codice as string)
         : "?";
-    const compA =
-      typeof b.metadata_json?.composizione_a === "string"
-        ? (b.metadata_json.composizione_a as string)
-        : "?";
+    const delta =
+      typeof meta.pezzi_delta === "number" ? (meta.pezzi_delta as number) : 0;
+    const sourceDescr =
+      typeof meta.source_descrizione === "string"
+        ? (meta.source_descrizione as string)
+        : null;
+    const destDescr =
+      typeof meta.dest_descrizione === "string"
+        ? (meta.dest_descrizione as string)
+        : null;
+    const capWarn = meta.capacity_warning === true;
     out.push({
       oraMin: min,
-      composizioneDa: compDa,
-      composizioneA: compA,
+      tipo: b.tipo_blocco,
+      materiale,
+      pezziDelta: delta,
       stazione: b.stazione_da_codice ?? b.stazione_a_codice,
+      sourceDescrizione: sourceDescr,
+      destDescrizione: destDescr,
+      capacityWarning: capWarn,
     });
   }
   return out;
@@ -1266,12 +1291,42 @@ function EventoCompMarker({ evento }: { evento: EventoComposizione }) {
   const px = minToPx(evento.oraMin);
   const stazioneSeg = evento.stazione !== null ? ` ${evento.stazione}` : "";
   const orario = formatTimeShort(minToTime(evento.oraMin));
+  const segno = evento.pezziDelta >= 0 ? "+" : "";
+  const descrizione =
+    evento.tipo === "aggancio"
+      ? evento.sourceDescrizione
+      : evento.destDescrizione;
+  const tooltip = [
+    `${evento.tipo === "aggancio" ? "AGGANCIO" : "SGANCIO"} · ${orario}${stazioneSeg}`,
+    `${segno}${evento.pezziDelta} ${evento.materiale}`,
+    descrizione ?? "",
+  ]
+    .filter((s) => s.length > 0)
+    .join(" · ");
+  // Sprint 7.9 MR β2-3: barra colorata + label esterna.
+  // - Aggancio: verde (+ pezzi entrano)
+  // - Sgancio: rosso (- pezzi escono)
+  // - Capacity warning: giallo lampo
+  const color = evento.capacityWarning
+    ? "#f59e0b"
+    : evento.tipo === "aggancio"
+      ? "#16a34a"
+      : "#dc2626";
   return (
     <div
-      className="pointer-events-none absolute z-10"
-      style={{ left: px, top: 14, width: 4, height: 74, background: "#f97316" }}
-      title={`Composizione · ${orario}${stazioneSeg} · ${evento.composizioneDa} → ${evento.composizioneA}`}
-    />
+      className="pointer-events-none absolute z-10 flex flex-col items-center"
+      style={{ left: px - 1, top: 8 }}
+      title={tooltip}
+    >
+      <span
+        className="rounded-sm px-1 py-0.5 text-[8px] font-bold leading-none text-white"
+        style={{ background: color }}
+      >
+        {segno}
+        {evento.pezziDelta} {evento.materiale}
+      </span>
+      <div style={{ width: 2, height: 70, background: color }} />
+    </div>
   );
 }
 

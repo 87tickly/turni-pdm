@@ -354,13 +354,23 @@ def _build_metadata_giro(
 
 
 def _build_metadata_evento(ev: EventoComposizione) -> dict[str, Any]:
-    """Metadata di un blocco aggancio/sgancio."""
+    """Metadata di un blocco aggancio/sgancio.
+
+    Sprint 7.9 MR β2-3: include i campi sourcing
+    (``source_descrizione`` / ``dest_descrizione`` / ``capacity_warning``)
+    arricchiti dalla pipeline ``arricchisci_sourcing``. La UI legge
+    ``source_descrizione`` per mostrare "Pezzi da treno X (arrivato Y
+    HH:MM)" sopra il blocco aggancio.
+    """
     return {
         "materiale_tipo_codice": ev.materiale_tipo_codice,
         "pezzi_delta": ev.pezzi_delta,
         "note_builder": ev.note_builder,
         "stazione_proposta_originale": ev.stazione_proposta,
         "stazione_finale": ev.stazione_proposta,
+        "source_descrizione": ev.source_descrizione,
+        "dest_descrizione": ev.dest_descrizione,
+        "capacity_warning": ev.capacity_warning,
     }
 
 

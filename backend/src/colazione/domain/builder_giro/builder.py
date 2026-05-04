@@ -1062,6 +1062,20 @@ async def genera_giri(
     # Date di applicazione perse (informativa per stat post-build).
     _ = aggrega_corse_residue_da_scartati(giri_scartati_cap)
 
+    # 6.45 Sourcing thread agganci/sganci (Sprint 7.9 MR β2-3): per
+    #     ogni evento composizione, cerca da DOVE arrivano i pezzi
+    #     agganciati (= altre catene del giorno-sede che terminano
+    #     stessa stazione entro 15min) e DOVE vanno quelli sganciati
+    #     (= altre catene che ripartono). Se sourcing fallisce →
+    #     fallback "deposito sede" + capacity check sulla dotazione
+    #     azienda (warning se sforato).
+    from colazione.domain.builder_giro.sourcing import arricchisci_sourcing
+
+    giri_assegnati, warnings_src = arricchisci_sourcing(
+        giri_assegnati, localita.codice_breve, dotazione
+    )
+    warnings.extend(warnings_src)
+
     # 6.5 Fusione cluster A1 simili (Sprint 7.9 MR 12, entry 114):
     #    riduce la frammentazione del clustering A1 fondendo cluster
     #    con sequenze simili (Jaccard ≥ 0.7) in cluster unificati.

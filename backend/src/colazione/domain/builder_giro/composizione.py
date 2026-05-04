@@ -128,6 +128,23 @@ class EventoComposizione:
     posizione_dopo_blocco: int
     note_builder: str
     is_validato_utente: bool = False
+    # Sprint 7.9 MR β2-3: sourcing descrittivo per UI.
+    # ``source_descrizione``: per AGGANCIO, da dove arrivano i pezzi.
+    # Esempi: "Pezzi da treno 24812 (arrivato CENTRALE 09:55)",
+    # "Pezzi da deposito FIO" (= no sourcing trovato, fallback dotazione),
+    # "Pezzi NON SOURCEABLE — dotazione satura" (= warning capacity).
+    # Per SGANCIO: ``None`` (l'aggancio è il caso interessante).
+    source_descrizione: str | None = None
+    # ``dest_descrizione``: per SGANCIO, dove vanno i pezzi sganciati.
+    # Esempi: "Pezzi a sosta MISR (regola programma)",
+    # "Pezzi verso treno 24820 (riaggancio CENTRALE 11:30)",
+    # "Pezzi orfani — riassegnazione manuale necessaria" (warning).
+    # Per AGGANCIO: ``None``.
+    dest_descrizione: str | None = None
+    # ``capacity_warning``: True se il sourcing ha violato la dotazione
+    # azienda (es. richiesti più ETR526 di quanti l'azienda ne ha).
+    # UI evidenzia in rosso.
+    capacity_warning: bool = False
 
 
 @dataclass(frozen=True)
