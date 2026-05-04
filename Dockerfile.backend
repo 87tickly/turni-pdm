@@ -28,6 +28,11 @@ COPY backend/alembic.ini* ./
 COPY backend/alembic ./alembic
 COPY backend/scripts ./scripts
 
+# Dati canonici letti a runtime (vincoli inviolabili materiale,
+# composizioni Trenord, ecc.). `_resolve_vincoli_path` cerca `data/`
+# risalendo i parent del modulo: in container → `/app/data/...`.
+COPY data ./data
+
 # Re-sync per registrare il progetto stesso (dopo che il src è in /app).
 RUN uv sync --no-dev
 
