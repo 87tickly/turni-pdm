@@ -797,9 +797,13 @@ function BloccoSegment({
     );
   }
 
-  // Vuoto: linea sottile rosso tratteggiato (h-1) sulla mid-line, con
-  // badge esplicito che dichiara la NATURA del vuoto (Sprint 7.9 MR β1)
-  // e numero treno virtuale parlante 9{commerciale} (MR β2-2).
+  // Sprint 7.9 MR β2-2 fix UX: vuoto come VERA RIGA TRENO, identica
+  // di layout al commerciale (stazioni sopra, etichetta dentro, orari
+  // sotto), distinta solo dallo stile (rosso chiaro + bordo dashed +
+  // testo rosso, vs commerciale = rosso pieno + testo bianco). Il
+  // numero virtuale 9XXXXX è l'etichetta primaria dentro la barra.
+  // Badge β1 ("Vuoto da deposito FIO" ecc.) restano sopra come
+  // contesto operativo.
   if (tipo === "materiale_vuoto") {
     const meta = blocco.metadata_json ?? {};
     const tipoVuoto =
@@ -814,9 +818,7 @@ function BloccoSegment({
         : typeof meta.numero_treno_placeholder === "string"
           ? (meta.numero_treno_placeholder as string)
           : null;
-    // Fallback per record persistiti pre-MR β1 (nessun `tipo_vuoto`):
-    // la classificazione si ricava da `is_uscita_ciclo` + `motivo` come
-    // facevamo prima. Si rimuoverà quando la base dati sarà rigenerata.
+    // Fallback per record persistiti pre-MR β1 (nessun `tipo_vuoto`).
     const isUscitaCiclo =
       tipoVuoto === "uscita_deposito" ||
       (tipoVuoto === null && meta.is_uscita_ciclo === true);
@@ -828,21 +830,24 @@ function BloccoSegment({
       tipoVuoto === "posizionamento_intra_area" ||
       (tipoVuoto === null && !isUscitaCiclo && !isRientroDeposito);
     const sedeLabel = sedeCodice ?? "deposito";
+    const direction = isRientroDeposito || isRientroIntraArea ? "ret" : "out";
+    const arrow = direction === "ret" ? "←" : "→";
+    const stazioneDa = stazioneShort(blocco.stazione_da_nome ?? blocco.stazione_da_codice);
+    const stazioneA = stazioneShort(blocco.stazione_a_nome ?? blocco.stazione_a_codice);
+    const showStazioni = widthPx >= 47;
+    const showOrari = widthPx >= 33;
     return (
       <button
         type="button"
         onClick={onSelect}
         title={tooltip}
         aria-pressed={selected}
-        className={cn(
-          "blk absolute",
-          selected && "is-selected",
-        )}
-        style={{ left: startPx, top: 42, width: widthPx }}
+        className={cn("blk absolute overflow-hidden", selected && "is-selected")}
+        style={{ left: startPx, top: 24, width: widthPx }}
       >
         {isUscitaCiclo && (
           <span
-            className="absolute -top-3 left-0 whitespace-nowrap rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
+            className="absolute -top-3 left-0 z-10 whitespace-nowrap rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
             title={`Uscita assoluta del convoglio dal deposito ${sedeLabel} (inizio del ciclo)`}
           >
             🏠→ Vuoto da deposito {sedeLabel}
@@ -850,7 +855,7 @@ function BloccoSegment({
         )}
         {isRientroDeposito && (
           <span
-            className="absolute -top-3 right-0 whitespace-nowrap rounded bg-violet-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
+            className="absolute -top-3 right-0 z-10 whitespace-nowrap rounded bg-violet-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
             title={`Rientro al deposito ${sedeLabel} (chiusura del ciclo)`}
           >
             🏠← Vuoto verso deposito {sedeLabel}
@@ -858,7 +863,7 @@ function BloccoSegment({
         )}
         {isRientroIntraArea && (
           <span
-            className="absolute -top-3 right-0 whitespace-nowrap rounded bg-amber-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
+            className="absolute -top-3 right-0 z-10 whitespace-nowrap rounded bg-amber-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
             title={`Posizionamento intra-area verso la stazione collegata al deposito ${sedeLabel}`}
           >
             ↳ Vuoto intra-area
@@ -866,26 +871,38 @@ function BloccoSegment({
         )}
         {isPosizionamentoIntraArea && !isUscitaCiclo && (
           <span
-            className="absolute -top-3 left-0 whitespace-nowrap rounded bg-amber-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
+            className="absolute -top-3 left-0 z-10 whitespace-nowrap rounded bg-amber-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
             title="Posizionamento tecnico intra-area (convoglio già in linea, si sposta dentro la whitelist sede)"
           >
             ↳ Vuoto intra-area
           </span>
         )}
-        <div className="seg-vuoto h-1" />
-        {numeroVirtuale !== null && (
-          // Sprint 7.9 MR β2-2 fix: il numero virtuale 9XXXXX è
-          // l'identificatore primario del vuoto, deve essere SEMPRE
-          // visibile. Posizionato come label assoluta sotto la linea,
-          // ancorata al blocco con allineamento centrato; può
-          // estendersi oltre la larghezza del blocco senza problemi
-          // (è solo testo, non interattivo).
-          <div
-            className="absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap font-mono text-[9px] font-semibold tabular-nums text-rose-700"
-            title={`Numero treno virtuale: ${numeroVirtuale} (= "9" + treno commerciale di confine)`}
-          >
-            {numeroVirtuale}
+        {showStazioni ? (
+          <div className="flex justify-between gap-1 font-mono text-[10px] font-semibold leading-none text-rose-700/80">
+            <span className="min-w-0 flex-1 truncate text-left">{stazioneDa}</span>
+            <span className="min-w-0 flex-1 truncate text-right">{stazioneA}</span>
           </div>
+        ) : (
+          <div className="h-[10px]" aria-hidden="true" />
+        )}
+        <div
+          className={cn(
+            "seg-line seg-vuoto-pieno relative mt-1.5 flex h-3 items-center justify-center rounded-sm",
+            blocco.is_validato_utente && "validato",
+            selected && "outline outline-2 outline-primary outline-offset-2",
+          )}
+        >
+          <span className="truncate px-1 font-mono text-[11px] font-semibold tabular-nums text-rose-700">
+            {arrow} {numeroVirtuale ?? "—"}
+          </span>
+        </div>
+        {showOrari ? (
+          <div className="mt-1 flex justify-between gap-1 font-mono text-[9px] leading-none tabular-nums text-muted-foreground">
+            <span className="truncate">{formatTimeShort(blocco.ora_inizio)}</span>
+            <span className="truncate">{formatTimeShort(blocco.ora_fine)}</span>
+          </div>
+        ) : (
+          <div className="mt-1 h-[9px]" aria-hidden="true" />
         )}
       </button>
     );

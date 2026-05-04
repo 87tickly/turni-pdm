@@ -62,13 +62,22 @@ body {
 .seg-comm {
   background: #dc2626;
 }
-/* Vuoto tecnico: rosso chiaro tratteggiato (sottile h-1, no etichette). */
+/* Vuoto tecnico (legacy): rosso chiaro tratteggiato sottile h-1. */
 .seg-vuoto {
   background-image: repeating-linear-gradient(
     90deg,
     #ef4444 0 6px,
     transparent 6px 10px
   );
+}
+/* Sprint 7.9 MR β2-2 fix UX: vuoto come "vera riga treno" — barra
+   piena con bordo rosso tratteggiato e sfondo rosso chiaro, stessa
+   altezza del commerciale (h-3) per essere riconosciuto come treno
+   ma visibilmente distinto (commerciale = rosso pieno + testo bianco;
+   vuoto = rosso chiaro + bordo dashed + testo rosso). */
+.seg-vuoto-pieno {
+  background: #fee2e2;
+  border: 1px dashed #dc2626;
 }
 /* Rientro 9NNNN: viola. */
 .seg-rientro {
