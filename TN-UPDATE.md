@@ -10,6 +10,60 @@
 
 ---
 
+## 2026-05-04 (122) — Hotfix Railway: Dockerfile.backend copia `data/` per vincoli inviolabili
+
+### Contesto
+
+Smoke utente sul programma "prova" Railway: click "Avvia generazione"
+→ alert *"Failed to fetch"*. Frontend in errore di rete.
+
+### Diagnosi
+
+`railway logs --service backend` mostrava:
+
+```
+File "/app/src/colazione/domain/builder_giro/builder.py", line 740,
+    in genera_giri
+    vincoli_inviolabili = carica_vincoli()
+File "/app/src/colazione/domain/vincoli/inviolabili.py", line 56,
+    in _resolve_vincoli_path
+    raise FileNotFoundError(
+FileNotFoundError: File 'vincoli_materiale_inviolabili.json' non
+trovato risalendo da /app/src/colazione/domain/vincoli/inviolabili.py.
+```
+
+`_resolve_vincoli_path` cerca `data/` risalendo i parent del modulo
+(repo_root/data in dev, /app/data in container). Il `Dockerfile.backend`
+copia `backend/src`, `backend/alembic`, `backend/scripts` ma **non**
+`data/` (è a livello repo root, non sotto backend/).
+
+L'errore non è emerso al boot perché `carica_vincoli()` viene invocato
+solo durante `genera_giri`, non al startup. Il primo run di smoke
+sull'endpoint l'ha esposto.
+
+### Modifiche
+
+`Dockerfile.backend`: aggiunto `COPY data ./data` dopo gli altri COPY.
+Il file `data/vincoli_materiale_inviolabili.json` (e gli altri JSON
+di riferimento: `depositi_manutenzione_trenord_seed.json`,
+`turni_materiale_2026_dump.json`, ecc.) sono ora disponibili in
+`/app/data/` runtime.
+
+### Verifiche
+
+- Build backend Railway clean.
+- `Application startup complete. Uvicorn running on http://0.0.0.0:8080`.
+- HTTP 200 su `/openapi.json`.
+- Smoke `genera-giri` da rifare in UI (utente).
+
+### Stato
+
+- ✅ Hotfix deployato.
+- 🟡 Re-smoke utente per validare MR 11B Step 2 (capacity routing) su
+  programma multi-regola.
+
+---
+
 ## 2026-05-04 (121) — Sprint 7.9 MR 11B Step 2: capacity-aware routing con riassegnazione cluster
 
 ### Contesto
