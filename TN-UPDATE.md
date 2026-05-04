@@ -10,6 +10,113 @@
 
 ---
 
+## 2026-05-04 (131) — Sprint 7.9 MR β2-0: anagrafica `LocalitaSosta` + `RegolaInvioSosta` + seed Milano San Rocco
+
+### Contesto
+
+Decisione utente 2026-05-04 (durante design β2):
+
+> "in alcune località tipo milano porta garibaldi, possiamo usare il
+> deposito loc di milano s.rocco molto utilizzato per soste notturne
+> e per soste superiori alle 2 ore"
+
+> "ATR125/115 sono di deposito a lecco, quindi andranno sempre in
+> sosta a milano san rocco"
+
+> Domanda 1 (LocalitaSosta come anagrafica globale per azienda?):
+> "confermo"
+> Domanda 3 (regole d'invio: per programma o universali?):
+> "si confermo" (= due tabelle distinte: regola_invio_sosta
+> programma-level + regola_invio_sosta_azienda azienda-level scope
+> futuro β2-7)
+
+MR β2-0 introduce SOLO l'anagrafica + endpoint base. Nessuna logica
+builder che la usa ancora — quella arriva in β2-3+. Il pianificatore
+non vede ancora UI per gestire le località di sosta; l'admin azienda
+le crea via endpoint API o le riceve dai seed di migrazione.
+
+### Modifiche backend
+
+`backend/src/colazione/models/anagrafica.py`:
+
+- Nuovo modello `LocalitaSosta`:
+  - `id`, `codice` (es. "MISR"), `nome`, `azienda_id`,
+    `stazione_collegata_codice` (FK stazione, opzionale),
+    `is_attiva`, `note`, `created_at`.
+  - UNIQUE `(azienda_id, codice)`.
+  - Distinta da `LocalitaManutenzione`: solo sosta tecnica, niente
+    manutenzione, niente whitelist stazioni vicine, niente uscita/
+    rientro deposito 9XXXX.
+- Nuovo modello `RegolaInvioSosta`:
+  - `id`, `programma_id` (FK CASCADE), `stazione_sgancio_codice`,
+    `tipo_materiale_codice`, `finestra_oraria_inizio`,
+    `finestra_oraria_fine`, `localita_sosta_id` (principale),
+    `fallback_sosta_id` (opzionale), `note`, `created_at`.
+  - Indice `(programma_id)` per query rapide.
+
+`backend/alembic/versions/0022_localita_sosta_e_regole.py`:
+
+- Migration upgrade: crea `localita_sosta` + `regola_invio_sosta`
+  con tutti i constraint FK descritti.
+- **Seed idempotente**: inserisce 1 record `LocalitaSosta` ``MISR``
+  (Milano San Rocco) per Trenord (`azienda_id=2`), collegato a
+  `S01645` (MILANO PORTA GARIBALDI). Idempotente via `WHERE NOT
+  EXISTS` per supportare riesecuzione.
+- Downgrade simmetrico.
+
+`backend/src/colazione/api/anagrafiche.py`:
+
+- Nuovo schema Pydantic `LocalitaSostaRead` + `LocalitaSostaCreate`.
+- `GET /api/localita-sosta` (auth `PIANIFICATORE_GIRO`): lista sedi
+  attive dell'azienda, ordinate per codice.
+- `POST /api/localita-sosta` (auth `ADMIN` only): crea nuova località
+  di sosta. 409 se duplicato `(azienda, codice)`. 400 se
+  `stazione_collegata_codice` non esiste.
+
+### Modifiche test
+
+`backend/tests/test_anagrafiche_api.py`:
+
+- `test_localita_sosta_401_senza_token`.
+- `test_localita_sosta_200_con_pianificatore`: verifica schema +
+  presenza MISR dal seed.
+- `test_localita_sosta_create_richiede_admin`: 403 se non admin.
+- `test_localita_sosta_create_admin_ok`: insert OK + 409 duplicato
+  (idempotente in caso di re-run).
+- `test_localita_sosta_create_admin_stazione_invalida`: 400 su FK
+  stazione inesistente.
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 60 file clean.
+- Backend `pytest` test puri (217) ✅.
+- Test integration `test_anagrafiche_api.py` richiedono Postgres +
+  seed `pianificatore_giro_demo`/`admin` (non eseguiti localmente
+  per Docker down).
+
+### Stato
+
+- ✅ MR β2-0 completato.
+- 🟡 Smoke utente Railway post-deploy: verificare che la migration
+  0022 sia applicata (logs backend) e che `GET /api/localita-sosta`
+  ritorni almeno 1 record (MISR).
+
+### Limitazioni note (scope futuro)
+
+- Nessuna UI per gestire `localita_sosta` (è anagrafica admin, non
+  la usa il pianificatore quotidianamente). Si aggiungerà in MR
+  successivo se serve.
+- Nessuna UI per `regola_invio_sosta` per programma — è β2-7.
+- `RegolaInvioSostaAzienda` (regole universali Trenord, es. "ATR125
+  sganciato a Garibaldi → sempre MISR") rimandata a β2-7.
+
+### Prossimo step
+
+β2-1: `MaterialeIstanza` + matricole `{TIPO}-{NNN}` con seed da
+dotazione esistente.
+
+---
+
 ## 2026-05-04 (130) — Sprint 7.9 strategy A: wipe a cascata turni PdC su rigenerazione giri
 
 ### Contesto

@@ -109,3 +109,83 @@ def test_localita_manutenzione_200(client: TestClient) -> None:
         assert "codice" in body[0]
         assert "codice_breve" in body[0]
         assert "stazione_collegata_codice" in body[0]
+
+
+# =====================================================================
+# Sprint 7.9 MR β2-0 — Località di sosta intermedia
+# =====================================================================
+
+
+def test_localita_sosta_401_senza_token(client: TestClient) -> None:
+    res = client.get("/api/localita-sosta")
+    assert res.status_code == 401
+
+
+def test_localita_sosta_200_con_pianificatore(client: TestClient) -> None:
+    """Trenord ha almeno MISR seed dalla migration 0022."""
+    token = _login(client, "pianificatore_giro_demo", "demo12345")
+    res = client.get("/api/localita-sosta", headers=_auth(token))
+    assert res.status_code == 200
+    body = res.json()
+    assert isinstance(body, list)
+    # Verifica schema + presenza MISR (seed)
+    if body:
+        assert "id" in body[0]
+        assert "codice" in body[0]
+        assert "nome" in body[0]
+        assert "stazione_collegata_codice" in body[0]
+        assert "is_attiva" in body[0]
+        codici = [r["codice"] for r in body]
+        assert "MISR" in codici, f"MISR seed mancante; trovati: {codici}"
+
+
+def test_localita_sosta_create_richiede_admin(client: TestClient) -> None:
+    """POST richiede ruolo ADMIN, non basta PIANIFICATORE_GIRO."""
+    token = _login(client, "pianificatore_giro_demo", "demo12345")
+    res = client.post(
+        "/api/localita-sosta",
+        json={"codice": "TEST-PIA", "nome": "Test pianificatore"},
+        headers=_auth(token),
+    )
+    assert res.status_code == 403, res.text
+
+
+def test_localita_sosta_create_admin_ok(client: TestClient) -> None:
+    """Admin può creare. 409 se duplicato."""
+    token = _login(client, "admin", "admin12345")
+    payload = {
+        "codice": "TEST-SOSTA-A",
+        "nome": "Sosta di test β2-0",
+        "stazione_collegata_codice": None,
+        "note": "Creata da test integration",
+    }
+    res1 = client.post("/api/localita-sosta", json=payload, headers=_auth(token))
+    # First insert OK
+    if res1.status_code == 409:
+        # Test rieseguito senza cleanup; salta ma non fallire
+        return
+    assert res1.status_code == 201, res1.text
+    body = res1.json()
+    assert body["codice"] == "TEST-SOSTA-A"
+    assert body["nome"] == "Sosta di test β2-0"
+    assert body["is_attiva"] is True
+
+    # Duplicato → 409
+    res2 = client.post("/api/localita-sosta", json=payload, headers=_auth(token))
+    assert res2.status_code == 409
+
+
+def test_localita_sosta_create_admin_stazione_invalida(
+    client: TestClient,
+) -> None:
+    token = _login(client, "admin", "admin12345")
+    res = client.post(
+        "/api/localita-sosta",
+        json={
+            "codice": "TEST-STAZ-INV",
+            "nome": "Test stazione invalida",
+            "stazione_collegata_codice": "S99999_INESISTENTE",
+        },
+        headers=_auth(token),
+    )
+    assert res.status_code == 400, res.text

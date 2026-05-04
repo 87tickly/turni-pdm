@@ -33,6 +33,7 @@ from colazione.models.anagrafica import (
     Depot,
     FestivitaUfficiale,
     LocalitaManutenzione,
+    LocalitaSosta,
     MaterialeDotazioneAzienda,
     MaterialeTipo,
     Stazione,
@@ -76,6 +77,28 @@ class LocalitaManutenzioneRead(BaseModel):
     nome_canonico: str
     stazione_collegata_codice: str | None
     is_pool_esterno: bool
+
+
+class LocalitaSostaRead(BaseModel):
+    """Sprint 7.9 MR β2-0: località di sosta intermedia (es. Milano
+    San Rocco). Distinta da LocalitaManutenzione."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    codice: str
+    nome: str
+    stazione_collegata_codice: str | None
+    is_attiva: bool
+    note: str | None
+
+
+class LocalitaSostaCreate(BaseModel):
+    """Body per POST /api/localita-sosta (admin)."""
+
+    codice: str
+    nome: str
+    stazione_collegata_codice: str | None = None
+    note: str | None = None
 
 
 @router.get("/stazioni", response_model=list[StazioneRead])
@@ -196,6 +219,94 @@ async def list_localita_manutenzione(
     )
     rows = (await session.execute(stmt)).scalars().all()
     return [LocalitaManutenzioneRead.model_validate(r) for r in rows]
+
+
+# =====================================================================
+# Sprint 7.9 MR β2-0 — Località di sosta intermedia
+# =====================================================================
+
+
+@router.get("/localita-sosta", response_model=list[LocalitaSostaRead])
+async def list_localita_sosta(
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> list[LocalitaSostaRead]:
+    """Lista località di sosta intermedia attive dell'azienda.
+
+    Sprint 7.9 MR β2-0: distinte dai depositi di manutenzione, sono
+    overflow per stazioni che non hanno capacità di sosta lunga (es.
+    Milano San Rocco per Milano Porta Garibaldi). Usate dall'algoritmo
+    builder + dalle regole d'invio (``regola_invio_sosta``).
+    """
+    stmt = (
+        select(LocalitaSosta)
+        .where(
+            LocalitaSosta.azienda_id == user.azienda_id,
+            LocalitaSosta.is_attiva,
+        )
+        .order_by(LocalitaSosta.codice)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return [LocalitaSostaRead.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/localita-sosta",
+    response_model=LocalitaSostaRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_localita_sosta(
+    body: LocalitaSostaCreate,
+    user: CurrentUser = Depends(require_role("ADMIN")),
+    session: AsyncSession = Depends(get_session),
+) -> LocalitaSostaRead:
+    """Crea una nuova località di sosta (admin only).
+
+    Sprint 7.9 MR β2-0: il pianificatore non crea direttamente le
+    località di sosta — è anagrafica gestita dall'admin azienda. La
+    UI di amministrazione ne consumerà questo endpoint quando l'azienda
+    avrà bisogno di aggiungere uno scalo nuovo (es. Treviglio Ovest).
+
+    Errori:
+
+    - **409**: codice già esistente per l'azienda corrente.
+    - **400**: ``stazione_collegata_codice`` non valido (FK).
+    """
+    # Check duplicato
+    stmt_dup = select(LocalitaSosta).where(
+        LocalitaSosta.azienda_id == user.azienda_id,
+        LocalitaSosta.codice == body.codice,
+    )
+    if (await session.execute(stmt_dup)).scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Località di sosta {body.codice!r} già esistente per "
+            f"azienda_id={user.azienda_id}.",
+        )
+
+    # Validazione FK stazione (opzionale)
+    if body.stazione_collegata_codice is not None:
+        stmt_staz = select(Stazione).where(
+            Stazione.codice == body.stazione_collegata_codice
+        )
+        if (await session.execute(stmt_staz)).scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Stazione collegata {body.stazione_collegata_codice!r} "
+                f"non trovata.",
+            )
+
+    nuova = LocalitaSosta(
+        codice=body.codice,
+        nome=body.nome,
+        azienda_id=user.azienda_id,
+        stazione_collegata_codice=body.stazione_collegata_codice,
+        note=body.note,
+    )
+    session.add(nuova)
+    await session.commit()
+    await session.refresh(nuova)
+    return LocalitaSostaRead.model_validate(nuova)
 
 
 # =====================================================================

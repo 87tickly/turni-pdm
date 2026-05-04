@@ -6,7 +6,7 @@ materiali, località manutenzione, depositi PdC, e tabelle associative.
 Vedi `docs/SCHEMA-DATI-NATIVO.md` §3 e migrazione 0001 per i dettagli.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any
 
 from sqlalchemy import (
@@ -18,6 +18,8 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Time,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -229,6 +231,109 @@ class MaterialeAccoppiamentoAmmesso(Base):
     )
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LocalitaSosta(Base):
+    """Sprint 7.9 MR β2-0: deposito di SOSTA INTERMEDIA, distinto dai
+    depositi di manutenzione (``localita_manutenzione``).
+
+    Esempio canonico: Milano San Rocco (codice ``MISR``), scalo
+    dedicato per soste notturne/lunghe (>2h) come overflow di Milano
+    Porta Garibaldi che non ha capacità di sosta lunga. I materiali
+    ATR125/ATR115/ETR421 sganciati a Garibaldi vengono inviati qui.
+
+    Distinzione semantica da ``LocalitaManutenzione``:
+    - ``LocalitaSosta``: solo sosta tecnica, niente manutenzione, niente
+      whitelist stazioni vicine, niente uscita/rientro deposito 9XXXX.
+    - ``LocalitaManutenzione``: sede produttiva del materiale, fa
+      manutenzione, ha whitelist stazioni vicine, è la "casa" del
+      convoglio per il giro materiale.
+
+    Decisione utente 2026-05-04: anagrafica globale per azienda (la
+    sosta MISR esiste sempre per Trenord, configurabile in admin),
+    poi le regole d'invio (``RegolaInvioSosta``) decidono per ogni
+    programma quando inviare a quale sosta.
+    """
+
+    __tablename__ = "localita_sosta"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    codice: Mapped[str] = mapped_column(String(40))  # es. "MISR"
+    nome: Mapped[str] = mapped_column(Text)
+    azienda_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("azienda.id", ondelete="RESTRICT")
+    )
+    # Stazione di proxy commerciale (es. MISR ↔ MILANO PORTA GARIBALDI)
+    # — il convoglio "arriva" a questa stazione per essere considerato
+    # in sosta presso la località.
+    stazione_collegata_codice: Mapped[str | None] = mapped_column(
+        String(20), ForeignKey("stazione.codice", ondelete="SET NULL")
+    )
+    is_attiva: Mapped[bool] = mapped_column(Boolean, default=True)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("azienda_id", "codice", name="uq_localita_sosta_azienda_codice"),
+    )
+
+
+class RegolaInvioSosta(Base):
+    """Sprint 7.9 MR β2-0: regola operativa che decide DOVE mandare un
+    materiale sganciato a una stazione X durante una finestra oraria.
+
+    Esempio: "ATR125 sganciato a Milano Porta Garibaldi tra 06:00 e
+    19:00 → invia a Milano San Rocco". Oppure "ETR421 sganciato a
+    Garibaldi dopo le 19:00 → invia a Misr (preferito) con fallback
+    a Fiorenza per rientro manutenzione".
+
+    Ambito: per programma (decisione utente 2026-05-04 confermata in
+    domanda 3 design β2-7). Le regole "universali" che valgono per
+    tutti i programmi Trenord vanno modellate separatamente come
+    `RegolaInvioSostaAzienda` (scope futuro β2-7); per ora questa
+    tabella copre il caso "regola di programma".
+
+    Vincoli:
+    - Finestra oraria può attraversare mezzanotte (es. 22:00→04:00).
+      L'algoritmo di matching deve gestire il caso ``inizio > fine``
+      come "fascia notturna che gira la mezzanotte".
+    - ``fallback_sosta_id`` opzionale: se la sosta principale è satura
+      (capacity check futuro), si invia al fallback.
+    """
+
+    __tablename__ = "regola_invio_sosta"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    programma_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("programma_materiale.id", ondelete="CASCADE"),
+    )
+    # Stazione dove avviene lo sgancio (es. S01645 = Milano Porta Garibaldi).
+    stazione_sgancio_codice: Mapped[str] = mapped_column(
+        String(20), ForeignKey("stazione.codice", ondelete="RESTRICT")
+    )
+    # Tipo materiale a cui la regola si applica (es. "ETR421", "ATR125").
+    tipo_materiale_codice: Mapped[str] = mapped_column(
+        String(50), ForeignKey("materiale_tipo.codice", ondelete="RESTRICT")
+    )
+    # Finestra oraria di applicazione (es. 06:00-19:00 = "diurna",
+    # 19:00-23:59 = "serale"). Può attraversare la mezzanotte.
+    finestra_oraria_inizio: Mapped[time] = mapped_column(Time)
+    finestra_oraria_fine: Mapped[time] = mapped_column(Time)
+    # Sosta principale di destinazione.
+    localita_sosta_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("localita_sosta.id", ondelete="RESTRICT")
+    )
+    # Sosta di fallback se la principale è satura (capacity check futuro).
+    fallback_sosta_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("localita_sosta.id", ondelete="RESTRICT")
+    )
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class MaterialeDotazioneAzienda(Base):
