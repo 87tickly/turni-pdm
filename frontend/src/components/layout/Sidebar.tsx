@@ -3,6 +3,7 @@ import type { ComponentType, SVGProps } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   AlertTriangle,
+  Building2,
   ChevronRight,
   IdCard,
   LayoutDashboard,
@@ -68,6 +69,9 @@ const NAV_PIANIFICATORE_PDC: NavGroup = {
     { to: "/pianificatore-pdc/dashboard", label: "Home", icon: LayoutDashboard },
     { to: "/pianificatore-pdc/giri", label: "Vista giri", icon: Workflow },
     { to: "/pianificatore-pdc/turni", label: "Turni PdC", icon: ListOrdered },
+    // Sprint 7.11: anteprima depositi PdC, sotto path PdC fino a quando
+    // il ruolo Gestione Personale non sar\u00e0 implementato.
+    { to: "/pianificatore-pdc/depositi", label: "Depositi PdC", icon: Building2 },
     {
       to: "/pianificatore-pdc/revisioni-cascading",
       label: "Rev. cascading",

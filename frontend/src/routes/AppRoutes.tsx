@@ -13,6 +13,7 @@ import { ProgrammiRoute } from "@/routes/pianificatore-giro/ProgrammiRoute";
 import { TurniPdcGiroRoute } from "@/routes/pianificatore-giro/TurniPdcGiroRoute";
 import { TurnoPdcDettaglioRoute } from "@/routes/pianificatore-giro/TurnoPdcDettaglioRoute";
 import { PianificatorePdcDashboardRoute } from "@/routes/pianificatore-pdc/DashboardRoute";
+import { PianificatorePdcDepositiRoute } from "@/routes/pianificatore-pdc/DepositiRoute";
 import { PianificatorePdcGiriRoute } from "@/routes/pianificatore-pdc/GiriRoute";
 import { PianificatorePdcRevisioniCascadingRoute } from "@/routes/pianificatore-pdc/RevisioniCascadingRoute";
 import { PianificatorePdcTurniRoute } from "@/routes/pianificatore-pdc/TurniRoute";
@@ -74,6 +75,7 @@ export function AppRoutes() {
             <Route path="giri" element={<PianificatorePdcGiriRoute />} />
             <Route path="turni" element={<PianificatorePdcTurniRoute />} />
             <Route path="turni/:turnoId" element={<PianificatorePdcTurnoDettaglioRoute />} />
+            <Route path="depositi" element={<PianificatorePdcDepositiRoute />} />
             <Route
               path="revisioni-cascading"
               element={<PianificatorePdcRevisioniCascadingRoute />}
