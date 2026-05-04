@@ -10,6 +10,101 @@
 
 ---
 
+## 2026-05-04 (129) — Sprint 7.11 cont.: sidebar collassabile + dialog dettagli blocco Gantt PdC (2 MR)
+
+### Contesto
+
+Smoke utente sul deploy entry 127:
+- I blocchi del Gantt giro materiale mostrano "→ 1..." troncato — la
+  sidebar 240px + 13 treni in 24h × 1h=40px = ~50px per blocco, sotto
+  la soglia di rendering della label.
+- Proposta utente: "magari la barra laterale la possiamo ridurre sulla
+  sinistra tipo (vedi screen Finder), oppure possiamo selezionare uno o
+  più turni e fargli aprire un pop up?"
+
+Decisione (con risposta utente "Sì, prima sidebar poi popup"):
+implemento entrambi in sequenza, sidebar prima perché moltiplicatore di
+spazio per TUTTE le schermate.
+
+### Modifiche
+
+**MR 7.11.5 — Sidebar collassabile** (commit `c6c4eb7`):
+
+- Nuovo `SidebarContext.tsx`: provider con stato `collapsed` + `toggle`
+  + `setCollapsed`, persistito in localStorage chiave
+  `arturo:sidebar:collapsed` (sopravvive a reload e cambi pagina).
+  SSR-safe.
+- `Sidebar.tsx`: nuovo branch `<CollapsedSidebar>` (w-14 invece di
+  w-60) quando collapsed. Mostra solo le icone delle voci del gruppo
+  attivo, tooltip nativo, active state preservato. Chip "wip" diventa
+  dot ambra. Toggle ChevronRight grande in alto. Footer compatto
+  (v0.1.0 + az #N verticale).
+- Sidebar espansa: aggiunto bottone ChevronLeft accanto al logo per
+  ridurre.
+- `Header.tsx`: bottone PanelLeft a sinistra del titolo, sempre visibile
+  in entrambe le modalità — è il toggle "principale".
+- `AppLayout.tsx`: wrapped in `<SidebarProvider>` per condividere stato
+  Sidebar/Header.
+
+Effetto pratico: ~180px in più sulla timeline → blocchi Gantt da ~50px
+a ~65px (+30%) → label "→ {treno}" mostrate sopra la soglia 47px del
+Gantt giro.
+
+**MR 7.11.6 — Dialog dettagli blocco Gantt PdC** (commit `3872e5c`):
+
+- State `blockDetail` in `TurnoPdcDettaglioRoute` (giornataNumero +
+  blocco) propagato via prop fino a `BloccoSegment`.
+- `CommercialBlock` + `SimpleBlock` convertiti da `<div>` a `<button>`
+  cliccabili con onSelect. Selected visualizzato come ring-2
+  ring-amber-400 attorno al blocco. aria-pressed/focus-visible per
+  accessibilità.
+- Nuovo `BloccoDetailDialog` (Radix Dialog max-w-xl) con sezioni:
+  - Header: chip tipo_evento colorato + `bloccoTitolo()` ("Treno 2710"
+    / "Vettura su 2730" / "Refezione" / "Dormita FR" / "Cambio volante
+    (partenza)" ecc.) + Giornata N · #seq
+  - Box Stazioni: Da → A grandi, con codice tecnico sotto se diverso
+    dal nome
+  - Box Orari: Inizio | Fine | Durata (mono tabular)
+  - Box Treno: numero + variante N/M se >1
+  - Box Note accessori (amber se presenti, badge "accessori maggiorati")
+  - Box Riferimenti tecnici: fonte_orario + IDs corsa_commerciale/
+    giro_blocco/corsa_materiale_vuoto
+- Helper `DetailField` riusabile + `bloccoTitolo()` mapping tipo_evento
+  → titolo italiano.
+
+Limitazione nota: il popup è solo per il Gantt PdC (2° ruolo). Per il
+Gantt giro materiale (1° ruolo, schermo dello smoke originale) il dato
+è più complesso (cluster A1, varianti calendariali, metadata
+vuoto/rientro/uscita_deposito) e va affrontato separatamente.
+
+### Verifiche
+
+- pnpm typecheck: clean su entrambi gli MR.
+- pnpm test full: 52/53 passed (1 fail preesistente in
+  ProgrammaDettaglioRoute, già documentato in entry 124).
+- Test specifici Gantt PdC: 8/8 (TurnoDettaglio + Validazioni).
+
+### Stato
+
+- ✅ MR 7.11.5 + 7.11.6 completati.
+- 🟡 Smoke utente Railway: dopo deploy verificare:
+  1. Sidebar: bottone PanelLeft nell'header riduce/espande la sidebar.
+     In modalità collapsed restano solo le icone del ruolo attivo, ~56px.
+  2. Stato persistito in localStorage: refresh pagina = stato preservato.
+  3. Gantt giro materiale con sidebar collassata: i blocchi ora hanno
+     ~65px e mostrano "→ {treno}" leggibile.
+  4. Click su un blocco del Gantt PdC apre il Dialog con tutti i dati
+     (stazioni, orari, treno+variante, note, ID tecnici).
+  5. Selezione visualizzata come ring amber attorno al blocco.
+
+### Prossimo step
+
+- Smoke utente per validare i 5 punti.
+- Eventuale popup dettagli per il Gantt giro materiale (1° ruolo) se
+  l'utente lo richiede dopo aver provato l'effetto sidebar collapsed.
+
+---
+
 ## 2026-05-04 (128) — Sprint 7.9 MR β2-2: numerazione vuoti parlante 9{numero_commerciale}
 
 ### Contesto
