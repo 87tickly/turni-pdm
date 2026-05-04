@@ -4,6 +4,7 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
   Bed,
   Moon,
 } from "lucide-react";
@@ -11,6 +12,13 @@ import {
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/Dialog";
 import { Spinner } from "@/components/ui/Spinner";
 import { useTurnoPdcDettaglio } from "@/hooks/useTurniPdc";
 import { ApiError } from "@/lib/api/client";
@@ -59,6 +67,11 @@ export function TurnoPdcDettaglioRoute() {
   const query = useTurnoPdcDettaglio(turnoId);
 
   const [oraOffset, setOraOffset] = useState<0 | 4>(0);
+  // MR 7.11.6: blocco selezionato per il Dialog dettagli. null = chiuso.
+  const [blockDetail, setBlockDetail] = useState<{
+    blocco: TurnoPdcBlocco;
+    giornataNumero: number;
+  } | null>(null);
 
   if (turnoId === undefined || Number.isNaN(turnoId)) {
     return <ErrorBlock message="ID turno PdC non valido nell'URL." />;
@@ -114,6 +127,10 @@ export function TurnoPdcDettaglioRoute() {
         turno={turno}
         oraOffset={oraOffset}
         onToggleOffset={() => setOraOffset((v) => (v === 0 ? 4 : 0))}
+        onSelectBlocco={(blocco, giornataNumero) =>
+          setBlockDetail({ blocco, giornataNumero })
+        }
+        selectedBloccoId={blockDetail?.blocco.id ?? null}
       />
 
       {/* Sequenza blocchi per giornata sotto al Gantt: dato di dettaglio
@@ -128,6 +145,13 @@ export function TurnoPdcDettaglioRoute() {
           ))}
         </div>
       </section>
+
+      {/* MR 7.11.6: Dialog dettagli blocco. Aperto cliccando un blocco
+          nella timeline o una riga della sequenza blocchi. */}
+      <BloccoDetailDialog
+        detail={blockDetail}
+        onClose={() => setBlockDetail(null)}
+      />
     </div>
   );
 }
@@ -265,9 +289,17 @@ interface GanttPdcProps {
   turno: TurnoPdcDettaglio;
   oraOffset: 0 | 4;
   onToggleOffset: () => void;
+  onSelectBlocco: (blocco: TurnoPdcBlocco, giornataNumero: number) => void;
+  selectedBloccoId: number | null;
 }
 
-function GanttPdc({ turno, oraOffset, onToggleOffset }: GanttPdcProps) {
+function GanttPdc({
+  turno,
+  oraOffset,
+  onToggleOffset,
+  onSelectBlocco,
+  selectedBloccoId,
+}: GanttPdcProps) {
   const innerWidth = GIORNATA_LABEL_COL_PX + TIMELINE_WIDTH_PX + STATS_COL_PX;
 
   return (
@@ -328,7 +360,13 @@ function GanttPdc({ turno, oraOffset, onToggleOffset }: GanttPdcProps) {
           <AxisHeader oraOffset={oraOffset} />
 
           {turno.giornate.map((g) => (
-            <GiornataRow key={g.id} giornata={g} oraOffset={oraOffset} />
+            <GiornataRow
+              key={g.id}
+              giornata={g}
+              oraOffset={oraOffset}
+              onSelectBlocco={(b) => onSelectBlocco(b, g.numero_giornata)}
+              selectedBloccoId={selectedBloccoId}
+            />
           ))}
         </div>
       </div>
@@ -396,9 +434,13 @@ function AxisHeader({ oraOffset }: { oraOffset: 0 | 4 }) {
 function GiornataRow({
   giornata,
   oraOffset,
+  onSelectBlocco,
+  selectedBloccoId,
 }: {
   giornata: TurnoPdcGiornata;
   oraOffset: 0 | 4;
+  onSelectBlocco: (b: TurnoPdcBlocco) => void;
+  selectedBloccoId: number | null;
 }) {
   const inizio = giornata.inizio_prestazione ?? "?";
   const fine = giornata.fine_prestazione ?? "?";
@@ -477,7 +519,13 @@ function GiornataRow({
         />
 
         {giornata.blocchi.map((b) => (
-          <BloccoSegment key={b.id} blocco={b} oraOffset={oraOffset} />
+          <BloccoSegment
+            key={b.id}
+            blocco={b}
+            oraOffset={oraOffset}
+            onSelect={() => onSelectBlocco(b)}
+            isSelected={selectedBloccoId === b.id}
+          />
         ))}
       </div>
 
@@ -558,9 +606,13 @@ function Fishbone({ giornate }: { giornate: TurnoPdcGiornata[] }) {
 function BloccoSegment({
   blocco,
   oraOffset,
+  onSelect,
+  isSelected,
 }: {
   blocco: TurnoPdcBlocco;
   oraOffset: 0 | 4;
+  onSelect: () => void;
+  isSelected: boolean;
 }) {
   const inizio = parseTimeToMin(blocco.ora_inizio);
   const fine = parseTimeToMin(blocco.ora_fine);
@@ -590,6 +642,8 @@ function BloccoSegment({
         startPx={startPx}
         widthPx={widthPx}
         tooltip={tooltip}
+        onSelect={onSelect}
+        isSelected={isSelected}
       />
     );
   }
@@ -600,6 +654,8 @@ function BloccoSegment({
       startPx={startPx}
       widthPx={widthPx}
       tooltip={tooltip}
+      onSelect={onSelect}
+      isSelected={isSelected}
     />
   );
 }
@@ -616,11 +672,15 @@ function CommercialBlock({
   startPx,
   widthPx,
   tooltip,
+  onSelect,
+  isSelected,
 }: {
   blocco: TurnoPdcBlocco;
   startPx: number;
   widthPx: number;
   tooltip: string;
+  onSelect: () => void;
+  isSelected: boolean;
 }) {
   const showStazioni = widthPx >= 47;
   const showOrari = widthPx >= 33;
@@ -643,15 +703,22 @@ function CommercialBlock({
       : blocco.tipo_evento;
 
   return (
-    <div
-      className="absolute overflow-visible"
+    <button
+      type="button"
+      onClick={onSelect}
+      title={tooltip}
+      aria-pressed={isSelected}
+      aria-label={`${blocco.tipo_evento} ${treno} — apri dettagli`}
+      className={cn(
+        "absolute cursor-pointer overflow-visible text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1",
+        isSelected && "z-10",
+      )}
       style={{
         left: `${startPx}px`,
         width: `${widthPx}px`,
         top: 6,
         height: TIMELINE_ROW_HEIGHT_PX - 12,
       }}
-      title={tooltip}
     >
       {/* Riga 1: stazione_da | stazione_a */}
       {showStazioni ? (
@@ -671,8 +738,9 @@ function CommercialBlock({
       {/* Riga 2: barra colorata centrata con treno+freccia */}
       <div
         className={cn(
-          "relative mt-1.5 flex h-7 items-center justify-center rounded-sm shadow-sm",
+          "relative mt-1.5 flex h-7 items-center justify-center rounded-sm shadow-sm transition",
           centerBg,
+          isSelected && "ring-2 ring-amber-400 ring-offset-1",
         )}
       >
         <span className="truncate px-1 font-mono text-[11px] font-semibold tabular-nums">
@@ -689,7 +757,7 @@ function CommercialBlock({
       ) : (
         <div className="mt-1 h-[9px]" aria-hidden />
       )}
-    </div>
+    </button>
   );
 }
 
@@ -705,11 +773,15 @@ function SimpleBlock({
   startPx,
   widthPx,
   tooltip,
+  onSelect,
+  isSelected,
 }: {
   blocco: TurnoPdcBlocco;
   startPx: number;
   widthPx: number;
   tooltip: string;
+  onSelect: () => void;
+  isSelected: boolean;
 }) {
   const tipo = blocco.tipo_evento;
   const colorClass = colorForTipoEvento(tipo);
@@ -722,16 +794,23 @@ function SimpleBlock({
 
   if (isThin) {
     return (
-      <div
-        className={cn("absolute flex items-center justify-center rounded-sm", colorClass)}
+      <button
+        type="button"
+        onClick={onSelect}
+        title={tooltip}
+        aria-label={tooltip}
+        aria-pressed={isSelected}
+        className={cn(
+          "absolute flex items-center justify-center rounded-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1",
+          colorClass,
+          isSelected && "ring-2 ring-amber-400 ring-offset-1",
+        )}
         style={{
           left: `${startPx}px`,
           width: `${widthPx}px`,
           top: TIMELINE_ROW_HEIGHT_PX / 2 - 5,
           height: 10,
         }}
-        title={tooltip}
-        aria-label={tooltip}
       />
     );
   }
@@ -741,10 +820,16 @@ function SimpleBlock({
   // riga, allineato col centro della timeline.
   const top = (TIMELINE_ROW_HEIGHT_PX - 28) / 2;
   return (
-    <div
+    <button
+      type="button"
+      onClick={onSelect}
+      title={tooltip}
+      aria-pressed={isSelected}
+      aria-label={`${tipo} — apri dettagli`}
       className={cn(
-        "absolute flex items-center justify-center overflow-hidden rounded shadow-sm",
+        "absolute flex items-center justify-center overflow-hidden rounded text-left shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1",
         colorClass,
+        isSelected && "ring-2 ring-amber-400 ring-offset-1",
       )}
       style={{
         left: `${startPx}px`,
@@ -752,14 +837,13 @@ function SimpleBlock({
         top,
         height: 28,
       }}
-      title={tooltip}
     >
       {!isShort && (
         <span className="truncate px-1.5 text-[11px] font-semibold leading-none">
           {label}
         </span>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -1044,6 +1128,203 @@ function formatHM(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
   return `${h}h${m.toString().padStart(2, "0")}`;
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Dialog dettagli blocco (MR 7.11.6)
+// ────────────────────────────────────────────────────────────────────────
+
+interface BloccoDetailDialogProps {
+  detail: { blocco: TurnoPdcBlocco; giornataNumero: number } | null;
+  onClose: () => void;
+}
+
+function BloccoDetailDialog({ detail, onClose }: BloccoDetailDialogProps) {
+  const open = detail !== null;
+  const blocco = detail?.blocco;
+  const giornataNumero = detail?.giornataNumero;
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-xl">
+        {blocco !== undefined && giornataNumero !== undefined && (
+          <>
+            <DialogHeader>
+              <div className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                    colorForTipoEvento(blocco.tipo_evento),
+                  )}
+                >
+                  {blocco.tipo_evento}
+                </span>
+                <DialogTitle className="text-base">
+                  {bloccoTitolo(blocco)}
+                </DialogTitle>
+              </div>
+              <DialogDescription>
+                Giornata {giornataNumero} · Blocco #{blocco.seq}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="flex flex-col gap-3 text-sm">
+              {/* Stazioni */}
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-md border border-border bg-muted/30 p-3">
+                <div className="text-left">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Da
+                  </div>
+                  <div className="font-semibold text-foreground">
+                    {blocco.stazione_da_nome ?? blocco.stazione_da_codice ?? "—"}
+                  </div>
+                  {blocco.stazione_da_nome !== null && blocco.stazione_da_codice !== null && (
+                    <div className="font-mono text-[10px] text-muted-foreground">
+                      {blocco.stazione_da_codice}
+                    </div>
+                  )}
+                </div>
+                <ArrowRight className="h-5 w-5 text-muted-foreground" aria-hidden />
+                <div className="text-right">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    A
+                  </div>
+                  <div className="font-semibold text-foreground">
+                    {blocco.stazione_a_nome ?? blocco.stazione_a_codice ?? "—"}
+                  </div>
+                  {blocco.stazione_a_nome !== null && blocco.stazione_a_codice !== null && (
+                    <div className="font-mono text-[10px] text-muted-foreground">
+                      {blocco.stazione_a_codice}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Orari + durata */}
+              <div className="grid grid-cols-3 gap-2 rounded-md border border-border bg-white p-3">
+                <DetailField label="Inizio" value={blocco.ora_inizio ?? "—"} mono />
+                <DetailField label="Fine" value={blocco.ora_fine ?? "—"} mono />
+                <DetailField
+                  label="Durata"
+                  value={blocco.durata_min !== null ? `${blocco.durata_min} min` : "—"}
+                  mono
+                />
+              </div>
+
+              {/* Treno */}
+              {blocco.numero_treno !== null && (
+                <div className="grid grid-cols-2 gap-2 rounded-md border border-border bg-white p-3">
+                  <DetailField label="Treno" value={blocco.numero_treno} mono />
+                  {blocco.numero_treno_variante_indice !== null &&
+                    blocco.numero_treno_variante_totale !== null &&
+                    blocco.numero_treno_variante_totale > 1 && (
+                      <DetailField
+                        label="Variante"
+                        value={`${blocco.numero_treno_variante_indice}/${blocco.numero_treno_variante_totale}`}
+                        mono
+                      />
+                    )}
+                </div>
+              )}
+
+              {/* Note accessori */}
+              {blocco.accessori_note !== null && blocco.accessori_note.length > 0 && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-3">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-800">
+                    Note accessori
+                  </div>
+                  <p className="mt-1 text-sm text-amber-900">{blocco.accessori_note}</p>
+                  {blocco.is_accessori_maggiorati && (
+                    <Badge variant="warning" className="mt-2 text-[9px]">
+                      accessori maggiorati
+                    </Badge>
+                  )}
+                </div>
+              )}
+
+              {/* Riferimenti tecnici */}
+              <div className="grid grid-cols-3 gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs">
+                <DetailField label="Fonte orario" value={blocco.fonte_orario} small />
+                {blocco.corsa_commerciale_id !== null && (
+                  <DetailField
+                    label="Corsa comm."
+                    value={`#${blocco.corsa_commerciale_id}`}
+                    mono
+                    small
+                  />
+                )}
+                {blocco.giro_blocco_id !== null && (
+                  <DetailField
+                    label="Giro blocco"
+                    value={`#${blocco.giro_blocco_id}`}
+                    mono
+                    small
+                  />
+                )}
+                {blocco.corsa_materiale_vuoto_id !== null && (
+                  <DetailField
+                    label="Vuoto"
+                    value={`#${blocco.corsa_materiale_vuoto_id}`}
+                    mono
+                    small
+                  />
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DetailField({
+  label,
+  value,
+  mono = false,
+  small = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  small?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
+      <div
+        className={cn(
+          small ? "text-xs" : "text-sm",
+          mono && "font-mono tabular-nums",
+          "font-medium text-foreground",
+        )}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function bloccoTitolo(b: TurnoPdcBlocco): string {
+  if (b.tipo_evento === "CONDOTTA" && b.numero_treno !== null && b.numero_treno.length > 0) {
+    return `Treno ${b.numero_treno}`;
+  }
+  if (b.tipo_evento === "VETTURA" && b.numero_treno !== null && b.numero_treno.length > 0) {
+    return `Vettura su ${b.numero_treno}`;
+  }
+  if (b.tipo_evento === "DORMITA") return "Dormita FR";
+  if (b.tipo_evento === "REFEZ") return "Refezione";
+  if (b.tipo_evento === "PRESA") return "Presa servizio";
+  if (b.tipo_evento === "FINE") return "Fine servizio";
+  if (b.tipo_evento === "CVp") return "Cambio volante (partenza)";
+  if (b.tipo_evento === "CVa") return "Cambio volante (arrivo)";
+  if (b.tipo_evento === "ACCp") return "Accessori partenza";
+  if (b.tipo_evento === "ACCa") return "Accessori arrivo";
+  if (b.tipo_evento === "PK") return "Parking";
+  if (b.tipo_evento === "SCOMP") return "S.COMP";
+  return b.tipo_evento;
 }
 
 function ErrorBlock({ message, onRetry }: { message: string; onRetry?: () => void }) {
