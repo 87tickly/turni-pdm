@@ -10,6 +10,75 @@
 
 ---
 
+## 2026-05-04 (135) — Sprint 7.9 MR β2-5: capacity check temporale (per giorno) sui thread
+
+### Contesto
+
+Estende il check di capacity da "count cumulativo per cluster"
+(`capacity_routing.py` MR 11B Step 2) a "count distinto per giorno
+sui MaterialeThread proiettati". Ora il builder può segnalare
+warning specifici tipo *"CAPACITY ETR526: 12 pezzi simultanei in
+data 2026-06-07 (dotazione 11)"*.
+
+### Modifiche backend
+
+`backend/src/colazione/domain/builder_giro/capacity_temporale.py`
+(modulo nuovo):
+
+- `verifica_capacity_temporale(session, programma_id, dotazione) →
+  list[str]`: query JOIN `MaterialeThread` + `MaterialeThreadEvento`
+  filtrato per programma + tipo evento "in uso".
+- Raggruppa per `(data_giorno, materiale)`, conta thread distinti.
+- Se `count > dotazione[materiale]` → warning con timestamp + delta.
+
+`backend/src/colazione/domain/builder_giro/thread_proiezione.py`:
+
+- `_carica_blocchi_variante_canonica` ora ritorna anche
+  `GiroVariante` (per accedere a `dates_apply_json`).
+- Nuovo helper `_prima_data_applicabile(variante)` che estrae la
+  prima data del cluster A1 (`dates_apply_json[0]`).
+- `MaterialeThreadEvento.data_giorno` popolato con questa data
+  invece di NULL — sblocca il capacity check temporale.
+
+`backend/src/colazione/domain/builder_giro/builder.py`:
+
+- Dopo `persisti_giri` chiama `verifica_capacity_temporale`. I
+  warning sono accodati al `BuilderResult.warnings` (già esposti in
+  UI card "Ultimo run").
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 63 file clean.
+- Backend `pytest` test puri 223 ok.
+
+### Stato
+
+- ✅ MR β2-5 completato.
+- 🟡 Smoke utente Railway: rigenerazione di un programma con
+  composizione che richiede pezzi > dotazione genera warning
+  specifico per data nella card "Ultimo run del builder".
+
+### Limitazioni note (scope futuro β2-5 v2)
+
+- **Granularità giornaliera**: due thread che operano la stessa data
+  ma in finestre orarie disgiunte sono contati entrambi anche se
+  fisicamente potrebbero condividere lo stesso pezzo. Granularità
+  minuto-per-minuto è scope futuro (richiede esplosione intervalli e
+  sweep line algorithm).
+- **Solo prima data del cluster**: per le altre date di
+  `dates_apply_json` di una variante, il check non viene eseguito.
+  Ogni data del cluster richiede idealmente lo stesso pezzo (= stesso
+  pattern), ma il check granulare per data è scope futuro
+  (esplosione per data o conteggio pesato).
+- Eventi senza `data_giorno`: skipped (non dovrebbero più esistere
+  dopo questo MR per i giri rigenerati).
+
+### Prossimo step
+
+β2-6: UI thread viewer + km/anno per thread.
+
+---
+
 ## 2026-05-04 (134) — Sprint 7.9 MR β2-4: `MaterialeThread` + algoritmo proiezione (cuore β2)
 
 ### Contesto

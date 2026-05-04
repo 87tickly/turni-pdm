@@ -1132,6 +1132,19 @@ async def genera_giri(
     )
     await session.commit()
 
+    # Sprint 7.9 MR β2-5: capacity check istante-per-istante (per
+    # giorno) sui MaterialeThread appena proiettati. Aggiunge warning
+    # specifici "CAPACITY ETR526: 12 pezzi simultanei in data 2026-06-07
+    # (dotazione = 11)" al `BuilderResult`.
+    from colazione.domain.builder_giro.capacity_temporale import (
+        verifica_capacity_temporale,
+    )
+
+    warnings_cap_temp = await verifica_capacity_temporale(
+        session, programma_id=programma_id, dotazione=dotazione
+    )
+    warnings.extend(warnings_cap_temp)
+
     # 9. Stats: sui giri AGGREGATI per il count "giri creati", e sui
     #    giri ASSEGNATI (pre-aggregazione) per metriche di produzione
     #    (corse processate, residue, eventi).

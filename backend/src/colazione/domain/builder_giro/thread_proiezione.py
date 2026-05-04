@@ -63,16 +63,20 @@ from colazione.models.giri import GiroBlocco, GiroGiornata, GiroVariante
 
 async def _carica_blocchi_variante_canonica(
     session: AsyncSession, giro_materiale_id: int
-) -> list[tuple[GiroGiornata, GiroBlocco]]:
+) -> list[tuple[GiroGiornata, GiroVariante, GiroBlocco]]:
     """Carica i blocchi della variante CANONICA (variant_index=0) di
     ogni giornata del giro, ordinati per giornata + seq.
 
-    Restituisce la lista [(giornata, blocco), ...].
+    Sprint 7.9 MR β2-5: ritorna anche la `GiroVariante` per accedere
+    a `dates_apply_json` (= prima data applicabile usata come
+    `data_giorno` sull'evento del thread, per capacity check temporale).
+
+    Restituisce la lista [(giornata, variante_canonica, blocco), ...].
     """
     from sqlalchemy import select
 
     stmt = (
-        select(GiroGiornata, GiroBlocco)
+        select(GiroGiornata, GiroVariante, GiroBlocco)
         .join(
             GiroVariante,
             GiroVariante.giro_giornata_id == GiroGiornata.id,
@@ -86,7 +90,7 @@ async def _carica_blocchi_variante_canonica(
     )
     result = await session.execute(stmt)
     rows = list(result.all())
-    return [(g, b) for g, b in rows]
+    return [(g, v, b) for g, v, b in rows]
 
 
 def _composizione_da_blocco(blocco: GiroBlocco) -> list[tuple[str, int]]:
@@ -113,7 +117,7 @@ def _composizione_da_blocco(blocco: GiroBlocco) -> list[tuple[str, int]]:
 
 
 def _composizione_max_giro(
-    blocchi_canonici: list[tuple[GiroGiornata, GiroBlocco]],
+    blocchi_canonici: list[tuple[GiroGiornata, GiroVariante, GiroBlocco]],
 ) -> list[tuple[str, int]]:
     """Composizione massima usata in TUTTO il giro: per ogni materiale,
     il MAX n_pezzi visto in qualunque corsa di qualunque giornata.
@@ -122,7 +126,7 @@ def _composizione_max_giro(
     (ETR425, 1)] → max = [(ETR526, 2), (ETR425, 1)] = 3 thread totali.
     """
     max_per_mat: dict[str, int] = {}
-    for _g, b in blocchi_canonici:
+    for _g, _v, b in blocchi_canonici:
         for mat, n in _composizione_da_blocco(b):
             if n > max_per_mat.get(mat, 0):
                 max_per_mat[mat] = n
@@ -226,7 +230,7 @@ async def proietta_thread_giro(
             km_tot = Decimal("0")
             min_tot = 0
             n_corse = 0
-            for giornata, b in blocchi_canonici:
+            for giornata, variante, b in blocchi_canonici:
                 evento_tipo: str | None = None
                 if b.tipo_blocco == "corsa_commerciale":
                     comp = _composizione_da_blocco(b)
@@ -292,7 +296,7 @@ async def proietta_thread_giro(
                     stazione_a_codice=b.stazione_a_codice,
                     ora_inizio=b.ora_inizio,
                     ora_fine=b.ora_fine,
-                    data_giorno=_data_giornata(giornata),
+                    data_giorno=_prima_data_applicabile(variante),
                     km_tratta=km_evento,
                     numero_treno=_numero_treno_blocco(b),
                     note=None,
@@ -345,14 +349,27 @@ def _minuti_blocco(blocco: GiroBlocco) -> int | None:
     return fine - inizio
 
 
-def _data_giornata(giornata: GiroGiornata) -> date_t | None:
-    """Estrae la data canonica dalla giornata.
+def _prima_data_applicabile(variante: GiroVariante) -> date_t | None:
+    """Sprint 7.9 MR β2-5: prima data del cluster A1 della variante
+    canonica. Usata come ``data_giorno`` sull'evento del thread per
+    consentire al capacity check temporale di raggruppare per giorno.
 
-    Per ora ritorniamo None (campo non presente sul modello GiroGiornata
-    — è derivato dal contesto ProgrammaMateriale.valido_da +
-    numero_giornata). Sufficiente per la versione MVP.
+    Approssimazione: il cluster ha N date `dates_apply_json` (= date
+    in cui la giornata-tipo si applica). Prendiamo la PRIMA come
+    proxy. Il check capacity ne tiene conto come "questo pezzo è in
+    uso quel giorno"; le altre date del cluster richiedono lo stesso
+    pezzo idealmente, ma il check granulare per ogni data del cluster
+    è scope futuro (β2-5 v2: esplosione per data o conteggio
+    pesato).
     """
-    _ = giornata
+    dates = variante.dates_apply_json or []
+    for d in dates:
+        if not isinstance(d, str):
+            continue
+        try:
+            return date_t.fromisoformat(d)
+        except ValueError:
+            continue
     return None
 
 
