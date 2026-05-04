@@ -19,7 +19,7 @@ Auth: ruolo ``PIANIFICATORE_GIRO`` (admin bypassa).
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
@@ -37,6 +37,7 @@ from colazione.models.anagrafica import (
     MaterialeDotazioneAzienda,
     MaterialeIstanza,
     MaterialeTipo,
+    RegolaInvioSosta,
     Stazione,
 )
 from colazione.models.corse import CorsaCommerciale
@@ -425,6 +426,188 @@ async def get_calendario(
         anno=anno,
         festivita=[FestivitaRead.model_validate(r) for r in rows],
     )
+
+
+# =====================================================================
+# Sprint 7.9 MR β2-7 — Regole pre-builder invio a sosta intermedia
+# =====================================================================
+
+
+class RegolaInvioSostaRead(BaseModel):
+    """Sprint 7.9 MR β2-7: regola operativa di invio a sosta."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    programma_id: int
+    stazione_sgancio_codice: str
+    tipo_materiale_codice: str
+    finestra_oraria_inizio: time
+    finestra_oraria_fine: time
+    localita_sosta_id: int
+    fallback_sosta_id: int | None
+    note: str | None
+
+
+class RegolaInvioSostaCreate(BaseModel):
+    """Body POST /api/programmi/{id}/regole-invio-sosta."""
+
+    stazione_sgancio_codice: str
+    tipo_materiale_codice: str
+    finestra_oraria_inizio: time
+    finestra_oraria_fine: time
+    localita_sosta_id: int
+    fallback_sosta_id: int | None = None
+    note: str | None = None
+
+
+@router.get(
+    "/programmi/{programma_id}/regole-invio-sosta",
+    response_model=list[RegolaInvioSostaRead],
+)
+async def list_regole_invio_sosta(
+    programma_id: int,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> list[RegolaInvioSostaRead]:
+    """Lista regole di invio sosta per il programma indicato.
+
+    Sprint 7.9 MR β2-7: il pianificatore le configura per dichiarare
+    "ETR421 sganciato a Garibaldi tra 06:00-19:00 → invia a Misr"
+    (anziché lasciare il fallback "deposito sede" del builder).
+    """
+    # Verifica programma esiste e appartiene all'azienda
+    from colazione.models.programmi import ProgrammaMateriale
+
+    prog = (
+        await session.execute(
+            select(ProgrammaMateriale).where(
+                ProgrammaMateriale.id == programma_id,
+                ProgrammaMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if prog is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    stmt = (
+        select(RegolaInvioSosta)
+        .where(RegolaInvioSosta.programma_id == programma_id)
+        .order_by(
+            RegolaInvioSosta.stazione_sgancio_codice,
+            RegolaInvioSosta.tipo_materiale_codice,
+            RegolaInvioSosta.finestra_oraria_inizio,
+        )
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return [RegolaInvioSostaRead.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/programmi/{programma_id}/regole-invio-sosta",
+    response_model=RegolaInvioSostaRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_regola_invio_sosta(
+    programma_id: int,
+    body: RegolaInvioSostaCreate,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> RegolaInvioSostaRead:
+    """Crea una regola di invio sosta per il programma."""
+    from colazione.models.programmi import ProgrammaMateriale
+
+    prog = (
+        await session.execute(
+            select(ProgrammaMateriale).where(
+                ProgrammaMateriale.id == programma_id,
+                ProgrammaMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if prog is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    # Valida FK localita_sosta (deve appartenere all'azienda).
+    sosta = (
+        await session.execute(
+            select(LocalitaSosta).where(
+                LocalitaSosta.id == body.localita_sosta_id,
+                LocalitaSosta.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if sosta is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Località di sosta {body.localita_sosta_id} non trovata.",
+        )
+
+    if body.fallback_sosta_id is not None:
+        fallback = (
+            await session.execute(
+                select(LocalitaSosta).where(
+                    LocalitaSosta.id == body.fallback_sosta_id,
+                    LocalitaSosta.azienda_id == user.azienda_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if fallback is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Località fallback {body.fallback_sosta_id} non trovata.",
+            )
+
+    nuova = RegolaInvioSosta(
+        programma_id=programma_id,
+        stazione_sgancio_codice=body.stazione_sgancio_codice,
+        tipo_materiale_codice=body.tipo_materiale_codice,
+        finestra_oraria_inizio=body.finestra_oraria_inizio,
+        finestra_oraria_fine=body.finestra_oraria_fine,
+        localita_sosta_id=body.localita_sosta_id,
+        fallback_sosta_id=body.fallback_sosta_id,
+        note=body.note,
+    )
+    session.add(nuova)
+    await session.commit()
+    await session.refresh(nuova)
+    return RegolaInvioSostaRead.model_validate(nuova)
+
+
+@router.delete(
+    "/programmi/{programma_id}/regole-invio-sosta/{regola_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_regola_invio_sosta(
+    programma_id: int,
+    regola_id: int,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Cancella una regola di invio sosta (cancellabile dal pianificatore)."""
+    from colazione.models.programmi import ProgrammaMateriale
+
+    prog = (
+        await session.execute(
+            select(ProgrammaMateriale).where(
+                ProgrammaMateriale.id == programma_id,
+                ProgrammaMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if prog is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    regola = (
+        await session.execute(
+            select(RegolaInvioSosta).where(
+                RegolaInvioSosta.id == regola_id,
+                RegolaInvioSosta.programma_id == programma_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if regola is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    await session.delete(regola)
+    await session.commit()
 
 
 # Esposto per riuso da altri moduli backend (es. builder Sprint 7.7.3).

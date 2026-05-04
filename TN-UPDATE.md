@@ -10,6 +10,106 @@
 
 ---
 
+## 2026-05-04 (137) — Sprint 7.9 MR β2-7: API CRUD `RegolaInvioSosta` + client + hook (chiusura β2)
+
+### Contesto
+
+Decisione utente 2026-05-04 (durante design β2, domanda 3):
+
+> "si confermo" (= regole invio sosta sono per programma + tabella
+> separata `regola_invio_sosta_azienda` per regole universali, scope
+> futuro)
+
+L'API CRUD permette al pianificatore di configurare regole tipo
+"ETR421 sganciato a Garibaldi 06:00-19:00 → Misr". Il modello dati
+esiste già da MR β2-0; β2-7 aggiunge endpoint REST + client TS +
+hook React Query.
+
+### Modifiche backend
+
+`backend/src/colazione/api/anagrafiche.py`:
+
+- `RegolaInvioSostaRead` + `RegolaInvioSostaCreate` Pydantic schemas.
+- `GET /api/programmi/{id}/regole-invio-sosta`: lista regole del
+  programma (PIANIFICATORE_GIRO).
+- `POST /api/programmi/{id}/regole-invio-sosta`: crea regola.
+  Validazione FK programma+azienda, FK localita_sosta+azienda,
+  FK fallback_sosta+azienda. 404 se programma non trovato per
+  azienda; 400 se sosta non trovata.
+- `DELETE /api/programmi/{id}/regole-invio-sosta/{regola_id}`:
+  cancella regola.
+
+### Modifiche frontend
+
+`frontend/src/lib/api/anagrafiche.ts`:
+
+- Tipi e wrapper anche per `LocalitaSosta` (β2-0) e
+  `MaterialeIstanza` (β2-1) — non aggiunti prima per pulizia.
+- Tipi `RegolaInvioSostaRead`, `RegolaInvioSostaCreate` e wrapper
+  `listRegoleInvioSosta`, `createRegolaInvioSosta`,
+  `deleteRegolaInvioSosta`.
+
+`frontend/src/hooks/useAnagrafiche.ts`:
+
+- `useLocalitaSosta()`, `useMaterialeIstanze({tipo, sede})`,
+  `useRegoleInvioSosta(programmaId)` (query).
+- `useCreateRegolaInvioSosta()`, `useDeleteRegolaInvioSosta()`
+  (mutations con `onSuccess` invalidate).
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 63 file clean.
+- Frontend `tsc -b --noEmit` ✅.
+
+### Stato
+
+- ✅ MR β2-7 backend + client+hook completati.
+- 🟡 UI completa di gestione regole nella `ProgrammaDettaglioRoute`
+  è scope **β2-7 v2**: card "Regole invio sosta" + form di
+  creazione + tabella regole + delete inline. Il backend è già
+  consumabile via curl per smoke immediato.
+- 🟡 Integrazione builder → consultazione regole quando uno sgancio
+  cade in finestra+stazione+materiale è scope **β2-7 v2 / β2-3
+  step 2**: oggi `arricchisci_sourcing` usa solo fallback
+  "deposito sede" per la `dest_descrizione`.
+
+### Sprint 7.9 β2 chiuso
+
+7 sub-MR consegnati in sequenza:
+
+- β2-0 (entry 131): `LocalitaSosta` + `RegolaInvioSosta` + seed
+  Milano San Rocco.
+- β2-1 (entry 132): `MaterialeIstanza` (matricole L3) + seed da
+  dotazione.
+- β2-2 (entry 128) e β2-3 (entry 133): numerazione vuoti parlante +
+  sourcing thread agganci/sganci + capacity check + bugfix render
+  eventi UI.
+- β2-4 (entry 134): `MaterialeThread` + algoritmo proiezione (cuore β2).
+- β2-5 (entry 135): capacity check temporale per giorno sui thread.
+- β2-6 (entry 136): UI Thread Viewer + pannello "Convogli del turno".
+- β2-7 (entry 137): API CRUD `RegolaInvioSosta` + client+hook.
+
+Modello L1+L2+L3 ora completo:
+- L1 tipo materiale (esistente).
+- L2 thread logico (β2-4) con timeline eventi e km/min/corse aggregati.
+- L3 istanza fisica con matricola (β2-1).
+
+### Limitazioni residue → backlog β2 v2
+
+1. Algoritmo proiezione thread copre solo variante canonica.
+2. Sosta tra sgancio/riaggancio non modellata come evento esplicito.
+3. Cross-thread esterni (bridge cross-giro) non tracciati.
+4. Capacity check granularità giornaliera (no minuto-per-minuto).
+5. UI gestione `RegolaInvioSosta` (form CRUD nella
+   ProgrammaDettaglioRoute).
+6. Builder consulta `RegolaInvioSosta` per popolare `dest_descrizione`
+   degli sganci (oggi solo fallback deposito).
+7. `RegolaInvioSostaAzienda` (regole universali, scope β2 v2).
+8. UI assegnazione `MaterialeIstanza.sede_codice` (= ruolo
+   Manutenzione futuro).
+
+---
+
 ## 2026-05-04 (136) — Sprint 7.9 MR β2-6: UI Thread Viewer + pannello "Convogli del turno"
 
 ### Modifiche frontend

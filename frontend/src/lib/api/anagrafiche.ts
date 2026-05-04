@@ -61,6 +61,105 @@ export async function listLocalitaManutenzione(): Promise<LocalitaManutenzioneRe
 }
 
 // =====================================================================
+// Sprint 7.9 MR β2-0 + β2-1 — LocalitaSosta + MaterialeIstanza
+// =====================================================================
+
+export interface LocalitaSostaRead {
+  id: number;
+  codice: string;
+  nome: string;
+  stazione_collegata_codice: string | null;
+  is_attiva: boolean;
+  note: string | null;
+}
+
+export async function listLocalitaSosta(): Promise<LocalitaSostaRead[]> {
+  return apiJson<LocalitaSostaRead[]>("/api/localita-sosta", { method: "GET" });
+}
+
+export interface MaterialeIstanzaRead {
+  id: number;
+  tipo_materiale_codice: string;
+  matricola: string;
+  sede_codice: string | null;
+  stato: string;
+  note: string | null;
+}
+
+export async function listMaterialeIstanze(
+  params: { tipo_materiale_codice?: string; sede_codice?: string } = {},
+): Promise<MaterialeIstanzaRead[]> {
+  const search = new URLSearchParams();
+  if (params.tipo_materiale_codice !== undefined) {
+    search.set("tipo_materiale_codice", params.tipo_materiale_codice);
+  }
+  if (params.sede_codice !== undefined) {
+    search.set("sede_codice", params.sede_codice);
+  }
+  const qs = search.toString();
+  return apiJson<MaterialeIstanzaRead[]>(
+    `/api/materiale-istanze${qs.length > 0 ? `?${qs}` : ""}`,
+    { method: "GET" },
+  );
+}
+
+// =====================================================================
+// Sprint 7.9 MR β2-7 — Regole pre-builder invio a sosta intermedia
+// =====================================================================
+
+export interface RegolaInvioSostaRead {
+  id: number;
+  programma_id: number;
+  stazione_sgancio_codice: string;
+  tipo_materiale_codice: string;
+  /** Formato "HH:MM:SS" o "HH:MM". */
+  finestra_oraria_inizio: string;
+  finestra_oraria_fine: string;
+  localita_sosta_id: number;
+  fallback_sosta_id: number | null;
+  note: string | null;
+}
+
+export interface RegolaInvioSostaCreate {
+  stazione_sgancio_codice: string;
+  tipo_materiale_codice: string;
+  finestra_oraria_inizio: string;
+  finestra_oraria_fine: string;
+  localita_sosta_id: number;
+  fallback_sosta_id?: number | null;
+  note?: string | null;
+}
+
+export async function listRegoleInvioSosta(
+  programmaId: number,
+): Promise<RegolaInvioSostaRead[]> {
+  return apiJson<RegolaInvioSostaRead[]>(
+    `/api/programmi/${programmaId}/regole-invio-sosta`,
+    { method: "GET" },
+  );
+}
+
+export async function createRegolaInvioSosta(
+  programmaId: number,
+  body: RegolaInvioSostaCreate,
+): Promise<RegolaInvioSostaRead> {
+  return apiJson<RegolaInvioSostaRead>(
+    `/api/programmi/${programmaId}/regole-invio-sosta`,
+    { method: "POST", body },
+  );
+}
+
+export async function deleteRegolaInvioSosta(
+  programmaId: number,
+  regolaId: number,
+): Promise<void> {
+  await apiJson<void>(
+    `/api/programmi/${programmaId}/regole-invio-sosta/${regolaId}`,
+    { method: "DELETE" },
+  );
+}
+
+// =====================================================================
 // Sprint 7.7 MR 2 — Calendario ufficiale festività
 // =====================================================================
 
