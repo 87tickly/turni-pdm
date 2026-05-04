@@ -34,6 +34,7 @@ from colazione.db import get_session
 from colazione.domain.builder_giro.builder import (
     BuilderResult,
     GiriEsistentiError,
+    PdcDipendentiError,
     PeriodoFuoriProgrammaError,
     ProgrammaNonAttivoError,
     ProgrammaNonTrovatoError,
@@ -132,6 +133,15 @@ async def genera_giri_endpoint(
         False,
         description="Se true, cancella i giri esistenti del programma e rigenera.",
     ),
+    confirm_delete_pdc: bool = Query(
+        False,
+        description=(
+            "Sprint 7.9 strategy A: se true, conferma la cancellazione "
+            "a cascata dei turni PdC dipendenti dai giri rigenerati. "
+            "Senza questa conferma, una rigenerazione che cancellerebbe "
+            "PdC esistenti restituisce 409 con il count nei dettagli."
+        ),
+    ),
     user: CurrentUser = _authz,
     session: AsyncSession = Depends(get_session),
 ) -> BuilderResultResponse:
@@ -165,6 +175,7 @@ async def genera_giri_endpoint(
             session=session,
             azienda_id=user.azienda_id,
             force=force,
+            confirm_delete_pdc=confirm_delete_pdc,
             eseguito_da_user_id=user.user_id,
         )
     except ProgrammaNonTrovatoError as exc:
@@ -176,6 +187,20 @@ async def genera_giri_endpoint(
     except PeriodoFuoriProgrammaError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    except PdcDipendentiError as exc:
+        # Sprint 7.9 strategy A: 409 STRUTTURATO con n_pdc + codici per UI.
+        # Il frontend usa questi dati per la seconda dialog di conferma.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "pdc_dipendenti",
+                "messaggio": str(exc),
+                "n_pdc_dipendenti": exc.n_pdc,
+                "pdc_codici": exc.pdc_codici,
+                "programma_id": exc.programma_id,
+                "localita_codice": exc.localita_codice,
+            },
         ) from exc
     except GiriEsistentiError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

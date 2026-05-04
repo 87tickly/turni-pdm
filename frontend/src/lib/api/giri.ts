@@ -39,6 +39,13 @@ export interface GeneraGiriParams {
   n_giornate?: number;
   localita_codice: string;
   force?: boolean;
+  /**
+   * Sprint 7.9 strategy A: conferma esplicita per cancellare i turni
+   * PdC dipendenti dai giri rigenerati. Senza questo flag a `true`,
+   * una rigenerazione che cancellerebbe PdC esistenti restituisce 409
+   * con `code: "pdc_dipendenti"` + count nel body.
+   */
+  confirm_delete_pdc?: boolean;
 }
 
 export interface GiroListItem {
@@ -142,6 +149,7 @@ export async function generaGiri(
   }
   search.set("localita_codice", params.localita_codice);
   if (params.force === true) search.set("force", "true");
+  if (params.confirm_delete_pdc === true) search.set("confirm_delete_pdc", "true");
   return apiJson<BuilderResult>(`/api/programmi/${programmaId}/genera-giri?${search.toString()}`, {
     method: "POST",
   });

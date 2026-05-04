@@ -44,6 +44,7 @@ La persistenza è in `api/` o CLI in `interfaces/`.
 from colazione.domain.builder_giro.builder import (
     BuilderResult,
     GiriEsistentiError,
+    PdcDipendentiError,
     ProgrammaNonAttivoError,
     ProgrammaNonTrovatoError,
     StrictModeViolation,
@@ -141,6 +142,7 @@ __all__ = [
     "LocalitaSenzaStazioneError",
     "MotivoChiusura",
     "ParamCatena",
+    "PdcDipendentiError",
     "ParamMultiGiornata",
     "ParamPosizionamento",
     "PosizionamentoImpossibileError",

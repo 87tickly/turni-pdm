@@ -34,12 +34,42 @@ interface GeneraGiriDialogProps {
 interface FormState {
   localita_codice: string;
   force: boolean;
+  /** Sprint 7.9 strategy A: conferma cancellazione cascata PdC. */
+  confirm_delete_pdc: boolean;
 }
 
 const INITIAL: FormState = {
   localita_codice: "",
   force: false,
+  confirm_delete_pdc: false,
 };
+
+/**
+ * Sprint 7.9 strategy A: dettagli del 409 strutturato sui PdC dipendenti.
+ * Backend restituisce in `detail` un oggetto con questa shape quando la
+ * rigenerazione cancellerebbe N turni PdC senza che l'utente abbia
+ * confermato esplicitamente.
+ */
+interface PdcDipendentiDetail {
+  code: "pdc_dipendenti";
+  messaggio: string;
+  n_pdc_dipendenti: number;
+  pdc_codici: string[];
+  programma_id: number;
+  localita_codice: string;
+}
+
+function parsePdcDipendentiDetail(detail: unknown): PdcDipendentiDetail | null {
+  if (
+    typeof detail === "object" &&
+    detail !== null &&
+    "code" in detail &&
+    (detail as { code: unknown }).code === "pdc_dipendenti"
+  ) {
+    return detail as PdcDipendentiDetail;
+  }
+  return null;
+}
 
 /**
  * Dialog di lancio dell'algoritmo `POST /api/programmi/{id}/genera-giri`.
@@ -71,6 +101,8 @@ export function GeneraGiriDialog({
   const [form, setForm] = useState<FormState>(INITIAL);
   const [error, setError] = useState<string | null>(null);
   const [needsForce, setNeedsForce] = useState(false);
+  /** Sprint 7.9 strategy A: dettagli PdC dipendenti dal 409 strutturato. */
+  const [pdcDipendenti, setPdcDipendenti] = useState<PdcDipendentiDetail | null>(null);
   const [result, setResult] = useState<BuilderResult | null>(null);
 
   const localitaQuery = useLocalitaManutenzione();
@@ -81,18 +113,20 @@ export function GeneraGiriDialog({
       setForm(INITIAL);
       setError(null);
       setNeedsForce(false);
+      setPdcDipendenti(null);
       setResult(null);
     }
     onOpenChange(next);
   };
 
-  const submit = async (forceFlag: boolean) => {
+  const submit = async (forceFlag: boolean, confirmDeletePdc: boolean) => {
     setError(null);
     // Periodo intero del programma sempre — niente data_inizio/n_giornate
     // (backend default Sprint 7.5 MR 4 = valido_da..valido_a).
     const params: GeneraGiriParams = {
       localita_codice: form.localita_codice,
       force: forceFlag,
+      confirm_delete_pdc: confirmDeletePdc,
     };
     try {
       const r = await generaMutation.mutateAsync({ programmaId, params });
@@ -100,6 +134,20 @@ export function GeneraGiriDialog({
       onCompleted?.(r);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
+        // Sprint 7.9 strategy A: distingui 409 generico (giri esistenti)
+        // da 409 strutturato (PdC dipendenti). Il secondo richiede una
+        // seconda conferma esplicita.
+        const pdcDetail = parsePdcDipendentiDetail(err.detail);
+        if (pdcDetail !== null) {
+          setPdcDipendenti(pdcDetail);
+          // PdC dipendenti implica giri esistenti già confermati a monte
+          // (force=true): il 409 PdC è sollevato DOPO il check giri.
+          // Persistiamo force=true così il prossimo submit manda entrambi.
+          setNeedsForce(true);
+          setForm((p) => ({ ...p, force: true }));
+          setError(null);
+          return;
+        }
         setNeedsForce(true);
         setError(err.message);
         return;
@@ -119,7 +167,7 @@ export function GeneraGiriDialog({
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!isValid) return;
-    void submit(form.force);
+    void submit(form.force, form.confirm_delete_pdc);
   };
 
   const localita = localitaQuery.data ?? [];
@@ -177,6 +225,44 @@ export function GeneraGiriDialog({
                 </label>
               )}
 
+              {pdcDipendenti !== null && (
+                <div className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+                  <p className="font-semibold text-destructive">
+                    ⚠ Cancellerai anche {pdcDipendenti.n_pdc_dipendenti} turn
+                    {pdcDipendenti.n_pdc_dipendenti === 1 ? "o" : "i"} PdC
+                  </p>
+                  <p className="text-foreground">
+                    La rigenerazione dei giri di questa sede distruggerà i seguenti
+                    turni PdC che ne dipendono. Operazione irreversibile.
+                  </p>
+                  <ul className="ml-4 list-disc font-mono text-xs text-foreground">
+                    {pdcDipendenti.pdc_codici.slice(0, 8).map((codice) => (
+                      <li key={codice}>{codice}</li>
+                    ))}
+                    {pdcDipendenti.pdc_codici.length > 8 && (
+                      <li className="italic text-muted-foreground">
+                        … e altri {pdcDipendenti.pdc_codici.length - 8}
+                      </li>
+                    )}
+                  </ul>
+                  <label className="mt-1 flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={form.confirm_delete_pdc}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, confirm_delete_pdc: e.target.checked }))
+                      }
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <strong>Confermo la cancellazione dei {pdcDipendenti.n_pdc_dipendenti} turn
+                      {pdcDipendenti.n_pdc_dipendenti === 1 ? "o" : "i"} PdC</strong> insieme
+                      ai giri di questa sede. Dovranno essere rigenerati dopo.
+                    </span>
+                  </label>
+                </div>
+              )}
+
               {error !== null && (
                 <p
                   role="alert"
@@ -195,9 +281,21 @@ export function GeneraGiriDialog({
                 >
                   Annulla
                 </Button>
-                <Button type="submit" disabled={!isValid || generaMutation.isPending}>
+                <Button
+                  type="submit"
+                  disabled={
+                    !isValid ||
+                    generaMutation.isPending ||
+                    // Se ci sono PdC dipendenti, il submit richiede entrambe
+                    // le conferme: force (giri esistenti) + confirm_delete_pdc.
+                    (pdcDipendenti !== null &&
+                      (!form.force || !form.confirm_delete_pdc))
+                  }
+                >
                   {generaMutation.isPending ? (
                     <Spinner label="Generazione…" />
+                  ) : pdcDipendenti !== null ? (
+                    "Conferma e rigenera"
                   ) : (
                     "Avvia generazione"
                   )}

@@ -143,6 +143,45 @@ class GiriEsistentiError(RuntimeError):
         self.n_esistenti = n_esistenti
 
 
+class PdcDipendentiError(RuntimeError):
+    """La rigenerazione (force=True) cancellerebbe N turni PdC dipendenti
+    dai giri della sede.
+
+    Sprint 7.9 strategy A (decisione utente 2026-05-04): il flusso
+    "rigenero giri sede X" richiede una conferma esplicita prima di
+    distruggere i turni PdC che derivano da quei giri (FK
+    ``turno_pdc_blocco.corsa_materiale_vuoto_id`` con ondelete=RESTRICT
+    impedisce wipe silente). Per procedere passa
+    ``confirm_delete_pdc=True``.
+
+    Attributi:
+        programma_id: id del programma.
+        localita_codice: codice sede (es. ``"IMPMAN_MILANO_FIORENZA"``).
+        n_pdc: numero turni PdC che verranno cancellati.
+        pdc_codici: lista dei ``codice`` dei turni PdC (es.
+            ``["T-G-FIO-001-ETR526-7g", ...]``) per UI.
+    """
+
+    def __init__(
+        self,
+        programma_id: int,
+        localita_codice: str,
+        n_pdc: int,
+        pdc_codici: list[str],
+    ) -> None:
+        super().__init__(
+            f"Rigenerazione giri programma {programma_id} sede "
+            f"{localita_codice!r} cancellerebbe {n_pdc} turni PdC "
+            f"dipendenti. Per confermare passa confirm_delete_pdc=True. "
+            f"Turni: {', '.join(pdc_codici[:5])}"
+            + (f" (+ altri {n_pdc - 5})" if n_pdc > 5 else "")
+        )
+        self.programma_id = programma_id
+        self.localita_codice = localita_codice
+        self.n_pdc = n_pdc
+        self.pdc_codici = pdc_codici
+
+
 class ProgrammaNonTrovatoError(LookupError):
     """Programma materiale non trovato per l'azienda."""
 
@@ -381,6 +420,50 @@ async def _count_giri_esistenti(
     return int(val)
 
 
+async def _conta_pdc_dipendenti(
+    session: AsyncSession,
+    programma_id: int,
+    localita_id: int | None,
+) -> tuple[int, list[str]]:
+    """Sprint 7.9 strategy A: conta turni PdC dipendenti dai giri di
+    questa sede del programma.
+
+    Un turno PdC è dipendente se almeno uno dei suoi blocchi
+    (``turno_pdc_blocco``) referenzia una ``corsa_materiale_vuoto``
+    appartenente a un giro della sede indicata. La FK è la stessa
+    che farebbe esplodere il wipe (RESTRICT).
+
+    Returns:
+        ``(n_pdc, codici)`` dove ``n_pdc`` è il count distinto e
+        ``codici`` la lista dei ``turno_pdc.codice`` (per UI).
+    """
+    if localita_id is None:
+        where_giri = "gm.programma_id = :pid"
+        params: dict[str, int] = {"pid": programma_id}
+    else:
+        where_giri = (
+            "gm.programma_id = :pid "
+            "AND gm.localita_manutenzione_partenza_id = :lid"
+        )
+        params = {"pid": programma_id, "lid": localita_id}
+
+    sql = text(
+        f"""
+        SELECT DISTINCT tp.id, tp.codice
+        FROM turno_pdc tp
+        JOIN turno_pdc_giornata tpg ON tpg.turno_pdc_id = tp.id
+        JOIN turno_pdc_blocco tpb ON tpb.turno_pdc_giornata_id = tpg.id
+        JOIN corsa_materiale_vuoto cmv ON cmv.id = tpb.corsa_materiale_vuoto_id
+        JOIN giro_materiale gm ON gm.id = cmv.giro_materiale_id
+        WHERE {where_giri}
+        ORDER BY tp.codice
+        """
+    )
+    rows = (await session.execute(sql, params)).all()
+    codici = [str(row.codice) for row in rows]
+    return len(codici), codici
+
+
 async def _wipe_giri_programma(
     session: AsyncSession,
     programma_id: int,
@@ -393,14 +476,26 @@ async def _wipe_giri_programma(
     comportamento storico (wipe globale del programma) — usato dai
     test di reset e dal fallback admin.
 
+    Sprint 7.9 strategy A (2026-05-04): cancella anche i turni PdC
+    dipendenti dai giri prima del wipe vero, perché la FK
+    ``turno_pdc_blocco.corsa_materiale_vuoto_id`` con ondelete=RESTRICT
+    impedirebbe altrimenti il wipe successivo. La conferma utente è
+    rispettata a monte da ``genera_giri`` (sollevando
+    ``PdcDipendentiError`` se il caller non ha esplicitamente
+    confermato). Qui assumiamo che l'autorizzazione sia già stata
+    data: cascade FK ``turno_pdc → giornata → blocco`` porta via il
+    resto.
+
     Ordine FK-safe critico:
 
-    1. Salva gli id dei vuoti collegati ai giri (li referenziano
+    1. Cancella i turni PdC dipendenti (cascade su giornate/blocchi
+       libera la FK su ``corsa_materiale_vuoto``).
+    2. Salva gli id dei vuoti collegati ai giri (li referenziano
        i ``giro_blocco materiale_vuoto`` con FK RESTRICT).
-    2. ``DELETE giro_materiale`` → CASCADE cancella giornate/varianti/
+    3. ``DELETE giro_materiale`` → CASCADE cancella giornate/varianti/
        blocchi → la FK ``giro_blocco_corsa_materiale_vuoto_id``
        smette di proteggere i vuoti.
-    3. Cancella i vuoti orfani identificati al passo 1.
+    4. Cancella i vuoti orfani identificati al passo 2.
 
     L'ordine inverso (vuoti prima dei giri) viola la FK
     ``giro_blocco_corsa_materiale_vuoto_id_fkey``. Bug intercettato
@@ -421,6 +516,34 @@ async def _wipe_giri_programma(
         )
         params = {"pid": programma_id, "lid": localita_id}
 
+    # 1. Wipe a cascata dei turni PdC dipendenti (Sprint 7.9 strategy A).
+    pdc_ids = list(
+        (
+            await session.execute(
+                text(
+                    f"""
+                    SELECT DISTINCT tp.id
+                    FROM turno_pdc tp
+                    JOIN turno_pdc_giornata tpg ON tpg.turno_pdc_id = tp.id
+                    JOIN turno_pdc_blocco tpb ON tpb.turno_pdc_giornata_id = tpg.id
+                    JOIN corsa_materiale_vuoto cmv ON cmv.id = tpb.corsa_materiale_vuoto_id
+                    JOIN giro_materiale gm ON gm.id = cmv.giro_materiale_id
+                    {where_giri}
+                    """
+                ),
+                params,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if pdc_ids:
+        await session.execute(
+            text("DELETE FROM turno_pdc WHERE id = ANY(:ids)"),
+            {"ids": pdc_ids},
+        )
+
+    # 2. Salva i vuoti collegati ai giri (referenziati da giro_blocco RESTRICT).
     cmv_ids = list(
         (
             await session.execute(
@@ -436,8 +559,10 @@ async def _wipe_giri_programma(
         .all()
     )
 
+    # 3. Cancella i giri (cascade su giornate/varianti/blocchi).
     await session.execute(text(f"DELETE FROM giro_materiale {delete_where}"), params)
 
+    # 4. Cancella i vuoti orfani.
     if cmv_ids:
         await session.execute(
             text("DELETE FROM corsa_materiale_vuoto WHERE id = ANY(:ids)"),
@@ -658,6 +783,7 @@ async def genera_giri(
     session: AsyncSession,
     azienda_id: int,
     force: bool = False,
+    confirm_delete_pdc: bool = False,
     eseguito_da_user_id: int | None = None,
 ) -> BuilderResult:
     """Genera giri materiali end-to-end e li persiste.
@@ -754,6 +880,17 @@ async def genera_giri(
     if n_esistenti_sede > 0:
         if not force:
             raise GiriEsistentiError(programma_id, localita_codice, n_esistenti_sede)
+        # Sprint 7.9 strategy A (decisione utente 2026-05-04): se la
+        # rigenerazione cancellerebbe turni PdC dipendenti, esige
+        # conferma esplicita. Altrimenti il wipe esploderebbe sulla
+        # FK turno_pdc_blocco.corsa_materiale_vuoto_id (RESTRICT).
+        n_pdc, pdc_codici = await _conta_pdc_dipendenti(
+            session, programma_id, localita_id=localita.id
+        )
+        if n_pdc > 0 and not confirm_delete_pdc:
+            raise PdcDipendentiError(
+                programma_id, localita_codice, n_pdc, pdc_codici
+            )
         await _wipe_giri_programma(session, programma_id, localita_id=localita.id)
 
     # 3. Pipeline: carica corse + costruisci catene per data

@@ -10,6 +10,134 @@
 
 ---
 
+## 2026-05-04 (130) — Sprint 7.9 strategy A: wipe a cascata turni PdC su rigenerazione giri
+
+### Contesto
+
+Bug intercettato durante smoke utente Railway 2026-05-04: rigenerare i
+giri di un programma esistente fallisce con `IntegrityError`
+`turno_pdc_blocco_corsa_materiale_vuoto_id_fkey` perché i turni PdC
+generati in precedenza referenziano i `corsa_materiale_vuoto` dei
+giri (FK `ondelete=RESTRICT`).
+
+Decisione utente 2026-05-04 (strategy A su 3 opzioni):
+
+> "a" (= strategia A, wipe a cascata esplicito con confirmation card
+> in UI prima di distruggere PdC).
+
+Modello concettuale: il PdC è un derivato del giro materiale. Se
+ricostruisco il giro, è normale ricostruire anche il PdC. Il
+prerequisito "preservare" è soddisfatto dalla **conferma esplicita**
+in UI con il count e i codici dei PdC che spariranno.
+
+### Modifiche backend
+
+`backend/src/colazione/domain/builder_giro/builder.py`:
+
+- Nuova exception `PdcDipendentiError(programma_id, localita_codice,
+  n_pdc, pdc_codici)` esposta nel `__init__.py`.
+- Nuovo helper `_conta_pdc_dipendenti(session, programma_id,
+  localita_id) -> (int, list[str])`: query JOIN
+  `turno_pdc → giornata → blocco → corsa_materiale_vuoto →
+  giro_materiale` filtrato per `(programma, sede)`. Restituisce count
+  + lista codici per UI.
+- `_wipe_giri_programma` esteso con step 1 nuovo: cancella prima i
+  `turno_pdc` dipendenti (cascade FK porta via giornate + blocchi).
+  Poi prosegue con la sequenza FK-safe già esistente (vuoti orfani
+  → giri → vuoti).
+- `genera_giri` accetta nuovo param kw-only `confirm_delete_pdc:
+  bool = False`. Quando `force=True` e
+  `_conta_pdc_dipendenti() > 0`, solleva `PdcDipendentiError` se
+  `confirm_delete_pdc=False`.
+
+`backend/src/colazione/api/giri.py`:
+
+- Nuovo Query param `confirm_delete_pdc: bool = False`.
+- Catch `PdcDipendentiError` → HTTP 409 con detail STRUTTURATO:
+  ```json
+  {
+    "code": "pdc_dipendenti",
+    "messaggio": "...",
+    "n_pdc_dipendenti": 3,
+    "pdc_codici": ["T-G-FIO-001-ETR526-7g", ...],
+    "programma_id": 4,
+    "localita_codice": "IMPMAN_MILANO_FIORENZA"
+  }
+  ```
+  L'altro 409 (`GiriEsistentiError`) resta col detail stringa
+  semplice, distinguibile dal frontend tramite assenza di `code`.
+
+### Modifiche frontend
+
+`frontend/src/lib/api/giri.ts`:
+
+- `GeneraGiriParams.confirm_delete_pdc?: boolean` aggiunto.
+- `generaGiri()` propaga il param come query string.
+
+`frontend/src/routes/pianificatore-giro/GeneraGiriDialog.tsx`:
+
+- Nuovo state `pdcDipendenti: PdcDipendentiDetail | null` parsato dal
+  `ApiError.detail` quando il 409 ha `code: "pdc_dipendenti"`.
+- Nuovo blocco UI sotto il warning force: card rosso con messaggio
+  "⚠ Cancellerai anche N turni PdC", lista codici (max 8 visibili
+  + `… e altri X`), checkbox "Confermo la cancellazione" che setta
+  `confirm_delete_pdc`.
+- Auto-set `force=true` quando arriva il 409 PdC (logica: il PdC
+  dipendenti implica giri esistenti già confermati a monte).
+- Bottone disabilitato finché entrambi `force` e `confirm_delete_pdc`
+  non sono spuntati. Label cambia da "Avvia generazione" a "Conferma
+  e rigenera" durante questa fase.
+
+### Flusso utente
+
+1. Click "Avvia generazione" sulla sede X.
+2. Backend: nessun giro esistente → genera → ritorna BuilderResult
+   (caso base). FINE.
+3. Backend: giri esistenti, `force=False` → 409 stringa "force=true
+   richiesto". Dialog mostra checkbox "Rigenera questa sede".
+4. Click di nuovo con `force=true`:
+   - Nessun PdC dipendente → wipe + rigenera. FINE.
+   - PdC dipendenti N>0 → 409 strutturato con n_pdc + codici. Dialog
+     mostra card rossa + checkbox "Confermo cancellazione N PdC".
+5. Click di nuovo con entrambi i flag → wipe a cascata (PdC + giri +
+   vuoti) + rigenera. FINE.
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 60 file clean.
+- Backend `pytest` test puri (217) ✅. Test integration richiedono
+  Postgres (Docker locale down al momento del run).
+- Frontend `tsc -b --noEmit` ✅.
+- Frontend `vitest` 52/53 (1 timeout flaky preesistente non correlato).
+
+### Stato
+
+- ✅ Strategy A implementata.
+- 🟡 Smoke utente Railway: rigenerare un programma con PdC esistenti
+  e verificare:
+  1. Prima conferma "Rigenera questa sede" appare normalmente.
+  2. Dopo aver spuntato force, comparsa della seconda conferma con
+     count + codici PdC.
+  3. Bottone disabilitato finché checkbox PdC non spuntata.
+  4. Conferma finale → rigenerazione va a buon fine.
+
+### Quick fix anticipato
+
+Pre-deploy ho cancellato manualmente il turno PdC `T-G-FIO-002-ETR522-5g`
+(id=2) via SQL su Railway production per sbloccare l'utente che era
+fermo sul bug FK (vedi conversazione precedente). Quel quick fix non
+serve più dopo questo MR.
+
+### Prossimo step
+
+Tornare al piano β2 originario: β2-0 (`LocalitaSosta` + seed Milano
+San Rocco) → β2-1 (matricole istanze materiali) → β2-3 (sourcing
+thread agganci/sganci) → β2-4 (modello `MaterialeThread` + algoritmo
+proiezione) → β2-5 (capacity istante-per-istante) → β2-6 (UI thread
+viewer) → β2-7 (regole pre-builder agganci/sganci).
+
+---
+
 ## 2026-05-04 (129) — Sprint 7.11 cont.: sidebar collassabile + dialog dettagli blocco Gantt PdC (2 MR)
 
 ### Contesto
