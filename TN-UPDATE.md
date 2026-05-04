@@ -10,6 +10,101 @@
 
 ---
 
+## 2026-05-04 (138) — Sprint 7.9 hotfix β2-5: capacity check AZIENDA-level + smoke completo β2
+
+### Contesto
+
+Smoke E2E sullo Sprint β2 chiuso (richiesto utente "hai fatto il
+test per vedere se funziona?" + "testa con un 421"). Lo smoke ha
+confermato la maggior parte delle funzionalità ma ha **scoperto un
+bug semantico nel β2-5**.
+
+### Bug trovato
+
+`verifica_capacity_temporale` filtrava `MaterialeThread.programma_id
+== programma_id` invece di `azienda_id == azienda_id`. Ma la
+dotazione (`materiale_dotazione_azienda`) è **azienda-level**,
+quindi il check sotto-stimava il peak quando lo stesso materiale
+era usato da più programmi della stessa azienda.
+
+Caso reale dello smoke: programma 6 (8 thread ETR421) + programma
+9 (12 thread ETR421) sullo stesso giorno = 20 totali; con dotazione
+ridotta a 16 doveva scattare warning, ma il check vedeva solo 8 (per
+6) o 12 (per 9) singolarmente → **0 warning**.
+
+### Fix
+
+`backend/src/colazione/domain/builder_giro/capacity_temporale.py`:
+
+- Aggiunta query preliminare per dedurre `azienda_id` dal
+  `programma_id` corrente (`SELECT azienda_id FROM
+  programma_materiale WHERE id = :pid`).
+- Filtro JOIN cambiato da `MaterialeThread.programma_id ==
+  programma_id` a `MaterialeThread.azienda_id == azienda_id`.
+- Docstring aggiornato con la spiegazione del bug pre-fix per
+  contesto futuro.
+
+### Smoke completo β2 (post-hotfix)
+
+**Programma 8** (ETR526×2 sulla direttrice TIRANO, 7 giorni):
+
+| Metrica | Atteso | Ottenuto |
+|---|---|---|
+| Giri creati | 5 | 5 ✅ |
+| Thread per giro | 2 (composizione doppia) | 2 ✅ |
+| Tipo eventi `corsa_doppia_pos1`+`pos2` | 1:1 | 124+124 ✅ |
+| `numero_treno_virtuale` 9XXXX | popolato | 924886 ecc. ✅ |
+| Peak ETR526 simultaneo | 10 (dot 11) | 10 ✅ no warning |
+
+**Programma 9** (ETR421×3 mattina + ETR421×2 pomeriggio, fasce
+orarie disgiunte → cambio composizione):
+
+| Metrica | Atteso | Ottenuto |
+|---|---|---|
+| Giri creati | 5 | 5 ✅ |
+| Eventi composizione (sganci 3→2) | > 0 | **20** ✅ |
+| Tipo evento persistito | `sgancio` | `sgancio` ✅ |
+| `dest_descrizione` β2-3 | popolato | "Pezzi a deposito FIO" ✅ (fallback corretto, no riaggancio in pool) |
+| Thread per giro | 3 (composizione max) | 3 ✅ |
+
+**Capacity warning β2-5** (dot ETR421 ridotta a 12, prog 6+9
+attivi → peak globale 14):
+
+```
+CAPACITY ETR421: 14 pezzi simultanei in data 2026-06-08
+(dotazione azienda = 12). Differenza 2.
+```
+
+✅ Warning ora correttamente sollevato dopo il fix azienda-level.
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 63 file clean.
+- Smoke E2E Railway production: tutti i 7 sub-MR β2 confermati
+  funzionanti, modello L1+L2+L3 popolato correttamente, sourcing
+  fallback deposito + capacity routing aggressivo + capacity
+  temporale ora corretto.
+- Dotazione ETR421 ripristinata a 44 dopo lo smoke.
+
+### Limitazioni note (rimangono per backlog β2 v2)
+
+1. Sourcing dest_descrizione "Pezzi verso treno X (riaggancio…)" non
+   esercitato perché in PdE reali è raro che uno sgancio sia ripreso
+   da un'altra catena entro 15 min stessa stazione.
+2. Capacity_routing (entry 121) è SCOPED per programma e scarta
+   cluster aggressivamente: in pratica raro che il check temporale
+   azienda-level scatti su programmi singoli, scatta solo su somma
+   di programmi (caso scoperto dallo smoke).
+3. Le 8 limitazioni residue documentate in entry 137 restano in
+   backlog β2 v2.
+
+### Stato
+
+- ✅ Sprint 7.9 β2 verificato funzionante in produzione end-to-end.
+- ✅ Hotfix β2-5 commit `fdbb16c` deployato.
+
+---
+
 ## 2026-05-04 (137) — Sprint 7.9 MR β2-7: API CRUD `RegolaInvioSosta` + client + hook (chiusura β2)
 
 ### Contesto
