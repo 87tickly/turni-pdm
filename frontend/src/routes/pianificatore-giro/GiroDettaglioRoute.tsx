@@ -43,13 +43,17 @@ import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdc
  */
 
 // =====================================================================
-// Constants — time axis 04:00 → 04:00 next day (24h, 1440 min, 1440px)
+// Constants — time axis 04:00 → 04:00 next day (24h, 1440 min, 960px @ 40px/h)
 // =====================================================================
 
 const AXIS_START_MIN = 4 * 60; // 04:00 reference
 const AXIS_TOTAL_MIN = 24 * 60; // 1440 min
 
-const TIMELINE_WIDTH_PX = 1440;
+// Sprint 7.9 MR γ (decisione utente 2026-05-04): asse compresso da
+// 1h=60px (1440px totale) a 1h=40px (960px totale). Riduce
+// l'innerWidth Gantt da 1660px a 1180px → entra in qualunque schermo
+// ≥1280px senza scroll orizzontale. Densità coerente col PDF Trenord.
+const TIMELINE_WIDTH_PX = 960;
 const GIORNATA_LABEL_COL_PX = 100;
 const PER_KM_COL_PX = 120;
 const TIMELINE_ROW_HEIGHT_PX = 88;
@@ -445,7 +449,7 @@ function GanttSection({
           </span>
         </div>
         <div className="text-muted-foreground/80">
-          Asse 04:00 → 04:00 (giorno seguente) · 1h = 60px · stile PDF Trenord
+          Asse 04:00 → 04:00 (giorno seguente) · 1h = 40px · stile PDF Trenord
         </div>
       </div>
 
@@ -989,12 +993,15 @@ function CommercialeBlocco({
   // Fallback al codice se il nome manca dal payload.
   const stazioneDa = stazioneShort(blocco.stazione_da_nome ?? blocco.stazione_da_codice);
   const stazioneA = stazioneShort(blocco.stazione_a_nome ?? blocco.stazione_a_codice);
-  // Sprint 7.9 entry 110: blocchi stretti (<70px) mostrano solo
-  // arrow+numero per evitare sovrapposizione delle etichette stazione
-  // sui blocchi adiacenti. Sopra 70px stampa entrambe (origine|dest)
-  // tronche al 50% della width disponibile.
-  const showStazioni = widthPx >= 70;
-  const showOrari = widthPx >= 50;
+  // Sprint 7.9 entry 110: blocchi stretti mostrano solo arrow+numero
+  // per evitare sovrapposizione delle etichette stazione sui blocchi
+  // adiacenti. Sopra la soglia stampa entrambe (origine|dest) tronche
+  // al 50% della width disponibile.
+  // Sprint 7.9 MR γ: soglie scalate da scala 60px/h a 40px/h (factor
+  // 2/3): 70→47, 50→33. Mantiene la stessa soglia in MINUTI di durata
+  // (~70 min per stazioni, ~50 min per orari).
+  const showStazioni = widthPx >= 47;
+  const showOrari = widthPx >= 33;
   return (
     <button
       type="button"
@@ -1761,7 +1768,7 @@ function formatDateShort(iso: string): string {
 }
 
 // =====================================================================
-// Time axis math (px-based, 1h = 60px)
+// Time axis math (px-based, 1h = 40px — Sprint 7.9 MR γ)
 // =====================================================================
 
 function parseTimeToMin(t: string | null): number | null {
@@ -1774,7 +1781,7 @@ function parseTimeToMin(t: string | null): number | null {
   return h * 60 + m;
 }
 
-/** Minuti da 00:00 → pixel sull'asse 04:00→04:00 (1440px totali). */
+/** Minuti da 00:00 → pixel sull'asse 04:00→04:00 (TIMELINE_WIDTH_PX totali). */
 function minToPx(min: number): number {
   let rel = min - AXIS_START_MIN;
   if (rel < 0) rel += AXIS_TOTAL_MIN;

@@ -10,6 +10,66 @@
 
 ---
 
+## 2026-05-04 (125) — Sprint 7.9 MR γ: layout Gantt senza scroll (1h=40px)
+
+### Contesto
+
+Decisione utente 2026-05-04 (subito dopo MR α + β1):
+
+> "Pagina intera senza scroll gestiscila tu ma risolvi il problema."
+
+Il Gantt giro aveva `TIMELINE_WIDTH_PX = 1440` (1h=60px stile PDF
+Trenord canonico) + colonna giornata 100px + colonna PER/KM 120px =
+**1660px innerWidth fisso**. Sui viewport tipici (~1500px utili dopo
+sidebar) compariva scroll orizzontale.
+
+### Modifiche
+
+`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`:
+
+- `TIMELINE_WIDTH_PX`: **1440 → 960** (1h = 40px invece di 60px,
+  factor 2/3). Innerwidth Gantt totale **1660 → 1180px** (entra in
+  qualunque schermo ≥ 1280).
+- `CommercialeBlocco.showStazioni`: soglia **70 → 47px** (= 70 × 2/3).
+  Mantiene equivalente in MINUTI di durata blocco (~70 min).
+- `CommercialeBlocco.showOrari`: soglia **50 → 33px** (= 50 × 2/3).
+  Equivalente ~50 min.
+- Toolbar label: "1h = 60px" → "1h = 40px".
+- Commenti documentazione `minToPx` allineati alla nuova scala.
+
+`minToPx` usa già `TIMELINE_WIDTH_PX` come variabile, quindi tutti i
+calcoli px (gap, eventi composizione, blocchi commerciali) si scalano
+automaticamente proporzionalmente. Niente refactor invasivo.
+
+### Verifiche
+
+- `tsc -b --noEmit` ✅.
+- `vitest` 52/53 (1 timeout flaky preesistente non correlato).
+- Preview Vite locale **non disponibile** in questo turno (vite ascolta
+  su 5174 ma curl/eval timeout — verosimilmente conflitto rete/firewall
+  locale con Tailscale o Docker su port range vicini). La modifica è
+  puramente di costanti numeriche, validata da TS strict; verifica
+  visiva post-deploy Railway (utente).
+
+### Stato
+
+- ✅ MR γ completato.
+- 🟡 Smoke utente Railway: aprire un giro materiale e confermare:
+  1. Niente scroll orizzontale sul Gantt (fitta in viewport ≥ 1280).
+  2. Etichette stazione visibili sui blocchi ≥ 70 min (es. tratte
+     Centrale↔Tirano).
+  3. Orari visibili sui blocchi ≥ 50 min.
+  4. Layout coerente, niente sovrapposizioni.
+
+### Prossimo step
+
+MR β2 (incrocio thread per agganci composizione "+N pezzi dal treno
+Y") — richiede schema metadata in `EventoComposizione` per dichiarare
+da quale altra catena del giorno arrivano i pezzi extra. Più
+sostanzioso (~3-4h).
+
+---
+
 ## 2026-05-04 (124) — Sprint 7.9 MR β1: etichette esplicite vuoti + cross-notte
 
 ### Contesto
