@@ -52,6 +52,11 @@ from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.domain.builder_giro.aggregazione_a2 import aggrega_a2
+from colazione.domain.builder_giro.capacity_routing import (
+    aggrega_corse_residue_da_scartati,
+    carica_dotazione_per_azienda,
+    ribilancia_per_capacity,
+)
 from colazione.domain.builder_giro.fusione_cluster_a1 import fonde_cluster_simili
 from colazione.domain.builder_giro.catena import costruisci_catene
 from colazione.domain.builder_giro.composizione import (
@@ -901,6 +906,24 @@ async def genera_giri(
 
     # 6. Strict mode pre-persistenza (sui giri pre-aggregazione)
     _check_strict_mode(programma, giri_assegnati)
+
+    # 6.4 Capacity-aware routing (Sprint 7.9 MR 11B Step 2, entry 121):
+    #    ribilancia cluster A1 in base alla dotazione fisica
+    #    (`materiale_dotazione_azienda`). Se una regola sfora i pezzi
+    #    disponibili, i cluster con MENO km vengono spostati a regole
+    #    alternative con capacity (decisione utente 2026-05-04). Cluster
+    #    che nessuna regola può ospitare → scartati (corse residue +
+    #    warning).
+    dotazione = await carica_dotazione_per_azienda(session, azienda_id)
+    giri_assegnati, giri_scartati_cap, warnings_cap = ribilancia_per_capacity(
+        giri_assegnati,
+        list(regole),
+        dotazione,
+        is_accoppiamento_ammesso,
+    )
+    warnings.extend(warnings_cap)
+    # Date di applicazione perse (informativa per stat post-build).
+    _ = aggrega_corse_residue_da_scartati(giri_scartati_cap)
 
     # 6.5 Fusione cluster A1 simili (Sprint 7.9 MR 12, entry 114):
     #    riduce la frammentazione del clustering A1 fondendo cluster

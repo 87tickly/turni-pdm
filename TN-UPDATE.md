@@ -10,6 +10,106 @@
 
 ---
 
+## 2026-05-04 (121) — Sprint 7.9 MR 11B Step 2: capacity-aware routing con riassegnazione cluster
+
+### Contesto
+
+Decisione utente 2026-05-04 dopo entry 120 (Step 1):
+
+> "Capacity awareness: lo Step 2 vero (capacity-aware routing con
+> ribilanciamento cluster quando una regola sfora la dotazione) è
+> scope futuro... ma perché non capisco?"
+
+Lo Step 1 (tie-break id) eliminava l'errore `RegolaAmbiguaError`, ma
+lasciava un problema operativo: la regola con id più basso vinceva
+TUTTE le corse della linea, le altre dormivano. Se la dotazione del
+materiale principale era inferiore al numero di cluster prodotti
+(es. 100 ETR526 richiesti su 11 disponibili), il pianificatore
+vedeva il warning ma doveva ribilanciare manualmente.
+
+Decisione utente 2026-05-04 sul criterio di scelta del cluster da
+spostare: **`km_cumulati` ASC** (= cluster con MENO km totali
+spostato per primo, preserva i cicli più produttivi).
+
+### Modifiche
+
+`backend/src/colazione/domain/builder_giro/capacity_routing.py`
+(modulo nuovo, ~310 righe):
+
+- `ribilancia_per_capacity(giri_a1, regole, dotazione, ...)`: API
+  pubblica. Greedy:
+  1. Raggruppa cluster per materiale principale.
+  2. Ordina cluster per `km_cumulati` DESC; tieni finché capacity
+     disponibile (cluster più produttivi vincono).
+  3. Surplus: tenta riassegnazione a regola alternativa (escludendo
+     la regola corrente) con materiale che ha capacity. Score per
+     "convogli rimanenti", tie-break id ASC.
+  4. Se nessuna regola alternativa cattura tutte le corse del cluster
+     o ha capacity → cluster scartato.
+- `_ricostruisci_cluster_con_regola(cluster, nuova_regola)`: per ogni
+  blocco invoca `risolvi_corsa(corsa, [nuova_regola], data)`. Se la
+  regola non cattura → `None`. Altrimenti restituisce un nuovo
+  `GiroAssegnato` con `BloccoAssegnato.assegnazione` aggiornata.
+- `_pezzi_consumati_per_giro`: dict materiale → pezzi (1 cluster = 1
+  convoglio fisico, niente moltiplicazione per giornate post-MR 10).
+- `carica_dotazione_per_azienda(session, azienda_id)`: helper async per
+  caricare `materiale_dotazione_azienda` come dict.
+- Capacity `None` (illimitata, es. FLIRT TILO) o materiale assente dal
+  dict → check disabilitato.
+
+`backend/src/colazione/domain/builder_giro/builder.py`:
+- Nuovo step 6.4 tra strict mode check e fusione cluster A1 (entry
+  114). Carica dotazione + invoca `ribilancia_per_capacity` su
+  `giri_assegnati`. I warning sono accumulati nel `BuilderResult`.
+
+`backend/tests/test_capacity_routing.py` (8 test nuovi):
+- Input vuoto / dotazione None / dotazione assente → tutti passano.
+- Dotazione sforata senza alternativa → cluster con meno km scartati.
+- Riassegnazione a regola alternativa con capacity disponibile.
+- Riassegnazione fallita se la regola alternativa non cattura le corse
+  (filtri incompatibili).
+- Composizione multi-materiale (`ETR526×2 + ETR425×1`): consumo
+  capacity per entrambi i tipi, limite = materiale più scarso.
+
+### Esempio operativo
+
+Programma con linea Tirano + 2 regole prio=60 stesso filtro:
+- r1 ETR526×2, dotazione ETR526=11
+- r2 ETR204×2, dotazione ETR204=35
+
+Builder produce 100 cluster A1 (Step 1: tutti assegnati a r1, id più
+basso). Step 2:
+1. ETR526 dotazione 11: tieni i 5 cluster con più km (= 5×2 = 10
+   pezzi).
+2. Restanti 95 cluster surplus: tentano r2.
+3. r2 cattura le stesse corse (filtro identico), ETR204 dotazione 35
+   → 17 cluster ricomposti come ETR204×2 (= 17×2 = 34 pezzi).
+4. Restanti 78 cluster scartati: warning + corse residue.
+
+### Verifiche
+
+- `mypy --strict` ✅ 60 file clean (1 nuovo).
+- `pytest` ✅ **559 passed, 12 skipped** (8 nuovi test capacity).
+
+### Stato
+
+- ✅ MR 11B Step 2 completato.
+- 🟡 Smoke utente Railway sul programma multi-regola.
+
+### Prossimo step
+
+Utente apre programma con multi-regola priorità identiche su Railway,
+verifica:
+1. Builder non produce più overshoot di dotazione (count "Convogli
+   necessari" entro la dotazione registrata).
+2. Card "Ultimo run" mostra warning di riassegnazione/scarto (es.
+   "Cluster originariamente regola=5236 (ETR526) riassegnato a
+   regola=5237 per capacity").
+3. Corse residue corrispondono alla differenza tra PdE coperto e
+   capacity disponibile.
+
+---
+
 ## 2026-05-04 (120) — Sprint 7.9 MR 11B Step 1: tie-break deterministico per id, niente più `RegolaAmbiguaError`
 
 ### Contesto
