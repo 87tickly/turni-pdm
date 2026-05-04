@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { AlertCircle, AlertTriangle, ArrowLeft, Bed, Moon } from "lucide-react";
 
@@ -11,18 +12,36 @@ import type {
   TurnoPdcDettaglio,
   TurnoPdcGiornata,
 } from "@/lib/api/turniPdc";
+import { cn } from "@/lib/utils";
 
+/**
+ * Sprint 7.10 MR 7.10.6 — Visualizzatore Gantt turno PdC.
+ *
+ * Variante v1 dal pacchetto Anthropic Design Handoff
+ * (`arturo/10-gantt-turno-pdc.html`): "asse 00→23 con barre alte +
+ * palette pastello dominante (CONDOTTA blu, REFEZ verde, …) + mini-mappa
+ * fishbone violazioni in cima + chip orizzontali legenda sotto header".
+ *
+ * Aggiunte rispetto al MR 7.3:
+ * - **Mini-mappa fishbone**: un bollino per giornata, colorato se ci sono
+ *   violazioni hard/soft; click → scroll alla giornata.
+ * - **Toggle asse 00↔04**: switch tra "giornata umana" (00→23) e "ciclo
+ *   commerciale ferroviario" (04→04 next day). Ricalcola posizioni
+ *   blocchi con offset modulo 24.
+ * - **Legenda chip orizzontali compatti** sotto header, sempre visibile,
+ *   con la mappa tipo_evento → colore.
+ * - **Barre più alte** (h-12 vs h-9) per leggibilità segmenti corti.
+ * - Path-aware back-link preservato (test 7.3 MR 3).
+ * - Tutti i badge violazione live + testid (test 7.3 MR 4) preservati.
+ */
 export function TurnoPdcDettaglioRoute() {
   const { turnoId: turnoIdParam } = useParams<{ turnoId: string }>();
   const turnoId = turnoIdParam !== undefined ? Number(turnoIdParam) : undefined;
   const location = useLocation();
-  // Sprint 7.3 MR 3: la stessa pagina è raggiungibile sia da
-  // `/pianificatore-giro/turni-pdc/:id` (1° ruolo, drilldown da editor
-  // giro) sia da `/pianificatore-pdc/turni/:id` (2° ruolo, drilldown da
-  // lista turni cross-giro). Il back-link va alla lista del ruolo da
-  // cui si è arrivati.
   const isPdcRoute = location.pathname.startsWith("/pianificatore-pdc");
   const query = useTurnoPdcDettaglio(turnoId);
+
+  const [oraOffset, setOraOffset] = useState<0 | 4>(0);
 
   if (turnoId === undefined || Number.isNaN(turnoId)) {
     return <ErrorBlock message="ID turno PdC non valido nell'URL." />;
@@ -49,9 +68,6 @@ export function TurnoPdcDettaglioRoute() {
   const turno = query.data;
   const meta = turno.generation_metadata_json;
   const giroId = meta.giro_materiale_id ?? null;
-  // Sprint 7.3 MR 4: sostituiamo l'accesso diretto a `meta.violazioni`
-  // con il campo strutturato `turno.validazioni_ciclo` (passthrough
-  // ma tipato a livello API, non più `unknown`).
   const validazioniCiclo = turno.validazioni_ciclo;
   const frGiornate = meta.fr_giornate ?? [];
 
@@ -73,6 +89,13 @@ export function TurnoPdcDettaglioRoute() {
       <Header turno={turno} />
       <Stats turno={turno} />
 
+      {/* Mini-mappa fishbone giornate + toggle asse + legenda chip */}
+      <Toolbar
+        turno={turno}
+        oraOffset={oraOffset}
+        onToggleOffset={() => setOraOffset((v) => (v === 0 ? 4 : 0))}
+      />
+
       {(validazioniCiclo.length > 0 || frGiornate.length > 0) && (
         <Avvisi validazioniCiclo={validazioniCiclo} frGiornate={frGiornate} />
       )}
@@ -83,7 +106,7 @@ export function TurnoPdcDettaglioRoute() {
         </h2>
         <div className="flex flex-col gap-3">
           {turno.giornate.map((g) => (
-            <GiornataPanel key={g.id} giornata={g} />
+            <GiornataPanel key={g.id} giornata={g} oraOffset={oraOffset} />
           ))}
         </div>
       </section>
@@ -117,7 +140,6 @@ function Stats({ turno }: { turno: TurnoPdcDettaglio }) {
   const totPrestazione = turno.giornate.reduce((s, g) => s + g.prestazione_min, 0);
   const totCondotta = turno.giornate.reduce((s, g) => s + g.condotta_min, 0);
   const totRefezione = turno.giornate.reduce((s, g) => s + g.refezione_min, 0);
-  // Sprint 7.3 MR 4: aggregati validazione hard/soft
   const hasViolazioni = turno.n_violazioni_hard > 0 || turno.n_violazioni_soft > 0;
   return (
     <div className="flex flex-col gap-3">
@@ -152,6 +174,135 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+interface ToolbarProps {
+  turno: TurnoPdcDettaglio;
+  oraOffset: 0 | 4;
+  onToggleOffset: () => void;
+}
+
+function Toolbar({ turno, oraOffset, onToggleOffset }: ToolbarProps) {
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-border bg-white p-3">
+      {/* Riga 1: fishbone violazioni + toggle asse */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Fishbone giornate={turno.giornate} />
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-muted-foreground">Asse Gantt</span>
+          <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5">
+            <button
+              type="button"
+              onClick={() => oraOffset !== 0 && onToggleOffset()}
+              className={cn(
+                "rounded px-2.5 py-1 font-mono text-[11px] font-semibold transition-colors",
+                oraOffset === 0
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              aria-pressed={oraOffset === 0}
+            >
+              00→23
+            </button>
+            <button
+              type="button"
+              onClick={() => oraOffset !== 4 && onToggleOffset()}
+              className={cn(
+                "rounded px-2.5 py-1 font-mono text-[11px] font-semibold transition-colors",
+                oraOffset === 4
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              aria-pressed={oraOffset === 4}
+            >
+              04→04
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Riga 2: legenda chip compatti */}
+      <Legenda />
+    </div>
+  );
+}
+
+function Fishbone({ giornate }: { giornate: TurnoPdcGiornata[] }) {
+  if (giornate.length === 0) {
+    return (
+      <span className="text-xs text-muted-foreground">Nessuna giornata</span>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Giornate
+      </span>
+      <ol className="flex items-center gap-1.5">
+        {giornate.map((g) => {
+          const hard = g.prestazione_violata || g.condotta_violata;
+          const soft = g.refezione_mancante;
+          const tone = hard ? "hard" : soft ? "soft" : "ok";
+          const dotClass = {
+            hard: "bg-amber-500 ring-2 ring-amber-200 text-amber-50",
+            soft: "bg-amber-200 ring-2 ring-amber-100 text-amber-900",
+            ok: "bg-emerald-500 ring-2 ring-emerald-100 text-white",
+          }[tone];
+          const tooltip = hard
+            ? `Giornata ${g.numero_giornata}: violazione hard (prest./cond. fuori cap)`
+            : soft
+              ? `Giornata ${g.numero_giornata}: violazione soft (refezione mancante)`
+              : `Giornata ${g.numero_giornata}: nessuna violazione`;
+          return (
+            <li key={g.id}>
+              <a
+                href={`#giornata-${g.numero_giornata}`}
+                className={cn(
+                  "grid h-5 w-5 place-items-center rounded-full font-mono text-[9px] font-bold transition-transform hover:scale-110",
+                  dotClass,
+                )}
+                title={tooltip}
+                aria-label={tooltip}
+              >
+                {g.numero_giornata}
+              </a>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+function Legenda() {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-2.5">
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Legenda
+      </span>
+      <LegendaChip label="Condotta" colorClass="bg-primary text-primary-foreground" />
+      <LegendaChip label="Vettura" colorClass="bg-sky-200 text-sky-900" />
+      <LegendaChip label="Refez" colorClass="bg-emerald-200 text-emerald-900" />
+      <LegendaChip label="ACC" colorClass="bg-amber-200 text-amber-900" />
+      <LegendaChip label="CV" colorClass="bg-orange-200 text-orange-900" />
+      <LegendaChip label="PK / S.COMP" colorClass="bg-secondary text-secondary-foreground" />
+      <LegendaChip label="Presa / Fine" colorClass="bg-slate-300 text-slate-800" />
+      <LegendaChip label="FR" colorClass="bg-violet-300 text-violet-900" />
+    </div>
+  );
+}
+
+function LegendaChip({ label, colorClass }: { label: string; colorClass: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+        colorClass,
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
 function Avvisi({
   validazioniCiclo,
   frGiornate,
@@ -178,10 +329,7 @@ function Avvisi({
           </ul>
           <p className="border-t border-amber-200 px-3 py-2 text-xs italic">
             Tag prodotti dal builder durante il calcolo (NORMATIVA-PDC §11
-            riposo intra-ciclo / §11.4 settimanale / §10.6 FR). Sprint 7.4
-            ha introdotto lo split CV intermedio per i cap di
-            prestazione/condotta a livello giornata; i vincoli di ciclo
-            qui elencati sono di livello superiore.
+            riposo intra-ciclo / §11.4 settimanale / §10.6 FR).
           </p>
         </details>
       )}
@@ -205,9 +353,17 @@ function Avvisi({
   );
 }
 
-function GiornataPanel({ giornata }: { giornata: TurnoPdcGiornata }) {
+interface GiornataPanelProps {
+  giornata: TurnoPdcGiornata;
+  oraOffset: 0 | 4;
+}
+
+function GiornataPanel({ giornata, oraOffset }: GiornataPanelProps) {
   return (
-    <div className="overflow-hidden rounded-md border border-border bg-white">
+    <div
+      id={`giornata-${giornata.numero_giornata}`}
+      className="overflow-hidden rounded-md border border-border bg-white scroll-mt-4"
+    >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-secondary/40 px-4 py-2">
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="font-semibold">Giornata {giornata.numero_giornata}</span>
@@ -219,7 +375,6 @@ function GiornataPanel({ giornata }: { giornata: TurnoPdcGiornata }) {
               <Moon className="h-3 w-3" aria-hidden /> notturno
             </Badge>
           )}
-          {/* Sprint 7.3 MR 4: badge cap normativi live */}
           {giornata.prestazione_violata && (
             <Badge
               variant="warning"
@@ -273,30 +428,55 @@ function GiornataPanel({ giornata }: { giornata: TurnoPdcGiornata }) {
         </div>
       </div>
       <div className="flex flex-col gap-3 p-3">
-        <GanttRow blocchi={giornata.blocchi} />
+        <GanttRow blocchi={giornata.blocchi} oraOffset={oraOffset} />
         <BlocchiList blocchi={giornata.blocchi} />
       </div>
     </div>
   );
 }
 
-const ORE = Array.from({ length: 24 }, (_, i) => i);
 const MINUTI_GIORNO = 24 * 60;
 
-function GanttRow({ blocchi }: { blocchi: TurnoPdcBlocco[] }) {
+function GanttRow({
+  blocchi,
+  oraOffset,
+}: {
+  blocchi: TurnoPdcBlocco[];
+  oraOffset: 0 | 4;
+}) {
+  const ore = useMemo(
+    () =>
+      Array.from({ length: 24 }, (_, i) => (i + oraOffset) % 24),
+    [oraOffset],
+  );
+  const offsetMin = oraOffset * 60;
   return (
     <div className="overflow-x-auto">
       <div className="relative min-w-[768px]">
+        {/* Header ore */}
         <div className="grid grid-cols-24 border-b border-border text-[10px] text-muted-foreground">
-          {ORE.map((h) => (
-            <div key={h} className="border-l border-border/60 px-1 py-0.5 first:border-l-0">
+          {ore.map((h, i) => (
+            <div
+              key={i}
+              className="border-l border-border/60 px-1 py-0.5 first:border-l-0"
+            >
               {h.toString().padStart(2, "0")}
             </div>
           ))}
         </div>
-        <div className="relative h-9 border-b border-border bg-secondary/20">
+        {/* Tick verticali sottili dietro alle barre */}
+        <div className="relative h-12 border-b border-border bg-secondary/20">
+          <div className="pointer-events-none absolute inset-0 grid grid-cols-24">
+            {ore.map((_, i) => (
+              <div
+                key={i}
+                className="border-l border-border/40 first:border-l-0"
+                aria-hidden
+              />
+            ))}
+          </div>
           {blocchi.map((b) => (
-            <GanttBlocco key={b.id} blocco={b} />
+            <GanttBlocco key={b.id} blocco={b} offsetMin={offsetMin} />
           ))}
         </div>
       </div>
@@ -341,12 +521,25 @@ function colorForTipoEvento(tipo: string): string {
   }
 }
 
-function GanttBlocco({ blocco }: { blocco: TurnoPdcBlocco }) {
+function GanttBlocco({
+  blocco,
+  offsetMin,
+}: {
+  blocco: TurnoPdcBlocco;
+  offsetMin: number;
+}) {
   const inizio = timeToMin(blocco.ora_inizio);
   const fine = timeToMin(blocco.ora_fine);
   if (inizio === null || fine === null) return null;
-  const left = (inizio / MINUTI_GIORNO) * 100;
-  const width = Math.max(0.5, ((fine - inizio) / MINUTI_GIORNO) * 100);
+  // Applica offset asse: shift modulo 24h. Cross-mezzanotte (fine < inizio
+  // dopo offset) NON è ancora gestito visivamente — la barra resta nelle
+  // 24h della giornata. Caveat documentato in TN-UPDATE.
+  const inizioShift = (inizio - offsetMin + MINUTI_GIORNO) % MINUTI_GIORNO;
+  const fineShift = (fine - offsetMin + MINUTI_GIORNO) % MINUTI_GIORNO;
+  const left = (inizioShift / MINUTI_GIORNO) * 100;
+  // Se fineShift < inizioShift (la barra "wrappa") usa la durata originale.
+  const effectiveDuration = fineShift >= inizioShift ? fineShift - inizioShift : fine - inizio;
+  const width = Math.max(0.5, (effectiveDuration / MINUTI_GIORNO) * 100);
   const da = stazioneLabel(blocco.stazione_da_nome, blocco.stazione_da_codice);
   const a = stazioneLabel(blocco.stazione_a_nome, blocco.stazione_a_codice);
   const treno = blocco.numero_treno !== null ? `\nTreno ${blocco.numero_treno}` : "";
@@ -354,7 +547,10 @@ function GanttBlocco({ blocco }: { blocco: TurnoPdcBlocco }) {
   const tooltip = `${blocco.tipo_evento} · ${blocco.ora_inizio ?? "?"}→${blocco.ora_fine ?? "?"}\n${da} → ${a}${treno}${note}`;
   return (
     <div
-      className={`absolute top-1 flex h-7 items-center overflow-hidden rounded px-1.5 text-[10px] font-medium ${colorForTipoEvento(blocco.tipo_evento)}`}
+      className={cn(
+        "absolute top-1 flex h-10 items-center overflow-hidden rounded px-1.5 text-[10px] font-medium shadow-sm",
+        colorForTipoEvento(blocco.tipo_evento),
+      )}
       style={{ left: `${left}%`, width: `${width}%` }}
       title={tooltip}
     >
