@@ -73,11 +73,13 @@ async def verifica_capacity_temporale(
     dotazione: dict[str, int | None],
 ) -> list[str]:
     """Verifica capacity istante-per-istante (MVP: per giorno) sui
-    thread del programma.
+    thread di TUTTA l'azienda.
 
     Args:
         session: AsyncSession SQLAlchemy.
-        programma_id: id programma.
+        programma_id: id programma corrente (usato per dedurre
+            l'azienda — il check guarda tutti i programmi della
+            stessa azienda).
         dotazione: mappa ``materiale_codice → pezzi_disponibili``.
             ``None`` = capacity illimitata. Materiali assenti = check
             disabilitato.
@@ -85,9 +87,33 @@ async def verifica_capacity_temporale(
     Returns:
         Lista di warning testuali per ogni `(data, materiale)` che
         sfora la dotazione. Vuota se tutto ok.
+
+    Sprint 7.9 MR β2-5 fix (post smoke 2026-05-04): il check è
+    AZIENDA-level, non programma-level. Bug pre-fix: il filtro
+    `programma_id` ignorava i thread di altri programmi della stessa
+    azienda — la dotazione è azienda-level, quindi il check scoped
+    sul singolo programma sotto-stimava il peak. Esempio: programma
+    A genera 8 thread ETR421 + programma B genera 12 thread ETR421
+    sullo stesso giorno = 20 thread totali; con dotazione=16 deve
+    scattare warning, ma il vecchio check vedeva solo 8 (per A) o
+    12 (per B) singolarmente.
     """
-    # Carica tutti gli eventi "in uso" dei thread del programma con il
-    # tipo materiale (join thread).
+    # Trova azienda_id dal programma corrente
+    from colazione.models.programmi import ProgrammaMateriale
+
+    azienda_id = (
+        await session.execute(
+            select(ProgrammaMateriale.azienda_id).where(
+                ProgrammaMateriale.id == programma_id
+            )
+        )
+    ).scalar_one_or_none()
+    if azienda_id is None:
+        return []
+
+    # Carica tutti gli eventi "in uso" dei thread di TUTTI i programmi
+    # dell'azienda (la dotazione è azienda-level, vedi
+    # `materiale_dotazione_azienda`).
     stmt = (
         select(
             MaterialeThreadEvento.thread_id,
@@ -99,7 +125,7 @@ async def verifica_capacity_temporale(
             MaterialeThread,
             MaterialeThread.id == MaterialeThreadEvento.thread_id,
         )
-        .where(MaterialeThread.programma_id == programma_id)
+        .where(MaterialeThread.azienda_id == azienda_id)
     )
     rows = (await session.execute(stmt)).all()
 
