@@ -798,13 +798,22 @@ function BloccoSegment({
   }
 
   // Vuoto: linea sottile rosso tratteggiato (h-1) sulla mid-line, con
-  // badge esplicito che dichiara la NATURA del vuoto (Sprint 7.9 MR β1).
+  // badge esplicito che dichiara la NATURA del vuoto (Sprint 7.9 MR β1)
+  // e numero treno virtuale parlante 9{commerciale} (MR β2-2).
   if (tipo === "materiale_vuoto") {
     const meta = blocco.metadata_json ?? {};
     const tipoVuoto =
       typeof meta.tipo_vuoto === "string" ? (meta.tipo_vuoto as string) : null;
     const sedeCodice =
       typeof meta.sede_codice === "string" ? (meta.sede_codice as string) : null;
+    // Sprint 7.9 MR β2-2: numero treno virtuale parlante. Backward
+    // compat con `numero_treno_placeholder` per record pre-MR β2-2.
+    const numeroVirtuale =
+      typeof meta.numero_treno_virtuale === "string"
+        ? (meta.numero_treno_virtuale as string)
+        : typeof meta.numero_treno_placeholder === "string"
+          ? (meta.numero_treno_placeholder as string)
+          : null;
     // Fallback per record persistiti pre-MR β1 (nessun `tipo_vuoto`):
     // la classificazione si ricava da `is_uscita_ciclo` + `motivo` come
     // facevamo prima. Si rimuoverà quando la base dati sarà rigenerata.
@@ -864,6 +873,14 @@ function BloccoSegment({
           </span>
         )}
         <div className="seg-vuoto h-1" />
+        {numeroVirtuale !== null && widthPx >= 30 && (
+          <div
+            className="mt-0.5 text-center font-mono text-[9px] tabular-nums text-rose-700"
+            title={`Numero treno virtuale: ${numeroVirtuale} (= "9" + treno commerciale di confine)`}
+          >
+            {numeroVirtuale}
+          </div>
+        )}
       </button>
     );
   }

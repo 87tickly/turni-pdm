@@ -289,21 +289,30 @@ def _km_media_annua_giro(
     return km_anno if qualcosa_calcolato else None
 
 
-async def _next_numero_rientro_sede(session: AsyncSession) -> str:
-    """Prossimo `numero_treno_vuoto` per la corsa rientro a sede.
+def _numero_vuoto_da_treno_commerciale(numero_treno_commerciale: str | None) -> str:
+    """Sprint 7.9 MR β2-2 (decisione utente 2026-05-04): numero treno
+    virtuale per i materiali vuoti = ``"9" + numero_treno_commerciale_associato``.
 
-    Sprint 5.6 Feature 4: convenzione **5 cifre, prefisso 9** (placeholder
-    Trenord). Sequenziale globale su `corsa_materiale_vuoto`.
+    Esempio: vuoto di uscita ciclo associato al primo treno 2823 →
+    ``"92823"``. Vuoto di rientro associato all'ultimo treno 10302 →
+    ``"910302"``. Univocità garantita dal numero treno commerciale che
+    è univoco nel PdE; possibili duplicati legittimi quando più
+    varianti calendariali condividono lo stesso treno di confine
+    (semantica: stesso pattern operativo).
+
+    Sostituisce il vecchio ``_next_numero_rientro_sede`` (sequenza
+    progressiva 90001+) che produceva numeri opachi non parlanti.
+
+    Args:
+        numero_treno_commerciale: numero treno della corsa commerciale
+            "ancora" (primo o ultimo della variante/giro). Se ``None``
+            (caso degenere variante senza corse commerciali, non
+            dovrebbe accadere) → fallback a ``"90000"`` per evitare
+            crash.
     """
-    from sqlalchemy import text
-
-    stmt = text(
-        "SELECT COALESCE(MAX(SUBSTRING(numero_treno_vuoto FROM 2)::int), 0) "
-        "FROM corsa_materiale_vuoto "
-        "WHERE numero_treno_vuoto ~ '^9[0-9]{4}$'"
-    )
-    last = (await session.execute(stmt)).scalar_one()
-    return f"9{(int(last) + 1):04d}"
+    if numero_treno_commerciale is None or not numero_treno_commerciale:
+        return "90000"
+    return f"9{numero_treno_commerciale}"
 
 
 def primo_tipo_materiale(giro: GiroAssegnato) -> str | None:
@@ -362,11 +371,24 @@ async def _crea_corsa_materiale_vuoto(
     numero_turno: str,
     seq_vuoto_giro: int,
     session: AsyncSession,
+    numero_treno_associato: str | None = None,
 ) -> int:
-    """Inserisce ``CorsaMaterialeVuoto`` ORM e ritorna il suo id."""
+    """Inserisce ``CorsaMaterialeVuoto`` ORM e ritorna il suo id.
+
+    Sprint 7.9 MR β2-2: ``numero_treno_vuoto`` ora è ``9{numero
+    commerciale ancora}`` (parlante) invece di ``V-{turno}-{seq}``
+    (opaco). Il caller passa ``numero_treno_associato`` = primo treno
+    commerciale per il vuoto_testa, ultimo per il vuoto_coda.
+    Fallback al vecchio pattern opaco se ``None`` (compat test legacy).
+    """
+    numero = (
+        _numero_vuoto_da_treno_commerciale(numero_treno_associato)
+        if numero_treno_associato is not None
+        else f"V-{numero_turno}-{seq_vuoto_giro:03d}"
+    )
     cmv = CorsaMaterialeVuoto(
         azienda_id=azienda_id,
-        numero_treno_vuoto=f"V-{numero_turno}-{seq_vuoto_giro:03d}",
+        numero_treno_vuoto=numero,
         codice_origine=blocco_vuoto.codice_origine,
         codice_destinazione=blocco_vuoto.codice_destinazione,
         ora_partenza=blocco_vuoto.ora_partenza,
@@ -421,6 +443,24 @@ async def _persisti_blocchi_variante(
     seq_vuoto = seq_vuoto_giro_inizio
     cat_pos = variante.catena_posizionata
 
+    # Sprint 7.9 MR β2-2: numero treno commerciale "ancora" per il
+    # nuovo pattern parlante 9{numero}. Vuoto_testa → primo treno della
+    # variante (= il treno a cui il vuoto si aggancia in arrivo);
+    # vuoto_coda → ultimo treno (= il treno da cui il vuoto si origina).
+    primo_treno_commerciale: str | None = None
+    ultimo_treno_commerciale: str | None = None
+    if variante.blocchi_assegnati:
+        primo_treno_commerciale = (
+            str(variante.blocchi_assegnati[0].corsa.numero_treno)
+            if variante.blocchi_assegnati[0].corsa.numero_treno is not None
+            else None
+        )
+        ultimo_treno_commerciale = (
+            str(variante.blocchi_assegnati[-1].corsa.numero_treno)
+            if variante.blocchi_assegnati[-1].corsa.numero_treno is not None
+            else None
+        )
+
     # ---- Vuoto di testa ----
     if cat_pos.vuoto_testa is not None:
         cmv_id = await _crea_corsa_materiale_vuoto(
@@ -430,8 +470,10 @@ async def _persisti_blocchi_variante(
             numero_turno,
             seq_vuoto,
             session,
+            numero_treno_associato=primo_treno_commerciale,
         )
         seq_vuoto += 1
+        numero_vuoto_testa = _numero_vuoto_da_treno_commerciale(primo_treno_commerciale)
         session.add(
             GiroBlocco(
                 giro_variante_id=giro_variante_id,
@@ -467,6 +509,11 @@ async def _persisti_blocchi_variante(
                     # Sede del programma — serve all'UI per "Vuoto da
                     # deposito FIO" / "Vuoto verso deposito NOV", ecc.
                     "sede_codice": sede_codice,
+                    # Sprint 7.9 MR β2-2: numero treno virtuale parlante
+                    # 9{primo_treno_commerciale} esposto in UI come
+                    # etichetta principale del blocco vuoto.
+                    "numero_treno_virtuale": numero_vuoto_testa,
+                    "numero_treno_associato": primo_treno_commerciale,
                 },
             )
         )
@@ -537,8 +584,10 @@ async def _persisti_blocchi_variante(
             numero_turno,
             seq_vuoto,
             session,
+            numero_treno_associato=ultimo_treno_commerciale,
         )
         seq_vuoto += 1
+        numero_vuoto_coda = _numero_vuoto_da_treno_commerciale(ultimo_treno_commerciale)
         session.add(
             GiroBlocco(
                 giro_variante_id=giro_variante_id,
@@ -564,6 +613,9 @@ async def _persisti_blocchi_variante(
                     # da `_crea_blocco_rientro_sede`.
                     "tipo_vuoto": "rientro_intra_area",
                     "sede_codice": sede_codice,
+                    # Sprint 7.9 MR β2-2: numero treno virtuale parlante.
+                    "numero_treno_virtuale": numero_vuoto_coda,
+                    "numero_treno_associato": ultimo_treno_commerciale,
                 },
             )
         )
@@ -740,6 +792,13 @@ async def _persisti_un_giro(
                     ultima_dest != loc.stazione_collegata_codice
                     and ultima_dest in entry.whitelist_sede
                 ):
+                    # Sprint 7.9 MR β2-2: numero treno virtuale del
+                    # rientro = 9{ultimo treno commerciale}.
+                    ultimo_treno_giro = (
+                        str(corse_ultima[-1].numero_treno)
+                        if corse_ultima[-1].numero_treno is not None
+                        else None
+                    )
                     await _crea_blocco_rientro_sede(
                         session=session,
                         giro_variante_id=last_gv_id,
@@ -750,6 +809,7 @@ async def _persisti_un_giro(
                         stazione_a=loc.stazione_collegata_codice,
                         ora_inizio=corse_ultima[-1].ora_arrivo,
                         sede_codice=loc.codice,
+                        numero_treno_associato=ultimo_treno_giro,
                     )
 
     return gm_id
@@ -784,7 +844,11 @@ async def _crea_blocco_uscita_sede(
     h, m = ora_arrivo.hour, ora_arrivo.minute
     partenza_min = (h * 60 + m - 30) % (24 * 60)
     ora_partenza = _time(partenza_min // 60, partenza_min % 60)
-    numero = await _next_numero_rientro_sede(session)
+    # Sprint 7.9 MR β2-2: pattern parlante (anche se questa funzione
+    # non è più chiamata dopo il rollback MR 7C — restano per
+    # estendibilità futura). Il caller passerà eventualmente il
+    # `numero_treno_associato`; per ora fallback "90000".
+    numero = _numero_vuoto_da_treno_commerciale(None)
 
     cmv = CorsaMaterialeVuoto(
         azienda_id=azienda_id,
@@ -834,15 +898,22 @@ async def _crea_blocco_rientro_sede(
     stazione_a: str,
     ora_inizio: Any,
     sede_codice: str | None = None,
+    numero_treno_associato: str | None = None,
 ) -> None:
-    """Crea CorsaMaterialeVuoto + GiroBlocco per il rientro 9XXXX a sede.
+    """Crea CorsaMaterialeVuoto + GiroBlocco per il rientro a sede.
 
     Sprint 7.9 MR β1: ``sede_codice`` propagato al ``metadata_json``
     per consentire all'UI di mostrare "Vuoto verso deposito {SEDE}".
+
+    Sprint 7.9 MR β2-2: ``numero_treno_associato`` (= ultimo treno
+    commerciale del giro) costruisce il numero virtuale del rientro
+    come ``"9" + numero_treno_associato`` invece della vecchia
+    sequenza progressiva 90001+. Decisione utente 2026-05-04: numeri
+    parlanti, riconducibili al treno commerciale di confine.
     """
     from datetime import time as _time
 
-    numero = await _next_numero_rientro_sede(session)
+    numero = _numero_vuoto_da_treno_commerciale(numero_treno_associato)
     h, m = ora_inizio.hour, ora_inizio.minute
     arrivo_min = (h * 60 + m + 30) % (24 * 60)
     ora_fine = _time(arrivo_min // 60, arrivo_min % 60)
@@ -880,7 +951,11 @@ async def _crea_blocco_rientro_sede(
             is_validato_utente=False,
             metadata_json={
                 "motivo": "rientro_sede",
+                # Backward-compat: il vecchio nome resta per i record
+                # storici, ma il campo canonico è ora "numero_treno_virtuale".
                 "numero_treno_placeholder": numero,
+                "numero_treno_virtuale": numero,
+                "numero_treno_associato": numero_treno_associato,
                 # Sprint 7.9 MR β1: classificazione esplicita per UI.
                 "tipo_vuoto": "rientro_deposito",
                 "sede_codice": sede_codice,

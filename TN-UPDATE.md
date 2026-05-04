@@ -10,6 +10,107 @@
 
 ---
 
+## 2026-05-04 (128) — Sprint 7.9 MR β2-2: numerazione vuoti parlante 9{numero_commerciale}
+
+### Contesto
+
+Decisione utente 2026-05-04 (durante design β2):
+
+> "se sei in grado di generare numeri a 5 cifre che iniziano con 9
+> sempre diversi sarebbe molto meglio, così identifichiamo sempre
+> tutto, anzi facciamo così il numero identificativo per far uscire
+> o rientrare un materiale vuoto è 9-ultimo numero treno"
+
+L'utente ha promosso il pattern 9XXXX da "etichetta UI" (proposta MR β1)
+a **numero treno virtuale parlante** legato al treno commerciale di
+confine. Sostituisce la vecchia sequenza progressiva 90001+ (entry
+del Sprint 5.6 Feature 4).
+
+### Pattern unico per tutti i materiali vuoti
+
+`numero_treno_vuoto = "9" + numero_treno_commerciale_di_confine`
+
+| Tipo vuoto | Confine |
+|---|---|
+| Vuoto testa (uscita ciclo G1V0) | PRIMO treno commerciale del giro |
+| Vuoto testa (intra-area K≥2) | PRIMO treno commerciale della variante |
+| Vuoto coda (intra-area) | ULTIMO treno commerciale della variante |
+| Rientro sede (chiusura ciclo) | ULTIMO treno commerciale del giro |
+
+Esempi: variante con treni `2811 → ... → 2839` → vuoto testa `92811`,
+vuoto coda `92839`. Treno a 5 cifre `10302` → vuoto numerato `910302`
+(nessun cap di lunghezza, `String(40)` regge).
+
+### Modifiche backend
+
+`backend/src/colazione/domain/builder_giro/persister.py`:
+
+- Nuovo helper `_numero_vuoto_da_treno_commerciale(numero)` che
+  restituisce `f"9{numero}"` o `"90000"` se `None` (fallback degenere).
+- Funzione `_next_numero_rientro_sede` (vecchia sequenza progressiva
+  con query SQL `MAX(SUBSTRING(...))`) **eliminata**. Era l'unico
+  consumer della tabella per dedurre il prossimo numero — il nuovo
+  pattern è puro e stateless.
+- `_crea_corsa_materiale_vuoto` accetta nuovo parametro
+  `numero_treno_associato: str | None`; usa il nuovo pattern se
+  fornito, fallback al vecchio `V-{turno}-{seq}` per backward-compat
+  test.
+- `_persisti_blocchi_variante` calcola `primo_treno_commerciale` e
+  `ultimo_treno_commerciale` dalla `variante.blocchi_assegnati` e li
+  passa al creatore vuoto testa/coda.
+- `metadata_json` dei blocchi vuoti ora include `numero_treno_virtuale`
+  e `numero_treno_associato` per consumo UI.
+- `_crea_blocco_rientro_sede` accetta `numero_treno_associato` (=
+  ultimo treno del giro) e usa il nuovo pattern.
+- `_crea_blocco_uscita_sede` (non più chiamata dopo rollback MR 7C
+  ma mantenuta per estendibilità) aggiornata anch'essa.
+
+### Modifiche frontend
+
+`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`:
+
+- Sotto la linea tratteggiata di ogni blocco `materiale_vuoto`,
+  rendering del `numero_treno_virtuale` (font mono, viola, centrato),
+  visibile se `widthPx ≥ 30`. Tooltip esplicativo.
+- Backward-compat: se `numero_treno_virtuale` assente nel metadata
+  (record persistiti pre-MR β2-2) leggi `numero_treno_placeholder`.
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 60 file clean.
+- Backend `pytest` test puri (217) ✅. Test integration richiedono
+  Postgres (Docker locale down al momento del run); verifica
+  delegata a Railway smoke post-deploy.
+- Frontend `tsc -b --noEmit` ✅.
+- Frontend `vitest` 52/53 (1 timeout flaky preesistente non correlato).
+
+### Memoria aggiornata
+
+`memory/project_rientro_sede_9XXXX.md` riscritta da "9XXXX progressivo"
+a "9{commerciale} parlante" + index `MEMORY.md` aggiornato.
+
+### Stato
+
+- ✅ MR β2-2 completato.
+- 🟡 Smoke utente Railway: rigenerare giri sul programma "prova"
+  (per popolare i nuovi metadata + esercitare il nuovo pattern) e
+  verificare:
+  1. Sotto ogni blocco vuoto compare il numero `9XXXXX` parlante
+     (es. `92811`, `92839`).
+  2. Il rientro a sede usa il numero ultimo treno del giro invece
+     della vecchia sequenza progressiva.
+  3. Niente regressioni sui badge β1 (Vuoto da deposito FIO ecc.).
+
+### Prossimo step
+
+MR β2-0 (`LocalitaSosta` + seed Milano San Rocco) → β2-1 (matricole
+istanze materiali) → β2-3 (sourcing thread agganci/sganci con
+dotazione check) → β2-4 (modello `MaterialeThread` + algoritmo
+proiezione) → β2-5 (capacity istante-per-istante) → β2-6 (UI thread
+viewer) → β2-7 (regole pre-builder agganci/sganci).
+
+---
+
 ## 2026-05-04 (127) — Sprint 7.11: dashboard intuitiva + integrazione anagrafica depositi PdC (3 MR + 1 hotfix Gantt)
 
 ### Contesto
