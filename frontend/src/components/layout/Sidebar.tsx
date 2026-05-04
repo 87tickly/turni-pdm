@@ -4,6 +4,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   AlertTriangle,
   Building2,
+  ChevronLeft,
   ChevronRight,
   IdCard,
   LayoutDashboard,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { ArturoLogo } from "@/components/brand/ArturoLogo";
+import { useSidebar } from "@/components/layout/SidebarContext";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { cn } from "@/lib/utils";
 
@@ -39,7 +41,7 @@ interface NavGroup {
   /** Prefisso path che identifica "siamo dentro questo gruppo". */
   pathPrefix: string;
   items: NavItem[];
-  /** Icona del gruppo (solo gruppi preview). */
+  /** Icona del gruppo (visibile in modalità collapsed o per i gruppi preview). */
   icon?: LucideIcon;
   /**
    * Gruppo "preview" (ruolo non ancora implementato): mostra label opacizzata
@@ -54,6 +56,7 @@ const NAV_PIANIFICATORE_GIRO: NavGroup = {
   label: "Pianificatore Giro",
   requiredRole: "PIANIFICATORE_GIRO",
   pathPrefix: "/pianificatore-giro",
+  icon: Workflow,
   items: [
     { to: "/pianificatore-giro/dashboard", label: "Home", icon: LayoutDashboard },
     { to: "/pianificatore-giro/programmi", label: "Programmi", icon: ListOrdered },
@@ -65,12 +68,13 @@ const NAV_PIANIFICATORE_PDC: NavGroup = {
   label: "Pianificatore PdC",
   requiredRole: "PIANIFICATORE_PDC",
   pathPrefix: "/pianificatore-pdc",
+  icon: ListOrdered,
   items: [
     { to: "/pianificatore-pdc/dashboard", label: "Home", icon: LayoutDashboard },
     { to: "/pianificatore-pdc/giri", label: "Vista giri", icon: Workflow },
     { to: "/pianificatore-pdc/turni", label: "Turni PdC", icon: ListOrdered },
     // Sprint 7.11: anteprima depositi PdC, sotto path PdC fino a quando
-    // il ruolo Gestione Personale non sar\u00e0 implementato.
+    // il ruolo Gestione Personale non sarà implementato.
     { to: "/pianificatore-pdc/depositi", label: "Depositi PdC", icon: Building2 },
     {
       to: "/pianificatore-pdc/revisioni-cascading",
@@ -134,6 +138,7 @@ const APP_VERSION = "0.1.0";
 export function Sidebar() {
   const { hasRole, user } = useAuth();
   const location = useLocation();
+  const { collapsed, toggle } = useSidebar();
 
   const visibleGroups = useMemo(
     () => NAV_GROUPS.filter((group) => hasRole(group.requiredRole)),
@@ -169,10 +174,29 @@ export function Sidebar() {
     });
   }
 
+  if (collapsed) {
+    return (
+      <CollapsedSidebar
+        visibleGroups={visibleGroups}
+        activeGroupId={activeGroupId}
+        userAziendaId={user?.azienda_id ?? null}
+      />
+    );
+  }
+
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-white/70 backdrop-blur">
-      <div className="flex h-14 items-center border-b border-border px-5">
+      <div className="flex h-14 items-center justify-between border-b border-border pl-5 pr-2">
         <ArturoLogo size="sm" />
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label="Riduci sidebar"
+          title="Riduci sidebar (più spazio per il Gantt)"
+          className="grid h-7 w-7 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <ChevronLeft className="h-4 w-4" aria-hidden />
+        </button>
       </div>
 
       <nav className="flex flex-1 flex-col gap-3 overflow-y-auto p-3 text-sm">
@@ -201,6 +225,74 @@ export function Sidebar() {
         </div>
       )}
     </aside>
+  );
+}
+
+interface CollapsedSidebarProps {
+  visibleGroups: NavGroup[];
+  activeGroupId: string | null;
+  userAziendaId: number | null;
+}
+
+function CollapsedSidebar({ visibleGroups, activeGroupId, userAziendaId }: CollapsedSidebarProps) {
+  const { toggle } = useSidebar();
+
+  // In modalità collapsed mostriamo le icone delle voci del gruppo attivo
+  // (le altre sono nascoste; toggle in alto per espandere e cambiare ruolo).
+  const activeGroup = visibleGroups.find((g) => g.id === activeGroupId) ?? null;
+  const items = activeGroup?.items ?? [];
+
+  return (
+    <aside className="flex w-14 shrink-0 flex-col border-r border-border bg-white/70 backdrop-blur">
+      <div className="flex h-14 items-center justify-center border-b border-border">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label="Espandi sidebar"
+          title="Espandi sidebar"
+          className="grid h-9 w-9 place-items-center rounded-md text-primary hover:bg-primary/[0.08]"
+        >
+          <ChevronRight className="h-5 w-5" aria-hidden />
+        </button>
+      </div>
+
+      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
+        {items.map((item) => (
+          <CollapsedNavItem key={item.to} item={item} />
+        ))}
+      </nav>
+
+      {userAziendaId !== null && (
+        <div className="border-t border-border px-2 py-2 text-center text-[9px] text-muted-foreground">
+          <div className="font-mono">v{APP_VERSION}</div>
+          <div>az #{userAziendaId}</div>
+        </div>
+      )}
+    </aside>
+  );
+}
+
+function CollapsedNavItem({ item }: { item: NavItem }) {
+  return (
+    <NavLink
+      to={item.to}
+      end={item.to.endsWith("/dashboard")}
+      title={item.label}
+      aria-label={item.label}
+      className={({ isActive }) =>
+        cn(
+          "relative grid h-10 place-items-center rounded-md transition-colors",
+          isActive
+            ? "bg-primary text-primary-foreground"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground",
+        )
+      }
+    >
+      <item.icon className="h-5 w-5" aria-hidden />
+      {item.chip !== undefined && (
+        <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-500" />
+      )}
+    </NavLink>
   );
 }
 

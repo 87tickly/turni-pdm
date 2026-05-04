@@ -1,6 +1,7 @@
-import { LogOut, User as UserIcon } from "lucide-react";
+import { LogOut, PanelLeft, User as UserIcon } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
+import { useSidebar } from "@/components/layout/SidebarContext";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/lib/auth/AuthContext";
 
@@ -14,11 +15,24 @@ function titleForPath(pathname: string): string {
 export function Header() {
   const { user, logout } = useAuth();
   const location = useLocation();
+  const { collapsed, toggle } = useSidebar();
   const title = titleForPath(location.pathname);
 
   return (
-    <header className="flex h-14 items-center justify-between border-b border-border bg-white px-6">
-      <div className="text-sm font-medium tracking-wide text-primary/80">{title}</div>
+    <header className="flex h-14 items-center justify-between border-b border-border bg-white px-4">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={collapsed ? "Espandi sidebar" : "Riduci sidebar"}
+          aria-pressed={collapsed}
+          title={collapsed ? "Espandi sidebar" : "Riduci sidebar (più spazio per il Gantt)"}
+          className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <PanelLeft className="h-4 w-4" aria-hidden />
+        </button>
+        <div className="text-sm font-medium tracking-wide text-primary/80">{title}</div>
+      </div>
       <div className="flex items-center gap-3">
         {user !== null && (
           <span className="flex items-center gap-2 text-sm">
