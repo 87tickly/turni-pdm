@@ -1,8 +1,11 @@
+import { useMemo } from "react";
 import type { ComponentType, SVGProps } from "react";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowRight,
+  Building2,
+  CheckCircle2,
   ListChecks,
   Workflow,
 } from "lucide-react";
@@ -11,223 +14,294 @@ import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { usePianificatorePdcOverview } from "@/hooks/usePianificatorePdc";
+import { useTurniPdcAzienda } from "@/hooks/useTurniPdc";
 import { cn } from "@/lib/utils";
 
 /**
  * Dashboard home del 2° ruolo (PIANIFICATORE_PDC).
  *
- * Sprint 7.10 MR 7.10.2 — variante v1 dal pacchetto Anthropic Design
- * Handoff (`arturo/06-dashboard-pdc.html`):
- * - HERO grande in alto (eyebrow + h1 + descrizione + onboarding 3-step)
- * - RAIL KPI piccoli a destra (4 KPI: giri / turni / violazioni / rev)
- * - DISTRIBUZIONE turni per impianto con empty state narrativo (no
- *   "cimitero degli zeri")
- * - ACTION CARDS rapidi a Vista giri e Lista turni
+ * Sprint 7.11 MR 7.11.1 — riscrittura "intuitiva" (single-screen,
+ * action-driven). Sostituisce la variante v1 (hero + checklist 3-step)
+ * che funzionava bene per lo zero-state ma diventava rumore quando i
+ * dati operativi erano presenti.
  *
- * Hooks/data fetching invariati rispetto al MR precedente
- * (`usePianificatorePdcOverview`).
+ * Layout:
+ * 1. Banner CTA "Cosa fare ora" — derivato dallo stato:
+ *    - violazioni > 0 → apri il primo turno violato
+ *    - turni < giri pubblicati → c'è ancora da convertire
+ *    - tutto ok → Lista turni
+ * 2. 4 KPI grandi (giri / turni / violazioni / impianti coperti)
+ * 3. Layout 2-col: ultimi turni (sx) + distribuzione impianti (dx)
+ * 4. Footer scorciatoie compatto
+ *
+ * Hooks: usePianificatorePdcOverview (KPI) + useTurniPdcAzienda (lista
+ * per CTA + ultimi turni). La lista turni è soft-failure: se l'hook
+ * fallisce, il banner CTA cade in stato di default e la sezione "ultimi
+ * turni" mostra empty state — KPI e distribuzione restano funzionanti.
  */
 export function PianificatorePdcDashboardRoute() {
   const { user } = useAuth();
   const overview = usePianificatorePdcOverview();
-  const data = overview.data;
+  const turniQuery = useTurniPdcAzienda({ limit: 10 });
 
-  const giriCount = data?.giri_materiali_count ?? null;
+  const data = overview.data;
+  const giriCount = data?.giri_materiali_count ?? 0;
   const turniTotali = data === undefined
-    ? null
+    ? 0
     : data.turni_pdc_per_impianto.reduce((sum, item) => sum + item.count, 0);
   const impiantiCount = data?.turni_pdc_per_impianto.length ?? 0;
-  const violazioniHard = data?.turni_con_violazioni_hard ?? null;
+  const violazioniHard = data?.turni_con_violazioni_hard ?? 0;
 
-  // Stato onboarding: derivato dai KPI reali. Step 1 attivo finché non
-  // ci sono turni (l'utente deve aprire Vista giri); step 2/3 indicizzati.
-  const turniGenerati = (turniTotali ?? 0) > 0;
-  const violazioniDaRisolvere = (violazioniHard ?? 0) > 0;
+  const turniList = turniQuery.data ?? [];
+
+  // Primo turno con violazioni (per CTA banner). Lista sortata da API
+  // per created_at desc; client-side filtra per n_violazioni > 0.
+  const turnoViolato = useMemo(
+    () => turniList.find((t) => t.n_violazioni > 0),
+    [turniList],
+  );
+
+  // CTA contestuale derivata dallo stato del lavoro.
+  const cta = useMemo(() => {
+    if (overview.isLoading) {
+      return { kind: "loading" as const };
+    }
+    if (overview.isError) {
+      return { kind: "error" as const };
+    }
+    if (violazioniHard > 0 && turnoViolato !== undefined) {
+      return {
+        kind: "violazioni" as const,
+        count: violazioniHard,
+        primoTurno: turnoViolato.codice,
+        href: `/pianificatore-pdc/turni/${turnoViolato.id}`,
+      };
+    }
+    if (violazioniHard > 0) {
+      return {
+        kind: "violazioni-no-link" as const,
+        count: violazioniHard,
+      };
+    }
+    if (giriCount > 0 && turniTotali === 0) {
+      return {
+        kind: "primo-turno" as const,
+        giri: giriCount,
+        href: "/pianificatore-pdc/giri",
+      };
+    }
+    if (giriCount > turniTotali) {
+      return {
+        kind: "altri-da-convertire" as const,
+        residui: giriCount - turniTotali,
+        href: "/pianificatore-pdc/giri",
+      };
+    }
+    if (turniTotali > 0) {
+      return {
+        kind: "tutto-ok" as const,
+        turni: turniTotali,
+        href: "/pianificatore-pdc/turni",
+      };
+    }
+    return { kind: "empty" as const };
+  }, [overview.isLoading, overview.isError, violazioniHard, turnoViolato, giriCount, turniTotali]);
+
+  const ultimiTurni = useMemo(() => turniList.slice(0, 5), [turniList]);
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Breadcrumb minimo */}
+    <div className="flex flex-col gap-5">
+      {/* breadcrumb */}
       <div className="text-xs text-muted-foreground">Home</div>
 
-      {/* HERO — grid 12-col: copy+onboarding | rail KPI */}
-      <section className="overflow-hidden rounded-lg border border-border bg-white">
-        <div className="grid grid-cols-1 lg:grid-cols-12">
-          {/* LEFT col-span-8: copy + onboarding 3-step */}
-          <div className="p-8 lg:col-span-8">
-            <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-primary">
-              Pianificatore Turno PdC
-            </div>
-            <h1 className="mb-2 text-3xl font-bold tracking-tight text-primary">
-              Dashboard Pianificatore Turno PdC
-            </h1>
-            <p className="max-w-[520px] text-sm leading-relaxed text-muted-foreground">
-              Benvenuto{user !== null ? `, ${user.username}` : ""}. Da qui
-              costruisci i turni del personale di macchina partendo dai giri
-              materiali pubblicati dal Pianificatore Giro.{" "}
-              {!turniGenerati && (
-                <>
-                  Non hai ancora generato turni: segui i tre passi qui sotto
-                  per iniziare.
-                </>
-              )}
-            </p>
+      {/* HEADER pagina compatto (h1 conservato per heading ARIA + test) */}
+      <header className="flex flex-col gap-1">
+        <h1 className="text-2xl font-bold tracking-tight text-primary">
+          Dashboard Pianificatore Turno PdC
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          Benvenuto{user !== null ? `, ${user.username}` : ""}. Da qui costruisci
+          i turni del personale di macchina partendo dai giri materiali pubblicati.
+        </p>
+      </header>
 
-            {/* Onboarding checklist 3-step */}
-            <ol className="mt-7 flex flex-col gap-3">
-              <OnboardingStep
-                n={1}
-                title="Apri la Vista giri materiali"
-                description={
-                  giriCount !== null
-                    ? `${giriCount} giri pubblicati dal 1° ruolo, in sola lettura. Scegli un giro pubblicato.`
-                    : "Esplora i giri pubblicati dal 1° ruolo, in sola lettura."
-                }
-                state={!turniGenerati ? "active" : "done"}
-                cta={
-                  !turniGenerati
-                    ? { to: "/pianificatore-pdc/giri", label: "Vai" }
-                    : undefined
-                }
-              />
-              <OnboardingStep
-                n={2}
-                title="Genera i turni dal dettaglio del giro"
-                description={
-                  <>
-                    Apri un giro materiale, premi{" "}
-                    <span className="font-medium text-foreground">
-                      &ldquo;Genera turni PdC&rdquo;
-                    </span>
-                    . Il builder costruisce automaticamente prestazione,
-                    condotta, refezione e FR.
-                  </>
-                }
-                state={turniGenerati && !violazioniDaRisolvere ? "active" : turniGenerati ? "done" : "todo"}
-              />
-              <OnboardingStep
-                n={3}
-                title="Valida turni e risolvi le violazioni hard"
-                description="Apri il visualizzatore Gantt del turno per leggere giornata per giornata e segnare le violazioni risolte."
-                state={violazioniDaRisolvere ? "active" : turniGenerati ? "done" : "todo"}
-              />
-            </ol>
-          </div>
+      {/* BANNER CTA "Cosa fare ora" */}
+      <CtaBanner cta={cta} />
 
-          {/* RIGHT col-span-4: rail KPI */}
-          <aside className="border-t border-border bg-muted/40 p-6 lg:col-span-4 lg:border-l lg:border-t-0">
-            <div className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Stato pianificazione
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <KpiRailCard
-                title="Giri materiali"
-                icon={Workflow}
-                value={giriCount}
-                loading={overview.isLoading}
-                error={overview.isError}
-                hint="sorgente per i turni PdC"
-              />
-              <KpiRailCard
-                title="Turni PdC"
-                icon={ListChecks}
-                value={turniTotali}
-                loading={overview.isLoading}
-                error={overview.isError}
-                hint={
-                  turniGenerati
-                    ? `Su ${impiantiCount} impianto/i`
-                    : "Nessun turno generato"
-                }
-                hintAccent={!turniGenerati && !overview.isLoading ? "warning" : "neutral"}
-                hintCta={
-                  !turniGenerati && !overview.isLoading
-                    ? { to: "/pianificatore-pdc/giri", label: "genera ora →" }
-                    : undefined
-                }
-                accent={!turniGenerati && !overview.isLoading ? "warning" : "neutral"}
-              />
-              <KpiRailCard
-                title="Violazioni hard"
-                icon={AlertTriangle}
-                value={violazioniHard}
-                loading={overview.isLoading}
-                error={overview.isError}
-                hint="Prestazione/condotta fuori cap"
-                accent={violazioniDaRisolvere ? "warning" : "neutral"}
-              />
-              <KpiRailCard
-                title="Rev. cascading"
-                icon={Workflow}
-                value={null}
-                loading={false}
-                error={false}
-                hint="Disponibile da Sprint 7.6"
-                placeholder="—"
-              />
-            </div>
-          </aside>
-        </div>
+      {/* 4 KPI grandi */}
+      <section className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <KpiCard
+          icon={Workflow}
+          label="Giri materiali"
+          value={giriCount}
+          loading={overview.isLoading}
+          error={overview.isError}
+          hint="Sorgente per i turni PdC"
+        />
+        <KpiCard
+          icon={ListChecks}
+          label="Turni PdC"
+          value={turniTotali}
+          loading={overview.isLoading}
+          error={overview.isError}
+          hint={
+            turniTotali > 0
+              ? `Su ${impiantiCount} impianto/i`
+              : "Nessuno generato"
+          }
+          accent={turniTotali === 0 && !overview.isLoading ? "warning" : "neutral"}
+        />
+        <KpiCard
+          icon={AlertTriangle}
+          label="Violazioni hard"
+          value={violazioniHard}
+          loading={overview.isLoading}
+          error={overview.isError}
+          hint="Prestazione/condotta fuori cap"
+          accent={violazioniHard > 0 ? "danger" : "neutral"}
+        />
+        <KpiCard
+          icon={Building2}
+          label="Impianti coperti"
+          value={impiantiCount}
+          loading={overview.isLoading}
+          error={overview.isError}
+          hint="Depositi PdC con almeno 1 turno"
+        />
       </section>
 
-      {/* ACTION CARDS — accesso rapido alle 2 sezioni operative */}
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <ActionCard
+      {/* LAYOUT 2-COL: ultimi turni (sx) + distribuzione impianti (dx) */}
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card className="flex flex-col p-4">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h2 className="text-sm font-semibold text-primary">Ultimi turni</h2>
+            <Link
+              to="/pianificatore-pdc/turni"
+              className="text-xs font-medium text-muted-foreground hover:text-primary"
+            >
+              vedi tutti →
+            </Link>
+          </div>
+          {turniQuery.isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Spinner label="Caricamento turni…" />
+            </div>
+          ) : ultimiTurni.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-8 text-center text-xs text-muted-foreground">
+              <span>Nessun turno generato finora.</span>
+              <Link
+                to="/pianificatore-pdc/giri"
+                className="font-medium text-primary hover:underline"
+              >
+                Apri vista giri →
+              </Link>
+            </div>
+          ) : (
+            <ul className="flex flex-col divide-y divide-border/60">
+              {ultimiTurni.map((t) => (
+                <li key={t.id}>
+                  <Link
+                    to={`/pianificatore-pdc/turni/${t.id}`}
+                    className="flex items-center justify-between gap-3 py-2 text-sm transition-colors hover:bg-primary/[0.03]"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="font-mono text-[13px] font-semibold text-primary">
+                        {t.codice}
+                      </span>
+                      <span className="truncate text-xs text-muted-foreground">
+                        {t.impianto}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2 text-xs">
+                      {t.n_violazioni > 0 && (
+                        <span className="inline-flex items-center gap-1 text-amber-700">
+                          <AlertTriangle className="h-3 w-3" aria-hidden />
+                          {t.n_violazioni}
+                        </span>
+                      )}
+                      <span className="font-mono tabular-nums text-muted-foreground">
+                        {t.n_giornate}g
+                      </span>
+                      <ArrowRight className="h-3 w-3 text-muted-foreground/40" aria-hidden />
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card className="flex flex-col p-4">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h2 className="text-sm font-semibold text-primary">
+              Distribuzione per impianto
+            </h2>
+            <span className="text-xs text-muted-foreground">25 depositi PdC Trenord</span>
+          </div>
+          {overview.isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Spinner label="Caricamento KPI…" />
+            </div>
+          ) : overview.isError ? (
+            <p className="py-4 text-sm text-destructive" role="alert">
+              Errore caricamento KPI: {overview.error?.message ?? "errore sconosciuto"}
+            </p>
+          ) : data === undefined || data.turni_pdc_per_impianto.length === 0 ? (
+            <p className="py-4 text-sm text-muted-foreground">
+              Nessun turno PdC presente per la tua azienda.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-1 text-sm">
+              {data.turni_pdc_per_impianto.map((item) => {
+                // Mini-bar proporzionale al max nella lista (visual quick-scan)
+                const max = Math.max(
+                  ...data.turni_pdc_per_impianto.map((x) => x.count),
+                  1,
+                );
+                const widthPct = (item.count / max) * 100;
+                return (
+                  <li
+                    key={item.impianto}
+                    className="flex items-center justify-between gap-3 py-1"
+                  >
+                    <span className="font-medium">{item.impianto}</span>
+                    <span className="flex items-center gap-2">
+                      <span
+                        className="h-1.5 rounded-full bg-primary/30"
+                        style={{ width: `${widthPct * 0.8}px` }}
+                        aria-hidden
+                      />
+                      <span className="font-mono tabular-nums text-muted-foreground">
+                        {item.count}
+                      </span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+      </section>
+
+      {/* FOOTER scorciatoie compatto */}
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <FooterShortcut
           to="/pianificatore-pdc/giri"
           title="Vista giri materiali"
-          description={
-            giriCount !== null
-              ? `Esplora i ${giriCount} giri pubblicati. Da ognuno puoi generare il turno PdC.`
-              : "Esplora i giri pubblicati. Da ognuno puoi generare il turno PdC."
-          }
           cta="Apri vista giri"
         />
-        <ActionCard
+        <FooterShortcut
           to="/pianificatore-pdc/turni"
           title="Lista turni PdC"
-          description="Filtra per impianto, codice, stato. Click riga = visualizzatore Gantt."
           cta="Apri lista turni"
         />
       </section>
 
-      {/* DISTRIBUZIONE turni per impianto */}
-      <Card className="p-6">
-        <div className="mb-4 flex items-baseline justify-between">
-          <h2 className="text-base font-semibold text-primary">
-            Distribuzione turni per impianto
-          </h2>
-          <span className="text-xs text-muted-foreground">25 depositi PdC Trenord</span>
-        </div>
-
-        {overview.isLoading ? (
-          <Spinner label="Caricamento KPI…" />
-        ) : overview.isError ? (
-          <p className="text-sm text-destructive" role="alert">
-            Errore caricamento KPI: {overview.error?.message ?? "errore sconosciuto"}
-          </p>
-        ) : data === undefined || data.turni_pdc_per_impianto.length === 0 ? (
-          <DistribuzioneEmpty />
-        ) : (
-          <ul className="flex flex-col gap-1 text-sm">
-            {data.turni_pdc_per_impianto.map((item) => (
-              <li
-                key={item.impianto}
-                className="flex justify-between border-b border-border py-1.5 last:border-0"
-              >
-                <span className="font-medium">{item.impianto}</span>
-                <span className="font-mono tabular-nums text-muted-foreground">
-                  {item.count}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-
-      {/* Footer info */}
-      <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-        <span>Auto-refresh 60s</span>
-      </div>
+      {/* Footer info: rev. cascading (preserva hint per test) */}
+      <p className="text-[11px] text-muted-foreground">
+        Revisioni cascading —{" "}
+        <span className="text-muted-foreground">Disponibile da Sprint 7.6</span>
+      </p>
     </div>
   );
 }
@@ -238,188 +312,263 @@ export function PianificatorePdcDashboardRoute() {
 
 type LucideIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
-interface KpiRailCardProps {
-  title: string;
+type CtaState =
+  | { kind: "loading" }
+  | { kind: "error" }
+  | { kind: "violazioni"; count: number; primoTurno: string; href: string }
+  | { kind: "violazioni-no-link"; count: number }
+  | { kind: "primo-turno"; giri: number; href: string }
+  | { kind: "altri-da-convertire"; residui: number; href: string }
+  | { kind: "tutto-ok"; turni: number; href: string }
+  | { kind: "empty" };
+
+function CtaBanner({ cta }: { cta: CtaState }) {
+  if (cta.kind === "loading" || cta.kind === "error") {
+    return (
+      <div className="rounded-lg border border-border bg-muted/30 px-5 py-4 text-sm text-muted-foreground">
+        {cta.kind === "loading" ? "Verifico lo stato della pianificazione…" : "Stato pianificazione non disponibile."}
+      </div>
+    );
+  }
+
+  if (cta.kind === "violazioni" || cta.kind === "violazioni-no-link") {
+    return (
+      <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-300 bg-amber-50 px-5 py-4">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" aria-hidden />
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-700">
+              Cosa fare ora
+            </div>
+            <div className="text-base font-semibold text-amber-900">
+              Hai {cta.count} violazion{cta.count === 1 ? "e" : "i"} hard da risolvere
+            </div>
+            {cta.kind === "violazioni" && (
+              <div className="text-xs text-amber-800">
+                Inizia dal turno{" "}
+                <span className="font-mono font-semibold">{cta.primoTurno}</span>.
+              </div>
+            )}
+          </div>
+        </div>
+        {cta.kind === "violazioni" && (
+          <Link
+            to={cta.href}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-amber-700"
+          >
+            Apri il turno
+            <ArrowRight className="h-4 w-4" aria-hidden />
+          </Link>
+        )}
+      </div>
+    );
+  }
+
+  if (cta.kind === "primo-turno") {
+    return (
+      <CtaSimple
+        icon={Workflow}
+        eyebrow="Cosa fare ora"
+        title={`Genera il primo turno PdC dai ${cta.giri} giri pubblicati`}
+        description="Apri Vista giri, scegli un giro pubblicato, premi 'Genera turni PdC'."
+        href={cta.href}
+        ctaLabel="Apri vista giri"
+        tone="primary"
+      />
+    );
+  }
+
+  if (cta.kind === "altri-da-convertire") {
+    return (
+      <CtaSimple
+        icon={Workflow}
+        eyebrow="Cosa fare ora"
+        title={`${cta.residui} giri ancora da convertire in turni`}
+        description="Apri Vista giri per generare i turni PdC mancanti."
+        href={cta.href}
+        ctaLabel="Apri vista giri"
+        tone="primary"
+      />
+    );
+  }
+
+  if (cta.kind === "tutto-ok") {
+    return (
+      <CtaSimple
+        icon={CheckCircle2}
+        eyebrow="Cosa fare ora"
+        title={`Tutto in linea: ${cta.turni} turni pubblicati, niente violazioni`}
+        description="Puoi continuare con la lista turni o le revisioni cascading quando arriveranno."
+        href={cta.href}
+        ctaLabel="Apri lista turni"
+        tone="success"
+      />
+    );
+  }
+
+  // empty: niente giri, niente turni
+  return (
+    <div className="rounded-lg border border-dashed border-border bg-white px-5 py-6 text-center">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Cosa fare ora
+      </div>
+      <div className="mt-1 text-base font-semibold text-foreground">
+        Aspetta che il Pianificatore Giro pubblichi un giro materiale
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Da quel momento potrai generare i turni PdC qui.
+      </p>
+    </div>
+  );
+}
+
+interface CtaSimpleProps {
   icon: LucideIcon;
-  value: number | null;
+  eyebrow: string;
+  title: string;
+  description: string;
+  href: string;
+  ctaLabel: string;
+  tone: "primary" | "success";
+}
+
+function CtaSimple({
+  icon: Icon,
+  eyebrow,
+  title,
+  description,
+  href,
+  ctaLabel,
+  tone,
+}: CtaSimpleProps) {
+  const tones = {
+    primary: {
+      border: "border-primary/30",
+      bg: "bg-primary/[0.04]",
+      iconColor: "text-primary",
+      eyebrowColor: "text-primary",
+      titleColor: "text-foreground",
+      btn: "bg-primary text-primary-foreground hover:opacity-90",
+    },
+    success: {
+      border: "border-emerald-300",
+      bg: "bg-emerald-50",
+      iconColor: "text-emerald-600",
+      eyebrowColor: "text-emerald-700",
+      titleColor: "text-emerald-900",
+      btn: "bg-emerald-600 text-white hover:bg-emerald-700",
+    },
+  }[tone];
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-between gap-4 rounded-lg border px-5 py-4",
+        tones.border,
+        tones.bg,
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <Icon className={cn("mt-0.5 h-5 w-5 shrink-0", tones.iconColor)} aria-hidden />
+        <div>
+          <div
+            className={cn(
+              "text-[10px] font-semibold uppercase tracking-wider",
+              tones.eyebrowColor,
+            )}
+          >
+            {eyebrow}
+          </div>
+          <div className={cn("text-base font-semibold", tones.titleColor)}>{title}</div>
+          <div className="text-xs text-muted-foreground">{description}</div>
+        </div>
+      </div>
+      <Link
+        to={href}
+        className={cn(
+          "inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium shadow-sm transition",
+          tones.btn,
+        )}
+      >
+        {ctaLabel}
+        <ArrowRight className="h-4 w-4" aria-hidden />
+      </Link>
+    </div>
+  );
+}
+
+interface KpiCardProps {
+  icon: LucideIcon;
+  label: string;
+  value: number;
   loading: boolean;
   error: boolean;
   hint: string;
-  hintAccent?: "neutral" | "warning";
-  hintCta?: { to: string; label: string };
-  accent?: "neutral" | "warning";
-  placeholder?: string;
+  accent?: "neutral" | "warning" | "danger";
 }
 
-function KpiRailCard({
-  title,
+function KpiCard({
   icon: Icon,
+  label,
   value,
   loading,
   error,
   hint,
-  hintAccent = "neutral",
-  hintCta,
   accent = "neutral",
-  placeholder = "—",
-}: KpiRailCardProps) {
-  const display = loading ? "…" : error ? "—" : value === null ? placeholder : String(value);
-  const isZero = value === 0;
-
+}: KpiCardProps) {
+  const display = loading ? "…" : error ? "—" : String(value);
+  const accentBorder = {
+    neutral: "border-border",
+    warning: "border-amber-300 ring-1 ring-amber-100",
+    danger: "border-red-300 ring-1 ring-red-100",
+  }[accent];
+  const accentValueColor = {
+    neutral: "text-foreground",
+    warning: "text-amber-700",
+    danger: "text-red-700",
+  }[accent];
   return (
-    <div
-      className={cn(
-        "rounded-md border bg-white p-3",
-        accent === "warning" && !loading
-          ? "border-amber-300 ring-1 ring-amber-100"
-          : "border-border",
-      )}
-    >
+    <Card className={cn("p-5", accentBorder)}>
       <div className="flex items-center justify-between">
-        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-          {title}
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {label}
         </div>
-        <Icon className="h-3.5 w-3.5 text-muted-foreground/70" aria-hidden />
+        <Icon className="h-4 w-4 text-muted-foreground/60" aria-hidden />
       </div>
       <div
         className={cn(
-          "mt-1 text-2xl font-semibold tabular-nums",
-          isZero || display === "—" || display === "…" ? "text-muted-foreground/50" : "text-foreground",
+          "mt-2 text-4xl font-bold tabular-nums",
+          value === 0 && !loading && !error ? "text-muted-foreground/40" : accentValueColor,
         )}
       >
         {display}
       </div>
-      <div
-        className={cn(
-          "mt-0.5 flex items-center gap-1 text-[11px]",
-          hintAccent === "warning" ? "text-amber-700" : "text-muted-foreground",
-        )}
-      >
-        <span>{hint}</span>
-        {hintCta !== undefined && (
-          <Link to={hintCta.to} className="font-medium hover:underline">
-            {hintCta.label}
-          </Link>
-        )}
-      </div>
-    </div>
+      <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
+    </Card>
   );
 }
 
-interface OnboardingStepProps {
-  n: number;
-  title: string;
-  description: React.ReactNode;
-  state: "active" | "done" | "todo";
-  cta?: { to: string; label: string };
-}
-
-function OnboardingStep({ n, title, description, state, cta }: OnboardingStepProps) {
-  return (
-    <li
-      className={cn(
-        "flex items-start gap-4 rounded-md border p-4",
-        state === "active" ? "border-border bg-muted/40" : "border-border",
-      )}
-    >
-      <div
-        className={cn(
-          "grid h-7 w-7 shrink-0 place-items-center rounded-full text-sm font-semibold",
-          state === "active"
-            ? "border-2 border-primary bg-white text-primary"
-            : state === "done"
-              ? "border-2 border-emerald-500 bg-emerald-50 text-emerald-700"
-              : "border border-border bg-white text-muted-foreground",
-        )}
-        aria-label={`Step ${n}${state === "done" ? " completato" : state === "active" ? " attivo" : ""}`}
-      >
-        {state === "done" ? "✓" : n}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span
-            className={cn(
-              "text-sm font-semibold",
-              state === "todo" ? "text-foreground/70" : "text-foreground",
-            )}
-          >
-            {title}
-          </span>
-          {state === "active" && (
-            <span className="inline-flex items-center rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-emerald-800">
-              prossimo
-            </span>
-          )}
-        </div>
-        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-      </div>
-      {cta !== undefined && (
-        <Link
-          to={cta.to}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:opacity-90"
-        >
-          {cta.label}
-          <span aria-hidden>→</span>
-        </Link>
-      )}
-    </li>
-  );
-}
-
-interface ActionCardProps {
+function FooterShortcut({
+  to,
+  title,
+  cta,
+}: {
   to: string;
   title: string;
-  description: string;
   cta: string;
-}
-
-function ActionCard({ to, title, description, cta }: ActionCardProps) {
+}) {
   return (
     <Link
       to={to}
-      className="group block rounded-lg border border-border bg-white p-6 transition hover:border-primary/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="group flex items-center justify-between rounded-md border border-border bg-white px-4 py-3 transition hover:border-primary/50 hover:bg-primary/[0.03]"
     >
-      <div className="flex items-start justify-between">
-        <div>
-          <h3 className="text-base font-semibold text-foreground">{title}</h3>
-          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-        </div>
-        <ArrowRight
-          className="h-5 w-5 shrink-0 text-muted-foreground/60 transition group-hover:translate-x-1 group-hover:text-primary"
-          aria-hidden
-        />
-      </div>
-      <div className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-primary">
-        {cta}
-        <ArrowRight className="h-4 w-4" aria-hidden />
-      </div>
+      <span className="flex flex-col">
+        <span className="text-sm font-semibold text-foreground">{title}</span>
+        <span className="text-xs text-muted-foreground">{cta}</span>
+      </span>
+      <ArrowRight
+        className="h-4 w-4 text-muted-foreground/40 transition group-hover:translate-x-0.5 group-hover:text-primary"
+        aria-hidden
+      />
     </Link>
-  );
-}
-
-function DistribuzioneEmpty() {
-  return (
-    <div className="rounded-md border border-dashed border-border px-6 py-10 text-center">
-      <div className="mx-auto mb-3 grid h-16 w-16 place-items-center rounded-full bg-muted">
-        <svg
-          className="h-8 w-8 text-muted-foreground/40"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          <path d="M3 21l1.5-9 7.5-3 7.5 3L21 21M3 21h18M9 21V13M15 21V13" />
-        </svg>
-      </div>
-      <div className="text-sm font-medium">Nessun turno PdC presente</div>
-      <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
-        I turni si distribuiscono qui per impianto (MILANO_GA, BRESCIA,
-        BERGAMO, …) dopo la prima generazione dal dettaglio di un giro
-        materiale.
-      </p>
-    </div>
   );
 }
