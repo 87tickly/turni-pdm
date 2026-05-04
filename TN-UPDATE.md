@@ -10,6 +10,84 @@
 
 ---
 
+## 2026-05-04 (120) — Sprint 7.9 MR 11B Step 1: tie-break deterministico per id, niente più `RegolaAmbiguaError`
+
+### Contesto
+
+Decisione utente 2026-05-03:
+
+> "il builder usa prio più alta. Funziona ma è rigido: se ETR526×2 ha
+> capacity disponibile, copre TUTTE le corse della linea, le altre
+> regole non scattano mai. ed è proprio questo il problema, ragioniamo
+> come se un materiale dovesse coprire tutti i treni e tutte le linee.
+> ma non è cosi che funziona. inoltre non abbiamo messo la quantità
+> di treni disponibili=? quindi il vincolo della priorità ha poco
+> senso, penso debba essere eliminato"
+
+`risolvi_corsa` (Sprint 4.2) sollevava `RegolaAmbiguaError` quando 2+
+regole matchavano la stessa corsa con priorità + specificità
+identiche. In presenza di regole-alternative legittime (es. 4 regole
+sulla stessa direttrice TIRANO-SONDRIO-LECCO-MILANO con composizioni
+diverse: ETR425+ETR526, ETR526×2, ETR204×2, ETR204×1), il builder
+falliva con HTTP 400 lato API.
+
+### Modifiche
+
+`backend/src/colazione/domain/builder_giro/risolvi_corsa.py`:
+- Rimossa la condizione `if top.priorita == second.priorita and
+  len(top.filtri_json) == len(second.filtri_json): raise
+  RegolaAmbiguaError(...)`.
+- Sort key esteso: `(-priorita, -len(filtri_json), id)` →
+  priorità DESC, specificità DESC, **id ASC** come tie-break
+  deterministico.
+- Docstring aggiornato.
+- La classe `RegolaAmbiguaError` resta esportata in
+  `builder_giro/__init__.py` per retrocompat (handlers HTTP in
+  `api/giri.py`), ma non è più sollevata da `risolvi_corsa`.
+
+`backend/tests/test_risolvi_corsa.py`:
+- `test_risolvi_corsa_ambiguita_raises` →
+  `test_risolvi_corsa_priorita_specificita_identiche_tie_break_id`.
+- `test_risolvi_corsa_ambiguita_tre_regole_solo_top_2` →
+  `test_risolvi_corsa_tie_break_anche_con_terza_regola_lower_prio`.
+- Verifica esplicita: l'ordine di input non conta, vince sempre
+  l'`id` più basso (regola creata per prima).
+
+`backend/tests/test_composizione.py`:
+- `test_regola_ambigua_bubble_up` → `test_regole_priorita_identiche_tie_break_id`.
+- Verifica la corsa è assegnata al materiale di r1 (id=1, ALe711)
+  invece di lanciare `RegolaAmbiguaError`.
+
+### Conseguenze + scope futuro
+
+**Risolto** (Step 1):
+- Programmi multi-regola sulla stessa linea con composizioni
+  alternative ora generano giri (`risolvi_corsa` non blocca più).
+- Capacity awareness manuale: card "Convogli necessari" (entry 113)
+  mostra `pezzi_richiesti / dotazione` per ogni regola →
+  pianificatore vede subito se sfora.
+
+**Step 2 futuro (capacity-aware routing)**:
+- Quando una regola "esaurisce" la dotazione fisica, ribilanciare
+  cluster A1 verso regole alternative compatibili (= regole con
+  filtri sovrapposti che coprono le stesse corse). Richiede modifica
+  pipeline post-bin-packing.
+- In assenza di Step 2: il pianificatore controlla manualmente
+  via la card "Ultimo run" (warning) + "Convogli necessari" (count).
+
+### Verifiche
+
+- `mypy --strict` ✅ 59 file clean.
+- `pytest` ✅ **551 passed, 12 skipped**.
+- Frontend `tsc -b --noEmit` ✅.
+
+### Stato
+
+- ✅ MR 11B Step 1 (tie-break deterministico) completato.
+- 🟡 MR 11B Step 2 (capacity-aware routing) scope futuro.
+
+---
+
 ## 2026-05-04 (119) — Sprint 7.9 MR 13: regole modificabili su programma `attivo`
 
 ### Contesto

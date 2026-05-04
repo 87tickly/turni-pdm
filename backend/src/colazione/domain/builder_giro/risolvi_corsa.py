@@ -372,8 +372,11 @@ def risolvi_corsa(
        La regola viene rimossa dalle candidate, la corsa cade su una
        regola successiva o diventa residua.
     4. Se nessuna candidata → `None`.
-    5. Ordina per `(priorita DESC, specificita DESC)`.
-    6. Se top-2 hanno priorità+specificità identiche → `RegolaAmbiguaError`.
+    5. Ordina per `(priorita DESC, specificita DESC, id ASC)`.
+    6. Sprint 7.9 MR 11B (entry 120): tie-break deterministico per
+       `id ascending` (= regola creata per prima vince) invece di
+       sollevare `RegolaAmbiguaError`. La capacity-awareness è
+       responsabilità del pianificatore via card "Convogli necessari".
     7. Costruisce ``composizione`` dalla ``composizione_json`` della top.
     8. **Sprint 5.5 — Validazione accoppiamento**: se la composizione
        ha 2+ materiali, ``is_composizione_manuale=False``, e il
@@ -424,16 +427,22 @@ def risolvi_corsa(
     if not candidate:
         return None
 
-    candidate.sort(key=lambda r: (r.priorita, len(r.filtri_json)), reverse=True)
+    # Sprint 7.9 MR 11B (entry 120): tie-break deterministico per id
+    # ascending invece di RegolaAmbiguaError. Decisione utente
+    # 2026-05-03: "il vincolo della priorità ha poco senso, penso debba
+    # essere eliminato". Quando 2+ regole matchano la stessa corsa con
+    # priorità + specificità identiche, vince l'id più basso (= regola
+    # creata per prima). Il pianificatore controlla la copertura via
+    # card "Convogli necessari" (entry 113) e "Ultimo run" (entry 116);
+    # se la dotazione fisica del materiale viene superata, può ridurre
+    # la composizione di una regola o spostare un filtro più specifico.
+    # Step 2 futuro: routing capacity-aware con ribilanciamento cluster.
+    #
+    # Sort key: (-priorita, -len(filtri), id) → priorità DESC, specificità
+    # DESC, id ASC.
+    candidate.sort(key=lambda r: (-r.priorita, -len(r.filtri_json), r.id))
 
     top = candidate[0]
-    if len(candidate) > 1:
-        second = candidate[1]
-        if top.priorita == second.priorita and len(top.filtri_json) == len(second.filtri_json):
-            raise RegolaAmbiguaError(
-                corsa_id=getattr(corsa, "numero_treno", None),
-                regole_ids=[top.id, second.id],
-            )
 
     composizione = _composizione_da_json(top)
     if not composizione:

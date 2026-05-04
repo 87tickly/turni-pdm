@@ -9,7 +9,7 @@ Coprono:
   - Casi base (1 corsa con 1 regola, nessuna regola → corsa residua)
   - Più giornate
   - Incompatibilità materiale (giornata con 2 tipi)
-  - `RegolaAmbiguaError` bubble up
+  - tie-break per id su priorità+specificità identiche (Sprint 7.9 MR 11B)
 - `rileva_eventi_composizione`:
   - Composizione costante → 0 eventi
   - Aggancio (3 → 6)
@@ -39,7 +39,6 @@ from colazione.domain.builder_giro import (
     GiornataGiro,
     Giro,
     IncompatibilitaMateriale,
-    RegolaAmbiguaError,
     assegna_e_rileva_eventi,
     assegna_materiali,
     rileva_eventi_composizione,
@@ -175,9 +174,13 @@ def test_giornata_due_tipi_materiale_incompat() -> None:
     assert out.incompatibilita_materiale[0].tipi_materiale == frozenset({"ALe711", "ETR526"})
 
 
-def test_regola_ambigua_bubble_up() -> None:
+def test_regole_priorita_identiche_tie_break_id() -> None:
+    """Sprint 7.9 MR 11B (entry 120): regole con priorità + specificità
+    identiche non sollevano più ``RegolaAmbiguaError``: vince l'id più
+    basso (deterministico). La capacity-awareness è responsabilità del
+    pianificatore via card "Convogli necessari".
+    """
     c = FakeCorsa(codice_linea="S5")
-    # Due regole con stessa priorità + stessa specificità = ambigue
     r1 = FakeRegola(
         id=1,
         filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "S5"}],
@@ -191,8 +194,14 @@ def test_regola_ambigua_bubble_up() -> None:
         materiale_tipo_codice="ETR526",
     )
     giro = _giro_singolo((c,), D_LUN)
-    with pytest.raises(RegolaAmbiguaError):
-        assegna_materiali(giro, [r1, r2])
+    out = assegna_materiali(giro, [r1, r2])
+    # Nessuna eccezione: la corsa è assegnata (non più residua per
+    # ambiguità).
+    assert len(out.giornate) == 1
+    blocchi = out.giornate[0].blocchi_assegnati
+    assert len(blocchi) == 1
+    # Vince r1 (id=1) → ALe711.
+    assert blocchi[0].assegnazione.composizione[0].materiale_tipo_codice == "ALe711"
 
 
 def test_pass_through_metadata_giro() -> None:

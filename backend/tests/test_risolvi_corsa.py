@@ -8,7 +8,7 @@ simulare corse e regole. Coprono:
   per `fascia_oraria` (parsing time strings).
 - `matches_all` (AND, lista vuota).
 - `risolvi_corsa`: nessuna regola, una sola, priorità, specificità,
-  ambiguità (`RegolaAmbiguaError`), edge case.
+  tie-break per id (Sprint 7.9 MR 11B entry 120), edge case.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ import pytest
 from colazione.domain.builder_giro import (
     ComposizioneItem,
     ComposizioneNonAmmessaError,
-    RegolaAmbiguaError,
     determina_giorno_tipo,
     estrai_valore_corsa,
     matches_all,
@@ -392,8 +391,11 @@ def test_risolvi_corsa_a_parita_priorita_vince_piu_specifica() -> None:
 # =====================================================================
 
 
-def test_risolvi_corsa_ambiguita_raises() -> None:
-    """Top-2 con priorità + specificità identiche → RegolaAmbiguaError."""
+def test_risolvi_corsa_priorita_specificita_identiche_tie_break_id() -> None:
+    """Sprint 7.9 MR 11B (entry 120): priorità + specificità identiche
+    → tie-break deterministico per ``id ascending``. Niente più
+    ``RegolaAmbiguaError``.
+    """
     c = FakeCorsa(codice_linea="S5", categoria="RE", numero_treno="9999")
     r1 = FakeRegola(
         id=1,
@@ -405,17 +407,19 @@ def test_risolvi_corsa_ambiguita_raises() -> None:
         filtri_json=[{"campo": "categoria", "op": "eq", "valore": "RE"}],
         priorita=60,
     )
-    with pytest.raises(RegolaAmbiguaError) as excinfo:
-        risolvi_corsa(c, [r1, r2], date(2026, 4, 20))
-    err = excinfo.value
-    assert err.regole_ids == [1, 2] or err.regole_ids == [2, 1]
-    assert err.corsa_id == "9999"
+    out = risolvi_corsa(c, [r1, r2], date(2026, 4, 20))
+    assert out is not None
+    assert out.regola_id == 1  # id più basso vince
+    # L'ordine di input non conta: anche [r2, r1] → id=1
+    out2 = risolvi_corsa(c, [r2, r1], date(2026, 4, 20))
+    assert out2 is not None
+    assert out2.regola_id == 1
 
 
-def test_risolvi_corsa_ambiguita_tre_regole_solo_top_2() -> None:
-    """L'ambiguità si valuta solo top-2, non sulla terza."""
+def test_risolvi_corsa_tie_break_anche_con_terza_regola_lower_prio() -> None:
+    """Tie-break tra le top-2 con priorità + specificità identiche;
+    la terza regola con priorità più bassa è irrilevante."""
     c = FakeCorsa(codice_linea="S5", categoria="RE")
-    # Due regole indistinguibili → ambigua
     r1 = FakeRegola(
         id=1,
         filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "S5"}],
@@ -426,14 +430,14 @@ def test_risolvi_corsa_ambiguita_tre_regole_solo_top_2() -> None:
         filtri_json=[{"campo": "categoria", "op": "eq", "valore": "RE"}],
         priorita=60,
     )
-    # Una terza regola con priorità più bassa: irrilevante
     r3 = FakeRegola(
         id=3,
         filtri_json=[],
         priorita=10,
     )
-    with pytest.raises(RegolaAmbiguaError):
-        risolvi_corsa(c, [r1, r2, r3], date(2026, 4, 20))
+    out = risolvi_corsa(c, [r1, r2, r3], date(2026, 4, 20))
+    assert out is not None
+    assert out.regola_id == 1
 
 
 def test_risolvi_corsa_priorita_diversa_no_ambiguita() -> None:
