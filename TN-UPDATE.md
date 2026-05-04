@@ -10,6 +10,165 @@
 
 ---
 
+## 2026-05-04 (126) — Sprint 7.10: implementazione handoff design Pianificatore PdC (6 MR)
+
+### Contesto
+
+L'utente ha consegnato un Anthropic Design Handoff (`d-UJ-30JmgKdsXAy9jSYrA`,
+fetch via `https://api.anthropic.com/v1/design/h/...`) con i mockup delle 5
+schermate del 2° ruolo (Pianificatore Turno PdC) + nuova sidebar a 5 gruppi.
+Il pacchetto include README, 3 chat transcripts (intent/decisioni utente),
+le 5 HTML PdC `06-10` (ognuna con 3 varianti v1/v2/v3) + reference 5
+schermate Pianificatore Giro `01-05`. C'è anche un sotto-progetto bonus
+`gantt-giro-handoff/` (TSX drop-in completo per il Gantt 1° ruolo) — fuori
+scope dell'`index-pdc.html`.
+
+Decisione utente esplicita (chat3.md): "scope 5 schermate + sidebar in
+unico round; gruppo attivo espanso con header RUOLO ATTIVO; filtri inline
+header tabella; dashboard hero + checklist 3-step; rev. cascading roadmap;
+Gantt asse 00→23 + fishbone violazioni + chip legenda + toggle 04→04".
+
+Brief di riferimento già presente non committato: `docs/REDESIGN-BRIEF-
+PIANIFICATORE-PDC.md` — stesso intent del pacchetto, vincoli inviolabili
+identici (Exo 2, palette `#0062CC`+`#B88B5C`, sidebar 240px 5 gruppi,
+nomenclatura italiana). Aggiunto al repo nello stesso commit del TN-UPDATE
+come asset di riferimento del lavoro.
+
+### Modifiche (6 MR sequenziali)
+
+**MR 7.10.1 — `frontend/src/components/layout/Sidebar.tsx`** (commit `27901a0`):
+
+- 5 NavGroup totali: 2 implementati (Pianificatore Giro / PdC) + 3 futuri
+  marcati `preview: true` (Manutenzione, Gestione Personale, Personale).
+- Gruppo path-matched è espanso dentro container `bg-primary/[0.04]
+  ring-1 ring-primary/10` con header "RUOLO ATTIVO" + label.
+- Gruppi non-attivi implementati: collassabili a button label cliccabile
+  con counter items + chevron, useState locale.
+- Gruppi preview: opacity 0.55 + chip "presto", non interattivi.
+- SidebarItem supporta counter inline (`item.counter`) e chip
+  (`item.chip`, es. "wip" su Rev. cascading).
+- Footer sidebar: build version mono + `azienda #N`.
+
+**MR 7.10.2 — `frontend/src/routes/pianificatore-pdc/DashboardRoute.tsx`**
+(commit `a17a91d`):
+
+- HERO grid 12-col: LEFT col-span-8 (eyebrow + h1 + onboarding 3-step),
+  RIGHT col-span-4 (rail 4 KPI piccoli).
+- Onboarding data-driven dallo stato KPI: step 1 attivo finché turni=0
+  con CTA inline "Vai →"; step 2 attivo dopo, step 3 quando violazioni>0;
+  stati visualizzati active/done/todo con bordi e check verdi.
+- KPI Turni PdC: bordo amber + micro-CTA inline "genera ora →" se 0.
+- ACTION CARDS preservate (link "Apri vista giri" / "Apri lista turni")
+  per coverage test esistenti.
+- DISTRIBUZIONE empty narrativo con icona astratta + microcopy.
+
+**MR 7.10.3 — `frontend/src/routes/pianificatore-pdc/GiriRoute.tsx`**
+(commit `abe4f35`):
+
+- Tabella con 2 thead rows: riga 1 etichette colonne, riga 2 filtri
+  inline (input cerca turno + select stato funzionanti; placeholder
+  disabled per ID/Materiale/Aggiornato/Var in attesa di facet API).
+- Mini-toolbar sopra: counter "Mostro N giri" + chip "N filtri attivi" +
+  bottone "Reset filtri" + chip "Esporta" disabled.
+- KPI banda mini header: pubblicati / bozza / archiviati / totali.
+- Empty state caldo: distingue "DB vuoto" vs "no risultati con filtri".
+- Nuova colonna "Var." (n_varianti_totale) finalmente esposta.
+
+**MR 7.10.4 — `frontend/src/routes/pianificatore-pdc/TurniRoute.tsx`**
+(commit `5bf6698`):
+
+- Stesso pattern di MR 7.10.3 con 3 filtri operativi (codice via form
+  submit, impianto e stato via onChange diretto).
+- KPI banda con chip extra "con violazioni" amber visibile solo se >0.
+- Badge "Ramo X/Y" inline al codice per turni splittati (preservato).
+
+**MR 7.10.5 — `frontend/src/routes/pianificatore-pdc/RevisioniCascadingRoute.tsx`**
+(commit `1db2a62`):
+
+- Sostituito placeholder banale con coming-soon onesto:
+  - Hero con badge pulse "In sviluppo · Sprint 7.6" + h1 grande con
+    gradient blu→terracotta (background-clip text).
+  - Roadmap orizzontale 4 milestone (Sprint 7.4 done · 7.5 now · 7.6
+    target · 7.8+ esplorativo) con barra progress 35%.
+  - 3 cards descrittive: Cosa fa (GitBranch) · Chi la usa (Users) ·
+    Quando arriva (ShieldCheck).
+  - Footer con endpoint API previsto.
+
+**MR 7.10.6 — `frontend/src/routes/pianificatore-giro/TurnoPdcDettaglioRoute.tsx`**
+(commit `05ec3fe`):
+
+- Toolbar nuova in cima con:
+  - **Mini-mappa fishbone**: ol di link cerchio per giornata, color
+    coded (verde=ok, ambra-medio=soft, ambra-pieno=hard); click →
+    `#giornata-N` scroll alla GiornataPanel.
+  - **Toggle asse 00↔04**: button group funzionale, ricalcola posizioni
+    blocchi con offset modulo 24h. Caveat: cross-mezzanotte usa durata
+    originale (no wrap visivo) — sufficiente per turni umani 24h.
+  - **Legenda chip orizzontali** sempre visibile sotto: mappa tipo_evento
+    → colore pastello (Condotta/Vettura/Refez/ACC/CV/PK·SCOMP/Presa·Fine/FR).
+- Barre Gantt più alte (h-9 → h-12) + shadow-sm.
+- Tick verticali sottili dietro le barre per riferimento orari.
+- Path-aware back-link preservato + tutti i badge violazione live + testid
+  preservati (test 7.3 MR 3 e MR 4 invariati).
+
+### Verifiche
+
+- **Build**: `pnpm typecheck` clean su tutti gli MR.
+- **Test**: 52/53 passed (1 fail preesistente in
+  `ProgrammaDettaglioRoute.test.tsx`, già documentato in entry 124, non
+  correlato a Sprint 7.10).
+- Test specifici per ogni MR verdi:
+  - MR 7.10.2 Dashboard: 5/5
+  - MR 7.10.3 Giri: 4/4
+  - MR 7.10.4 Turni: 5/5
+  - MR 7.10.6 Turno dettaglio + validazioni: 8/8 (2 + 6)
+  - MR 7.10.1 e 7.10.5: nessun test dedicato (sidebar/coming-soon).
+
+### Asset committati
+
+- `docs/REDESIGN-BRIEF-PIANIFICATORE-PDC.md` (734 righe) — brief dettagliato
+  del redesign, riferimento permanente del lavoro Sprint 7.10. Era già
+  presente non committato; aggiunto in questo TN-UPDATE.
+
+### Bonus non integrato
+
+Il pacchetto include `colazione-arturo/project/gantt-giro-handoff/` — un
+sotto-progetto **TSX drop-in completo per il Gantt del 1° ruolo** (Giro
+Materiale): `package.json`, `HANDOFF.md`, `src/components/GanttGiro/`
+(Header, SidePanel, Toolbar, Timeline con Block/DayRow/Gap/NightBand/
+TimelineAxis/VariantRow), `hooks/useTimeScale.ts`, `adapter.ts`,
+`types.ts`, `mocks/turno-1134.ts`, `stories/`. **Non integrato** in questo
+sprint (fuori scope `index-pdc.html`). Resta archiviato nel tarball
+WebFetch — riferimento per Sprint 7.9+ se vorremo riallineare anche il
+Gantt giro materiale al nuovo design system.
+
+### Stato
+
+- ✅ Tutti i 6 MR completati (commit atomici `27901a0`/`a17a91d`/`abe4f35`/
+  `5bf6698`/`1db2a62`/`05ec3fe`).
+- ✅ Build verde, test verdi (52/53 con 1 fail preesistente).
+- 🟡 Smoke utente Railway: dopo il deploy, verificare:
+  1. Sidebar mostra 2 gruppi implementati (admin: anche 3 futuri opaci
+     con chip "presto") + header "RUOLO ATTIVO · Pianificatore PdC"
+     quando si è dentro il 2° ruolo.
+  2. Dashboard PdC: hero con onboarding, KPI rail 4 piccoli, empty
+     narrativo se 0 turni.
+  3. Vista giri / Lista turni: filtri inline nell'header tabella
+     funzionanti (ricerca + stato + impianto), KPI banda mini in cima.
+  4. Rev. cascading: roadmap timeline + 3 cards.
+  5. Gantt turno PdC: fishbone in cima cliccabile, toggle asse 00↔04
+     funzionale, legenda chip sempre visibile, barre più alte.
+
+### Prossimo step
+
+- Smoke utente sui 6 MR e raccolta feedback su micro-tweaks (eventuali
+  MR 7.10.7+ di refinement).
+- Decisione utente: integrare anche `gantt-giro-handoff/` per allineare
+  il Gantt giro materiale del 1° ruolo (richiede MR proprio fuori scope
+  attuale).
+
+---
+
 ## 2026-05-04 (125) — Sprint 7.9 MR γ: layout Gantt senza scroll (1h=40px)
 
 ### Contesto
