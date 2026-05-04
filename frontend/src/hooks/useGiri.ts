@@ -9,13 +9,17 @@ import {
 import {
   generaGiri,
   getGiroDettaglio,
+  getThreadDettaglio,
   listGiriAzienda,
   listGiriProgramma,
+  listThreadsGiro,
   type BuilderResult,
   type GeneraGiriParams,
   type GiroDettaglio,
   type GiroListItem,
   type ListGiriAziendaParams,
+  type MaterialeThreadDettaglio,
+  type MaterialeThreadListItem,
 } from "@/lib/api/giri";
 
 const GIRI_KEY = ["giri"] as const;
@@ -58,6 +62,34 @@ export function useGiroDettaglio(giroId: number | undefined): UseQueryResult<Gir
 interface GeneraGiriArgs {
   programmaId: number;
   params: GeneraGiriParams;
+}
+
+/** Sprint 7.9 MR β2-6: lista thread di un giro per "Convogli del turno". */
+export function useThreadsGiro(
+  giroId: number | undefined,
+): UseQueryResult<MaterialeThreadListItem[]> {
+  return useQuery({
+    queryKey: [...GIRI_KEY, "threads", giroId],
+    queryFn: () => {
+      if (giroId === undefined) throw new Error("giroId mancante");
+      return listThreadsGiro(giroId);
+    },
+    enabled: giroId !== undefined,
+  });
+}
+
+/** Sprint 7.9 MR β2-6: dettaglio thread + timeline eventi per viewer. */
+export function useThreadDettaglio(
+  threadId: number | undefined,
+): UseQueryResult<MaterialeThreadDettaglio> {
+  return useQuery({
+    queryKey: [...GIRI_KEY, "thread", threadId],
+    queryFn: () => {
+      if (threadId === undefined) throw new Error("threadId mancante");
+      return getThreadDettaglio(threadId);
+    },
+    enabled: threadId !== undefined,
+  });
 }
 
 export function useGeneraGiri(): UseMutationResult<BuilderResult, Error, GeneraGiriArgs> {

@@ -136,6 +136,60 @@ export interface GiroDettaglio {
   giornate: GiroGiornata[];
 }
 
+/**
+ * Sprint 7.9 MR β2-4: thread materiale (L2 logico).
+ */
+export interface MaterialeThreadListItem {
+  id: number;
+  tipo_materiale_codice: string;
+  matricola_id: number | null;
+  km_totali: number;
+  minuti_servizio: number;
+  n_corse_commerciali: number;
+}
+
+export interface MaterialeThreadEvento {
+  id: number;
+  ordine: number;
+  tipo: string;
+  giro_blocco_id: number | null;
+  stazione_da_codice: string | null;
+  stazione_a_codice: string | null;
+  ora_inizio: string | null;
+  ora_fine: string | null;
+  data_giorno: string | null;
+  km_tratta: number | null;
+  numero_treno: string | null;
+  note: string | null;
+}
+
+export interface MaterialeThreadDettaglio {
+  id: number;
+  tipo_materiale_codice: string;
+  matricola_id: number | null;
+  giro_materiale_id_origine: number;
+  km_totali: number;
+  minuti_servizio: number;
+  n_corse_commerciali: number;
+  eventi: MaterialeThreadEvento[];
+}
+
+export async function listThreadsGiro(
+  giroId: number,
+): Promise<MaterialeThreadListItem[]> {
+  return apiJson<MaterialeThreadListItem[]>(
+    `/api/giri/${giroId}/threads`,
+  );
+}
+
+export async function getThreadDettaglio(
+  threadId: number,
+): Promise<MaterialeThreadDettaglio> {
+  return apiJson<MaterialeThreadDettaglio>(
+    `/api/giri/threads/${threadId}`,
+  );
+}
+
 export async function generaGiri(
   programmaId: number,
   params: GeneraGiriParams,

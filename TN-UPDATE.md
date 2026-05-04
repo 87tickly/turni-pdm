@@ -10,6 +10,61 @@
 
 ---
 
+## 2026-05-04 (136) — Sprint 7.9 MR β2-6: UI Thread Viewer + pannello "Convogli del turno"
+
+### Modifiche frontend
+
+`frontend/src/lib/api/giri.ts`:
+
+- Tipi `MaterialeThreadListItem`, `MaterialeThreadEvento`,
+  `MaterialeThreadDettaglio`.
+- `listThreadsGiro(giroId)` + `getThreadDettaglio(threadId)` clients.
+
+`frontend/src/hooks/useGiri.ts`:
+
+- `useThreadsGiro(giroId)` + `useThreadDettaglio(threadId)` hook.
+
+`frontend/src/routes/pianificatore-giro/MaterialeThreadRoute.tsx`
+(nuovo, ~200 righe):
+
+- Pagina dedicata `/pianificatore-giro/thread/:threadId`.
+- Hero: tipo materiale + matricola + 3 KPI (km totali, minuti
+  servizio, # corse commerciali).
+- Timeline tabellare degli eventi con badge colorati per tipo
+  (corsa singolo/doppia/tripla, vuoto, aggancio, sgancio, uscita/
+  rientro deposito).
+
+`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`:
+
+- Nuovo pannello `ConvogliDelTurnoSection` aggiunto sotto
+  `DateApplicazioneSection`. Mostra tabella con N pezzi proiettati,
+  km/min/corse aggregati per pezzo, link "Apri →" alla pagina
+  thread viewer.
+
+`frontend/src/routes/AppRoutes.tsx`:
+
+- Route nuova `pianificatore-giro/thread/:threadId` →
+  `MaterialeThreadRoute`.
+
+### Verifiche
+
+- Frontend `tsc -b --noEmit` ✅.
+- Frontend `vitest` 52/53 (flaky preesistente).
+
+### Stato
+
+- ✅ MR β2-6 completato.
+- 🟡 Smoke utente Railway: aprire un giro materiale, scrollare sotto
+  "Date di applicazione" → vedere card "Convogli del turno (thread
+  L2)" con N righe (N = somma pezzi composizione max). Cliccare
+  "Apri →" → pagina dedicata col timeline eventi del thread.
+
+### Prossimo step
+
+β2-7: regole pre-builder agganci/sganci.
+
+---
+
 ## 2026-05-04 (135) — Sprint 7.9 MR β2-5: capacity check temporale (per giorno) sui thread
 
 ### Contesto

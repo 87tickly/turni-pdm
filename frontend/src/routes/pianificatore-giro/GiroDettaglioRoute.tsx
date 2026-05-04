@@ -5,7 +5,7 @@ import { AlertCircle, ArrowLeft, FileDown, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
-import { useGiroDettaglio } from "@/hooks/useGiri";
+import { useGiroDettaglio, useThreadsGiro } from "@/hooks/useGiri";
 import { useTurniPdcGiro } from "@/hooks/useTurniPdc";
 import { ApiError } from "@/lib/api/client";
 import type {
@@ -189,12 +189,104 @@ export function GiroDettaglioRoute() {
 
       <DateApplicazioneSection giro={giro} />
 
+      <ConvogliDelTurnoSection giroId={giro.id} />
+
       <GeneraTurnoPdcDialog
         giroId={giro.id}
         open={pdcDialogOpen}
         onOpenChange={setPdcDialogOpen}
       />
     </div>
+  );
+}
+
+// =====================================================================
+// Sprint 7.9 MR β2-6 — Pannello "Convogli del turno" (thread L2)
+// =====================================================================
+
+function ConvogliDelTurnoSection({ giroId }: { giroId: number }) {
+  const query = useThreadsGiro(giroId);
+  if (query.isLoading) {
+    return (
+      <Card className="grid place-items-center p-8">
+        <Spinner label="Caricamento convogli…" />
+      </Card>
+    );
+  }
+  if (query.isError) return null;
+  const threads = query.data ?? [];
+  return (
+    <Card className="overflow-hidden">
+      <div className="border-b border-border bg-muted/40 px-4 py-2.5 text-xs">
+        <span className="font-medium uppercase tracking-wide text-foreground">
+          Convogli del turno (thread L2)
+        </span>
+        <span className="ml-3 text-muted-foreground">
+          {threads.length} pezz{threads.length === 1 ? "o" : "i"} fisic
+          {threads.length === 1 ? "o" : "i"} proiettat{threads.length === 1 ? "o" : "i"}
+        </span>
+      </div>
+      {threads.length === 0 ? (
+        <div className="p-6 text-center text-sm text-muted-foreground">
+          Nessun thread proiettato. Probabile composizione vuota o giro creato
+          prima di MR β2-4 — rigenera per popolare.
+        </div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="border-b border-border bg-muted/20">
+            <tr>
+              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Materiale
+              </th>
+              <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Matricola
+              </th>
+              <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                km totali
+              </th>
+              <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                min servizio
+              </th>
+              <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                # corse
+              </th>
+              <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Timeline
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {threads.map((t) => (
+              <tr key={t.id} className="border-b border-border/40 hover:bg-muted/20">
+                <td className="px-3 py-2 font-mono text-foreground">
+                  {t.tipo_materiale_codice}
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {t.matricola_id !== null ? `#${t.matricola_id}` : "non assegnata"}
+                </td>
+                <td className="px-3 py-2 text-right font-mono tabular-nums">
+                  {Math.round(t.km_totali).toLocaleString("it-IT")}
+                </td>
+                <td className="px-3 py-2 text-right font-mono tabular-nums">
+                  {t.minuti_servizio.toLocaleString("it-IT")}
+                </td>
+                <td className="px-3 py-2 text-right font-mono tabular-nums">
+                  {t.n_corse_commerciali}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <Link
+                    to={`/pianificatore-giro/thread/${t.id}`}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Apri →
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
   );
 }
 
