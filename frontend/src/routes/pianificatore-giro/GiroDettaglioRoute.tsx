@@ -873,9 +873,15 @@ function BloccoSegment({
           </span>
         )}
         <div className="seg-vuoto h-1" />
-        {numeroVirtuale !== null && widthPx >= 30 && (
+        {numeroVirtuale !== null && (
+          // Sprint 7.9 MR β2-2 fix: il numero virtuale 9XXXXX è
+          // l'identificatore primario del vuoto, deve essere SEMPRE
+          // visibile. Posizionato come label assoluta sotto la linea,
+          // ancorata al blocco con allineamento centrato; può
+          // estendersi oltre la larghezza del blocco senza problemi
+          // (è solo testo, non interattivo).
           <div
-            className="mt-0.5 text-center font-mono text-[9px] tabular-nums text-rose-700"
+            className="absolute left-1/2 top-3 -translate-x-1/2 whitespace-nowrap font-mono text-[9px] font-semibold tabular-nums text-rose-700"
             title={`Numero treno virtuale: ${numeroVirtuale} (= "9" + treno commerciale di confine)`}
           >
             {numeroVirtuale}

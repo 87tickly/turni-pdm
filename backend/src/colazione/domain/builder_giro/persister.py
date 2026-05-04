@@ -750,7 +750,9 @@ async def _persisti_un_giro(
                 session,
                 seq_blocco_inizio=seq_blocco_inizio,
                 marca_uscita_ciclo=marca_uscita_ciclo,
-                sede_codice=loc.codice,
+                # Sprint 7.9 fix: usa codice_breve ("FIO") non codice
+                # ("IMPMAN_MILANO_FIORENZA") che sfora dall'etichetta UI.
+                sede_codice=loc.codice_breve,
             )
             last_gv_id = gv.id
 
@@ -808,7 +810,8 @@ async def _persisti_un_giro(
                         stazione_da=ultima_dest,
                         stazione_a=loc.stazione_collegata_codice,
                         ora_inizio=corse_ultima[-1].ora_arrivo,
-                        sede_codice=loc.codice,
+                        # Sprint 7.9 fix: codice_breve per UI compatta.
+                        sede_codice=loc.codice_breve,
                         numero_treno_associato=ultimo_treno_giro,
                     )
 
