@@ -1,9 +1,16 @@
 import { useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
-import { AlertCircle, AlertTriangle, ArrowLeft, Bed, Moon } from "lucide-react";
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowLeft,
+  Bed,
+  Moon,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { useTurnoPdcDettaglio } from "@/hooks/useTurniPdc";
 import { ApiError } from "@/lib/api/client";
@@ -15,24 +22,34 @@ import type {
 import { cn } from "@/lib/utils";
 
 /**
- * Sprint 7.10 MR 7.10.6 — Visualizzatore Gantt turno PdC.
+ * Sprint 7.10 MR 7.10.7 — Visualizzatore Gantt turno PdC, ricalcato
+ * sulla grammatica del Gantt giro materiale (1° ruolo) con palette
+ * dedicata al dominio PdC.
  *
- * Variante v1 dal pacchetto Anthropic Design Handoff
- * (`arturo/10-gantt-turno-pdc.html`): "asse 00→23 con barre alte +
- * palette pastello dominante (CONDOTTA blu, REFEZ verde, …) + mini-mappa
- * fishbone violazioni in cima + chip orizzontali legenda sotto header".
+ * Pattern condiviso col Gantt giro:
+ * - Card con toolbar in cima (info asse + giornate count)
+ * - Scroll wrapper con sticky AxisHeader (24 tick orari + corner sx/dx)
+ * - Per ogni giornata: header row con numero/badge + single-line
+ *   `ticks-bg` con blocchi posizionati assolutamente
+ * - Sticky-left "Giornata N" + sticky-right "Prest/Cond"
+ * - Legenda in fondo, sempre visibile
+ * - 1h = 40px, TIMELINE_WIDTH_PX = 960 (densità coerente)
  *
- * Aggiunte rispetto al MR 7.3:
- * - **Mini-mappa fishbone**: un bollino per giornata, colorato se ci sono
- *   violazioni hard/soft; click → scroll alla giornata.
- * - **Toggle asse 00↔04**: switch tra "giornata umana" (00→23) e "ciclo
- *   commerciale ferroviario" (04→04 next day). Ricalcola posizioni
- *   blocchi con offset modulo 24.
- * - **Legenda chip orizzontali compatti** sotto header, sempre visibile,
- *   con la mappa tipo_evento → colore.
- * - **Barre più alte** (h-12 vs h-9) per leggibilità segmenti corti.
- * - Path-aware back-link preservato (test 7.3 MR 3).
- * - Tutti i badge violazione live + testid (test 7.3 MR 4) preservati.
+ * Distinzioni deliberate (brief §5.5):
+ * - **Asse default 00→23** (giornata umana del PdC), non 04→04 che è il
+ *   ciclo commerciale del materiale rotabile. Toggle 00↔04 disponibile
+ *   in toolbar per allineare visivamente al Gantt giro quando serve.
+ * - **Palette pastello dedicata per tipo evento PdC**: CONDOTTA blu
+ *   primary, VETTURA sky, REFEZ emerald, ACC amber, CV orange, PK/SCOMP
+ *   secondary, PRESA/FINE slate, DORMITA viola. Niente classi `.seg-*`
+ *   del Gantt giro (rosso commerciale), niente `.night-band`.
+ *
+ * Aggiunte rispetto al MR 7.10.6:
+ * - Mini-mappa fishbone giornate (click → scroll #giornata-N)
+ * - Toggle asse 00↔04 funzionale
+ * - Legenda chip orizzontali sempre visibile
+ * - Path-aware back-link preservato
+ * - Tutti i badge violazione live + testid preservati
  */
 export function TurnoPdcDettaglioRoute() {
   const { turnoId: turnoIdParam } = useParams<{ turnoId: string }>();
@@ -49,9 +66,9 @@ export function TurnoPdcDettaglioRoute() {
 
   if (query.isLoading) {
     return (
-      <div className="flex items-center justify-center rounded-md border border-border bg-white py-16">
+      <Card className="grid place-items-center p-16">
         <Spinner label="Caricamento turno PdC…" />
-      </div>
+      </Card>
     );
   }
 
@@ -89,30 +106,35 @@ export function TurnoPdcDettaglioRoute() {
       <Header turno={turno} />
       <Stats turno={turno} />
 
-      {/* Mini-mappa fishbone giornate + toggle asse + legenda chip */}
-      <Toolbar
+      {(validazioniCiclo.length > 0 || frGiornate.length > 0) && (
+        <Avvisi validazioniCiclo={validazioniCiclo} frGiornate={frGiornate} />
+      )}
+
+      <GanttPdc
         turno={turno}
         oraOffset={oraOffset}
         onToggleOffset={() => setOraOffset((v) => (v === 0 ? 4 : 0))}
       />
 
-      {(validazioniCiclo.length > 0 || frGiornate.length > 0) && (
-        <Avvisi validazioniCiclo={validazioniCiclo} frGiornate={frGiornate} />
-      )}
-
+      {/* Sequenza blocchi per giornata sotto al Gantt: dato di dettaglio
+          che il pianificatore consulta dopo aver letto il Gantt sopra. */}
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold tracking-tight">
-          Giornate ({turno.giornate.length})
+          Sequenze blocchi per giornata
         </h2>
         <div className="flex flex-col gap-3">
           {turno.giornate.map((g) => (
-            <GiornataPanel key={g.id} giornata={g} oraOffset={oraOffset} />
+            <BlocchiPanel key={g.id} giornata={g} />
           ))}
         </div>
       </section>
     </div>
   );
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// Header turno + Stats aggregate
+// ────────────────────────────────────────────────────────────────────────
 
 function Header({ turno }: { turno: TurnoPdcDettaglio }) {
   const meta = turno.generation_metadata_json;
@@ -174,135 +196,6 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-interface ToolbarProps {
-  turno: TurnoPdcDettaglio;
-  oraOffset: 0 | 4;
-  onToggleOffset: () => void;
-}
-
-function Toolbar({ turno, oraOffset, onToggleOffset }: ToolbarProps) {
-  return (
-    <div className="flex flex-col gap-3 rounded-md border border-border bg-white p-3">
-      {/* Riga 1: fishbone violazioni + toggle asse */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Fishbone giornate={turno.giornate} />
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-muted-foreground">Asse Gantt</span>
-          <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5">
-            <button
-              type="button"
-              onClick={() => oraOffset !== 0 && onToggleOffset()}
-              className={cn(
-                "rounded px-2.5 py-1 font-mono text-[11px] font-semibold transition-colors",
-                oraOffset === 0
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-              aria-pressed={oraOffset === 0}
-            >
-              00→23
-            </button>
-            <button
-              type="button"
-              onClick={() => oraOffset !== 4 && onToggleOffset()}
-              className={cn(
-                "rounded px-2.5 py-1 font-mono text-[11px] font-semibold transition-colors",
-                oraOffset === 4
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-              aria-pressed={oraOffset === 4}
-            >
-              04→04
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Riga 2: legenda chip compatti */}
-      <Legenda />
-    </div>
-  );
-}
-
-function Fishbone({ giornate }: { giornate: TurnoPdcGiornata[] }) {
-  if (giornate.length === 0) {
-    return (
-      <span className="text-xs text-muted-foreground">Nessuna giornata</span>
-    );
-  }
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Giornate
-      </span>
-      <ol className="flex items-center gap-1.5">
-        {giornate.map((g) => {
-          const hard = g.prestazione_violata || g.condotta_violata;
-          const soft = g.refezione_mancante;
-          const tone = hard ? "hard" : soft ? "soft" : "ok";
-          const dotClass = {
-            hard: "bg-amber-500 ring-2 ring-amber-200 text-amber-50",
-            soft: "bg-amber-200 ring-2 ring-amber-100 text-amber-900",
-            ok: "bg-emerald-500 ring-2 ring-emerald-100 text-white",
-          }[tone];
-          const tooltip = hard
-            ? `Giornata ${g.numero_giornata}: violazione hard (prest./cond. fuori cap)`
-            : soft
-              ? `Giornata ${g.numero_giornata}: violazione soft (refezione mancante)`
-              : `Giornata ${g.numero_giornata}: nessuna violazione`;
-          return (
-            <li key={g.id}>
-              <a
-                href={`#giornata-${g.numero_giornata}`}
-                className={cn(
-                  "grid h-5 w-5 place-items-center rounded-full font-mono text-[9px] font-bold transition-transform hover:scale-110",
-                  dotClass,
-                )}
-                title={tooltip}
-                aria-label={tooltip}
-              >
-                {g.numero_giornata}
-              </a>
-            </li>
-          );
-        })}
-      </ol>
-    </div>
-  );
-}
-
-function Legenda() {
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-2.5">
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Legenda
-      </span>
-      <LegendaChip label="Condotta" colorClass="bg-primary text-primary-foreground" />
-      <LegendaChip label="Vettura" colorClass="bg-sky-200 text-sky-900" />
-      <LegendaChip label="Refez" colorClass="bg-emerald-200 text-emerald-900" />
-      <LegendaChip label="ACC" colorClass="bg-amber-200 text-amber-900" />
-      <LegendaChip label="CV" colorClass="bg-orange-200 text-orange-900" />
-      <LegendaChip label="PK / S.COMP" colorClass="bg-secondary text-secondary-foreground" />
-      <LegendaChip label="Presa / Fine" colorClass="bg-slate-300 text-slate-800" />
-      <LegendaChip label="FR" colorClass="bg-violet-300 text-violet-900" />
-    </div>
-  );
-}
-
-function LegendaChip({ label, colorClass }: { label: string; colorClass: string }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-        colorClass,
-      )}
-    >
-      {label}
-    </span>
-  );
-}
-
 function Avvisi({
   validazioniCiclo,
   frGiornate,
@@ -353,210 +246,396 @@ function Avvisi({
   );
 }
 
-interface GiornataPanelProps {
-  giornata: TurnoPdcGiornata;
+// ────────────────────────────────────────────────────────────────────────
+// Gantt PdC — single-line per giornata, asse 00→23 (toggle 04→04)
+// Pattern condiviso col Gantt giro materiale, palette PdC dedicata.
+// ────────────────────────────────────────────────────────────────────────
+
+const TIMELINE_WIDTH_PX = 960; // 1h = 40px (coerente col Gantt giro)
+const GIORNATA_LABEL_COL_PX = 110;
+const STATS_COL_PX = 140;
+const TIMELINE_ROW_HEIGHT_PX = 56;
+const HEADER_AXIS_HEIGHT_PX = 36;
+const AXIS_TOTAL_MIN = 24 * 60;
+
+interface GanttPdcProps {
+  turno: TurnoPdcDettaglio;
   oraOffset: 0 | 4;
+  onToggleOffset: () => void;
 }
 
-function GiornataPanel({ giornata, oraOffset }: GiornataPanelProps) {
+function GanttPdc({ turno, oraOffset, onToggleOffset }: GanttPdcProps) {
+  const innerWidth = GIORNATA_LABEL_COL_PX + TIMELINE_WIDTH_PX + STATS_COL_PX;
+
   return (
-    <div
-      id={`giornata-${giornata.numero_giornata}`}
-      className="overflow-hidden rounded-md border border-border bg-white scroll-mt-4"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-secondary/40 px-4 py-2">
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="font-semibold">Giornata {giornata.numero_giornata}</span>
-          <Badge variant="outline" className="text-[10px]">
-            {giornata.variante_calendario}
-          </Badge>
-          {giornata.is_notturno && (
-            <Badge variant="secondary" className="gap-1 text-[10px]">
-              <Moon className="h-3 w-3" aria-hidden /> notturno
-            </Badge>
-          )}
-          {giornata.prestazione_violata && (
-            <Badge
-              variant="warning"
-              className="gap-1 text-[10px]"
-              data-testid={`badge-prestazione-violata-g${giornata.numero_giornata}`}
-            >
-              <AlertTriangle className="h-3 w-3" aria-hidden /> prest. fuori cap
-            </Badge>
-          )}
-          {giornata.condotta_violata && (
-            <Badge
-              variant="warning"
-              className="gap-1 text-[10px]"
-              data-testid={`badge-condotta-violata-g${giornata.numero_giornata}`}
-            >
-              <AlertTriangle className="h-3 w-3" aria-hidden /> cond. fuori cap
-            </Badge>
-          )}
-          {giornata.refezione_mancante && (
-            <Badge
-              variant="outline"
-              className="gap-1 text-[10px] border-amber-400 text-amber-800"
-              data-testid={`badge-refezione-mancante-g${giornata.numero_giornata}`}
-            >
-              <AlertTriangle className="h-3 w-3" aria-hidden /> refez. mancante
-            </Badge>
-          )}
+    <Card className="overflow-hidden">
+      {/* Toolbar: titolo + fishbone + asse info + toggle */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-2.5 text-xs">
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <span className="font-medium uppercase tracking-wide text-foreground">
+            Gantt turno PdC
+          </span>
+          <span className="text-border">·</span>
+          <span>
+            {turno.giornate.length} giornat
+            {turno.giornate.length === 1 ? "a" : "e"}
+          </span>
+          <span className="text-border">·</span>
+          <Fishbone giornate={turno.giornate} />
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          <span className="tabular-nums">
-            {giornata.inizio_prestazione ?? "?"} → {giornata.fine_prestazione ?? "?"}
-          </span>
+        <div className="flex items-center gap-3 text-muted-foreground/80">
           <span>
-            <span className="font-medium text-foreground">
-              {formatHM(giornata.prestazione_min)}
-            </span>{" "}
-            prestazione
+            Asse {oraOffset === 0 ? "00:00 → 23:59 (giornata umana)" : "04:00 → 04:00 (ciclo)"} ·
+            1h = 40px
           </span>
-          <span>
-            <span className="font-medium text-foreground">{formatHM(giornata.condotta_min)}</span>{" "}
-            condotta
-          </span>
-          {giornata.refezione_min > 0 && (
-            <span>
-              <span className="font-medium text-foreground">
-                {formatHM(giornata.refezione_min)}
-              </span>{" "}
-              refez
-            </span>
-          )}
+          <div className="inline-flex rounded-md border border-border bg-white p-0.5">
+            <button
+              type="button"
+              onClick={() => oraOffset !== 0 && onToggleOffset()}
+              className={cn(
+                "rounded px-2 py-0.5 font-mono text-[10px] font-semibold transition-colors",
+                oraOffset === 0
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              aria-pressed={oraOffset === 0}
+            >
+              00→23
+            </button>
+            <button
+              type="button"
+              onClick={() => oraOffset !== 4 && onToggleOffset()}
+              className={cn(
+                "rounded px-2 py-0.5 font-mono text-[10px] font-semibold transition-colors",
+                oraOffset === 4
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              aria-pressed={oraOffset === 4}
+            >
+              04→04
+            </button>
+          </div>
         </div>
       </div>
-      <div className="flex flex-col gap-3 p-3">
-        <GanttRow blocchi={giornata.blocchi} oraOffset={oraOffset} />
-        <BlocchiList blocchi={giornata.blocchi} />
+
+      {/* Scroll wrapper */}
+      <div className="relative overflow-auto" style={{ maxHeight: "640px" }}>
+        <div className="relative" style={{ width: `${innerWidth}px` }}>
+          <AxisHeader oraOffset={oraOffset} />
+
+          {turno.giornate.map((g) => (
+            <GiornataRow key={g.id} giornata={g} oraOffset={oraOffset} />
+          ))}
+        </div>
       </div>
-    </div>
+
+      {/* Legenda sempre visibile */}
+      <Legenda />
+    </Card>
   );
 }
 
-const MINUTI_GIORNO = 24 * 60;
-
-function GanttRow({
-  blocchi,
-  oraOffset,
-}: {
-  blocchi: TurnoPdcBlocco[];
-  oraOffset: 0 | 4;
-}) {
-  const ore = useMemo(
-    () =>
-      Array.from({ length: 24 }, (_, i) => (i + oraOffset) % 24),
+function AxisHeader({ oraOffset }: { oraOffset: 0 | 4 }) {
+  const hourTicks = useMemo(
+    () => Array.from({ length: 24 }, (_, i) => (i + oraOffset) % 24),
     [oraOffset],
   );
-  const offsetMin = oraOffset * 60;
   return (
-    <div className="overflow-x-auto">
-      <div className="relative min-w-[768px]">
-        {/* Header ore */}
-        <div className="grid grid-cols-24 border-b border-border text-[10px] text-muted-foreground">
-          {ore.map((h, i) => (
+    <div
+      className="sticky top-0 z-30 flex border-b border-border bg-white"
+      style={{ height: HEADER_AXIS_HEIGHT_PX }}
+    >
+      {/* Corner sx (sopra label giornata) */}
+      <div
+        className="sticky left-0 z-40 flex items-end border-r border-border bg-white px-3 pb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground"
+        style={{ width: GIORNATA_LABEL_COL_PX }}
+      >
+        Giornata
+      </div>
+      {/* 24 tick orari */}
+      <div className="relative" style={{ width: TIMELINE_WIDTH_PX }}>
+        <div className="absolute inset-0 flex">
+          {hourTicks.map((h, i) => (
             <div
-              key={i}
-              className="border-l border-border/60 px-1 py-0.5 first:border-l-0"
+              key={`${h}-${i}`}
+              className="relative border-l border-border/40 first:border-l-0"
+              style={{ width: 40 }}
             >
-              {h.toString().padStart(2, "0")}
+              <span
+                className={cn(
+                  "absolute left-1 top-1 font-mono text-[10px] tabular-nums",
+                  i % 2 === 0 ? "text-foreground" : "text-muted-foreground/70",
+                )}
+              >
+                {String(h).padStart(2, "0")}
+              </span>
             </div>
           ))}
         </div>
-        {/* Tick verticali sottili dietro alle barre */}
-        <div className="relative h-12 border-b border-border bg-secondary/20">
-          <div className="pointer-events-none absolute inset-0 grid grid-cols-24">
-            {ore.map((_, i) => (
-              <div
-                key={i}
-                className="border-l border-border/40 first:border-l-0"
-                aria-hidden
-              />
-            ))}
-          </div>
-          {blocchi.map((b) => (
-            <GanttBlocco key={b.id} blocco={b} offsetMin={offsetMin} />
-          ))}
+      </div>
+      {/* Corner dx (sopra Per/Cond) */}
+      <div
+        className="sticky right-0 z-40 flex border-l border-border bg-white"
+        style={{ width: STATS_COL_PX }}
+      >
+        <div className="flex w-1/2 items-end justify-center border-r border-border pb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+          Prest.
+        </div>
+        <div className="flex w-1/2 items-end justify-center pb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+          Cond.
         </div>
       </div>
     </div>
   );
 }
 
-function timeToMin(t: string | null): number | null {
-  if (t === null || t.length === 0) return null;
-  const parts = t.split(":");
-  if (parts.length < 2) return null;
-  const h = Number.parseInt(parts[0], 10);
-  const m = Number.parseInt(parts[1], 10);
-  if (Number.isNaN(h) || Number.isNaN(m)) return null;
-  return h * 60 + m;
+function GiornataRow({
+  giornata,
+  oraOffset,
+}: {
+  giornata: TurnoPdcGiornata;
+  oraOffset: 0 | 4;
+}) {
+  const inizio = giornata.inizio_prestazione ?? "?";
+  const fine = giornata.fine_prestazione ?? "?";
+  const hasViolazioneHard =
+    giornata.prestazione_violata || giornata.condotta_violata;
+
+  return (
+    <div
+      id={`giornata-${giornata.numero_giornata}`}
+      className="relative flex border-b border-border scroll-mt-4"
+    >
+      {/* Sticky-left: numero + badge violazioni + variante calendario */}
+      <div
+        className={cn(
+          "sticky left-0 z-20 flex flex-col justify-center gap-1 border-r border-border px-3 py-2",
+          hasViolazioneHard ? "bg-amber-50/60" : "bg-white",
+        )}
+        style={{ width: GIORNATA_LABEL_COL_PX }}
+      >
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-bold text-foreground">
+            G{giornata.numero_giornata}
+          </span>
+          {giornata.is_notturno && (
+            <Moon className="h-3 w-3 text-violet-600" aria-hidden />
+          )}
+        </div>
+        <Badge variant="outline" className="w-fit text-[9px]">
+          {giornata.variante_calendario}
+        </Badge>
+        <div className="font-mono text-[10px] tabular-nums text-muted-foreground">
+          {inizio} → {fine}
+        </div>
+        {(giornata.prestazione_violata || giornata.condotta_violata || giornata.refezione_mancante) && (
+          <div className="flex flex-wrap gap-0.5">
+            {giornata.prestazione_violata && (
+              <Badge
+                variant="warning"
+                className="gap-0.5 text-[8px]"
+                data-testid={`badge-prestazione-violata-g${giornata.numero_giornata}`}
+              >
+                <AlertTriangle className="h-2.5 w-2.5" aria-hidden /> prest. fuori cap
+              </Badge>
+            )}
+            {giornata.condotta_violata && (
+              <Badge
+                variant="warning"
+                className="gap-0.5 text-[8px]"
+                data-testid={`badge-condotta-violata-g${giornata.numero_giornata}`}
+              >
+                <AlertTriangle className="h-2.5 w-2.5" aria-hidden /> cond. fuori cap
+              </Badge>
+            )}
+            {giornata.refezione_mancante && (
+              <Badge
+                variant="outline"
+                className="gap-0.5 border-amber-400 text-[8px] text-amber-800"
+                data-testid={`badge-refezione-mancante-g${giornata.numero_giornata}`}
+              >
+                <AlertTriangle className="h-2.5 w-2.5" aria-hidden /> refez. mancante
+              </Badge>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Timeline single-line con ticks-bg */}
+      <div
+        className="ticks-bg relative"
+        style={{ width: TIMELINE_WIDTH_PX, height: TIMELINE_ROW_HEIGHT_PX }}
+      >
+        {/* Linea base centrata sottile per agganciare visivamente i blocchi */}
+        <div
+          className="pointer-events-none absolute left-0 right-0 h-px bg-border"
+          style={{ top: TIMELINE_ROW_HEIGHT_PX / 2 }}
+        />
+
+        {giornata.blocchi.map((b) => (
+          <BloccoSegment key={b.id} blocco={b} oraOffset={oraOffset} />
+        ))}
+      </div>
+
+      {/* Sticky-right: prestazione + condotta in due celle */}
+      <div
+        className="sticky right-0 z-20 flex border-l border-border bg-white"
+        style={{ width: STATS_COL_PX }}
+      >
+        <div
+          className={cn(
+            "flex w-1/2 flex-col items-center justify-center border-r border-border font-mono text-xs tabular-nums",
+            giornata.prestazione_violata ? "text-amber-700" : "text-foreground",
+          )}
+        >
+          {formatHM(giornata.prestazione_min)}
+        </div>
+        <div
+          className={cn(
+            "flex w-1/2 flex-col items-center justify-center font-mono text-xs tabular-nums",
+            giornata.condotta_violata ? "text-amber-700" : "text-foreground",
+          )}
+        >
+          {formatHM(giornata.condotta_min)}
+        </div>
+      </div>
+    </div>
+  );
 }
 
-function colorForTipoEvento(tipo: string): string {
-  switch (tipo) {
-    case "CONDOTTA":
-      return "bg-primary text-primary-foreground";
-    case "VETTURA":
-      return "bg-sky-200 text-sky-900";
-    case "REFEZ":
-      return "bg-emerald-200 text-emerald-900";
-    case "ACCp":
-    case "ACCa":
-      return "bg-amber-200 text-amber-900";
-    case "PK":
-    case "SCOMP":
-      return "bg-secondary text-secondary-foreground";
-    case "PRESA":
-    case "FINE":
-      return "bg-slate-300 text-slate-800";
-    case "CVp":
-    case "CVa":
-      return "bg-orange-200 text-orange-900";
-    case "DORMITA":
-      return "bg-violet-300 text-violet-900";
-    default:
-      return "bg-muted text-muted-foreground";
+// ────────────────────────────────────────────────────────────────────────
+// Fishbone navigazione
+// ────────────────────────────────────────────────────────────────────────
+
+function Fishbone({ giornate }: { giornate: TurnoPdcGiornata[] }) {
+  if (giornate.length === 0) {
+    return <span className="text-muted-foreground/60">no giornate</span>;
   }
+  return (
+    <ol className="flex items-center gap-1">
+      {giornate.map((g) => {
+        const hard = g.prestazione_violata || g.condotta_violata;
+        const soft = g.refezione_mancante;
+        const tone = hard ? "hard" : soft ? "soft" : "ok";
+        const dotClass = {
+          hard: "bg-amber-500 ring-1 ring-amber-200 text-white",
+          soft: "bg-amber-200 ring-1 ring-amber-100 text-amber-900",
+          ok: "bg-emerald-500 ring-1 ring-emerald-100 text-white",
+        }[tone];
+        const tooltip = hard
+          ? `G${g.numero_giornata}: violazione hard`
+          : soft
+            ? `G${g.numero_giornata}: violazione soft`
+            : `G${g.numero_giornata}: ok`;
+        return (
+          <li key={g.id}>
+            <a
+              href={`#giornata-${g.numero_giornata}`}
+              className={cn(
+                "grid h-4 w-4 place-items-center rounded-full font-mono text-[8px] font-bold transition-transform hover:scale-110",
+                dotClass,
+              )}
+              title={tooltip}
+              aria-label={tooltip}
+            >
+              {g.numero_giornata}
+            </a>
+          </li>
+        );
+      })}
+    </ol>
+  );
 }
 
-function GanttBlocco({
+// ────────────────────────────────────────────────────────────────────────
+// Blocchi sulla timeline
+// ────────────────────────────────────────────────────────────────────────
+
+function BloccoSegment({
   blocco,
-  offsetMin,
+  oraOffset,
 }: {
   blocco: TurnoPdcBlocco;
-  offsetMin: number;
+  oraOffset: 0 | 4;
 }) {
-  const inizio = timeToMin(blocco.ora_inizio);
-  const fine = timeToMin(blocco.ora_fine);
+  const inizio = parseTimeToMin(blocco.ora_inizio);
+  const fine = parseTimeToMin(blocco.ora_fine);
   if (inizio === null || fine === null) return null;
-  // Applica offset asse: shift modulo 24h. Cross-mezzanotte (fine < inizio
-  // dopo offset) NON è ancora gestito visivamente — la barra resta nelle
-  // 24h della giornata. Caveat documentato in TN-UPDATE.
-  const inizioShift = (inizio - offsetMin + MINUTI_GIORNO) % MINUTI_GIORNO;
-  const fineShift = (fine - offsetMin + MINUTI_GIORNO) % MINUTI_GIORNO;
-  const left = (inizioShift / MINUTI_GIORNO) * 100;
-  // Se fineShift < inizioShift (la barra "wrappa") usa la durata originale.
-  const effectiveDuration = fineShift >= inizioShift ? fineShift - inizioShift : fine - inizio;
-  const width = Math.max(0.5, (effectiveDuration / MINUTI_GIORNO) * 100);
-  const da = stazioneLabel(blocco.stazione_da_nome, blocco.stazione_da_codice);
-  const a = stazioneLabel(blocco.stazione_a_nome, blocco.stazione_a_codice);
-  const treno = blocco.numero_treno !== null ? `\nTreno ${blocco.numero_treno}` : "";
-  const note = blocco.accessori_note !== null ? `\n${blocco.accessori_note}` : "";
-  const tooltip = `${blocco.tipo_evento} · ${blocco.ora_inizio ?? "?"}→${blocco.ora_fine ?? "?"}\n${da} → ${a}${treno}${note}`;
+
+  const offsetMin = oraOffset * 60;
+  const startPx = minToPx(inizio, offsetMin);
+  let endPx = minToPx(fine, offsetMin);
+  if (endPx <= startPx) {
+    // Cross-mezzanotte (es. DORMITA 22:00→06:00): estende oltre il bordo
+    // destro mantenendo la durata reale, coerente col Gantt giro materiale.
+    endPx = minToPx(fine + AXIS_TOTAL_MIN, offsetMin);
+  }
+  const widthPx = Math.max(6, endPx - startPx);
+
+  const tipo = blocco.tipo_evento;
+  const colorClass = colorForTipoEvento(tipo);
+  const isShort = widthPx < 30;
+  const tooltip = bloccoTooltip(blocco);
+  const label = bloccoLabel(blocco);
+
+  // Vuoti (PRESA/FINE/PK/SCOMP/CV) e blocchi corti: barra più sottile,
+  // niente label inline (overflow troncato), tutto in tooltip.
+  const isThin = tipo === "PRESA" || tipo === "FINE" || tipo === "PK" || tipo === "SCOMP";
+
   return (
     <div
       className={cn(
-        "absolute top-1 flex h-10 items-center overflow-hidden rounded px-1.5 text-[10px] font-medium shadow-sm",
-        colorForTipoEvento(blocco.tipo_evento),
+        "absolute flex items-center justify-start overflow-hidden rounded shadow-sm",
+        colorClass,
       )}
-      style={{ left: `${left}%`, width: `${width}%` }}
+      style={{
+        left: `${startPx}px`,
+        width: `${widthPx}px`,
+        top: isThin ? TIMELINE_ROW_HEIGHT_PX / 2 - 6 : 8,
+        height: isThin ? 12 : TIMELINE_ROW_HEIGHT_PX - 16,
+      }}
       title={tooltip}
     >
-      <span className="truncate">{bloccoLabel(blocco)}</span>
+      {!isShort && !isThin && (
+        <span className="truncate px-1.5 text-[11px] font-semibold leading-none">
+          {label}
+        </span>
+      )}
     </div>
   );
+}
+
+/**
+ * Palette per tipo_evento PdC. Niente .seg-* del Gantt giro: lì il rosso
+ * carica semantica "commerciale" che qui non esiste. Qui i colori
+ * mappano la natura del lavoro PdC.
+ */
+function colorForTipoEvento(tipo: string): string {
+  switch (tipo) {
+    case "CONDOTTA":
+      return "bg-primary text-primary-foreground"; // blu ARTURO — cuore del lavoro
+    case "VETTURA":
+      return "bg-sky-200 text-sky-900"; // PdC come passeggero
+    case "REFEZ":
+      return "bg-emerald-200 text-emerald-900"; // pausa pasto
+    case "ACCp":
+    case "ACCa":
+      return "bg-amber-200 text-amber-900"; // accessori treno
+    case "CVp":
+    case "CVa":
+      return "bg-orange-300 text-orange-900"; // cambio volante
+    case "PK":
+    case "SCOMP":
+      return "bg-slate-200 text-slate-700"; // parking / comparto
+    case "PRESA":
+    case "FINE":
+      return "bg-slate-400 text-slate-50"; // presa/fine servizio (più scuro)
+    case "DORMITA":
+      return "bg-violet-300 text-violet-900"; // FR pernotto
+    default:
+      return "bg-muted text-muted-foreground";
+  }
 }
 
 function bloccoLabel(b: TurnoPdcBlocco): string {
@@ -567,61 +646,127 @@ function bloccoLabel(b: TurnoPdcBlocco): string {
   return b.tipo_evento;
 }
 
+function bloccoTooltip(b: TurnoPdcBlocco): string {
+  const da = stazioneLabel(b.stazione_da_nome, b.stazione_da_codice);
+  const a = stazioneLabel(b.stazione_a_nome, b.stazione_a_codice);
+  const treno = b.numero_treno !== null ? `\nTreno ${b.numero_treno}` : "";
+  const note = b.accessori_note !== null ? `\n${b.accessori_note}` : "";
+  const durata = b.durata_min !== null ? ` (${b.durata_min}')` : "";
+  return `${b.tipo_evento}${durata} · ${b.ora_inizio ?? "?"} → ${b.ora_fine ?? "?"}\n${da} → ${a}${treno}${note}`;
+}
+
 function stazioneLabel(nome: string | null, codice: string | null): string {
   if (nome !== null && nome.length > 0) return nome;
   if (codice !== null && codice.length > 0) return codice;
   return "—";
 }
 
-function BlocchiList({ blocchi }: { blocchi: TurnoPdcBlocco[] }) {
-  if (blocchi.length === 0) {
-    return (
-      <p className="px-3 py-2 text-xs italic text-muted-foreground">
-        Nessun blocco in questa giornata.
-      </p>
-    );
-  }
+// ────────────────────────────────────────────────────────────────────────
+// Legenda chip orizzontali
+// ────────────────────────────────────────────────────────────────────────
+
+function Legenda() {
   return (
-    <details className="rounded-md border border-border bg-white text-xs">
-      <summary className="cursor-pointer px-3 py-2 font-medium text-muted-foreground">
-        Sequenza blocchi ({blocchi.length})
+    <div className="flex flex-wrap items-center gap-1.5 border-t border-border bg-muted/30 px-4 py-2.5">
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Legenda
+      </span>
+      <LegendaChip label="Condotta" colorClass="bg-primary text-primary-foreground" />
+      <LegendaChip label="Vettura" colorClass="bg-sky-200 text-sky-900" />
+      <LegendaChip label="Refez" colorClass="bg-emerald-200 text-emerald-900" />
+      <LegendaChip label="ACCp / ACCa" colorClass="bg-amber-200 text-amber-900" />
+      <LegendaChip label="CV" colorClass="bg-orange-300 text-orange-900" />
+      <LegendaChip label="PK / S.COMP" colorClass="bg-slate-200 text-slate-700" />
+      <LegendaChip label="Presa / Fine" colorClass="bg-slate-400 text-slate-50" />
+      <LegendaChip label="FR" colorClass="bg-violet-300 text-violet-900" />
+    </div>
+  );
+}
+
+function LegendaChip({ label, colorClass }: { label: string; colorClass: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+        colorClass,
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Sequenza blocchi tabella per giornata (sotto il Gantt)
+// ────────────────────────────────────────────────────────────────────────
+
+function BlocchiPanel({ giornata }: { giornata: TurnoPdcGiornata }) {
+  const refMissing =
+    giornata.refezione_mancante ||
+    (giornata.refezione_min === 0 && giornata.prestazione_min > 6 * 60);
+
+  return (
+    <details className="overflow-hidden rounded-md border border-border bg-white text-xs">
+      <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 font-medium text-foreground">
+        <span className="flex items-center gap-2">
+          <span className="font-bold">Giornata {giornata.numero_giornata}</span>
+          <Badge variant="outline" className="text-[9px]">
+            {giornata.variante_calendario}
+          </Badge>
+          <span className="text-muted-foreground">
+            ({giornata.blocchi.length} blocch
+            {giornata.blocchi.length === 1 ? "i" : "i"})
+          </span>
+        </span>
+        <span className="font-mono text-[11px] text-muted-foreground">
+          {formatHM(giornata.prestazione_min)} prest · {formatHM(giornata.condotta_min)} cond
+          {refMissing && (
+            <span className="ml-2 text-amber-700">· refez. mancante</span>
+          )}
+        </span>
       </summary>
-      <table className="w-full">
-        <thead className="bg-secondary/40 text-[10px] uppercase tracking-wider text-muted-foreground">
-          <tr>
-            <th className="px-2 py-1 text-left">#</th>
-            <th className="px-2 py-1 text-left">Tipo</th>
-            <th className="px-2 py-1 text-left">Treno</th>
-            <th className="px-2 py-1 text-left">Da</th>
-            <th className="px-2 py-1 text-left">A</th>
-            <th className="px-2 py-1 text-left">Inizio</th>
-            <th className="px-2 py-1 text-left">Fine</th>
-            <th className="px-2 py-1 text-right">Min</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {blocchi.map((b) => (
-            <tr key={b.id}>
-              <td className="px-2 py-1 font-mono text-muted-foreground">{b.seq}</td>
-              <td className="px-2 py-1">
-                <BloccoTipoBadge tipo={b.tipo_evento} />
-              </td>
-              <td className="px-2 py-1">
-                <TrenoCell blocco={b} />
-              </td>
-              <td className="px-2 py-1">
-                <StazioneCell nome={b.stazione_da_nome} codice={b.stazione_da_codice} />
-              </td>
-              <td className="px-2 py-1">
-                <StazioneCell nome={b.stazione_a_nome} codice={b.stazione_a_codice} />
-              </td>
-              <td className="px-2 py-1 tabular-nums">{b.ora_inizio ?? "—"}</td>
-              <td className="px-2 py-1 tabular-nums">{b.ora_fine ?? "—"}</td>
-              <td className="px-2 py-1 text-right tabular-nums">{b.durata_min ?? "—"}</td>
+      {giornata.blocchi.length === 0 ? (
+        <p className="px-3 pb-3 text-xs italic text-muted-foreground">
+          Nessun blocco in questa giornata.
+        </p>
+      ) : (
+        <table className="w-full">
+          <thead className="bg-secondary/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <tr>
+              <th className="px-2 py-1 text-left">#</th>
+              <th className="px-2 py-1 text-left">Tipo</th>
+              <th className="px-2 py-1 text-left">Treno</th>
+              <th className="px-2 py-1 text-left">Da</th>
+              <th className="px-2 py-1 text-left">A</th>
+              <th className="px-2 py-1 text-left">Inizio</th>
+              <th className="px-2 py-1 text-left">Fine</th>
+              <th className="px-2 py-1 text-right">Min</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {giornata.blocchi.map((b) => (
+              <tr key={b.id} className="hover:bg-muted/30">
+                <td className="px-2 py-1 font-mono text-muted-foreground">{b.seq}</td>
+                <td className="px-2 py-1">
+                  <BloccoTipoBadge tipo={b.tipo_evento} />
+                </td>
+                <td className="px-2 py-1">
+                  <TrenoCell blocco={b} />
+                </td>
+                <td className="px-2 py-1">
+                  <StazioneCell nome={b.stazione_da_nome} codice={b.stazione_da_codice} />
+                </td>
+                <td className="px-2 py-1">
+                  <StazioneCell nome={b.stazione_a_nome} codice={b.stazione_a_codice} />
+                </td>
+                <td className="px-2 py-1 tabular-nums">{b.ora_inizio ?? "—"}</td>
+                <td className="px-2 py-1 tabular-nums">{b.ora_fine ?? "—"}</td>
+                <td className="px-2 py-1 text-right tabular-nums">{b.durata_min ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </details>
   );
 }
@@ -687,6 +832,27 @@ function BloccoTipoBadge({ tipo }: { tipo: string }) {
     default:
       return <Badge variant="outline">{tipo}</Badge>;
   }
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Helpers
+// ────────────────────────────────────────────────────────────────────────
+
+function parseTimeToMin(t: string | null): number | null {
+  if (t === null || t.length === 0) return null;
+  const parts = t.split(":");
+  if (parts.length < 2) return null;
+  const h = Number.parseInt(parts[0], 10);
+  const m = Number.parseInt(parts[1], 10);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+/** Minuti da 00:00 → pixel sulla timeline shiftata di `offsetMin`. */
+function minToPx(min: number, offsetMin: number): number {
+  let rel = min - offsetMin;
+  if (rel < 0) rel += AXIS_TOTAL_MIN;
+  return (rel / AXIS_TOTAL_MIN) * TIMELINE_WIDTH_PX;
 }
 
 function formatHM(min: number): string {
