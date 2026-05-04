@@ -35,6 +35,7 @@ from colazione.models.anagrafica import (
     LocalitaManutenzione,
     LocalitaSosta,
     MaterialeDotazioneAzienda,
+    MaterialeIstanza,
     MaterialeTipo,
     Stazione,
 )
@@ -307,6 +308,60 @@ async def create_localita_sosta(
     await session.commit()
     await session.refresh(nuova)
     return LocalitaSostaRead.model_validate(nuova)
+
+
+# =====================================================================
+# Sprint 7.9 MR β2-1 — Istanze materiale (matricole L3)
+# =====================================================================
+
+
+class MaterialeIstanzaRead(BaseModel):
+    """Sprint 7.9 MR β2-1: istanza fisica L3 di un materiale."""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    tipo_materiale_codice: str
+    matricola: str
+    sede_codice: str | None
+    stato: str
+    note: str | None
+
+
+@router.get("/materiale-istanze", response_model=list[MaterialeIstanzaRead])
+async def list_materiale_istanze(
+    tipo_materiale_codice: str | None = None,
+    sede_codice: str | None = None,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> list[MaterialeIstanzaRead]:
+    """Lista istanze materiale dell'azienda, filtrabili per tipo e sede.
+
+    Sprint 7.9 MR β2-1. Le istanze sono seedate dalla migration 0023
+    a partire dalla `materiale_dotazione_azienda` (es. dotazione
+    Trenord ETR526=11 → matricole `ETR526-000`..`ETR526-010`).
+
+    Filtri opzionali:
+    - ``tipo_materiale_codice``: es. ``"ETR526"``.
+    - ``sede_codice``: es. ``"IMPMAN_MILANO_FIORENZA"`` o stringa
+      vuota per filtrare le istanze NON ancora assegnate
+      (sede_codice IS NULL).
+    """
+    stmt = (
+        select(MaterialeIstanza)
+        .where(MaterialeIstanza.azienda_id == user.azienda_id)
+        .order_by(MaterialeIstanza.tipo_materiale_codice, MaterialeIstanza.matricola)
+    )
+    if tipo_materiale_codice is not None:
+        stmt = stmt.where(
+            MaterialeIstanza.tipo_materiale_codice == tipo_materiale_codice
+        )
+    if sede_codice is not None:
+        if sede_codice == "":
+            stmt = stmt.where(MaterialeIstanza.sede_codice.is_(None))
+        else:
+            stmt = stmt.where(MaterialeIstanza.sede_codice == sede_codice)
+    rows = (await session.execute(stmt)).scalars().all()
+    return [MaterialeIstanzaRead.model_validate(r) for r in rows]
 
 
 # =====================================================================

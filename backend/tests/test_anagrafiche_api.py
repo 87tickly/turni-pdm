@@ -189,3 +189,49 @@ def test_localita_sosta_create_admin_stazione_invalida(
         headers=_auth(token),
     )
     assert res.status_code == 400, res.text
+
+
+# =====================================================================
+# Sprint 7.9 MR β2-1 — Istanze materiale (matricole L3)
+# =====================================================================
+
+
+def test_materiale_istanze_401_senza_token(client: TestClient) -> None:
+    res = client.get("/api/materiale-istanze")
+    assert res.status_code == 401
+
+
+def test_materiale_istanze_200_seed(client: TestClient) -> None:
+    """Verifica che la migration 0023 abbia seedato le istanze dalla
+    dotazione_azienda. Per Trenord ETR526 dotazione=11 → 11 matricole."""
+    token = _login(client, "pianificatore_giro_demo", "demo12345")
+    res = client.get(
+        "/api/materiale-istanze?tipo_materiale_codice=ETR526",
+        headers=_auth(token),
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert isinstance(body, list)
+    if body:
+        # Verifica formato matricola {TIPO}-{NNN}
+        matricole = [r["matricola"] for r in body]
+        assert all(m.startswith("ETR526-") for m in matricole)
+        assert "ETR526-000" in matricole
+        # Tutte hanno tipo coerente
+        assert all(r["tipo_materiale_codice"] == "ETR526" for r in body)
+        # Default stato attivo
+        assert all(r["stato"] == "attivo" for r in body)
+        # Sede NULL al seed iniziale (assegnabile in fase Manutenzione)
+        assert all(r["sede_codice"] is None for r in body)
+
+
+def test_materiale_istanze_filtro_sede_vuota(client: TestClient) -> None:
+    """Filtro sede_codice="" restituisce solo le NON assegnate."""
+    token = _login(client, "pianificatore_giro_demo", "demo12345")
+    res = client.get(
+        "/api/materiale-istanze?sede_codice=",
+        headers=_auth(token),
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert all(r["sede_codice"] is None for r in body)

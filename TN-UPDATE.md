@@ -10,6 +10,86 @@
 
 ---
 
+## 2026-05-04 (132) — Sprint 7.9 MR β2-1: `MaterialeIstanza` (matricole L3) + seed da dotazione
+
+### Contesto
+
+Decisione utente 2026-05-04 (durante design β2, domanda 4):
+
+> "L3 (matricola fisica): ad oggi non serve, ma per per semplificare
+> il tutto, potremmo iniziare noi a farlo. iniziando da 000."
+
+Introduzione del livello L3 (istanza fisica) anche se il ruolo
+Manutenzione che lo userà davvero arriva in Sprint successivo.
+Semplifica i futuri `MaterialeThread` (β2-4) che potranno opzionalmente
+puntare a una matricola.
+
+### Modifiche backend
+
+`backend/src/colazione/models/anagrafica.py`:
+
+- Nuovo modello `MaterialeIstanza`:
+  - `id`, `azienda_id`, `tipo_materiale_codice`, `matricola`,
+    `sede_codice` (nullable, FK localita_manutenzione SET NULL),
+    `stato` (default "attivo"), `note`, `created_at`.
+  - UNIQUE `(azienda_id, matricola)`.
+  - Convenzione matricola: `{TIPO}-{NNN}` zero-padded (es.
+    `ETR526-000`, `ETR526-001`, ...).
+
+`backend/alembic/versions/0023_materiale_istanza.py`:
+
+- Migration upgrade: crea tabella + indice
+  `(azienda_id, tipo_materiale_codice, sede_codice)`.
+- **Seed automatico** via `generate_series(0, qty-1)` di Postgres:
+  per ogni `materiale_dotazione_azienda` con `pezzi_disponibili` non
+  NULL, genera N istanze con matricole `{TIPO}-000`..`{TIPO}-{N-1}`.
+  `sede_codice = NULL` (assegnabile in fase Manutenzione futura).
+  Idempotente via `WHERE NOT EXISTS`.
+- Esempio Trenord: ETR526 dotazione=11 → 11 matricole
+  `ETR526-000`..`ETR526-010`. ETR522 dotazione=71 → 71 matricole.
+
+`backend/src/colazione/api/anagrafiche.py`:
+
+- Nuovo schema Pydantic `MaterialeIstanzaRead`.
+- `GET /api/materiale-istanze?tipo_materiale_codice=...&sede_codice=...`
+  (auth `PIANIFICATORE_GIRO`): lista istanze filtrabili per tipo e
+  sede. `sede_codice=""` filtra le NON assegnate (sede IS NULL).
+
+### Modifiche test
+
+`backend/tests/test_anagrafiche_api.py`:
+
+- `test_materiale_istanze_401_senza_token`.
+- `test_materiale_istanze_200_seed`: verifica formato matricola
+  `ETR526-NNN`, presenza `ETR526-000`, stato attivo, sede NULL.
+- `test_materiale_istanze_filtro_sede_vuota`: filtro `sede_codice=""`
+  → solo istanze NON assegnate.
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 60 file clean.
+
+### Stato
+
+- ✅ MR β2-1 completato.
+- 🟡 Smoke utente Railway: dopo migration 0023, query
+  `GET /api/materiale-istanze?tipo_materiale_codice=ETR526` deve
+  ritornare 11 record con matricole `ETR526-000..ETR526-010`.
+
+### Limitazioni note
+
+- `sede_codice` di tutte le istanze è NULL al seed. La distribuzione
+  per sede arriverà col ruolo Manutenzione (Sprint futuro) o tramite
+  un endpoint admin di assegnazione (scope futuro).
+- Non c'è UI dedicata. Le istanze sono visibili via API; consumate
+  dal builder β2-4 per popolare opzionalmente `MaterialeThread.matricola_id`.
+
+### Prossimo step
+
+β2-3: sourcing thread agganci/sganci con dotazione check.
+
+---
+
 ## 2026-05-04 (131) — Sprint 7.9 MR β2-0: anagrafica `LocalitaSosta` + `RegolaInvioSosta` + seed Milano San Rocco
 
 ### Contesto

@@ -336,6 +336,59 @@ class RegolaInvioSosta(Base):
     )
 
 
+class MaterialeIstanza(Base):
+    """Sprint 7.9 MR β2-1: istanza fisica (L3) di un materiale.
+
+    Decisione utente 2026-05-04: introduciamo da subito il livello L3
+    (istanza fisica) anche se il ruolo Manutenzione che lo userà
+    davvero arriva in Sprint successivo. Schema semplifica i futuri
+    `MaterialeThread` che potranno opzionalmente puntare a una
+    matricola specifica.
+
+    Convenzione matricola: ``{TIPO}-{NNN}`` zero-padded a 3 cifre.
+    Esempi: ``ETR526-000``, ``ETR526-001``, ..., ``ETR526-010`` (per
+    dotazione = 11). Univocità per ``(azienda_id, matricola)`` —
+    diverse aziende possono avere matricole identiche, ma dentro
+    un'azienda no.
+
+    ``sede_codice`` è NULLABLE: al seed iniziale l'istanza è
+    "non assegnata" (sarà la Manutenzione ad assegnare il telaio fisico
+    alla sede produttiva quando attivata la feature). Nel `MaterialeThread`
+    invece la sede è quella del giro che ha generato il thread.
+
+    Stato:
+    - ``"attivo"``: istanza disponibile per l'assegnazione (default).
+    - ``"in_revisione"``: temporaneamente fuori servizio (revisione
+      programmata).
+    - ``"fuori_servizio"``: dismessa (mantenuta per storico thread).
+    """
+
+    __tablename__ = "materiale_istanza"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    azienda_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("azienda.id", ondelete="RESTRICT")
+    )
+    tipo_materiale_codice: Mapped[str] = mapped_column(
+        String(50), ForeignKey("materiale_tipo.codice", ondelete="RESTRICT")
+    )
+    matricola: Mapped[str] = mapped_column(String(40))
+    sede_codice: Mapped[str | None] = mapped_column(
+        String(80), ForeignKey("localita_manutenzione.codice", ondelete="SET NULL")
+    )
+    stato: Mapped[str] = mapped_column(String(20), default="attivo")
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "azienda_id", "matricola", name="uq_materiale_istanza_azienda_matricola"
+        ),
+    )
+
+
 class MaterialeDotazioneAzienda(Base):
     """Sprint 7.9 MR 7D: dotazione fisica per (azienda, materiale).
 
