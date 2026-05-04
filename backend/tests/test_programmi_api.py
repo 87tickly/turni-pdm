@@ -381,7 +381,11 @@ def test_delete_regola_a_bozza_ok(client: TestClient) -> None:
     assert res4.json()["regole"] == []
 
 
-def test_add_regola_su_attivo_blocca_400(client: TestClient) -> None:
+def test_add_regola_su_attivo_consentito(client: TestClient) -> None:
+    """Sprint 7.9 MR 13 (entry 119): aggiunta regola su programma
+    `attivo` consentita. Solo `archiviato` blocca. Dopo modifica
+    l'utente rigenera giri con force=true.
+    """
     token = _login(client, "admin", "admin12345")
     payload = {**_PAYLOAD_MIN, "regole": [_REGOLA_MIN]}
     res = client.post("/api/programmi", json=payload, headers=_auth_headers(token))
@@ -393,8 +397,25 @@ def test_add_regola_su_attivo_blocca_400(client: TestClient) -> None:
         json=_REGOLA_MIN,
         headers=_auth_headers(token),
     )
+    assert res2.status_code == 201, res2.text
+
+
+def test_add_regola_su_archiviato_blocca_400(client: TestClient) -> None:
+    """Su programma archiviato le regole NON sono modificabili."""
+    token = _login(client, "admin", "admin12345")
+    payload = {**_PAYLOAD_MIN, "regole": [_REGOLA_MIN]}
+    res = client.post("/api/programmi", json=payload, headers=_auth_headers(token))
+    pid = res.json()["id"]
+    client.post(f"/api/programmi/{pid}/pubblica", headers=_auth_headers(token))
+    client.post(f"/api/programmi/{pid}/archivia", headers=_auth_headers(token))
+
+    res2 = client.post(
+        f"/api/programmi/{pid}/regole",
+        json=_REGOLA_MIN,
+        headers=_auth_headers(token),
+    )
     assert res2.status_code == 400
-    assert "bozza" in res2.json()["detail"]
+    assert "archiviato" in res2.json()["detail"]
 
 
 # =====================================================================

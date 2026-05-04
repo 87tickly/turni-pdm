@@ -298,21 +298,20 @@ async def add_regola(
     """Aggiunge una regola al programma. Vincoli:
 
     - programma deve esistere e appartenere all'azienda corrente
-    - programma deve essere in stato `bozza` (mod. di un attivo richiede
-      revisione futura, fuori MVP)
+    - programma NON deve essere `archiviato` (read-only). Bozza e attivo
+      sono entrambi modificabili (Sprint 7.9 MR 13, entry 119): dopo
+      modifica delle regole su programma attivo l'utente rigenera i
+      giri con `force=true` per allineare l'output.
 
-    Entry 96: i vincoli HARD a livello tipo materiale
-    (`data/vincoli_materiale_inviolabili.json`) **non sono più
-    applicati qui**. Il pianificatore può creare regole "ampie" senza
-    essere bloccato. Il check viene fatto dal builder (``risolvi_corsa``):
-    le corse incompatibili col materiale di una regola cadono come
-    residue invece che bloccare la creazione.
+    Entry 96: i vincoli HARD a livello tipo materiale non sono più
+    applicati qui. Il pianificatore può creare regole "ampie"; il
+    builder filtra a runtime con ``risolvi_corsa``.
     """
     p = await _get_programma_or_404(session, programma_id, user.azienda_id)
-    if p.stato != "bozza":
+    if p.stato == "archiviato":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"programma in stato {p.stato!r}: regole modificabili solo in bozza",
+            detail=f"programma archiviato: regole non modificabili",
         )
 
     composizione = payload.composizione
@@ -343,12 +342,13 @@ async def delete_regola(
     user: CurrentUser = _authz,
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Cancella una regola. Programma deve essere in `bozza`."""
+    """Cancella una regola. Solo `archiviato` blocca la cancellazione
+    (Sprint 7.9 MR 13, entry 119)."""
     p = await _get_programma_or_404(session, programma_id, user.azienda_id)
-    if p.stato != "bozza":
+    if p.stato == "archiviato":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"programma in stato {p.stato!r}: regole modificabili solo in bozza",
+            detail=f"programma archiviato: regole non cancellabili",
         )
 
     stmt = (

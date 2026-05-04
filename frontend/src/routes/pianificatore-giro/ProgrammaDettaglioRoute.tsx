@@ -70,7 +70,10 @@ export function ProgrammaDettaglioRoute() {
   }
 
   const programma = query.data;
-  const editable = programma.stato === "bozza";
+  // Sprint 7.9 MR 13 (entry 119): regole modificabili anche in stato
+  // 'attivo'. Solo 'archiviato' è read-only. Dopo modifica su programma
+  // attivo l'utente rigenera i giri con force=true per allineare output.
+  const editable = programma.stato !== "archiviato";
   const canGenerate = programma.stato === "attivo" && programma.regole.length > 0;
   const giri = giriQuery.data ?? [];
   const giriCount = giri.length;
@@ -366,7 +369,7 @@ function ConfigurazioneSection({
           title={
             editable
               ? "Modifica configurazione: dialog non ancora disponibile (TN-UPDATE residuo)"
-              : "Modifica disponibile solo in stato bozza"
+              : "Programma archiviato: configurazione read-only"
           }
         >
           Modifica configurazione
@@ -694,7 +697,7 @@ function RegoleSection({
           size="sm"
           onClick={onAddRegola}
           disabled={!editable}
-          title={editable ? "Aggiungi una nuova regola" : "Aggiunta disponibile solo in stato bozza"}
+          title={editable ? "Aggiungi una nuova regola" : "Programma archiviato: regole read-only"}
         >
           <Plus className="mr-1 h-3.5 w-3.5" aria-hidden /> Nuova regola
         </Button>

@@ -10,6 +10,57 @@
 
 ---
 
+## 2026-05-04 (119) — Sprint 7.9 MR 13: regole modificabili su programma `attivo`
+
+### Contesto
+
+Decisione utente 2026-05-03 (entry 116 follow-up): la UI bloccava
+modifica/aggiunta/cancellazione regole su programma in stato `attivo`.
+Per coprire materiali/linee aggiuntive servirebbe altrimenti rifare
+il programma da zero. Il pianificatore vuole iterare sulle regole
+mentre il programma è in produzione, poi rigenerare giri con
+`force=true`.
+
+### Modifiche
+
+`backend/src/colazione/api/programmi.py`:
+- `add_regola`: check rilassato da `stato != 'bozza'` a
+  `stato == 'archiviato'`.
+- `delete_regola`: idem.
+- Docstring + messaggi 400 aggiornati.
+
+`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`:
+- `editable = stato !== 'archiviato'` (= bozza E attivo entrambi
+  modificabili).
+- Tooltip "solo in stato bozza" → "Programma archiviato: read-only".
+
+`backend/tests/test_programmi_api.py`:
+- `test_add_regola_su_attivo_blocca_400` rinominato in
+  `test_add_regola_su_attivo_consentito` (verifica 201).
+- Nuovo test `test_add_regola_su_archiviato_blocca_400` per il caso
+  rimasto bloccante.
+
+### Conseguenze
+
+- Workflow: pianificatore aggiunge nuova regola su programma attivo
+  → click "Genera giri" con `force=true` → nuovi giri allineati alle
+  regole modificate. Card "Ultimo run" (entry 116) mostra il delta.
+- Il programma `archiviato` resta read-only end-to-end.
+
+### Verifiche
+
+- `mypy --strict` ✅ 59 file clean.
+- `pytest` ✅ **551 passed, 12 skipped** (1 nuovo test).
+- Frontend `tsc -b --noEmit` ✅.
+
+### Stato
+
+- ✅ MR 13 sblocco modifica regole su programma attivo.
+- 🟡 MR 11B capacity-based assignment (eliminare priorità ambigua,
+  introdurre routing per dotazione disponibile).
+
+---
+
 ## 2026-05-04 (118) — Deploy Railway live + clone DB locale → produzione
 
 ### Contesto
