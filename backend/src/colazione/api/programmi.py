@@ -20,6 +20,7 @@ non rivelare l'esistenza).
 """
 
 import logging
+import os
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -99,6 +100,37 @@ _authz_pdc = Depends(require_role("PIANIFICATORE_PDC"))
 _authz_personale = Depends(require_role("GESTIONE_PERSONALE"))
 _authz_manutenzione = Depends(require_role("MANUTENZIONE"))
 _authz_admin = Depends(require_admin())
+
+
+# =====================================================================
+# Configurazione gating ``conferma-personale`` (sub-MR 2.bis-c, entry 174)
+# =====================================================================
+
+#: Soglia minima di ``programma_materiale.copertura_pct`` per consentire
+#: la transizione ``PDC_CONFERMATO → PERSONALE_ASSEGNATO``. Default 95.0.
+#: Override via env var ``AUTO_ASSEGNA_SOGLIA_COPERTURA_PCT``.
+def _resolve_soglia_copertura_pct() -> float:
+    raw = os.environ.get("AUTO_ASSEGNA_SOGLIA_COPERTURA_PCT")
+    if raw is None or raw.strip() == "":
+        return 95.0
+    try:
+        v = float(raw)
+    except ValueError:
+        logger.warning(
+            "AUTO_ASSEGNA_SOGLIA_COPERTURA_PCT=%r non parsabile, fallback 95.0",
+            raw,
+        )
+        return 95.0
+    if not 0.0 <= v <= 100.0:
+        logger.warning(
+            "AUTO_ASSEGNA_SOGLIA_COPERTURA_PCT=%s fuori range [0,100], fallback 95.0",
+            v,
+        )
+        return 95.0
+    return v
+
+
+SOGLIA_COPERTURA_PCT_DEFAULT: float = 95.0
 
 # Sprint 8.0 MR 0: list/detail di programmi sono leggibili da tutti i 4
 # ruoli pipeline (PdC, Personale, Manutenzione oltre a Giro Materiale).
@@ -650,10 +682,41 @@ async def conferma_personale(
     user: CurrentUser = _authz_personale,
     session: AsyncSession = Depends(get_session),
 ) -> ProgrammaMateriale:
-    """Transizione ``PDC_CONFERMATO`` → ``PERSONALE_ASSEGNATO``."""
+    """Transizione ``PDC_CONFERMATO`` → ``PERSONALE_ASSEGNATO``.
+
+    **Gating sub-MR 2.bis-c (entry 174)**: 409 se
+    ``programma.copertura_pct`` è ``NULL`` (= nessun run di
+    auto-assegna effettuato) oppure ``< SOGLIA_COPERTURA_PCT`` (default
+    95.0%, configurabile via env ``AUTO_ASSEGNA_SOGLIA_COPERTURA_PCT``).
+
+    L'admin che vuole forzare la transizione anche con copertura
+    insufficiente può prima chiamare ``POST /sblocca`` ramo PdC
+    (regredisce di uno step), oppure portare a sopra-soglia la
+    copertura via override manuale + re-run di ``auto-assegna-persone``
+    (che aggiorna ``copertura_pct``).
+    """
     p = await _get_programma_or_404(
         session, programma_id, user.azienda_id, for_update=True
     )
+    soglia = _resolve_soglia_copertura_pct()
+    if p.copertura_pct is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "nessun run di auto-assegna-persone effettuato: "
+                "esegui prima POST /api/programmi/{id}/auto-assegna-persone "
+                f"e raggiungi una copertura ≥ {soglia:g}%"
+            ),
+        )
+    if p.copertura_pct < soglia:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"copertura attuale {p.copertura_pct:g}% < soglia "
+                f"{soglia:g}%: copri le mancanze residue (override manuale + "
+                "re-run auto-assegna) prima di confermare il personale"
+            ),
+        )
     await _transizione_pdc(session, p, StatoPipelinePdc.PERSONALE_ASSEGNATO)
     await session.commit()
     await session.refresh(p)
@@ -956,6 +1019,11 @@ async def auto_assegna_persone_endpoint(
                 stato="pianificato",
             )
         )
+    # Sub-MR 2.bis-c (entry 174): persisti il KPI copertura sul programma
+    # per consentire il gating su ``conferma-personale`` (409 se sotto
+    # soglia). Aggiornato a ogni run di auto-assegna; non viene aggiornato
+    # da ``assegna-manuale`` (limitazione dichiarata).
+    p.copertura_pct = risultato.delta_copertura_pct
     await session.commit()
 
     return AutoAssegnaPersoneResponse(

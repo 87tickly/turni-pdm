@@ -10,6 +10,162 @@
 
 ---
 
+## 2026-05-05 (174) — Sub-MR 2.bis-c: gating conferma-personale su copertura ≥ 95% (chiusura MR 2.bis)
+
+### Contesto
+
+Chiusura del **3°** dei 3 sub-MR concordati per il MR 2.bis (entry 167).
+Aggiunge il **gate** sul ``POST /conferma-personale`` (transizione
+``PDC_CONFERMATO → PERSONALE_ASSEGNATO``): il backend rifiuta con 409
+se la copertura ultima run di auto-assegna è ``NULL`` o sotto soglia
+(default 95.0%, configurabile via env).
+
+Con questa entry, il MR 2.bis è completo: workflow utente
+end-to-end auto-assegna → override → conferma è gating e operativo
+in produzione.
+
+### Modifiche backend
+
+**`backend/alembic/versions/0033_programma_copertura_pct.py`**
+(nuovo): aggiunge colonna ``programma_materiale.copertura_pct`` (Float
+nullable) + CHECK constraint range ``[0,100]``. Revision ID
+``a1b2c3d4e5f6``, parent ``f0a1b2c3d4e5`` (0032). Applica
+automaticamente al boot Railway.
+
+**`backend/src/colazione/models/programmi.py`** —
+``ProgrammaMateriale.copertura_pct: float | None`` mappato. Import
+``Float`` aggiunto.
+
+**`backend/src/colazione/schemas/programmi.py`** —
+``ProgrammaMaterialeRead.copertura_pct: float | None = None`` aggiunto
+(propagato a tutti i consumer del schema).
+
+**`backend/src/colazione/api/programmi.py`**:
+
+- Helper modulo ``_resolve_soglia_copertura_pct() -> float``: legge
+  env ``AUTO_ASSEGNA_SOGLIA_COPERTURA_PCT`` (default 95.0). Validazione
+  range [0, 100] con fallback + logger.warning su valori invalidi.
+- ``auto_assegna_persone_endpoint``: dopo ``auto_assegna()`` setta
+  ``p.copertura_pct = risultato.delta_copertura_pct`` PRIMA del commit.
+  Side effect: ogni run aggiorna il KPI server-side.
+- ``conferma_personale``: 2 nuovi check 409 prima della transizione:
+  - ``copertura_pct IS NULL`` → "esegui prima auto-assegna"
+  - ``copertura_pct < soglia`` → "{X}% < soglia {Y}%: copri le mancanze"
+- Limitazione **dichiarata**: ``assegna-manuale`` NON aggiorna
+  ``copertura_pct``. Per refreshare il KPI dopo override, l'utente
+  deve ri-runnare auto-assegna (idempotente). Documentato nei docstring
+  + nella UI.
+
+### Test backend
+
+**`backend/tests/test_api_programmi_conferma.py`** — sezione "Conferma
+personale gating su copertura_pct" (6 nuovi test):
+
+- ``test_conferma_personale_409_se_no_run_auto_assegna``:
+  ``copertura_pct=NULL`` → 409 con "auto-assegna" in detail.
+- ``test_conferma_personale_409_se_copertura_sotto_soglia``: forzo
+  ``copertura_pct=80`` → 409 con "80" e "95" nel detail.
+- ``test_conferma_personale_ok_se_copertura_sopra_soglia``:
+  ``copertura_pct=100`` → 200 + ``stato_pipeline_pdc='PERSONALE_ASSEGNATO'``.
+- ``test_conferma_personale_ok_a_soglia_esatta``: ``copertura_pct=95.0``
+  (boundary case) → 200.
+- ``test_conferma_personale_workflow_end_to_end``: setup completo →
+  auto-assegna 100% → conferma 200.
+- ``test_auto_assegna_persiste_copertura_pct_su_programma``: SELECT
+  diretto su DB conferma persistenza.
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/programmi.ts`** —
+``ProgrammaMaterialeRead.copertura_pct: number | null`` aggiunto
+(con docstring che cita la limitazione assegna-manuale).
+
+**`frontend/src/routes/gestione-personale/AssegnaPersoneRoute.tsx`**:
+
+- Costante locale ``SOGLIA_COPERTURA_PCT = 95`` (mirror della soglia
+  server-side per l'UI).
+- Importato ``useConfermaPersonale`` e ``useNavigate``.
+- Empty state "Nessun run" ora mostra anche la copertura **persistita**
+  ("…la copertura % corrente è X%").
+- Nuovo componente ``ConfermaPersonaleSection``:
+  - Card border emerald + check icon se gate aperto, altrimenti
+    border default + lock icon.
+  - Bottone "Conferma personale" abilitato iff (stato ===
+    PDC_CONFERMATO) && (copertura_pct >= 95) && !pending.
+  - Box amber con motivo bloccante (4 casi: stato successivo già
+    fatto, stato precedente, no run, sotto soglia).
+  - Box blue se copertura in-memory ≠ persistita (override fatto
+    senza re-run): "re-runna auto-assegna per refreshare il KPI".
+  - Su conferma 200 → ``navigate("/gestione-personale/dashboard")``.
+
+**Fixture aggiornate** (3 file): ``ProgrammaDettaglioRoute.test.tsx``,
+``ProgrammiRoute.test.tsx``, ``AssegnaPersoneRoute.test.tsx`` — aggiunto
+``copertura_pct: null`` per soddisfare il nuovo type.
+
+### Test frontend
+
+**`AssegnaPersoneRoute.test.tsx`** — 1 nuovo test:
+
+- ``Conferma personale disabled + motivo se copertura_pct=null (no run)``:
+  bottone disabilitato + testo "Nessun run di auto-assegna effettuato"
+  visibile.
+
+Test esistente "mostra header con nome programma" aggiornato a
+``getAllByText("PDC_CONFERMATO")`` perché lo stato appare ora in 2
+posti (badge header + descrizione transizione in ConfermaPersonaleSection).
+
+### Verifiche
+
+- ✅ ``uv run mypy --strict src/``: 72 source files clean.
+- ✅ ``uv run alembic upgrade head``: 0033 applicata locale.
+- ✅ ``uv run pytest``: **759 passed, 12 skipped, 0 failed** (+6 nuovi).
+- ✅ ``pnpm tsc -b --noEmit``: clean.
+- ✅ ``pnpm test --run``: **58 passed | 1 skipped** (+1 nuovo).
+
+### MR 2.bis — chiusura totale
+
+| Sub-MR | Entry | Scope | Stato |
+|---|---|---|---|
+| 2.bis-a | 172 | Backend domain greedy + endpoint auto-assegna + 33 test | ✅ in prod |
+| 2.bis-b | 173 | Backend assegna-manuale + UI drilldown + override + 13 test | ✅ in prod |
+| 2.bis-c | 174 | Migration 0033 + gating conferma-personale + UI Conferma + 7 test | ⏳ deploy |
+
+**Totale MR 2.bis**: ~3.500 righe di codice + 53 test nuovi.
+mypy strict 72 file clean su tutti, pytest 759 passed, vitest 58
+passed.
+
+### Decisioni di scope rinviate (post MR 2.bis)
+
+- ``assegna-manuale`` non aggiorna ``copertura_pct``: l'utente deve
+  ri-runnare auto-assegna. Soluzione futura possibile: incrementare
+  il KPI atomically nel POST manuale (richiede salvare anche
+  ``n_giornate_totali`` per il programma o passare il delta exact).
+- Persistenza report: i risultati di ogni run sono transient (React
+  state). Per audit/storico serve tabella ``auto_assegna_run``.
+- Override DELETE: oggi solo CREATE. Per riassegnare una giornata
+  l'utente passa da admin/SQL.
+- Soglia 95% globale: per programma o per azienda non supportato.
+
+### Stato
+
+- ✅ Codice 2.bis-c pronto (migration + 2 endpoint patch + 1 nuova
+  sezione UI + 7 test nuovi).
+- ⏳ Commit + push + deploy backend + frontend Railway. La migration
+  0033 si applica automaticamente al boot del backend in production.
+
+### Prossimo step
+
+A scelta utente:
+
+- **Smoke production gating**: dopo il deploy, verificare via curl
+  che il gate funziona su programma reale.
+- **MR 2.ter**: feature additionali al MR 2 (non chiarito qui).
+- **MR 4.bis**: algoritmo matricole (ramo Manutenzione, entry 169).
+- **MR 5.bis**: applicazione concreta variazioni PdE (entry 170).
+- Altro lavoro fuori Sprint 8.0.
+
+---
+
 ## 2026-05-05 (173) — Sub-MR 2.bis-b: UI Gestione Personale auto-assegna + override manuale
 
 ### Contesto

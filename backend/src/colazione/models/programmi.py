@@ -25,6 +25,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -74,6 +75,15 @@ class ProgrammaMateriale(Base):
     # le transizioni del ramo principale.
     stato_manutenzione: Mapped[str] = mapped_column(
         String(40), default="IN_ATTESA", server_default="IN_ATTESA"
+    )
+    # Sprint 8.0 sub-MR 2.bis-c (migration 0033): % copertura ultima
+    # run auto-assegna persone. NULL = nessun run effettuato. Range
+    # 0..100 (CHECK constraint a livello DB). Usato come gate da
+    # ``conferma-personale`` (409 se < 95.0). L'endpoint
+    # ``assegna-manuale`` non aggiorna questo campo: l'utente deve
+    # ri-runnare auto-assegna per refreshare il KPI.
+    copertura_pct: Mapped[float | None] = mapped_column(
+        Float, nullable=True
     )
 
     # Parametri globali

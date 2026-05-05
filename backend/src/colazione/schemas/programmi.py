@@ -250,6 +250,9 @@ class ProgrammaMaterialeRead(BaseModel):
     # ``colazione.domain.pipeline``; lato DB CHECK constraint.
     stato_pipeline_pdc: str = "PDE_IN_LAVORAZIONE"
     stato_manutenzione: str = "IN_ATTESA"
+    # Sub-MR 2.bis-c (entry 174): % copertura ultima run auto-assegna.
+    # NULL se nessun run effettuato. Range 0..100 (CHECK DB).
+    copertura_pct: float | None = None
     km_max_giornaliero: int | None = None
     km_max_ciclo: int | None = None
     n_giornate_default: int

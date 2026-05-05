@@ -29,6 +29,7 @@ const programmaPdcConfermato = {
   stato: "attivo",
   stato_pipeline_pdc: "PDC_CONFERMATO",
   stato_manutenzione: "IN_LAVORAZIONE",
+  copertura_pct: null,
   km_max_giornaliero: null,
   km_max_ciclo: null,
   n_giornate_default: 1,
@@ -110,7 +111,9 @@ describe("GestionePersonaleAssegnaPersoneRoute", () => {
     });
     expect(screen.getByText(/2026-05-04/)).toBeInTheDocument();
     expect(screen.getByText(/2026-05-08/)).toBeInTheDocument();
-    expect(screen.getByText("PDC_CONFERMATO")).toBeInTheDocument();
+    // Sub-MR 2.bis-c: "PDC_CONFERMATO" appare in più posti (badge header
+    // + descrizione conferma section). Verifico solo che ci sia almeno un match.
+    expect(screen.getAllByText("PDC_CONFERMATO").length).toBeGreaterThan(0);
   });
 
   it("bottone Auto-assegna abilitato quando PDC_CONFERMATO", async () => {
@@ -163,5 +166,17 @@ describe("GestionePersonaleAssegnaPersoneRoute", () => {
       /Data a \(inclusa\)/i,
     ) as HTMLInputElement;
     expect(dataAInput.value).toBe("2026-05-08");
+  });
+
+  // Sub-MR 2.bis-c: gating conferma personale
+  it("Conferma personale disabled + motivo se copertura_pct=null (no run)", async () => {
+    renderRoute(42);
+    const btn = await screen.findByRole("button", {
+      name: /Conferma personale/i,
+    });
+    expect(btn).toBeDisabled();
+    expect(
+      screen.getByText(/Nessun run di auto-assegna effettuato/i),
+    ).toBeInTheDocument();
   });
 });

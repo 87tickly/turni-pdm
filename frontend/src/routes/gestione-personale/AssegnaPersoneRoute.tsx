@@ -27,13 +27,14 @@
  */
 
 import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowRight,
   CalendarRange,
   CheckCircle2,
   Info,
+  Lock,
   Wand2,
 } from "lucide-react";
 
@@ -53,6 +54,7 @@ import { usePersone } from "@/hooks/useGestionePersonale";
 import {
   useAssegnaManuale,
   useAutoAssegnaPersone,
+  useConfermaPersonale,
   useProgramma,
 } from "@/hooks/useProgrammi";
 import type {
@@ -63,6 +65,9 @@ import type {
   WarningSoft,
 } from "@/lib/api/programmi";
 import { cn } from "@/lib/utils";
+
+/** Sub-MR 2.bis-c (entry 174): soglia copertura per conferma. */
+const SOGLIA_COPERTURA_PCT = 95;
 
 const MOTIVO_LABEL: Record<MotivoMancanza, string> = {
   nessun_pdc_deposito: "Nessun PdC nel deposito del turno",
@@ -236,9 +241,27 @@ export function GestionePersonaleAssegnaPersoneRoute() {
         />
       ) : (
         <Card className="border-border bg-muted/30 p-3 text-sm text-muted-foreground">
-          Nessun run effettuato. Clicca "Esegui auto-assegna" per iniziare.
+          Nessun run effettuato in questa sessione. Clicca "Esegui
+          auto-assegna" per generare un report. Se hai già runnato in
+          precedenza, la copertura % corrente è{" "}
+          <strong>
+            {p.copertura_pct === null
+              ? "N/A"
+              : `${p.copertura_pct.toFixed(1)}%`}
+          </strong>
+          .
         </Card>
       )}
+
+      {/* Conferma personale (gating sub-MR 2.bis-c) */}
+      <ConfermaPersonaleSection
+        programmaId={programmaId}
+        statoPipeline={stato}
+        coperturaPersistita={p.copertura_pct}
+        coperturaCorrente={
+          risultato !== null ? risultato.delta_copertura_pct : p.copertura_pct
+        }
+      />
 
       {/* Dialog override */}
       <Dialog
@@ -619,5 +642,118 @@ function OverrideDialog({
         </div>
       </div>
     </>
+  );
+}
+
+// =====================================================================
+// Conferma personale section (sub-MR 2.bis-c)
+// =====================================================================
+
+function ConfermaPersonaleSection({
+  programmaId,
+  statoPipeline,
+  coperturaPersistita,
+  coperturaCorrente,
+}: {
+  programmaId: number;
+  statoPipeline: string;
+  coperturaPersistita: number | null;
+  coperturaCorrente: number | null;
+}) {
+  const navigate = useNavigate();
+  const conferma = useConfermaPersonale();
+
+  // La conferma è abilitata solo se:
+  // 1. Stato è esattamente PDC_CONFERMATO (transizione successiva).
+  // 2. Copertura persistita lato server (campo `copertura_pct`) ≥ soglia.
+  //    Nota: `coperturaCorrente` è in-memory (può differire da quella
+  //    persistita dopo override manuale che NON aggiorna il backend).
+  //    Per il gating reale che fa il backend conta `coperturaPersistita`.
+  const isPdcConfermato = statoPipeline === "PDC_CONFERMATO";
+  const sopraSoglia =
+    coperturaPersistita !== null && coperturaPersistita >= SOGLIA_COPERTURA_PCT;
+  const enabled = isPdcConfermato && sopraSoglia && !conferma.isPending;
+
+  const handleConferma = () => {
+    if (!enabled) return;
+    conferma.mutate(programmaId, {
+      onSuccess: () => navigate("/gestione-personale/dashboard"),
+    });
+  };
+
+  // Determina motivo del gating (se applicable)
+  let motivoBlocco: string | null = null;
+  if (statoPipeline === "PERSONALE_ASSEGNATO" || statoPipeline === "VISTA_PUBBLICATA") {
+    motivoBlocco = `Personale già confermato (stato ${statoPipeline}).`;
+  } else if (!isPdcConfermato) {
+    motivoBlocco = `Stato pipeline ${statoPipeline}: la conferma è abilitata solo da PDC_CONFERMATO.`;
+  } else if (coperturaPersistita === null) {
+    motivoBlocco = "Nessun run di auto-assegna effettuato. Esegui prima un run.";
+  } else if (coperturaPersistita < SOGLIA_COPERTURA_PCT) {
+    motivoBlocco = `Copertura ${coperturaPersistita.toFixed(1)}% < soglia ${SOGLIA_COPERTURA_PCT}%. Risolvi le mancanze residue (override + re-run auto-assegna).`;
+  }
+
+  // Warning se in-memory % differisce da persistita (override manuale fatto)
+  const stale =
+    coperturaCorrente !== null &&
+    coperturaPersistita !== null &&
+    Math.abs(coperturaCorrente - coperturaPersistita) > 0.01;
+
+  return (
+    <Card
+      className={cn(
+        "flex flex-col gap-2 p-3",
+        enabled && "border-emerald-300 bg-emerald-50",
+        !enabled && "border-border bg-muted/30",
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2">
+          {enabled ? (
+            <CheckCircle2
+              className="mt-0.5 h-4 w-4 text-emerald-600"
+              aria-hidden
+            />
+          ) : (
+            <Lock className="mt-0.5 h-4 w-4 text-muted-foreground" aria-hidden />
+          )}
+          <div>
+            <div className="text-sm font-semibold text-foreground">
+              Conferma personale assegnato
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Transizione <code>PDC_CONFERMATO</code> →{" "}
+              <code>PERSONALE_ASSEGNATO</code>. Soglia gate{" "}
+              <strong>{SOGLIA_COPERTURA_PCT}%</strong> copertura persistita.
+            </div>
+          </div>
+        </div>
+        <Button onClick={handleConferma} disabled={!enabled}>
+          {conferma.isPending ? "Conferma in corso…" : "Conferma personale"}
+        </Button>
+      </div>
+      {motivoBlocco !== null ? (
+        <div className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
+          <AlertTriangle className="mr-1 inline h-3 w-3" aria-hidden />
+          {motivoBlocco}
+        </div>
+      ) : null}
+      {stale ? (
+        <div className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[11px] text-blue-800">
+          <Info className="mr-1 inline h-3 w-3" aria-hidden />
+          Copertura in-memory {coperturaCorrente?.toFixed(1)}% differisce da
+          quella persistita {coperturaPersistita?.toFixed(1)}% (override
+          manuale fatto). Re-runna auto-assegna per refreshare il KPI server-side
+          e abilitare la conferma.
+        </div>
+      ) : null}
+      {conferma.isError ? (
+        <div className="rounded border border-red-300 bg-red-50 px-2 py-1 text-[11px] text-red-800">
+          {conferma.error instanceof Error
+            ? conferma.error.message
+            : "Errore durante la conferma."}
+        </div>
+      ) : null}
+    </Card>
   );
 }

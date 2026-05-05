@@ -79,6 +79,14 @@ export interface ProgrammaMaterialeRead {
   stato_pipeline_pdc: StatoPipelinePdc;
   /** Sprint 8.0 MR 0 (entry 164): stato pipeline ramo Manutenzione. */
   stato_manutenzione: StatoManutenzione;
+  /**
+   * Sub-MR 2.bis-c (entry 174): % copertura ultima run auto-assegna
+   * (0..100). NULL = nessun run effettuato. Aggiornato dall'endpoint
+   * `/auto-assegna-persone`. Usato come gate da `/conferma-personale`
+   * (409 se < 95.0). NB: NON aggiornato da `/assegna-manuale`
+   * (limitazione dichiarata, ri-runnare auto-assegna per refresh).
+   */
+  copertura_pct: number | null;
   km_max_giornaliero: number | null;
   km_max_ciclo: number | null;
   n_giornate_default: number;

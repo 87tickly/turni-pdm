@@ -1519,3 +1519,146 @@ async def test_assegna_manuale_chiude_mancanza_da_auto_assegna(
     assert body2["n_giornate_coperte"] == 1
     assert body2["delta_copertura_pct"] == 100.0
     assert body2["mancanze"] == []
+
+
+# =====================================================================
+# Conferma personale gating su copertura_pct — Sub-MR 2.bis-c (entry 174)
+# =====================================================================
+
+
+async def test_conferma_personale_409_se_no_run_auto_assegna(
+    client: TestClient,
+) -> None:
+    """``programma.copertura_pct IS NULL`` → 409 con messaggio "esegui prima auto-assegna"."""
+    pid = await _crea_programma_in_stato("conf_pers_no_run", "PDC_CONFERMATO")
+    res = client.post(
+        f"/api/programmi/{pid}/conferma-personale",
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res.status_code == 409, res.text
+    assert "auto-assegna" in res.json()["detail"]
+
+
+async def test_conferma_personale_409_se_copertura_sotto_soglia(
+    client: TestClient,
+) -> None:
+    """``copertura_pct < 95.0`` → 409."""
+    pid = await _crea_programma_in_stato(
+        "conf_pers_sotto", "PDC_CONFERMATO"
+    )
+    # Forzo copertura_pct = 80.0 (sotto soglia 95.0)
+    async with session_scope() as session:
+        await session.execute(
+            text("UPDATE programma_materiale SET copertura_pct = 80.0 WHERE id = :pid"),
+            {"pid": pid},
+        )
+    res = client.post(
+        f"/api/programmi/{pid}/conferma-personale",
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert "80" in detail
+    assert "95" in detail
+
+
+async def test_conferma_personale_ok_se_copertura_sopra_soglia(
+    client: TestClient,
+) -> None:
+    """``copertura_pct >= 95.0`` → 200 (transizione PERSONALE_ASSEGNATO)."""
+    pid = await _crea_programma_in_stato(
+        "conf_pers_ok", "PDC_CONFERMATO"
+    )
+    async with session_scope() as session:
+        await session.execute(
+            text("UPDATE programma_materiale SET copertura_pct = 100.0 WHERE id = :pid"),
+            {"pid": pid},
+        )
+    res = client.post(
+        f"/api/programmi/{pid}/conferma-personale",
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["stato_pipeline_pdc"] == "PERSONALE_ASSEGNATO"
+    assert body["copertura_pct"] == 100.0
+
+
+async def test_conferma_personale_ok_a_soglia_esatta(
+    client: TestClient,
+) -> None:
+    """``copertura_pct == 95.0`` (esattamente alla soglia) → 200."""
+    pid = await _crea_programma_in_stato(
+        "conf_pers_soglia", "PDC_CONFERMATO"
+    )
+    async with session_scope() as session:
+        await session.execute(
+            text("UPDATE programma_materiale SET copertura_pct = 95.0 WHERE id = :pid"),
+            {"pid": pid},
+        )
+    res = client.post(
+        f"/api/programmi/{pid}/conferma-personale",
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res.status_code == 200, res.text
+
+
+async def test_conferma_personale_workflow_end_to_end(
+    client: TestClient,
+) -> None:
+    """End-to-end: auto-assegna popola copertura → conferma-personale 200."""
+    setup = await _crea_setup_aa(
+        "conf_pers_e2e",
+        n_persone=1,
+        n_giornate=1,
+        valido_da=date(2026, 5, 4),
+        valido_a=date(2026, 5, 4),
+    )
+    # Auto-assegna copre la giornata (1/1 = 100%)
+    r_auto = client.post(
+        f"/api/programmi/{setup['programma_id']}/auto-assegna-persone",
+        json={"data_da": "2026-05-04", "data_a": "2026-05-04"},
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert r_auto.status_code == 200
+    assert r_auto.json()["delta_copertura_pct"] == 100.0
+    # Conferma OK
+    r_conf = client.post(
+        f"/api/programmi/{setup['programma_id']}/conferma-personale",
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert r_conf.status_code == 200
+    assert r_conf.json()["stato_pipeline_pdc"] == "PERSONALE_ASSEGNATO"
+
+
+async def test_auto_assegna_persiste_copertura_pct_su_programma(
+    client: TestClient,
+) -> None:
+    """Verifica che la copertura calcolata dall'algoritmo sia
+    persistita su ``programma_materiale.copertura_pct``."""
+    setup = await _crea_setup_aa(
+        "auto_persiste_pct",
+        n_persone=1,
+        n_giornate=1,
+        valido_da=date(2026, 5, 4),
+        valido_a=date(2026, 5, 4),
+    )
+    res = client.post(
+        f"/api/programmi/{setup['programma_id']}/auto-assegna-persone",
+        json={"data_da": "2026-05-04", "data_a": "2026-05-04"},
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res.status_code == 200
+    # Verifica DB
+    async with session_scope() as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT copertura_pct FROM programma_materiale "
+                    "WHERE id = :pid"
+                ),
+                {"pid": setup["programma_id"]},
+            )
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].copertura_pct == 100.0
