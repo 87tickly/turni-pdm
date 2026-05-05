@@ -10,6 +10,130 @@
 
 ---
 
+## 2026-05-05 (171) — Sprint 8.0 MR 6: dashboard pipeline trasversale (admin)
+
+### Contesto
+
+**Chiusura dello Sprint 8.0.** Vista admin/super-user con tabella di
+TUTTI i programmi dell'azienda × stato pipeline + tempo in stato +
+ruolo responsabile dello step successivo. Permette al coordinatore
+di vedere "chi blocca chi" nel flusso fra ruoli.
+
+### Modifiche backend
+
+**`backend/src/colazione/api/pipeline_overview.py`** (nuovo, ~150 righe):
+
+- Router ``/api/admin/`` con auth ``require_admin()`` (solo
+  ``is_admin=True`` accede; gli altri ruoli sono filtrati a 403).
+- ``GET /pipeline-overview`` → ``PipelineOverviewResponse`` con:
+  - ``programmi: list[PipelineProgrammaItem]``: per ogni programma
+    nome, ID, stato PdC, stato Manutenzione, ruolo responsabile
+    prossimo step (PdC + Manutenzione), giorni in stato,
+    ``is_bloccato`` (true se ``> 7 giorni`` in stato non terminale).
+  - ``counters_per_stato_pdc``: dict ``stato → count``.
+  - ``counters_per_stato_manutenzione``: idem.
+  - ``n_bloccati``: contatore globale.
+- Mappe statiche ``_RESPONSABILE_PROSSIMO_STEP`` (PdC) +
+  ``_RESPONSABILE_MANUTENZIONE`` per la business logic "chi deve
+  agire ora". Allineate con la matrice MR 0 e l'auth degli endpoint
+  conferma.
+- Sicurezza: stato fuori enum (CHECK DB violato) → riga skippata
+  (anziché crashare la dashboard).
+
+**`backend/src/colazione/main.py`** — registrato il nuovo router.
+
+### Modifiche test backend
+
+**`backend/tests/test_admin_pipeline_overview.py`** (nuovo, 3 test):
+
+- ``test_pipeline_overview_admin_ok``: 200 + struttura response.
+- ``test_pipeline_overview_pianificatore_403``: ruolo non admin → 403.
+- ``test_pipeline_overview_senza_token_401``.
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/adminPipeline.ts`** (nuovo):
+``PipelineOverviewResponse`` + ``PipelineProgrammaItem`` + wrapper
+``getPipelineOverview()``.
+
+**`frontend/src/hooks/useAdminPipeline.ts`** (nuovo):
+``useAdminPipelineOverview()`` con TanStack Query.
+
+**`frontend/src/routes/admin/PipelineOverviewRoute.tsx`** (nuovo,
+~190 righe):
+
+- Componente ``AdminPipelineOverviewRoute`` con guard
+  ``!user.is_admin`` → redirect a ``/forbidden``.
+- 4 KPI: programmi totali, bloccati > 7gg, in VISTA_PUBBLICATA,
+  matricole assegnate.
+- Tabella ordinata: bloccati prima, poi giorni desc. Colonne:
+  programma, stato PdC, stato Manutenzione, prossimo PdC, prossimo
+  Manutenzione, giorni, badge "bloccato".
+- Riga amber-50 per programmi bloccati.
+
+**`frontend/src/routes/AppRoutes.tsx`**: nuovo block
+``/admin/pipeline`` sotto ``ProtectedRoute`` standard (l'admin check
+è applicativo nella route, non nell'auth dependency).
+
+### Verifiche
+
+- ✅ ``uv run mypy --strict src/``: 71 file clean.
+- ✅ ``uv run ruff check`` su file MR 6: 0 errori.
+- ✅ ``uv run pytest tests/test_admin_pipeline_overview.py``: 3 verdi.
+- ✅ ``pnpm tsc -b --noEmit``: clean.
+- ✅ ``pnpm test --run``: 52 passed | 1 skipped.
+
+### Sprint 8.0 — chiusura totale
+
+Lo Sprint 8.0 chiude la **concatenazione fra ruoli** in 6 MR + 1 fix
+collaterale:
+
+| MR | Entry | Scope | Stato |
+|----|-------|-------|-------|
+| 0 | 164 | Pipeline state machine + filtro list per ruolo | ✅ in prod |
+| (fix) | 165 | Fix 2 test persister stale post β2-2 | ✅ in prod |
+| 1 | 166 | Handoff Materiale → PdC + freeze + bottone conferma | ✅ in prod |
+| 2 | 167 | Handoff PdC → Personale + dashboard PdC + Personale | ✅ in prod |
+| 3 | 168 | Vista PdC finale ``/personale-pdc/mio-turno`` | ✅ in prod |
+| 4 | 169 | Dashboard Manutenzione (ramo parallelo) | ✅ in prod |
+| 5 | 170 | Endpoint variazioni PdE (audit-trail metadata) | ✅ in prod |
+| 6 | 171 | Dashboard pipeline trasversale (admin) | ⏳ deploy |
+
+**Totale codice MR 6**: 1 nuovo router backend + 3 file frontend +
+3 test. mypy strict 71 file clean, ruff clean, full pytest verde,
+frontend tsc + 52 vitest verdi.
+
+### Decisioni di scope rinviate (post-Sprint 8.0)
+
+- **Algoritmo assegnazione persone → turni** (MR 2.bis o nuovo
+  sprint).
+- **Algoritmo assegnazione matricole → giri** (MR 4.bis).
+- **Applicazione concreta variazioni al PdE** (MR 5.bis: parser
+  incrementale + diff con corse esistenti).
+- **UI per registrare variazioni** dalla dashboard
+  PIANIFICATORE_GIRO (MR 5.bis).
+- **Banner pipeline su dettaglio giri/turni** (oggi solo dashboard).
+- **Notifiche al PdC** quando un programma diventa
+  ``VISTA_PUBBLICATA``.
+
+### Stato
+
+- ✅ Codice MR 6 pronto (backend endpoint + frontend dashboard +
+  test).
+- ⏳ Commit + push + deploy backend + frontend Railway.
+
+### Prossimo step
+
+A scelta utente:
+- **MR 2.bis**: algoritmo assegnazione persone (sblocca MR 3 vista
+  finale che oggi mostra empty state).
+- **MR 5.bis**: applicazione concreta variazioni al PdE (chiude
+  cerchio di MR 5).
+- **MR 4.bis**: algoritmo matricole.
+- Oppure altro lavoro fuori Sprint 8.0.
+
+---
+
 ## 2026-05-05 (170) — Sprint 8.0 MR 5: endpoint variazioni PdE (audit-trail metadata)
 
 ### Contesto

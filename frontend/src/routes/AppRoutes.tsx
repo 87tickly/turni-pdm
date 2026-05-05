@@ -21,6 +21,7 @@ import { GestionePersonaleIndisponibilitaRoute } from "@/routes/gestione-persona
 import { GestionePersonaleLayout } from "@/routes/gestione-personale/GestionePersonaleLayout";
 import { GestionePersonalePersonaDettaglioRoute } from "@/routes/gestione-personale/PersonaDettaglioRoute";
 import { GestionePersonalePersoneRoute } from "@/routes/gestione-personale/PersoneRoute";
+import { AdminPipelineOverviewRoute } from "@/routes/admin/PipelineOverviewRoute";
 import { ManutenzioneDashboardRoute } from "@/routes/manutenzione/DashboardRoute";
 import { PersonalePdcMioTurnoRoute } from "@/routes/personale-pdc/MioTurnoRoute";
 import { PianificatorePdcDashboardRoute } from "@/routes/pianificatore-pdc/DashboardRoute";
@@ -140,6 +141,16 @@ export function AppRoutes() {
           <Route path="/personale-pdc">
             <Route index element={<Navigate to="/personale-pdc/mio-turno" replace />} />
             <Route path="mio-turno" element={<PersonalePdcMioTurnoRoute />} />
+          </Route>
+        </Route>
+      </Route>
+
+      {/* Dashboard admin — Pipeline trasversale (Sprint 8.0 MR 6, entry 171) */}
+      <Route element={<ProtectedRoute />}>
+        <Route element={<AppLayout />}>
+          <Route path="/admin">
+            <Route index element={<Navigate to="/admin/pipeline" replace />} />
+            <Route path="pipeline" element={<AdminPipelineOverviewRoute />} />
           </Route>
         </Route>
       </Route>
