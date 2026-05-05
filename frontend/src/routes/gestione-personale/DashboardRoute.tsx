@@ -582,12 +582,20 @@ function PersonalePipelineCard({
 }) {
   const stato = programma.stato_pipeline_pdc;
   const isPubblicato = stato === "VISTA_PUBBLICATA";
-  return (
+  // Sub-MR 2.bis-b (Sprint 8.0): la card è cliccabile (link drilldown
+  // auto-assegna) da PDC_CONFERMATO in poi. Per stati precedenti niente
+  // link (la pagina drilldown bloccherebbe a 409 sul backend).
+  const isCliccabile =
+    stato === "PDC_CONFERMATO" ||
+    stato === "PERSONALE_ASSEGNATO" ||
+    stato === "VISTA_PUBBLICATA";
+  const card = (
     <Card
       className={cnGp(
         "flex items-center justify-between gap-3 p-3",
         stato === "PDC_CONFERMATO" && "border-blue-300 bg-blue-50",
         isPubblicato && "border-emerald-300 bg-emerald-50",
+        isCliccabile && "transition-colors hover:bg-muted/50",
       )}
     >
       <div className="min-w-0 flex-1">
@@ -600,8 +608,22 @@ function PersonalePipelineCard({
       </div>
       {isPubblicato ? (
         <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+      ) : isCliccabile ? (
+        <ChevronRight
+          className="h-4 w-4 shrink-0 text-muted-foreground"
+          aria-hidden
+        />
       ) : null}
     </Card>
+  );
+  if (!isCliccabile) return card;
+  return (
+    <Link
+      to={`/gestione-personale/programmi/${programma.id}/assegna`}
+      className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+    >
+      {card}
+    </Link>
   );
 }
 

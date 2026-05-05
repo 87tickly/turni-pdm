@@ -484,3 +484,33 @@ class AutoAssegnaPersoneResponse(BaseModel):
     assegnazioni: list[AssegnazioneCreataRead]
     mancanze: list[MancanzaRead]
     warning_soft: list[WarningSoftRead]
+
+
+class AssegnaManualeRequest(BaseModel):
+    """Body per ``POST /api/programmi/{id}/assegna-manuale`` (sub-MR 2.bis-b).
+
+    Override manuale: assegna una specifica persona a una specifica
+    ``(turno_pdc_giornata, data)`` bypassando i vincoli HARD del greedy.
+
+    Use case principale: chiudere mancanze residue dell'algoritmo
+    auto-assegna (es. ``tutti_riposo_intraturno_violato`` quando il
+    deposito è sotto-staffato e il pianificatore accetta consapevolmente
+    una violazione del riposo).
+
+    Vincoli applicati lato backend:
+
+    - Programma in stato ``PDC_CONFERMATO`` (stesso check di auto-assegna).
+    - Persona esiste, stessa azienda, ``profilo='PdC'``,
+      ``is_matricola_attiva=True``.
+    - Giornata esiste e appartiene a un turno del programma.
+    - Niente conflitto: persona non già assegnata sulla stessa data,
+      giornata non già coperta sulla stessa data (409 in entrambi i casi).
+    - **Non si controlla**: sede, indisponibilità, riposo intraturno,
+      qualifiche. È l'override consapevole del pianificatore.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    persona_id: int = Field(gt=0)
+    turno_pdc_giornata_id: int = Field(gt=0)
+    data: date

@@ -10,6 +10,187 @@
 
 ---
 
+## 2026-05-05 (173) — Sub-MR 2.bis-b: UI Gestione Personale auto-assegna + override manuale
+
+### Contesto
+
+Chiusura del **2°** dei 3 sub-MR concordati per il MR 2.bis (entry 167).
+Aggiunge l'UI di drilldown per il ruolo ``GESTIONE_PERSONALE`` che
+consuma l'endpoint ``/auto-assegna-persone`` (sub-MR 2.bis-a, entry 172)
++ un endpoint nuovo backend per l'override manuale delle mancanze.
+
+Restano per chiudere lo scope MR 2.bis: **sub-MR 2.bis-c** (side
+effect ``conferma-personale`` con gating su ``delta_copertura_pct ≥ 95%``).
+
+### Modifiche backend
+
+**`backend/src/colazione/schemas/programmi.py`** — nuovo schema:
+
+- ``AssegnaManualeRequest`` con ``persona_id`` (gt=0), ``turno_pdc_giornata_id``
+  (gt=0), ``data`` (ISO YYYY-MM-DD).
+
+**`backend/src/colazione/api/programmi.py`** — endpoint nuovo:
+
+- ``POST /api/programmi/{id}/assegna-manuale``
+  (auth ``GESTIONE_PERSONALE``, response 201 +  ``AssegnazioneCreataRead``):
+  override manuale di una assegnazione, bypassa i vincoli HARD del
+  greedy ma rispetta uniqueness:
+  - 409 se programma non in ``PDC_CONFERMATO``
+  - 404 se persona inesistente / non eleggibile (azienda, profilo,
+    ``is_matricola_attiva``)
+  - 404 se giornata inesistente o non appartenente a turni del
+    programma (JOIN ``TurnoPdc.generation_metadata_json
+    ['giro_materiale_id']`` con i giri del programma)
+  - 409 se ``(persona, data)`` già coperto (vincolo "una persona, una
+    giornata per data" inviolabile anche in override)
+  - 409 se ``(turno_pdc_giornata, data)`` già coperto
+  - **Non** valida sede match, indisponibilità, riposo intraturno.
+    È l'override consapevole del pianificatore.
+- Persistenza con ``stato='pianificato'`` + ``note='override_manuale'``
+  per audit trail.
+
+### Test backend
+
+**`backend/tests/test_api_programmi_conferma.py`** — sezione
+"Assegna manuale (override)" (8 test integration):
+
+- ``test_assegna_manuale_ok``: happy path 201 + verifica
+  ``note='override_manuale'`` su DB.
+- ``test_assegna_manuale_pre_pdc_confermato_409``.
+- ``test_assegna_manuale_persona_inesistente_404``.
+- ``test_assegna_manuale_giornata_di_altro_programma_404``: due setup
+  paralleli (suffix-based persona codice univoche per supportare
+  setup multipli nello stesso test).
+- ``test_assegna_manuale_persona_gia_assegnata_409`` (duplicate
+  ``(persona, data)``).
+- ``test_assegna_manuale_giornata_gia_coperta_409``
+  (duplicate ``(turno_pdc_giornata, data)``).
+- ``test_assegna_manuale_403_pianificatore_pdc``.
+- ``test_assegna_manuale_chiude_mancanza_da_auto_assegna``: workflow
+  end-to-end auto-assegna lascia mancanza (persona indisp) → override
+  forza assegnazione → re-run auto-assegna ha 0 nuove + 100% copertura.
+
+Helper ``_crea_setup_aa`` modificato: persona ``codice_dipendente``
+include il ``programma_suffix`` per supportare 2+ setup nello stesso
+test (vincolo unique ``(azienda_id, codice_dipendente)``).
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/programmi.ts`** — type + wrapper REST nuovi:
+
+- ``AutoAssegnaPersonePayload``, ``AssegnazioneCreata``,
+  ``MotivoMancanza``, ``MancanzaAuto``, ``TipoWarningSoft``,
+  ``WarningSoft``, ``AutoAssegnaPersoneResponse``,
+  ``AssegnaManualePayload``.
+- ``autoAssegnaPersone(id, payload)``,
+  ``assegnaManuale(id, payload)``.
+
+**`frontend/src/hooks/useProgrammi.ts`** — 2 mutation hook:
+
+- ``useAutoAssegnaPersone()`` invalida ``["programmi"]`` +
+  ``["assegnazioni", id]``.
+- ``useAssegnaManuale()`` invalida ``["assegnazioni", id]``.
+
+**`frontend/src/routes/gestione-personale/AssegnaPersoneRoute.tsx`**
+(nuovo, ~430 righe): drilldown route
+``/gestione-personale/programmi/:programmaId/assegna``.
+
+- Header card: nome programma, valido_da/a, badge stato pipeline
+  (blue se PDC_CONFERMATO, amber altrimenti). Banner amber se non
+  PDC_CONFERMATO ("Aspetta che il Pianificatore PdC confermi i turni").
+- Action card: bottone "Esegui auto-assegna…" disabilitato se non
+  PDC_CONFERMATO. Apre dialog con input ``data_da``/``data_a``
+  (default = ``programma.valido_da/a``).
+- ``RisultatoSection`` (transient, in React state — non persistito):
+  - ``KpiRow``: copertura % grande con tone (verde ≥95, amber 71-94,
+    rosso <71) + counters (coperte/totali/nuove/mancanze/warning).
+  - ``MancanzeTable``: per ogni mancanza, riga con data + turno_pdc_id +
+    giornata_id + motivo (label tradotto da enum) + bottone "Override".
+  - ``WarningTable``: warning soft con label tradotto + descrizione.
+  - ``AssegnazioniSummary``: riepilogo conteggio nuove assegnazioni.
+- ``OverrideDialog``: dropdown persone (tutte i PdC attivi
+  dell'azienda — sede non vincolante in override), bottone
+  "Conferma override". Su 201 la riga mancanza viene rimossa
+  client-side e i counters bumpati.
+- Empty state se nessun run effettuato.
+
+**`frontend/src/routes/gestione-personale/DashboardRoute.tsx`** —
+``PersonalePipelineCard`` ora cliccabile (Link) per programmi
+``stato_pipeline_pdc >= PDC_CONFERMATO``: hover effect + chevron →
+porta a ``/gestione-personale/programmi/{id}/assegna``. Per stati
+precedenti, niente link (la pagina drilldown bloccherebbe a 409).
+
+**`frontend/src/routes/AppRoutes.tsx`** — aggiunta route
+``/gestione-personale/programmi/:programmaId/assegna`` sotto il
+guard ``GESTIONE_PERSONALE`` + ``GestionePersonaleLayout``.
+
+### Test frontend
+
+**`frontend/src/routes/gestione-personale/AssegnaPersoneRoute.test.tsx`**
+(nuovo, 5 test):
+
+- Header con nome programma + validità + badge stato.
+- Bottone abilitato quando PDC_CONFERMATO.
+- Bottone disabilitato + warning banner per stati precedenti.
+- Empty state se nessun run.
+- Apertura dialog auto-assegna con date default popolate dal
+  ``valido_da/a`` del programma.
+
+Mock fetch su ``/api/programmi/:id`` + ``/api/persone`` + URL
+inattesi sollevano errore (defensive).
+
+### Verifiche
+
+- ✅ ``uv run mypy --strict src/``: 72 source files clean.
+- ✅ ``uv run ruff check`` su tutti i file MR (programmi.py, schemas,
+  test_api_programmi_conferma): 0 errori. (Pre-esistente debito
+  tecnico ruff nei file builder_giro/, anagrafica.py, ecc. fuori scope.)
+- ✅ ``uv run pytest``: **753 passed, 12 skipped, 0 failed** (+8 nuovi
+  test manual override).
+- ✅ ``pnpm tsc -b --noEmit``: clean.
+- ✅ ``pnpm test --run``: **57 passed | 1 skipped** (+5 nuovi vitest).
+
+### Decisioni di scope rinviate (dichiarate)
+
+- **Sub-MR 2.bis-c**: side effect su ``POST /conferma-personale`` con
+  gating ``delta_copertura_pct ≥ 95%`` (soglia configurabile via env).
+  Richiede di rivalutare il delta% al momento del conferma — strategia
+  da decidere: persistere ``last_delta_pct`` su ``ProgrammaMateriale``
+  (overwrite a ogni run di auto-assegna) o ricalcolare live in
+  ``conferma-personale`` runnando l'algoritmo internamente.
+- **Persistenza report**: i risultati di ogni run sono transient
+  (React state). Per uno storico/audit serve una tabella
+  ``auto_assegna_run`` (non in scope).
+- **Override DELETE / RIASSIGN**: oggi solo CREATE. Per riassegnare
+  una giornata, l'utente deve passare da admin/SQL. Considerare un
+  endpoint ``DELETE /api/assegnazioni-giornata/{id}`` in futuro.
+- **Dialog accessibility warning**: vitest segnala "Missing
+  ``aria-describedby`` for DialogContent". Non blocca i test ma
+  andrebbe pulito (richiede aggiornare ``components/ui/Dialog.tsx``,
+  cross-cutting). Da fare separatamente.
+
+### Stato
+
+- ✅ Codice 2.bis-b pronto (1 endpoint backend + 8 test integration +
+  2 wrapper API + 2 hook + 1 route nuova + 5 test vitest + link da
+  dashboard).
+- ⏳ Commit + push + deploy backend Railway + frontend Railway.
+
+### Prossimo step
+
+Sub-MR 2.bis-c: gating su ``conferma-personale``. Strategia
+proposta:
+
+1. Nuovo campo opzionale ``ProgrammaMateriale.copertura_pct: float | None``
+   (migration alembic 0033) — popolato dall'endpoint ``/auto-assegna-persone``
+   ad ogni run.
+2. ``POST /conferma-personale`` 409 se ``copertura_pct < soglia`` (env
+   default 95).
+3. UI: bottone "Conferma personale" sulla dashboard mostra il delta%
+   corrente + 409 inline se sotto soglia.
+
+---
+
 ## 2026-05-05 (172) — Sub-MR 2.bis-a: algoritmo auto-assegna persone PdC (backend)
 
 ### Contesto

@@ -16,6 +16,8 @@ import {
 import {
   addRegola,
   archiviaProgramma,
+  assegnaManuale,
+  autoAssegnaPersone,
   confermaMateriale,
   confermaManutenzione,
   confermaPdc,
@@ -28,6 +30,10 @@ import {
   pubblicaProgramma,
   pubblicaVistaPdc,
   sbloccaProgramma,
+  type AssegnaManualePayload,
+  type AssegnazioneCreata,
+  type AutoAssegnaPersonePayload,
+  type AutoAssegnaPersoneResponse,
   type BuilderRunRead,
   type ListProgrammiParams,
   type ProgrammaDettaglioRead,
@@ -232,5 +238,62 @@ export function useSbloccaProgramma(): UseMutationResult<
   return useMutation({
     mutationFn: ({ id, payload }) => sbloccaProgramma(id, payload),
     onSuccess: () => invalidatePipelineQueries(qc),
+  });
+}
+
+// =====================================================================
+// Sub-MR 2.bis-a/b: auto-assegna persone + override manuale
+// =====================================================================
+
+interface AutoAssegnaArgs {
+  id: number;
+  payload: AutoAssegnaPersonePayload;
+}
+
+/**
+ * Mutation hook per `POST /api/programmi/{id}/auto-assegna-persone`.
+ * Sub-MR 2.bis-a (Sprint 8.0).
+ *
+ * Invalida ``["programmi"]`` (lo stato pipeline non cambia ma la
+ * dashboard può voler refreshare KPI dopo il run) + nuova chiave
+ * ``["assegnazioni", id]`` per la pagina drilldown.
+ */
+export function useAutoAssegnaPersone(): UseMutationResult<
+  AutoAssegnaPersoneResponse,
+  Error,
+  AutoAssegnaArgs
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }) => autoAssegnaPersone(id, payload),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: PROGRAMMI_KEY });
+      void qc.invalidateQueries({ queryKey: ["assegnazioni", vars.id] });
+    },
+  });
+}
+
+interface AssegnaManualeArgs {
+  id: number;
+  payload: AssegnaManualePayload;
+}
+
+/**
+ * Mutation hook per `POST /api/programmi/{id}/assegna-manuale`.
+ * Sub-MR 2.bis-b (Sprint 8.0). Override consapevole: bypassa HARD
+ * constraints del greedy ma rispetta uniqueness (no doppia
+ * persona/data, no doppia giornata/data).
+ */
+export function useAssegnaManuale(): UseMutationResult<
+  AssegnazioneCreata,
+  Error,
+  AssegnaManualeArgs
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }) => assegnaManuale(id, payload),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: ["assegnazioni", vars.id] });
+    },
   });
 }

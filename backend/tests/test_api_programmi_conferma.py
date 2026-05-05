@@ -990,8 +990,13 @@ async def _crea_setup_aa(
             assert g_row is not None
             giornate_ids.append(int(g_row[0]))
 
-        # 6) N persone nel depot
+        # 6) N persone nel depot. Codice unico per suffix per
+        # supportare 2+ setup nello stesso test (es. test giornata
+        # di altro programma).
         persone_ids: list[int] = []
+        # Compatto (max 40 char):  TEST_AAM<suffix>_<idx>. ``codice_dipendente``
+        # ha unique (azienda_id, codice_dipendente).
+        suffix_safe = programma_suffix[:20].replace(" ", "_")
         for i in range(n_persone):
             p_row = (
                 await session.execute(
@@ -1005,7 +1010,7 @@ async def _crea_setup_aa(
                         "RETURNING id"
                     ),
                     {
-                        "c": f"{_AA_PERSONA_PREFIX}{i:03d}",
+                        "c": f"{_AA_PERSONA_PREFIX}{suffix_safe}_{i:03d}",
                         "nome": f"PdC{i}",
                         "did": depot_id,
                     },
@@ -1231,3 +1236,286 @@ async def test_auto_assegna_persisted_su_db(client: TestClient) -> None:
         assert len(rows) == 1
         assert rows[0].stato == "pianificato"
         assert rows[0].data == date(2026, 5, 4)
+
+
+# =====================================================================
+# Assegna manuale (override) — Sub-MR 2.bis-b (Sprint 8.0)
+# =====================================================================
+
+
+async def test_assegna_manuale_ok(client: TestClient) -> None:
+    """Override manuale: persona compatibile, giornata vuota → 201."""
+    setup = await _crea_setup_aa(
+        "manuale_ok",
+        n_persone=1,
+        n_giornate=1,
+        valido_da=date(2026, 5, 4),
+        valido_a=date(2026, 5, 4),
+    )
+    persone_ids = setup["persone_ids"]
+    giornate_ids = setup["giornate_ids"]
+    assert isinstance(persone_ids, list)
+    assert isinstance(giornate_ids, list)
+
+    res = client.post(
+        f"/api/programmi/{setup['programma_id']}/assegna-manuale",
+        json={
+            "persona_id": persone_ids[0],
+            "turno_pdc_giornata_id": giornate_ids[0],
+            "data": "2026-05-04",
+        },
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["persona_id"] == persone_ids[0]
+    assert body["turno_pdc_giornata_id"] == giornate_ids[0]
+    assert body["data"] == "2026-05-04"
+    # Verifica nota="override_manuale" persistita per audit
+    async with session_scope() as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT note FROM assegnazione_giornata "
+                    "WHERE persona_id = :pid AND data = :d"
+                ),
+                {"pid": persone_ids[0], "d": date(2026, 5, 4)},
+            )
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].note == "override_manuale"
+
+
+async def test_assegna_manuale_pre_pdc_confermato_409(
+    client: TestClient,
+) -> None:
+    """Programma in MATERIALE_CONFERMATO → 409."""
+    pid = await _crea_programma_in_stato(
+        "manuale_pre_409", "MATERIALE_CONFERMATO"
+    )
+    res = client.post(
+        f"/api/programmi/{pid}/assegna-manuale",
+        json={
+            "persona_id": 1,
+            "turno_pdc_giornata_id": 1,
+            "data": "2026-05-04",
+        },
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res.status_code == 409
+    assert "PDC_CONFERMATO" in res.json()["detail"]
+
+
+async def test_assegna_manuale_persona_inesistente_404(
+    client: TestClient,
+) -> None:
+    """persona_id non esiste → 404."""
+    setup = await _crea_setup_aa("manuale_pers_404", n_persone=1, n_giornate=1)
+    giornate_ids = setup["giornate_ids"]
+    assert isinstance(giornate_ids, list)
+    res = client.post(
+        f"/api/programmi/{setup['programma_id']}/assegna-manuale",
+        json={
+            "persona_id": 999999,
+            "turno_pdc_giornata_id": giornate_ids[0],
+            "data": "2026-05-04",
+        },
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res.status_code == 404
+    assert "persona" in res.json()["detail"].lower()
+
+
+async def test_assegna_manuale_giornata_di_altro_programma_404(
+    client: TestClient,
+) -> None:
+    """Giornata che NON appartiene al programma target → 404."""
+    setup_a = await _crea_setup_aa(
+        "manuale_a", n_persone=1, n_giornate=1
+    )
+    setup_b = await _crea_setup_aa(
+        "manuale_b", n_persone=1, n_giornate=1
+    )
+    persone_a_ids = setup_a["persone_ids"]
+    giornate_b_ids = setup_b["giornate_ids"]
+    assert isinstance(persone_a_ids, list)
+    assert isinstance(giornate_b_ids, list)
+    res = client.post(
+        f"/api/programmi/{setup_a['programma_id']}/assegna-manuale",
+        json={
+            "persona_id": persone_a_ids[0],
+            "turno_pdc_giornata_id": giornate_b_ids[0],  # giornata di B
+            "data": "2026-05-04",
+        },
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res.status_code == 404
+    assert "non appartiene" in res.json()["detail"]
+
+
+async def test_assegna_manuale_persona_gia_assegnata_409(
+    client: TestClient,
+) -> None:
+    """Persona ha già un'assegnazione sulla stessa data → 409."""
+    setup = await _crea_setup_aa(
+        "manuale_doppia_pers",
+        n_persone=1,
+        n_giornate=2,
+        valido_da=date(2026, 5, 4),
+        valido_a=date(2026, 5, 4),
+    )
+    persone_ids = setup["persone_ids"]
+    giornate_ids = setup["giornate_ids"]
+    assert isinstance(persone_ids, list)
+    assert isinstance(giornate_ids, list)
+    # 1° assegnazione manuale
+    r1 = client.post(
+        f"/api/programmi/{setup['programma_id']}/assegna-manuale",
+        json={
+            "persona_id": persone_ids[0],
+            "turno_pdc_giornata_id": giornate_ids[0],
+            "data": "2026-05-04",
+        },
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert r1.status_code == 201
+    # 2° tentativo stesso (persona, data) ma giornata diversa → 409
+    r2 = client.post(
+        f"/api/programmi/{setup['programma_id']}/assegna-manuale",
+        json={
+            "persona_id": persone_ids[0],
+            "turno_pdc_giornata_id": giornate_ids[1],
+            "data": "2026-05-04",
+        },
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert r2.status_code == 409
+    assert "ha già" in r2.json()["detail"]
+
+
+async def test_assegna_manuale_giornata_gia_coperta_409(
+    client: TestClient,
+) -> None:
+    """(turno_pdc_giornata, data) già coperto → 409."""
+    setup = await _crea_setup_aa(
+        "manuale_doppia_giorn",
+        n_persone=2,
+        n_giornate=1,
+        valido_da=date(2026, 5, 4),
+        valido_a=date(2026, 5, 4),
+    )
+    persone_ids = setup["persone_ids"]
+    giornate_ids = setup["giornate_ids"]
+    assert isinstance(persone_ids, list)
+    assert isinstance(giornate_ids, list)
+    r1 = client.post(
+        f"/api/programmi/{setup['programma_id']}/assegna-manuale",
+        json={
+            "persona_id": persone_ids[0],
+            "turno_pdc_giornata_id": giornate_ids[0],
+            "data": "2026-05-04",
+        },
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert r1.status_code == 201
+    # 2° tentativo stessa giornata stessa data ma persona diversa → 409
+    r2 = client.post(
+        f"/api/programmi/{setup['programma_id']}/assegna-manuale",
+        json={
+            "persona_id": persone_ids[1],
+            "turno_pdc_giornata_id": giornate_ids[0],
+            "data": "2026-05-04",
+        },
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert r2.status_code == 409
+    assert "già coperta" in r2.json()["detail"]
+
+
+async def test_assegna_manuale_403_pianificatore_pdc(
+    client: TestClient,
+) -> None:
+    """PIANIFICATORE_PDC non può fare override (è ruolo Personale)."""
+    setup = await _crea_setup_aa("manuale_403", n_persone=1, n_giornate=1)
+    persone_ids = setup["persone_ids"]
+    giornate_ids = setup["giornate_ids"]
+    assert isinstance(persone_ids, list)
+    assert isinstance(giornate_ids, list)
+    res = client.post(
+        f"/api/programmi/{setup['programma_id']}/assegna-manuale",
+        json={
+            "persona_id": persone_ids[0],
+            "turno_pdc_giornata_id": giornate_ids[0],
+            "data": "2026-05-04",
+        },
+        headers=_h(_ruolo_token(client, "pianificatore_pdc")),
+    )
+    assert res.status_code == 403
+
+
+async def test_assegna_manuale_chiude_mancanza_da_auto_assegna(
+    client: TestClient,
+) -> None:
+    """Workflow completo: auto-assegna lascia mancanza (persona indisp),
+    override la chiude."""
+    setup = await _crea_setup_aa(
+        "manuale_chiude_mancanza",
+        n_persone=1,
+        n_giornate=1,
+        valido_da=date(2026, 5, 4),
+        valido_a=date(2026, 5, 4),
+    )
+    persone_ids = setup["persone_ids"]
+    giornate_ids = setup["giornate_ids"]
+    assert isinstance(persone_ids, list)
+    assert isinstance(giornate_ids, list)
+
+    # Indisponibilità che blocca l'auto-assegna
+    async with session_scope() as session:
+        await session.execute(
+            text(
+                "INSERT INTO indisponibilita_persona "
+                "(persona_id, tipo, data_inizio, data_fine, is_approvato) "
+                "VALUES (:pid, 'ferie', :da, :a, TRUE)"
+            ),
+            {
+                "pid": persone_ids[0],
+                "da": date(2026, 5, 4),
+                "a": date(2026, 5, 4),
+            },
+        )
+
+    # Auto-assegna → mancanza
+    r_auto = client.post(
+        f"/api/programmi/{setup['programma_id']}/auto-assegna-persone",
+        json={"data_da": "2026-05-04", "data_a": "2026-05-04"},
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert r_auto.status_code == 200
+    assert r_auto.json()["n_assegnazioni_create"] == 0
+    assert len(r_auto.json()["mancanze"]) == 1
+
+    # Override manuale: forza la persona indisponibile
+    r_man = client.post(
+        f"/api/programmi/{setup['programma_id']}/assegna-manuale",
+        json={
+            "persona_id": persone_ids[0],
+            "turno_pdc_giornata_id": giornate_ids[0],
+            "data": "2026-05-04",
+        },
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert r_man.status_code == 201
+
+    # Re-run auto-assegna: ora la giornata è coperta, n_assegnazioni_create=0
+    r_auto2 = client.post(
+        f"/api/programmi/{setup['programma_id']}/auto-assegna-persone",
+        json={"data_da": "2026-05-04", "data_a": "2026-05-04"},
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert r_auto2.status_code == 200
+    body2 = r_auto2.json()
+    assert body2["n_assegnazioni_create"] == 0
+    assert body2["n_giornate_coperte"] == 1
+    assert body2["delta_copertura_pct"] == 100.0
+    assert body2["mancanze"] == []

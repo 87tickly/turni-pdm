@@ -13,6 +13,7 @@ import { ProgrammaGiriRoute } from "@/routes/pianificatore-giro/ProgrammaGiriRou
 import { ProgrammiRoute } from "@/routes/pianificatore-giro/ProgrammiRoute";
 import { TurniPdcGiroRoute } from "@/routes/pianificatore-giro/TurniPdcGiroRoute";
 import { TurnoPdcDettaglioRoute } from "@/routes/pianificatore-giro/TurnoPdcDettaglioRoute";
+import { GestionePersonaleAssegnaPersoneRoute } from "@/routes/gestione-personale/AssegnaPersoneRoute";
 import { GestionePersonaleCalendarioRoute } from "@/routes/gestione-personale/CalendarioRoute";
 import { GestionePersonaleDashboardRoute } from "@/routes/gestione-personale/DashboardRoute";
 import { GestionePersonaleDepositiRoute } from "@/routes/gestione-personale/DepositiRoute";
@@ -129,6 +130,11 @@ export function AppRoutes() {
               <Route
                 path="indisponibilita"
                 element={<GestionePersonaleIndisponibilitaRoute />}
+              />
+              {/* Sub-MR 2.bis-b (Sprint 8.0): drilldown auto-assegna */}
+              <Route
+                path="programmi/:programmaId/assegna"
+                element={<GestionePersonaleAssegnaPersoneRoute />}
               />
             </Route>
           </Route>

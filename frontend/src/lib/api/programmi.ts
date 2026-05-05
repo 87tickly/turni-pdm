@@ -318,3 +318,112 @@ export async function sbloccaProgramma(
     body: payload,
   });
 }
+
+// =====================================================================
+// Auto-assegna persone — Sub-MR 2.bis-a (Sprint 8.0)
+// =====================================================================
+
+/**
+ * Body per `POST /api/programmi/{id}/auto-assegna-persone`.
+ *
+ * Entrambi i campi sono opzionali. Se omessi, il backend usa
+ * `programma.valido_da` / `programma.valido_a`. Le date sono ISO
+ * `YYYY-MM-DD`. Validatore Pydantic richiede `data_da ≤ data_a`.
+ */
+export interface AutoAssegnaPersonePayload {
+  data_da?: string | null;
+  data_a?: string | null;
+}
+
+/** Una nuova assegnazione persona → giornata creata dal greedy. */
+export interface AssegnazioneCreata {
+  persona_id: number;
+  turno_pdc_giornata_id: number;
+  data: string;
+}
+
+/**
+ * Una giornata non coperta dall'algoritmo + motivo. Allineato con enum
+ * server-side `MotivoMancanza` (vedi
+ * `colazione.domain.normativa.assegnazione_persone`).
+ */
+export type MotivoMancanza =
+  | "nessun_pdc_deposito"
+  | "tutti_indisponibili"
+  | "tutti_gia_assegnati"
+  | "tutti_riposo_intraturno_violato"
+  | "nessun_pdc_candidato";
+
+export interface MancanzaAuto {
+  turno_pdc_giornata_id: number;
+  turno_pdc_id: number;
+  data: string;
+  motivo: MotivoMancanza;
+}
+
+/**
+ * Tipo del warning soft. Allineato con enum server-side `TipoWarningSoft`.
+ */
+export type TipoWarningSoft =
+  | "fr_cap_settimana_superato"
+  | "fr_cap_28gg_superato"
+  | "riposo_settimanale_violato"
+  | "primo_giorno_post_riposo_mattina";
+
+export interface WarningSoft {
+  persona_id: number;
+  data: string;
+  tipo: TipoWarningSoft;
+  descrizione: string;
+}
+
+/** Response dell'auto-assegna. KPI principale: `delta_copertura_pct`. */
+export interface AutoAssegnaPersoneResponse {
+  finestra_data_da: string;
+  finestra_data_a: string;
+  n_giornate_totali: number;
+  n_giornate_coperte: number;
+  n_assegnazioni_create: number;
+  delta_copertura_pct: number;
+  assegnazioni: AssegnazioneCreata[];
+  mancanze: MancanzaAuto[];
+  warning_soft: WarningSoft[];
+}
+
+export async function autoAssegnaPersone(
+  id: number,
+  payload: AutoAssegnaPersonePayload,
+): Promise<AutoAssegnaPersoneResponse> {
+  return apiJson<AutoAssegnaPersoneResponse>(
+    `/api/programmi/${id}/auto-assegna-persone`,
+    { method: "POST", body: payload },
+  );
+}
+
+// =====================================================================
+// Assegna manuale (override) — Sub-MR 2.bis-b (Sprint 8.0)
+// =====================================================================
+
+/**
+ * Body per `POST /api/programmi/{id}/assegna-manuale`.
+ *
+ * Override consapevole del pianificatore: bypassa i vincoli HARD del
+ * greedy (sede, indisp, riposo intraturno) ma rispetta uniqueness
+ * (no doppia persona/data, no doppia giornata/data).
+ */
+export interface AssegnaManualePayload {
+  persona_id: number;
+  turno_pdc_giornata_id: number;
+  /** ISO YYYY-MM-DD. */
+  data: string;
+}
+
+export async function assegnaManuale(
+  id: number,
+  payload: AssegnaManualePayload,
+): Promise<AssegnazioneCreata> {
+  return apiJson<AssegnazioneCreata>(
+    `/api/programmi/${id}/assegna-manuale`,
+    { method: "POST", body: payload },
+  );
+}

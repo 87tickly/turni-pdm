@@ -68,6 +68,7 @@ from colazione.models.programmi import (
 from colazione.models.turni_pdc import TurnoPdc, TurnoPdcGiornata
 from colazione.schemas.corse import CorsaImportRunRead
 from colazione.schemas.programmi import (
+    AssegnaManualeRequest,
     AssegnazioneCreataRead,
     AutoAssegnaPersoneRequest,
     AutoAssegnaPersoneResponse,
@@ -990,6 +991,154 @@ async def auto_assegna_persone_endpoint(
             )
             for w in risultato.warning_soft
         ],
+    )
+
+
+@router.post(
+    "/{programma_id}/assegna-manuale",
+    response_model=AssegnazioneCreataRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Override manuale: assegna persona a giornata (sub-MR 2.bis-b)",
+)
+async def assegna_manuale(
+    programma_id: int,
+    payload: AssegnaManualeRequest,
+    user: CurrentUser = _authz_personale,
+    session: AsyncSession = Depends(get_session),
+) -> AssegnazioneCreataRead:
+    """Override manuale di una assegnazione: bypass vincoli HARD greedy.
+
+    Use case: chiudere mancanze residue dell'algoritmo auto-assegna
+    (sub-MR 2.bis-a) quando il pianificatore vuole forzare una
+    persona su una giornata anche se l'algoritmo l'avrebbe scartata
+    (es. tutti_riposo_intraturno_violato).
+
+    **Validazioni applicate**:
+
+    - 409 se programma non in ``PDC_CONFERMATO``
+    - 404 se persona inesistente / non eleggibile (azienda, profilo,
+      attiva)
+    - 404 se giornata inesistente / non appartenente a turni del
+      programma (via JOIN ``TurnoPdc.generation_metadata_json
+      ['giro_materiale_id']`` con i giri del programma)
+    - 409 se persona già assegnata sulla stessa data (vincolo
+      "una persona, una giornata per data" — INVIOLABILE anche in
+      override)
+    - 409 se giornata già coperta sulla stessa data
+
+    **Non validato** (override consapevole): sede match, indisponibilità,
+    riposo intraturno, qualifiche.
+    """
+    p = await _get_programma_or_404(
+        session, programma_id, user.azienda_id, for_update=True
+    )
+    if p.stato_pipeline_pdc != StatoPipelinePdc.PDC_CONFERMATO.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"programma in stato pipeline {p.stato_pipeline_pdc!r}: "
+                "assegna-manuale richiede PDC_CONFERMATO"
+            ),
+        )
+
+    # Persona check (azienda + PdC + attiva)
+    persona_check = await session.execute(
+        select(Persona.id).where(
+            Persona.id == payload.persona_id,
+            Persona.azienda_id == user.azienda_id,
+            Persona.profilo == "PdC",
+            Persona.is_matricola_attiva.is_(True),
+        )
+    )
+    if persona_check.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"persona {payload.persona_id} non trovata o non eleggibile "
+                "(azienda diversa, profilo non PdC, o matricola non attiva)"
+            ),
+        )
+
+    # Giornata check: deve appartenere a un turno del programma
+    giri_subq = (
+        select(GiroMateriale.id)
+        .where(
+            GiroMateriale.programma_id == programma_id,
+            GiroMateriale.azienda_id == user.azienda_id,
+        )
+        .scalar_subquery()
+    )
+    giornata_check = await session.execute(
+        select(TurnoPdcGiornata.id)
+        .join(TurnoPdc, TurnoPdc.id == TurnoPdcGiornata.turno_pdc_id)
+        .where(
+            TurnoPdcGiornata.id == payload.turno_pdc_giornata_id,
+            TurnoPdc.azienda_id == user.azienda_id,
+            cast(
+                TurnoPdc.generation_metadata_json["giro_materiale_id"].astext,
+                BigInteger,
+            ).in_(giri_subq),
+        )
+    )
+    if giornata_check.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"giornata {payload.turno_pdc_giornata_id} non trovata "
+                f"o non appartiene al programma {programma_id}"
+            ),
+        )
+
+    # Conflitto: persona già assegnata stessa data
+    confl_persona = await session.execute(
+        select(AssegnazioneGiornata.id).where(
+            AssegnazioneGiornata.persona_id == payload.persona_id,
+            AssegnazioneGiornata.data == payload.data,
+            AssegnazioneGiornata.stato != "annullato",
+        )
+    )
+    if confl_persona.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"persona {payload.persona_id} ha già un'assegnazione "
+                f"per il {payload.data.isoformat()}"
+            ),
+        )
+
+    # Conflitto: giornata già coperta stessa data
+    confl_giornata = await session.execute(
+        select(AssegnazioneGiornata.id).where(
+            AssegnazioneGiornata.turno_pdc_giornata_id
+            == payload.turno_pdc_giornata_id,
+            AssegnazioneGiornata.data == payload.data,
+            AssegnazioneGiornata.stato != "annullato",
+        )
+    )
+    if confl_giornata.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"giornata {payload.turno_pdc_giornata_id} già coperta "
+                f"il {payload.data.isoformat()}"
+            ),
+        )
+
+    # Insert con note='override_manuale' per audit
+    nuova = AssegnazioneGiornata(
+        persona_id=payload.persona_id,
+        data=payload.data,
+        turno_pdc_giornata_id=payload.turno_pdc_giornata_id,
+        stato="pianificato",
+        note="override_manuale",
+    )
+    session.add(nuova)
+    await session.commit()
+
+    return AssegnazioneCreataRead(
+        persona_id=payload.persona_id,
+        turno_pdc_giornata_id=payload.turno_pdc_giornata_id,
+        data=payload.data,
     )
 
 
