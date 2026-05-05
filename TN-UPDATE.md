@@ -10,6 +10,119 @@
 
 ---
 
+## 2026-05-05 (163) — Sprint 7.10 MR α.8.fix: min-w-0 chain blocca propagazione width Gantt zoom 200%
+
+### Contesto
+
+Smoke utente post MR α.8 (entry 159) con doppio screenshot:
+- **Screen 1** (Chrome stable, DevTools aperto): toolbar Gantt
+  destra ancora invisibile a zoom 100%.
+- **Screen 2** (stesso browser, DevTools chiuso): *"quando metto
+  200% sparisce tutto. anche la possibilità di cambiare la %"*.
+
+Verifiche server-side già clean: bundle production
+`index-_yVK81yc.js` contiene `Maximize2`/`Minimize2`, CSS contiene
+tutte le classi nuove (`min-w-0`, `shrink-0`, `inset-2`, ecc.),
+no service worker, no chunking dinamico. Quindi niente regressione
+build né cache.
+
+### Diagnosi (root cause)
+
+Il bug è geometrico CSS, non di codice React. Il chain di flex-col
+parent del Gantt è:
+
+```
+<main flex-1 overflow-auto p-6>   ← AppLayout
+  <Outlet>
+    <div flex flex-col gap-4>     ← GiroDettaglioRoute outer
+      <HeroSection />
+      <section flex flex-col gap-4>
+        <div flex flex-col gap-4>
+          <Card overflow-hidden>  ← GanttSection
+            <toolbar flex flex-wrap justify-between>
+            <scroll-wrapper overflow-x-auto>
+              <div style={{ width: innerWidth }}>  ← 2140px @ zoom 200%
+```
+
+Default su flex-item: `min-width: auto` = larghezza min-content.
+Lo scroll-wrapper interno con figlio `style={{ width: 2140px }}`
+ha min-content = 2140 (lo style inline forza la min-width).
+`overflow-x-auto` da solo NON azzera min-width nell'algoritmo
+flex-layout (l'azzeramento serve esplicito sul flex-item, e il
+vero flex-item del chain qui è il Card, non lo scroll-wrapper).
+
+Risultato: la min-content propaga in cascata ai flex-col
+ancestors fino al main. Il Card si espande a 2140px, la toolbar
+(block dentro Card, width=Card.width) diventa 2140px, e
+`justify-between` porta la sezione destra (zoom + display +
+fullscreen) all'estremità destra a position 1880-2140 — **fuori
+dal viewport** visibile (tipicamente 1500-1700px con sidebar
+aperta).
+
+A zoom 100% innerWidth = 1180 → fit sotto viewport, di solito ok.
+Ma con sidebar aperta + viewport stretto + qualche margin,
+1180 può comunque sforare. Da qui la regressione percepita anche
+a zoom 100% nello smoke utente.
+
+### Modifiche
+
+**`frontend/src/components/layout/AppLayout.tsx`**:
+
+- `<div className="flex min-w-0 flex-1 flex-col">` (era senza min-w-0)
+- `<main className="min-w-0 flex-1 overflow-auto p-6">` (idem)
+
+Firewall di alto livello: blocca la propagazione del min-content
+dei figli sul main, indipendentemente da quale pagina sta sotto
+Outlet. Vale per qualsiasi route futura con content potenzialmente
+largo.
+
+**`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`**:
+
+- `<div className="flex min-w-0 flex-col gap-4">` (outer wrapper)
+- `<section className="flex min-w-0 flex-col gap-4">` (riga 210)
+- `<div className="flex min-w-0 flex-col gap-4">` (riga 211)
+- `<Card className="min-w-0 overflow-hidden ...">` (riga 731)
+
+Difesa in profondità: ogni livello del flex-col chain ha
+`min-w-0` esplicito. Il Card stesso, con `overflow-hidden +
+min-w-0`, è il vero firewall: anche se il chain superiore
+fallisse, il Card non si espande mai oltre il proprio slot.
+
+### Verifiche
+
+- ✅ `pnpm tsc -b --noEmit`: clean.
+- ✅ `pnpm build`: 1786 modules, bundle 663KB / 180KB gz
+  (+3KB rispetto a entry 159 per i nuovi commenti CSS).
+- ⚠️ Test non rieseguiti: il fix è puramente CSS layout, niente
+  logica React/state nuova. Verifica funzionale → production.
+
+### Stato
+
+- ✅ Diagnosi root cause: min-content propagation in flex-col chain.
+- ✅ Fix CSS chirurgico (`min-w-0` su 5 punti).
+- ⏳ Deploy frontend Railway.
+- ⏳ Smoke utente: a zoom 100% e 200% la toolbar destra deve
+  restare nel viewport con tutti i controlli (zoom, scroll
+  ←→, display, fullscreen).
+
+### Limitazioni dichiarate
+
+1. **Verifica solo statica**: non ho potuto smoke browser locale
+   (no backend up + CORS production). Se il fix non risolve, mi
+   serve dal browser dell'utente: snapshot DOM tree espanso del
+   Card del Gantt + screenshot DevTools Computed con larghezza
+   effettiva del Card e della toolbar.
+2. **Possibile fix incompleto**: se l'Outlet ha un wrapper
+   intermedio non visibile in AppLayout, il min-w-0 sul main
+   potrebbe non bastare. In tal caso fallback hard:
+   `overflow-x-clip` al main.
+
+### Prossimo step
+
+Commit + push + deploy frontend Railway → smoke utente.
+
+---
+
 ## 2026-05-05 (162) — Sprint 7.10 MR α.8 frontend: banner trasparenza + acronimo VC + Gantt compatto
 
 ### Contesto

@@ -196,7 +196,7 @@ export function GiroDettaglioRoute() {
   const programmaId = typeof meta.programma_id === "number" ? meta.programma_id : null;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <Link
         to={
           programmaId !== null
@@ -210,8 +210,8 @@ export function GiroDettaglioRoute() {
 
       <HeroSection giro={giro} onGeneraPdc={() => setPdcDialogOpen(true)} />
 
-      <section className="flex flex-col gap-4">
-        <div className="flex flex-col gap-4">
+      <section className="flex min-w-0 flex-col gap-4">
+        <div className="flex min-w-0 flex-col gap-4">
           <GanttSection
             giro={giro}
             selectedBlocco={selectedBlocco}
@@ -730,7 +730,14 @@ function GanttSection({
       )}
       <Card
         className={cn(
-          "overflow-hidden",
+          // Sprint 7.10 MR α.8.fix: `min-w-0` sul Card è il vero
+          // firewall. Il Card è flex-item del wrapper esterno della
+          // pagina (anche lui min-w-0). Senza min-w-0 sul Card
+          // stesso, il scroll-wrapper interno con `style={{ width:
+          // 2140px }}` (a zoom 200%) propaga la min-content fino al
+          // Card e oltre, espandendo la toolbar e spingendo la
+          // sezione destra fuori viewport.
+          "min-w-0 overflow-hidden",
           selectedBlocco !== null && "gantt-selecting",
           // Sprint 7.10 MR α.8: in fullscreen il Card occupa la
           // viewport (inset-2 = 8px da ogni bordo) e diventa flex-col

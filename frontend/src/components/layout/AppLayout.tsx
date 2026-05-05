@@ -16,9 +16,14 @@ export function AppLayout() {
     <SidebarProvider>
       <div className="flex h-screen overflow-hidden text-foreground">
         <Sidebar />
-        <div className="flex flex-1 flex-col">
+        {/* Sprint 7.10 MR α.8.fix: `min-w-0` sul colonna right + sul
+            main blocca la propagazione del width dei figli (es. Gantt
+            a zoom 200% con innerWidth 2140px) attraverso tutto il
+            flex-col chain. Senza, il content largo espande Card →
+            toolbar → spinge la sezione destra fuori dal viewport. */}
+        <div className="flex min-w-0 flex-1 flex-col">
           <Header />
-          <main className="flex-1 overflow-auto p-6">
+          <main className="min-w-0 flex-1 overflow-auto p-6">
             <Outlet />
           </main>
         </div>
