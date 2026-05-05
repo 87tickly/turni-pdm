@@ -55,7 +55,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.config import get_settings
 from colazione.domain.builder_pdc.builder import (
+    ACCESSORI_MIN_STANDARD,
     CONDOTTA_MAX_MIN,
+    FINE_SERVIZIO_MIN,
     PRESTAZIONE_MAX_NOTTURNO,
     PRESTAZIONE_MAX_STANDARD,
     BuilderTurnoPdcResult,
@@ -118,6 +120,11 @@ class _SegmentoTurno:
     idx_start: int
     idx_end: int
     deposito_assegnato: Depot | None
+    # Sprint 7.10 MR α.5.fix: vettura pre-calcolata dalla heuristic
+    # (= già verificata via API live durante la scelta deposito).
+    # Se valorizzata, `_aggiungi_vettura_rientro` la riusa senza
+    # una seconda chiamata API.
+    vettura_pre: TrenoVettura | None = None
 
 
 def _eccede_cap_prestazione(draft: _GiornataPdcDraft) -> bool:
@@ -229,64 +236,110 @@ def _dp_segmenta_giornata(
     return segmenti
 
 
-def _scegli_deposito_per_segmento(
+async def _scegli_deposito_per_segmento(
     blocchi_segmento: list[GiroBlocco],
     depositi: list[Depot],
-) -> Depot | None:
-    """Heuristic post-DP: scegli il miglior deposito per il segmento.
+    *,
+    ora_chiusura_min: int,
+    live_client: httpx.AsyncClient,
+) -> tuple[Depot | None, TrenoVettura | None]:
+    """Heuristic post-DP con quality gate VETTURA — Sprint 7.10 MR α.5.fix.
 
-    Strategia (in ordine di preferenza):
+    Decisione utente 2026-05-05: *"il turno del deposito di sondrio
+    finisce a lecco e non ci sono vetture, questo vuol dire che non è
+    giusto inserirlo a sondrio"*. Quindi un deposito è candidato solo
+    se il PdC può tornarci a fine turno: o chiude lì naturalmente, o
+    esiste una vettura passiva (treno commerciale reale via API live).
 
-    1. Deposito la cui ``stazione_principale_codice`` coincide con la
-       ``stazione_da_codice`` del primo blocco del segmento. È il
-       caso ideale: il PdC inizia da casa.
-    2. Deposito con stazione_principale = stazione_a del primo blocco
-       o stazione_da/a di un blocco intermedio. Sempre nessun FR
-       perché tocca il deposito durante il segmento.
-    3. Deposito con stazione_principale = stazione_a dell'ultimo blocco
-       del segmento. Il PdC parte da deposito X, ma chiude in casa Y.
-       FR per X (notte fuori), casa per Y al mattino successivo.
-    4. Fallback: il primo deposito con stazione_principale popolata
-       (= almeno il calcolo FR sarà sensato a posteriori).
-    5. Fallback finale: ``None`` (legacy, sede = stazione del materiale).
+    Priorità rivista (con quality gate):
 
-    Per il MVP α.2 limito alla strategia 1+2+3+5 (skip 4): se nessun
-    deposito sta lungo la tratta del segmento, ritorno None — il
-    builder usa il fallback legacy e l'utente vedrà che quel turno
-    ha "Sede PdC: legacy", segnale che la copertura CV è incompleta
-    su quella tratta.
+    1. **Chiusura in casa**: depot.stazione_principale = stazione_a
+       dell'ultimo blocco del segmento → il PdC chiude in casa,
+       niente vettura serve. Vincitore preferenziale.
+    2. **Partenza in casa con vettura**: depot.stazione_principale =
+       stazione_da del primo blocco → serve vettura di rientro.
+       Verifica via ``trova_treno_vettura`` con la stazione di
+       chiusura del segmento. Se trovata → ok, ritorna (depot,
+       vettura). Altrimenti scarta e passa al prossimo.
+    3. **Intermedi con vettura**: stazioni toccate dai blocchi
+       intermedi del segmento. Stesso quality gate: serve vettura.
+    4. **Fallback**: ritorna (None, None) → il builder usa la
+       stazione del materiale come sede legacy.
+
+    Returns ``(depot, vettura_pre_calcolata)``. Se ``vettura_pre_calcolata``
+    è valorizzato, il chiamante può riusarla DIRETTAMENTE senza una
+    seconda chiamata API (= ammortizza il costo).
     """
     if not blocchi_segmento or not depositi:
-        return None
+        return None, None
 
-    # Raccogli tutte le stazioni "toccate" dal segmento (ordine: from
-    # del primo > a di tutti i blocchi).
-    stazioni_toccate: list[str] = []
     primo = blocchi_segmento[0]
-    if primo.stazione_da_codice is not None:
-        stazioni_toccate.append(primo.stazione_da_codice)
-    for b in blocchi_segmento:
-        if b.stazione_a_codice is not None and b.stazione_a_codice not in stazioni_toccate:
-            stazioni_toccate.append(b.stazione_a_codice)
+    ultimo = blocchi_segmento[-1]
+    stazione_chiusura = ultimo.stazione_a_codice
 
-    # Indice deposit by stazione_principale_codice per lookup O(1).
+    # Indice depot by stazione_principale_codice per lookup O(1).
     by_stazione: dict[str, Depot] = {
         d.stazione_principale_codice: d
         for d in depositi
         if d.stazione_principale_codice is not None
     }
 
-    # Strategia 1: stazione_da del primo blocco (= avvio "in casa").
+    # Strategia 1: chiusura in casa (preferenziale, no API call).
+    if stazione_chiusura is not None and stazione_chiusura in by_stazione:
+        return by_stazione[stazione_chiusura], None
+
+    if stazione_chiusura is None:
+        # Senza stazione di chiusura non possiamo cercare vetture →
+        # niente quality gate possibile, scegli il primo candidato
+        # toccato (comportamento legacy pre-α.5.fix).
+        if primo.stazione_da_codice is not None and primo.stazione_da_codice in by_stazione:
+            return by_stazione[primo.stazione_da_codice], None
+        for b in blocchi_segmento:
+            if b.stazione_a_codice is not None and b.stazione_a_codice in by_stazione:
+                return by_stazione[b.stazione_a_codice], None
+        return None, None
+
+    # Lista candidati in ordine di preferenza (stazione_da, poi
+    # intermedi, deduplicati). Stazione_chiusura è già stata gestita
+    # in Strategia 1.
+    candidati_codici: list[str] = []
+    seen_codici: set[str] = set()
     if primo.stazione_da_codice is not None and primo.stazione_da_codice in by_stazione:
-        return by_stazione[primo.stazione_da_codice]
+        candidati_codici.append(primo.stazione_da_codice)
+        seen_codici.add(primo.stazione_da_codice)
+    for b in blocchi_segmento:
+        for s in (b.stazione_da_codice, b.stazione_a_codice):
+            if s is None or s in seen_codici or s not in by_stazione:
+                continue
+            if s == stazione_chiusura:
+                continue  # già gestito da Strategia 1
+            candidati_codici.append(s)
+            seen_codici.add(s)
 
-    # Strategia 2+3: una qualsiasi stazione toccata corrisponde a un depot.
-    for s in stazioni_toccate:
-        if s in by_stazione:
-            return by_stazione[s]
+    # Quality gate VETTURA: per ogni candidato, verifica che esista
+    # un treno commerciale reale di rientro entro la finestra
+    # ammessa. Il primo che passa vince (= meno tempo morto).
+    for codice in candidati_codici:
+        depot = by_stazione[codice]
+        treno = await trova_treno_vettura(
+            stazione_partenza_codice=stazione_chiusura,
+            stazione_arrivo_codice=codice,
+            ora_min_partenza=ora_chiusura_min + VETTURA_GAP_PRE_MIN,
+            max_attesa_min=VETTURA_ATTESA_MAX_MIN,
+            client=live_client,
+        )
+        if treno is not None:
+            return depot, treno
+        logger.info(
+            "Depot %s scartato per segmento (chiusura %s): nessuna vettura "
+            "in finestra %dmin",
+            codice,
+            stazione_chiusura,
+            VETTURA_ATTESA_MAX_MIN,
+        )
 
-    # Nessun match — il segmento non passa da alcun deposito popolato.
-    return None
+    # Nessun candidato passa il quality gate → fallback legacy.
+    return None, None
 
 
 async def genera_turni_pdc_multi(
@@ -410,6 +463,12 @@ async def genera_turni_pdc_multi(
 
     # Costruisci tutti i segmenti DP per tutte le giornate-giro.
     segmenti_globali: list[_SegmentoTurno] = []
+    # Pre-step (sync, no API): calcola i ranges DP per ogni giornata.
+    # La heuristic deposito (async, con API live) viene poi applicata
+    # in un secondo loop con il client live_arturo aperto una sola volta.
+    ranges_per_giornata: list[
+        tuple[GiroGiornata, str, list[GiroBlocco], list[tuple[int, int]]]
+    ] = []
     for gg in giornate_giro:
         blocchi = blocchi_per_giornata.get(gg.id, [])
         if not blocchi:
@@ -423,34 +482,67 @@ async def genera_turni_pdc_multi(
             # per quella giornata. L'utente vedrà violazioni cap, segnale
             # che serve un punto CV addizionale o un giro più corto.
             ranges = [(0, len(blocchi) - 1)]
+        ranges_per_giornata.append((gg, validita, blocchi, ranges))
 
-        for idx_start, idx_end in ranges:
-            seg_blocchi = blocchi[idx_start : idx_end + 1]
-            depot = _scegli_deposito_per_segmento(seg_blocchi, depositi)
-            segmenti_globali.append(
-                _SegmentoTurno(
-                    giornata_giro_id=gg.id,
-                    numero_giornata=gg.numero_giornata,
-                    variante_calendario=validita,
-                    blocchi=seg_blocchi,
-                    idx_start=idx_start,
-                    idx_end=idx_end,
-                    deposito_assegnato=depot,
+    # Sprint 7.10 MR α.5.fix: client httpx condiviso fra heuristic
+    # deposito (quality gate vettura) e persistenza (assegnazione
+    # vettura al draft). Una sola connessione TLS, ammortizzata sui
+    # ~3-5 depositi tipici × N segmenti.
+    settings = get_settings()
+    live_client = httpx.AsyncClient(timeout=settings.live_arturo_timeout_sec)
+
+    try:
+        for gg, validita, blocchi_gg, ranges in ranges_per_giornata:
+            for idx_start, idx_end in ranges:
+                seg_blocchi = blocchi_gg[idx_start : idx_end + 1]
+                # Stima ora di chiusura del PdC per il quality gate
+                # vettura: ora_fine ultimo blocco + ACCa + FINE servizio.
+                ultimo_blocco = seg_blocchi[-1]
+                if ultimo_blocco.ora_fine is None:
+                    ora_chiusura_min = 0
+                else:
+                    ora_chiusura_min = (
+                        _t(ultimo_blocco.ora_fine)
+                        + ACCESSORI_MIN_STANDARD
+                        + FINE_SERVIZIO_MIN
+                    ) % (24 * 60)
+                depot, vettura_pre = await _scegli_deposito_per_segmento(
+                    seg_blocchi,
+                    depositi,
+                    ora_chiusura_min=ora_chiusura_min,
+                    live_client=live_client,
                 )
-            )
+                segmenti_globali.append(
+                    _SegmentoTurno(
+                        giornata_giro_id=gg.id,
+                        numero_giornata=gg.numero_giornata,
+                        variante_calendario=validita,
+                        blocchi=seg_blocchi,
+                        idx_start=idx_start,
+                        idx_end=idx_end,
+                        deposito_assegnato=depot,
+                        vettura_pre=vettura_pre,
+                    )
+                )
 
-    if not segmenti_globali:
-        raise GiroVuotoError(f"Giro {giro_id} non ha blocchi validi")
+        if not segmenti_globali:
+            raise GiroVuotoError(f"Giro {giro_id} non ha blocchi validi")
 
-    # Persiste ogni segmento come 1 TurnoPdc autonomo (1 giornata, ciclo=1).
-    risultati: list[BuilderTurnoPdcResult] = await _persisti_segmenti(
-        session=session,
-        azienda_id=azienda_id,
-        giro=giro,
-        segmenti=segmenti_globali,
-        valido_da_eff=valido_da_eff,
-        giornate_ids_giro=giornata_ids,
-    )
+        # Persiste i segmenti come N TurnoPdc accorpati per deposito.
+        # Riusa lo stesso live_client per la vettura sull'ultima
+        # giornata di ogni TurnoPdc (se vettura_pre già nota viene
+        # riusata).
+        risultati: list[BuilderTurnoPdcResult] = await _persisti_segmenti(
+            session=session,
+            azienda_id=azienda_id,
+            giro=giro,
+            segmenti=segmenti_globali,
+            valido_da_eff=valido_da_eff,
+            giornate_ids_giro=giornata_ids,
+            live_client=live_client,
+        )
+    finally:
+        await live_client.aclose()
 
     await session.commit()
     return risultati
@@ -461,6 +553,7 @@ async def _aggiungi_vettura_rientro(
     draft: _GiornataPdcDraft,
     depot: Depot,
     client: httpx.AsyncClient,
+    treno_pre_calcolato: TrenoVettura | None = None,
 ) -> tuple[_GiornataPdcDraft, TrenoVettura | None]:
     """Sprint 7.10 MR α.5: estende l'ultima giornata del turno con un
     blocco VETTURA per riportare il PdC al deposito.
@@ -494,14 +587,20 @@ async def _aggiungi_vettura_rientro(
     if draft.stazione_fine is None:
         return draft, None
 
-    ora_fine_min = _t(draft.fine_prestazione)
-    treno = await trova_treno_vettura(
-        stazione_partenza_codice=draft.stazione_fine,
-        stazione_arrivo_codice=depot.stazione_principale_codice,
-        ora_min_partenza=ora_fine_min + VETTURA_GAP_PRE_MIN,
-        max_attesa_min=VETTURA_ATTESA_MAX_MIN,
-        client=client,
-    )
+    # Sprint 7.10 MR α.5.fix: se il treno è già stato pre-calcolato
+    # dalla heuristic deposito (quality gate vettura), riusalo
+    # direttamente senza una seconda chiamata API.
+    if treno_pre_calcolato is not None:
+        treno: TrenoVettura | None = treno_pre_calcolato
+    else:
+        ora_fine_min = _t(draft.fine_prestazione)
+        treno = await trova_treno_vettura(
+            stazione_partenza_codice=draft.stazione_fine,
+            stazione_arrivo_codice=depot.stazione_principale_codice,
+            ora_min_partenza=ora_fine_min + VETTURA_GAP_PRE_MIN,
+            max_attesa_min=VETTURA_ATTESA_MAX_MIN,
+            client=client,
+        )
     if treno is None:
         return draft, None
 
@@ -600,6 +699,7 @@ async def _persisti_segmenti(
     segmenti: list[_SegmentoTurno],
     valido_da_eff: date,
     giornate_ids_giro: list[int],
+    live_client: httpx.AsyncClient,
 ) -> list[BuilderTurnoPdcResult]:
     """Sprint 7.10 MR α.4 (entry 154): accorpa per deposito + codice nuovo.
 
@@ -638,16 +738,13 @@ async def _persisti_segmenti(
 
     risultati: list[BuilderTurnoPdcResult] = []
 
-    # Sprint 7.10 MR α.5: client httpx condiviso per le chiamate live
-    # arturo (vettura passiva). Riusarne UNO per tutto il giro
-    # ammortizza la connessione TLS sui ~3-5 depositi tipici. Chiusura
-    # garantita nel `finally` in fondo.
-    settings = get_settings()
-    live_client = httpx.AsyncClient(timeout=settings.live_arturo_timeout_sec)
-
     # 2. Per ogni deposito, persisti 1 TurnoPdc aggregando le sue
     #    giornate. Per `None` (legacy) faccio 1 turno per segmento
     #    per visibilità del problema "tratta scoperta".
+    # Il `live_client` è ora passato dal chiamante (genera_turni_pdc_multi),
+    # così la heuristic deposito (che ne ha già fatto uso per il
+    # quality gate vettura) e la persistenza condividono la stessa
+    # connessione TLS.
     for depot_key, lista in drafts_per_deposito.items():
         if depot_key is None:
             for idx, (seg, draft) in enumerate(lista, start=1):
@@ -716,10 +813,17 @@ async def _persisti_segmenti(
         if drafts_finali:
             ultimo_idx = len(drafts_finali) - 1
             ultimo_draft = drafts_finali[ultimo_idx]
+            # Sprint 7.10 MR α.5.fix: se la heuristic deposito ha già
+            # pre-calcolato la vettura per questo segmento (quality gate),
+            # riusala direttamente. La vettura è quella dell'ULTIMO
+            # segmento del deposito (= quello che chiude il ciclo).
+            ultimo_seg = lista[-1][0]
+            treno_pre = ultimo_seg.vettura_pre
             ultimo_aggiornato, treno = await _aggiungi_vettura_rientro(
                 draft=ultimo_draft,
                 depot=depot,
                 client=live_client,
+                treno_pre_calcolato=treno_pre,
             )
             drafts_finali[ultimo_idx] = ultimo_aggiornato
             if treno is not None:
@@ -777,9 +881,9 @@ async def _persisti_segmenti(
         )
         risultati.append(risultato)
 
-    # Chiudi il client live arturo (chiamato per tutti i depositi).
-    await live_client.aclose()
-
+    # NB: il `live_client` è chiuso dal chiamante (genera_turni_pdc_multi)
+    # nel suo blocco `finally`. Non chiuderlo qui o lo si renderebbe
+    # inutilizzabile per altre chiamate.
     return risultati
 
 

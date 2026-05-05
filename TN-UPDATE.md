@@ -10,6 +10,131 @@
 
 ---
 
+## 2026-05-05 (157) — Sprint 7.10 MR α.5.fix: parser fermate stazione_id vuota + quality gate VETTURA nella heuristic deposito
+
+### Contesto
+
+Smoke utente post-deploy MR α.5: 2 bug critici.
+
+**Bug A — parser fermate**: nella response live arturo reale la
+fermata di partenza ha `stazione_id=""` (l'API mette il codice solo
+sulle fermate intermedie/finali). Il mio parser cadeva nel fallback
+`fermata_partenza = fermate[0]` ma poi cercava la fermata di arrivo
+solo *dopo* aver visto un match ESPLICITO sul codice di partenza
+→ `seen_partenza` restava `False` → arrivo non trovato → ritornava
+sempre `None` → **vetture mai aggiunte in produzione** anche dopo
+MR α.5.
+
+**Bug B — heuristic deposito**: utente ha mostrato un turno
+T-SONDRIO che chiude a LECCO senza vettura di rientro. Citazione:
+*"questo vuol dire che non è giusto inserirlo a sondrio. Mancano le
+vetture, non le mette"*. Logica corretta: se non c'è vettura di
+rientro, il deposito candidato non è ammissibile, va sostituito
+con un altro che chiude in casa o ha vettura disponibile.
+
+### Modifiche
+
+**`backend/src/colazione/integrations/live_arturo.py`** (Bug A):
+
+- Refactoring `_estrai_candidato`:
+  - Trova INDICE della fermata di partenza con match esplicito su
+    codice; **se nessuno matcha, fallback a `fp_idx = 0`**.
+  - Cerca arrivo iterando solo nelle fermate `fermate[fp_idx + 1:]`
+    → indipendente dal flag `seen_partenza` ora rimosso.
+- Test nuovo `test_estrai_candidato_fermata_partenza_con_stazione_id_vuoto`
+  che riproduce esattamente lo scenario reale (`stazione_id=""` sulla
+  fermata 0, codice corretto sull'arrivo).
+
+**`backend/src/colazione/domain/builder_pdc/multi_turno.py`**
+(Bug B):
+
+- `_scegli_deposito_per_segmento` ora **async** con quality gate
+  VETTURA. Nuova firma:
+  ```
+  async def _scegli_deposito_per_segmento(
+      blocchi_segmento, depositi, *,
+      ora_chiusura_min: int,
+      live_client: httpx.AsyncClient,
+  ) -> tuple[Depot | None, TrenoVettura | None]
+  ```
+- **Priorità rivista**:
+  1. **Chiusura in casa** (preferenziale, no API call): depot
+     coincide con stazione_a dell'ultimo blocco → vince subito.
+  2. **Partenza con vettura disponibile**: candidato è il depot di
+     stazione_da del primo blocco. Verifica `trova_treno_vettura`
+     dalla stazione di chiusura al depot. Se trovata → vince con
+     vettura allegata. Altrimenti scarta e passa al successivo.
+  3. **Intermedi con vettura**: stazioni intermedie del segmento.
+     Stesso quality gate.
+  4. **Fallback**: ritorna `(None, None)` → builder usa la
+     stazione del materiale come sede legacy.
+- Ritorna ora ANCHE la `TrenoVettura | None` pre-calcolata
+  durante il quality gate, così il chiamante la riusa senza una
+  seconda chiamata API.
+- `_SegmentoTurno` esteso con `vettura_pre: TrenoVettura | None`.
+- `_aggiungi_vettura_rientro` accetta `treno_pre_calcolato`: se
+  valorizzato salta `trova_treno_vettura` e usa direttamente il
+  treno già trovato.
+- `genera_turni_pdc_multi` ora apre il `live_client` PRIMA del
+  loop heuristic (era in `_persisti_segmenti`), lo passa sia alla
+  heuristic che alla persistenza, e lo chiude in `finally`.
+  Sequenza corretta: build ranges DP (sync) → heuristic deposito
+  (async, con API) → persistenza (async, con vettura pre-calcolata
+  riusata).
+
+**Test `tests/test_multi_turno_dp.py`** — riscrittura completa
+heuristic deposito con `httpx.MockTransport`:
+
+- `chiusura_in_casa_no_api_call`: Strategia 1 vince senza API
+- `partenza_con_vettura_disponibile`: depot di partenza ammesso
+  perché c'è treno passante
+- `partenza_senza_vettura_scartato`: il bug dell'utente — SONDRIO
+  scartato, ritorna None
+- `chiusura_in_casa_vince_su_partenza`: priorità rivista
+- `lista_depositi_vuota`, `blocchi_vuoti`, `ignora_depositi_senza_stazione`
+
+### Verifiche
+
+- ✅ `uv run mypy --strict src/`: 68 file, 0 errori.
+- ✅ `uv run ruff check src/colazione/integrations/
+  src/colazione/domain/builder_pdc/`: clean.
+- ✅ `uv run pytest --ignore=tests/test_persister.py`: **612 passed**
+  (era 610 +2: 1 nuovo bug A test + heuristic riscritta), 12
+  skipped, 0 failed.
+
+### Stato
+
+- ✅ Bug A (parser fermate) sistemato + test specifico.
+- ✅ Bug B (quality gate VETTURA) implementato + test specifici.
+- ⏳ Deploy backend Railway.
+
+### Limitazioni dichiarate
+
+1. **Heuristic con quality gate sequenziale**: ogni candidato →
+   1 chiamata API. Per un giro con 8 segmenti e 3 depositi
+   candidati medi → 24 chiamate API totali (~5-10s). Ammortizzato
+   da `httpx.AsyncClient` connection pool. Se diventa lento:
+   parallelizzare con `asyncio.gather` o cache redis in MR
+   successivo.
+2. **Vettura sempre dall'API live**: nessun fallback "stima
+   manuale" se l'API è down. Per ora ok perché l'API è interna
+   ARTURO; se diventasse problema, MR α.5.bis con cache locale
+   degli orari treni.
+
+### Prossimo step
+
+Commit + push + deploy backend → smoke utente: rigenera turno
+T-SONDRIO che chiude a LECCO. Atteso ora:
+- Se LECCO è in `depositi` (stazione_principale_codice popolata) →
+  T-LECCO-NNN vince (Strategia 1)
+- Se LECCO non è popolata → ricerca treno LECCO→SONDRIO; se trovato
+  → T-SONDRIO con blocco VETTURA finale; se non trovato → T-LEGACY
+  con visibilità del problema "tratta scoperta".
+
+Poi MR α.6 (fill multi-giro) e α.7 (redesign Gantt).
+
+---
+
 ## 2026-05-05 (156) — Sprint 7.10 MR α.5: vetture passive con API live arturo
 
 ### Contesto

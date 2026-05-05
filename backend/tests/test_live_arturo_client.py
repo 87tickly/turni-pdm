@@ -151,6 +151,36 @@ def test_estrai_candidato_arrivo_prima_di_partenza() -> None:
     ) is None
 
 
+def test_estrai_candidato_fermata_partenza_con_stazione_id_vuoto() -> None:
+    """Sprint 7.10 MR α.5.fix: bug parser. Nella response live arturo
+    reale la prima fermata ha spesso `stazione_id=""` (l'API mette
+    il codice solo sulle fermate intermedie/finali). Il parser deve
+    cadere sul fallback `fermate[0]` E poi cercare l'arrivo nelle
+    fermate SUCCESSIVE — non solo dopo la fermata che fa match
+    esplicito (perché in quel caso `seen_partenza` resterebbe False
+    e l'arrivo non verrebbe mai trovato)."""
+    treno = _make_treno(
+        fermate=[
+            # Prima fermata = partenza, ma `stazione_id` vuoto come
+            # restituisce live arturo per la fermata di origine.
+            {"stazione_id": "", "programmato_partenza": "2026-05-05T12:00:00Z", "programmato_arrivo": None},
+            {"stazione_id": "S01520", "programmato_partenza": None, "programmato_arrivo": "2026-05-05T13:00:00Z"},
+        ],
+    )
+    cand = _estrai_candidato(
+        treno,
+        stazione_partenza_codice="S01700",  # codice che NON matcha nessuna fermata
+        stazione_arrivo_codice="S01520",
+        ora_min_partenza=11 * 60 + 50,
+        max_attesa_min=120,
+    )
+    # Fallback: prendiamo fermate[0] come partenza, poi cerchiamo
+    # S01520 nelle successive → trovato a 13:00.
+    assert cand is not None
+    assert cand.partenza_min == 12 * 60
+    assert cand.arrivo_min == 13 * 60
+
+
 def test_estrai_candidato_fermate_vuote() -> None:
     treno = {"numero": "1", "categoria": "REG", "operatore": "X", "fermate": []}
     assert _estrai_candidato(

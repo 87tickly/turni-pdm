@@ -209,19 +209,22 @@ def _estrai_candidato(
     if not isinstance(fermate, list) or not fermate:
         return None
 
-    # 1. Trova la fermata di PARTENZA (= dove il PdC sale).
-    fermata_partenza = None
-    for f in fermate:
-        if not isinstance(f, dict):
-            continue
-        if f.get("stazione_id") == stazione_partenza_codice:
-            fermata_partenza = f
+    # 1. Trova l'INDICE della fermata di PARTENZA (= dove il PdC sale).
+    # Sprint 7.10 MR α.5.fix: nella response live arturo la fermata di
+    # partenza ha spesso `stazione_id=""` (l'API mette il codice solo
+    # sulle fermate intermedie/finali, non su quella di origine).
+    # Match esplicito su codice O fallback alla fermata 0.
+    fp_idx: int | None = None
+    for i, f in enumerate(fermate):
+        if isinstance(f, dict) and f.get("stazione_id") == stazione_partenza_codice:
+            fp_idx = i
             break
-    if fermata_partenza is None:
-        # Fallback: se l'API non popola la fermata di partenza esplicitamente
-        # (lo abbiamo visto nel probe: stazione_id="" per il primo elemento),
-        # assumiamo che sia la prima fermata e prendiamo l'orario lì.
-        fermata_partenza = fermate[0]
+    if fp_idx is None:
+        # Fallback: assume `fermate[0]` come partenza.
+        fp_idx = 0
+    fermata_partenza = fermate[fp_idx]
+    if not isinstance(fermata_partenza, dict):
+        return None
 
     partenza_min = _hhmm_to_min(fermata_partenza.get("programmato_partenza"))
     if partenza_min is None:
@@ -233,19 +236,11 @@ def _estrai_candidato(
     if attesa < 0 or attesa > max_attesa_min:
         return None
 
-    # 2. Trova la fermata di ARRIVO (= dove il PdC scende = deposito).
-    # Deve venire DOPO la fermata di partenza nella sequenza.
-    seen_partenza = False
-    fermata_arrivo = None
-    for f in fermate:
-        if not isinstance(f, dict):
-            continue
-        if f is fermata_partenza or f.get("stazione_id") == stazione_partenza_codice:
-            seen_partenza = True
-            continue
-        if not seen_partenza:
-            continue
-        if f.get("stazione_id") == stazione_arrivo_codice:
+    # 2. Trova la fermata di ARRIVO nelle fermate SUCCESSIVE all'indice
+    # di partenza (così evitiamo direzioni opposte).
+    fermata_arrivo: dict[str, Any] | None = None
+    for f in fermate[fp_idx + 1 :]:
+        if isinstance(f, dict) and f.get("stazione_id") == stazione_arrivo_codice:
             fermata_arrivo = f
             break
     if fermata_arrivo is None:
