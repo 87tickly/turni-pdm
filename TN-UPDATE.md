@@ -10,6 +10,216 @@
 
 ---
 
+## 2026-05-05 (139) — Sprint 7.9 chiusura β2 estesa: smoke catena sorgente + UI regole invio sosta + fix UI
+
+### Contesto
+
+L'utente ha richiamato (giustamente) tre residui lasciati impliciti
+nello smoke E2E β2 (entry 138):
+
+- **A** — smoke catena sorgente reale `source_descrizione = "Pezzi
+  da treno X (arrivato Y HH:MM)"`: solo test unit `test_sourcing.py`
+  6/6 ok, mancava verifica E2E pipeline `arricchisci_sourcing →
+  persisti_giri → DB`.
+- **B** — screenshot UI Thread Viewer + pannello Convogli del turno
+  (β2-6) in produzione.
+- **C** — UI form CRUD `RegolaInvioSosta` (β2-7 v2): backend +
+  hook React Query già pronti dall'entry 137, mancava solo il
+  componente cliccabile.
+
+Decisione utente: "procedi e non fare il pigro" → applicato Regola 7
+CLAUDE.md (chiudere bene quello che si comincia).
+
+### Verifica dotazione ETR421=44 (live production)
+
+API `GET /api/materiali` su backend Railway production con login
+admin: `pezzi_disponibili` per i materiali principali della direttrice
+TIRANO + Garibaldi:
+
+```
+ATR115   pezzi_disponibili=6
+ATR125   pezzi_disponibili=15
+ATR803   pezzi_disponibili=20
+ETR421   pezzi_disponibili=44  ✅ ripristino post-smoke confermato
+ETR425   pezzi_disponibili=18
+ETR522   pezzi_disponibili=71
+ETR526   pezzi_disponibili=11
+```
+
+### B — Screenshot UI Thread Viewer (frontend locale → backend Railway)
+
+Frontend dev locale puntato a backend production via `.env.local` con
+`VITE_API_BASE_URL=https://backend-production-f67f.up.railway.app`
+(rimosso a fine task per non lasciare config fuori standard).
+
+- Aperto giro 80 (programma 8 `test-beta2-doppia` ETR526×2): ✅ Gantt
+  6 giornate stile Trenord renderizzato; ✅ pannello "CONVOGLI DEL
+  TURNO (THREAD L2)" sotto "Date di applicazione" con 2 thread
+  ETR526 (km 3393, min 3450, 26 corse).
+- Aperto thread #9 dal pannello: ✅ hero "Thread #9 ETR526 ·
+  matricola non assegnata", ✅ KPI 3 colonne, ✅ timeline 31 eventi
+  badge "Corsa doppia (pos 1)" con treni reali (10290, 2815, 2818,
+  2827) della direttrice TIRANO.
+- Console errors: 0.
+
+Bug minore trovato durante lo smoke e fixato:
+`MaterialeThreadRoute.tsx:118` produceva "31 **eventoi**" per il
+plurale (concat malformata `evento{n===1?"":"i"}` → "eventoi").
+Fix: spostato il letterale costante `"event"` fuori dalla concat
+(`event{n===1?"o":"i"}` → "evento" / "eventi"). Verificato HMR.
+
+### A — Smoke catena sorgente E2E
+
+Indagine su DB Railway production via TCP proxy (`nozomi.proxy.rlwy.net:28852`):
+
+```
+== Aggancio totali distribuiti per programma ==
+prog 1 (creato 06:38): 4 aggancio, 0 con source_descrizione
+prog 2 (creato 07:02): 43 aggancio, 0 con source_descrizione
+prog 9 (creato 21:25): 0 aggancio, 16 sgancio (TUTTI con dest popolato)
+
+== Distribuzione dest_descrizione su sgancio ==
+16x  'Pezzi a deposito FIO'
+== Distribuzione source_descrizione su aggancio ==
+47x  None
+```
+
+**Conclusione**: i 47 aggancio "muti" (`source_descrizione=None`) sono
+**dato storico pre-β2-3**: programmi 1/2 generati la mattina del
+2026-05-04 PRIMA del deploy MR β2-3. Non è bug attivo. Lato
+**sgancio** post-β2-3 (prog 9): 16/16 popolati con fallback deposito
+FIO ✅. Non si è attivato il caso "catena reale verso treno X" perché
+il PdE Trenord 2025-2026 non genera composizioni in CRESCITA
+mid-giornata (sempre decrescenti per fasce deboli) — è la limitazione
+strutturale dichiarata in entry 138.
+
+**Test E2E aggiunti** (`tests/test_persister.py` +220 righe):
+
+- `test_e2e_sourcing_catena_reale_aggancio_da_treno_X`: 2 giri
+  posizionati nella stessa sede FIO, giro A termina catena a S99043
+  alle 10:25, giro B aggancia a S99043 alle 10:30 (gap 5 min →
+  match). Asserisce `metadata_json["source_descrizione"]` inizia con
+  "Pezzi da treno TREN_A" + contiene "10:25" + "S99043" +
+  `capacity_warning=False`.
+- `test_e2e_sourcing_fallback_deposito_nessuna_catena`: 1 solo giro
+  → fallback `"Pezzi da deposito FIO"`.
+- `test_e2e_sourcing_capacity_warning_dotazione_satura`: aggancio
+  +3 con dotazione 2 → `capacity_warning=True` + descrizione
+  "NON SOURCEABLE — dotazione 2 ETR esaurita (richiesti 3)" + 1
+  warning nella lista builder.
+
+Pipeline esercitata: `arricchisci_sourcing → wrap_assegnato_in_aggregato
+→ persisti_giri`, query DB su `giro_blocco.metadata_json` come
+prova finale. Tutti e 3 verdi su Postgres locale fresco con migrations
+0001-0024 applicate (`alembic upgrade head` da `c5e4f8a92b13` →
+`e9a3f2c81d4b`).
+
+### C — MR β2-8: UI form CRUD RegolaInvioSosta
+
+Nuovo componente `frontend/src/routes/pianificatore-giro/RegoleInvioSostaSection.tsx`
+(~340 righe), montato nella `ProgrammaDettaglioRoute` come sezione 3.5
+tra "Regole di assegnazione" e "Ultimo run del builder".
+
+**Lista regole** (Card con stato vuoto/popolato):
+
+- 0 regole → messaggio `"Nessuna regola configurata. Gli sganci che
+  non trovano riaggancio vengono inviati al deposito di sede."`
+  + chip header `"0 regole · sganci senza regola → fallback deposito sede"`.
+- N > 0 → riga per regola con label parlante: `"ETR421 sganciato a
+  MILANO PORTA GARIBALDI tra 06:00–19:00 → Milano San Rocco"` +
+  fallback in italics se presente + bottone trash inline (delete
+  con `useDeleteRegolaInvioSosta`, invalida cache su success).
+
+**Dialog "Nuova regola invio sosta"** (Radix Dialog):
+
+Form 7 campi:
+1. Stazione di sgancio (Select da `useStazioni`)
+2. Tipo materiale (Select da `useMateriali`)
+3. Finestra inizio (Input time, default 06:00)
+4. Finestra fine (Input time, default 19:00)
+5. Località di sosta (Select da `useLocalitaSosta`, solo `is_attiva`)
+6. Fallback opzionale (Select escludendo la sosta principale)
+7. Note (Textarea opzionale)
+
+Validazioni client-side:
+- stazione + materiale + sosta required.
+- ora_fine > ora_inizio.
+- ApiError 400/404 dal backend → mostrato sotto il form, non chiude
+  dialog.
+
+`is_validato_utente` viene gestita lato backend (default False).
+Editable=false (programma archiviato) disabilita "Nuova regola" e
+i delete inline.
+
+**Smoke UI E2E in browser** (frontend dev locale → backend Railway,
+programma 8):
+
+1. Apertura sezione: ✅ "0 regole · fallback deposito sede".
+2. Click "+ Nuova regola" → dialog aperto, 7 campi resi.
+3. Compila: stazione `S01645` (MILANO PORTA GARIBALDI), materiale
+   `ETR421`, finestra 06:00-19:00, sosta `1` (Milano San Rocco MISR),
+   note `"Smoke MR β2-8: Garibaldi 06-19 → Misr"`.
+4. Submit → POST /api/programmi/8/regole-invio-sosta ✅ → dialog si
+   chiude, lista invalidata e ri-fetched.
+5. Lista mostra: ✅ "ETR421 sganciato a MILANO PORTA GARIBALDI tra
+   06:00–19:00 → Milano San Rocco".
+6. Click trash → DELETE /api/programmi/8/regole-invio-sosta/{id} ✅
+   → lista torna a "0 regole".
+
+Console errors: 0. Network 4xx/5xx: 0.
+
+### Verifiche
+
+- Backend `mypy --strict` ✅ 63 file clean.
+- Frontend `tsc -b --noEmit` ✅.
+- 3 nuovi test E2E sourcing ✅ (Postgres locale fresco).
+- Test legacy `test_vuoto_testa_genera_corsa_materiale_vuoto_e_blocco`
+  e `test_persister_corsa_rientro_9xxxx_se_genera_rientro_sede`
+  pre-falliscono (regressioni indipendenti, non causate da questo
+  MR — verificato con `git stash`). Da indagare in MR separato.
+
+### Stato
+
+- ✅ Dotazione ETR421=44 verificata live in produzione.
+- ✅ Smoke UI Thread Viewer + pannello Convogli del turno (entry 138
+  limitazione "no screenshot in produzione" chiusa).
+- ✅ Bug UI plurale "eventoi" sistemato.
+- ✅ 3 test E2E sourcing aggiunti (entry 138 limitazione 1
+  "sourcing aggancio non esercitato" chiusa via test).
+- ✅ MR β2-8 UI form CRUD RegolaInvioSosta consegnato (entry 137
+  limitazione 5 "UI gestione RegolaInvioSosta" chiusa).
+
+### Limitazioni residue (legittime, scope β3)
+
+Le seguenti, dichiarate nell'entry 137 limitazioni 1-4 e 6-8,
+restano scope β3 perché richiedono lavoro architetturale non
+banale, non scope-cutting silente:
+
+1. Algoritmo proiezione thread copre solo variante canonica.
+2. Sosta tra sgancio/riaggancio non modellata come evento esplicito.
+3. Cross-thread esterni (bridge cross-giro) non tracciati.
+4. Capacity check granularità giornaliera (no minuto-per-minuto).
+5. **Builder consulta `RegolaInvioSosta` per popolare `dest_descrizione`
+   degli sganci**: oggi `arricchisci_sourcing` usa solo fallback
+   "deposito sede". L'API + UI sono ora consumabili dal builder
+   (è il prossimo step concreto di β3).
+6. `RegolaInvioSostaAzienda` (regole universali, non per programma).
+7. UI assegnazione `MaterialeIstanza.sede_codice` (= ruolo
+   Manutenzione futuro).
+8. PdE in produzione non produce composizioni in crescita
+   mid-giornata → catena reale "Pezzi da treno X" non si attiva
+   su dati Trenord 2026 reali. Non è bug: i test E2E nuovi
+   coprono la logica.
+
+### Prossimo step
+
+Aprire MR β3-1: integrazione builder ↔ regole. Quando uno sgancio
+cade in una `RegolaInvioSosta` (match stazione + tipo materiale +
+finestra oraria), il `dest_descrizione` deve diventare `"Pezzi a
+sosta {nome_sosta}"` invece di `"Pezzi a deposito {sede}"`.
+
+---
+
 ## 2026-05-04 (138) — Sprint 7.9 hotfix β2-5: capacity check AZIENDA-level + smoke completo β2
 
 ### Contesto

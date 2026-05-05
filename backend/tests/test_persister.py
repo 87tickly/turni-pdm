@@ -1285,3 +1285,313 @@ async def test_dates_apply_vuoto_pre_cluster_fallback_a_data_giorno(
             )
         ).scalar_one()
         assert gv.dates_apply_json == ["2026-06-01"]
+
+
+# =====================================================================
+# Sprint 7.9 entry 139 — Smoke E2E sourcing catena reale
+#
+# Lo Sprint 7.9 β2-3 ha aggiunto `arricchisci_sourcing` che popola
+# `EventoComposizione.source_descrizione`/`dest_descrizione` con catene
+# di provenienza/destinazione. `test_sourcing.py` 6/6 verifica la
+# logica isolata; questi test E2E confermano che la pipeline
+# `arricchisci_sourcing → persisti_giri` propaga il campo fino al
+# `metadata_json` del `GiroBlocco` su DB Postgres reale.
+# =====================================================================
+
+
+async def test_e2e_sourcing_catena_reale_aggancio_da_treno_X(
+    azienda_id: int, programma_test_id: int
+) -> None:
+    """Catena sorgente reale: aggancio del giro B trova catena terminale
+    del giro A nella stessa stazione entro 15 min → `source_descrizione
+    = "Pezzi da treno {treno_A} (arrivato S99043 10:25)"`.
+
+    Senza questo test, il bug "47 aggancio source_descrizione=None"
+    osservato in produzione su programmi pre-β2-3 può ripresentarsi
+    silenziosamente se una pipeline successiva resetta gli eventi.
+    """
+    from colazione.domain.builder_giro.sourcing import arricchisci_sourcing
+
+    await _crea_stazione("S99041", azienda_id)
+    await _crea_stazione("S99042", azienda_id)
+    await _crea_stazione("S99043", azienda_id)
+    await _crea_stazione("S99044", azienda_id)
+    await _crea_localita("TEST_LOC_FIO_E2E", "S99041", azienda_id)
+
+    # Giro A: 1 corsa che termina a S99043 alle 10:25 (catena terminale).
+    c_a = await _crea_corsa(
+        "TREN_A", "S99041", "S99043", (9, 0), (10, 25), azienda_id
+    )
+    # Giro B: 2 corse — la seconda parte da S99043 alle 10:30 con
+    # composizione +1 → aggancio mid-giornata, ev.stazione = S99043,
+    # ora_evento = 10:30 (gap=5min con catena A → match).
+    c_b1 = await _crea_corsa(
+        "TREN_B1", "S99042", "S99043", (9, 10), (10, 0), azienda_id
+    )
+    c_b2 = await _crea_corsa(
+        "TREN_B2", "S99043", "S99044", (10, 30), (11, 0), azienda_id
+    )
+
+    async with session_scope() as session:
+        corse_a = (
+            (
+                await session.execute(
+                    select(CorsaCommerciale).where(CorsaCommerciale.id == c_a)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        corse_b = (
+            (
+                await session.execute(
+                    select(CorsaCommerciale)
+                    .where(CorsaCommerciale.id.in_([c_b1, c_b2]))
+                    .order_by(CorsaCommerciale.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        # Costruisci 2 GiroAssegnato sulla stessa sede con composizione
+        # 1 ETR526 (giro A) e 1→2 ETR526 (giro B, aggancio).
+        giro_a = _giro_assegnato_singolo(
+            localita_codice="TEST_LOC_FIO_E2E",
+            corse_orm=tuple(corse_a),
+            pezzi_per_corsa=(1,),
+            data_giorno=date(2026, 6, 8),
+        )
+        giro_b = _giro_assegnato_singolo(
+            localita_codice="TEST_LOC_FIO_E2E",
+            corse_orm=tuple(corse_b),
+            pezzi_per_corsa=(1, 2),
+            data_giorno=date(2026, 6, 8),
+        )
+
+        # Pipeline sourcing: arricchisce gli eventi composizione con
+        # source_descrizione/dest_descrizione (idempotente).
+        arricchiti, warnings = arricchisci_sourcing(
+            [giro_a, giro_b],
+            sede_codice_breve="FIO",
+            dotazione={MATERIALE_TIPO: 10},
+        )
+        assert warnings == []  # nessun capacity warning atteso
+
+        # Persisti entrambi i giri.
+        ids = await persisti_giri(
+            [
+                GiroDaPersistere(
+                    numero_turno="G-FIOE2E-A",
+                    giro=wrap_assegnato_in_aggregato(arricchiti[0]),
+                ),
+                GiroDaPersistere(
+                    numero_turno="G-FIOE2E-B",
+                    giro=wrap_assegnato_in_aggregato(arricchiti[1]),
+                ),
+            ],
+            session,
+            programma_id=programma_test_id,
+            azienda_id=azienda_id,
+        )
+
+    async with session_scope() as session:
+        # Recupera il blocco aggancio del giro B (dovrebbe averne 1).
+        blocchi_aggancio = (
+            (
+                await session.execute(
+                    select(GiroBlocco)
+                    .join(GiroVariante, GiroBlocco.giro_variante_id == GiroVariante.id)
+                    .join(
+                        GiroGiornata,
+                        GiroVariante.giro_giornata_id == GiroGiornata.id,
+                    )
+                    .where(
+                        GiroGiornata.giro_materiale_id == ids[1],
+                        GiroBlocco.tipo_blocco == "aggancio",
+                    )
+                    .order_by(GiroBlocco.seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(blocchi_aggancio) == 1, (
+            "Atteso 1 aggancio mid-giornata sul giro B (1→2)"
+        )
+        meta = blocchi_aggancio[0].metadata_json
+        # Catena sorgente reale: deve citare TREN_A e l'orario 10:25.
+        assert meta["source_descrizione"] is not None
+        assert meta["source_descrizione"].startswith("Pezzi da treno TREN_A")
+        assert "10:25" in meta["source_descrizione"]
+        assert "S99043" in meta["source_descrizione"]
+        # capacity_warning falso (catena risolta, non da deposito).
+        assert meta["capacity_warning"] is False
+
+
+async def test_e2e_sourcing_fallback_deposito_nessuna_catena(
+    azienda_id: int, programma_test_id: int
+) -> None:
+    """Fallback deposito: aggancio senza catena sorgente entro 15 min →
+    `source_descrizione = "Pezzi da deposito FIO"` (no warning, dotazione
+    non saturata)."""
+    from colazione.domain.builder_giro.sourcing import arricchisci_sourcing
+
+    await _crea_stazione("S99051", azienda_id)
+    await _crea_stazione("S99052", azienda_id)
+    await _crea_stazione("S99053", azienda_id)
+    await _crea_localita("TEST_LOC_FIO_FB", "S99051", azienda_id)
+
+    c1 = await _crea_corsa(
+        "TRE_FB1", "S99051", "S99052", (9, 0), (10, 0), azienda_id
+    )
+    c2 = await _crea_corsa(
+        "TRE_FB2", "S99052", "S99053", (10, 30), (11, 0), azienda_id
+    )
+
+    async with session_scope() as session:
+        corse = (
+            (
+                await session.execute(
+                    select(CorsaCommerciale)
+                    .where(CorsaCommerciale.id.in_([c1, c2]))
+                    .order_by(CorsaCommerciale.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        giro = _giro_assegnato_singolo(
+            localita_codice="TEST_LOC_FIO_FB",
+            corse_orm=tuple(corse),
+            pezzi_per_corsa=(1, 2),  # aggancio 1→2
+            data_giorno=date(2026, 6, 8),
+        )
+        # Solo 1 giro nel pool → niente catena terminale candidata.
+        arricchiti, warnings = arricchisci_sourcing(
+            [giro],
+            sede_codice_breve="FIO",
+            dotazione={MATERIALE_TIPO: 10},
+        )
+        assert warnings == []
+
+        ids = await persisti_giri(
+            [
+                GiroDaPersistere(
+                    numero_turno="G-FB-A",
+                    giro=wrap_assegnato_in_aggregato(arricchiti[0]),
+                )
+            ],
+            session,
+            programma_id=programma_test_id,
+            azienda_id=azienda_id,
+        )
+
+    async with session_scope() as session:
+        blocchi_aggancio = (
+            (
+                await session.execute(
+                    select(GiroBlocco)
+                    .join(GiroVariante, GiroBlocco.giro_variante_id == GiroVariante.id)
+                    .join(
+                        GiroGiornata,
+                        GiroVariante.giro_giornata_id == GiroGiornata.id,
+                    )
+                    .where(
+                        GiroGiornata.giro_materiale_id == ids[0],
+                        GiroBlocco.tipo_blocco == "aggancio",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(blocchi_aggancio) == 1
+        meta = blocchi_aggancio[0].metadata_json
+        assert meta["source_descrizione"] == "Pezzi da deposito FIO"
+        assert meta["capacity_warning"] is False
+
+
+async def test_e2e_sourcing_capacity_warning_dotazione_satura(
+    azienda_id: int, programma_test_id: int
+) -> None:
+    """Capacity warning: aggancio fallback deposito ma dotazione del
+    materiale già satura → `source_descrizione` contiene "NON SOURCEABLE"
+    + `capacity_warning=True`."""
+    from colazione.domain.builder_giro.sourcing import arricchisci_sourcing
+
+    await _crea_stazione("S99061", azienda_id)
+    await _crea_stazione("S99062", azienda_id)
+    await _crea_stazione("S99063", azienda_id)
+    await _crea_localita("TEST_LOC_FIO_CAP", "S99061", azienda_id)
+
+    c1 = await _crea_corsa(
+        "TRE_CAP1", "S99061", "S99062", (9, 0), (10, 0), azienda_id
+    )
+    c2 = await _crea_corsa(
+        "TRE_CAP2", "S99062", "S99063", (10, 30), (11, 0), azienda_id
+    )
+
+    async with session_scope() as session:
+        corse = (
+            (
+                await session.execute(
+                    select(CorsaCommerciale)
+                    .where(CorsaCommerciale.id.in_([c1, c2]))
+                    .order_by(CorsaCommerciale.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        giro = _giro_assegnato_singolo(
+            localita_codice="TEST_LOC_FIO_CAP",
+            corse_orm=tuple(corse),
+            pezzi_per_corsa=(2, 5),  # aggancio +3 da deposito
+            data_giorno=date(2026, 6, 8),
+        )
+        # Dotazione 2 < richiesta 3 → capacity warn.
+        arricchiti, warnings = arricchisci_sourcing(
+            [giro],
+            sede_codice_breve="FIO",
+            dotazione={MATERIALE_TIPO: 2},
+        )
+        assert len(warnings) == 1
+        assert "AGGANCIO non risolto" in warnings[0]
+
+        ids = await persisti_giri(
+            [
+                GiroDaPersistere(
+                    numero_turno="G-CAP-A",
+                    giro=wrap_assegnato_in_aggregato(arricchiti[0]),
+                )
+            ],
+            session,
+            programma_id=programma_test_id,
+            azienda_id=azienda_id,
+        )
+
+    async with session_scope() as session:
+        blocchi_aggancio = (
+            (
+                await session.execute(
+                    select(GiroBlocco)
+                    .join(GiroVariante, GiroBlocco.giro_variante_id == GiroVariante.id)
+                    .join(
+                        GiroGiornata,
+                        GiroVariante.giro_giornata_id == GiroGiornata.id,
+                    )
+                    .where(
+                        GiroGiornata.giro_materiale_id == ids[0],
+                        GiroBlocco.tipo_blocco == "aggancio",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(blocchi_aggancio) == 1
+        meta = blocchi_aggancio[0].metadata_json
+        assert meta["capacity_warning"] is True
+        assert meta["source_descrizione"] is not None
+        assert "NON SOURCEABLE" in meta["source_descrizione"]

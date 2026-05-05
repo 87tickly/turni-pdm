@@ -25,6 +25,7 @@ import type {
 } from "@/lib/api/programmi";
 import { formatDateIt, formatPeriodo } from "@/lib/format";
 import { GeneraGiriDialog } from "@/routes/pianificatore-giro/GeneraGiriDialog";
+import { RegoleInvioSostaSection } from "@/routes/pianificatore-giro/RegoleInvioSostaSection";
 import { RegolaCard } from "@/routes/pianificatore-giro/regola/RegolaCard";
 import { RegolaEditor } from "@/routes/pianificatore-giro/regola/RegolaEditor";
 
@@ -113,6 +114,9 @@ export function ProgrammaDettaglioRoute() {
         editable={editable}
         onAddRegola={() => setEditorOpen(true)}
       />
+
+      {/* ═══ 3.5 · REGOLE INVIO SOSTA (Sprint 7.9 MR β2-8) ══════ */}
+      <RegoleInvioSostaSection programmaId={programma.id} editable={editable} />
 
       {/* ═══ 4 · ULTIMO RUN DEL BUILDER ════════════════════════ */}
       {programma.stato === "attivo" && <UltimoRunSection programmaId={programma.id} />}

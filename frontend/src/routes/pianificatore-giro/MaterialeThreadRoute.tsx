@@ -115,7 +115,7 @@ export function MaterialeThreadRoute() {
             Timeline eventi
           </span>
           <span className="ml-3 text-muted-foreground">
-            {thread.eventi.length} evento{thread.eventi.length === 1 ? "" : "i"}
+            {thread.eventi.length} event{thread.eventi.length === 1 ? "o" : "i"}
           </span>
         </div>
         {thread.eventi.length === 0 ? (
