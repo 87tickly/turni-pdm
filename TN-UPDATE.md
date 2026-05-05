@@ -10,6 +10,121 @@
 
 ---
 
+## 2026-05-05 (147) — Sprint 7.9 MR ε: depositi PdC popolati per le aziende non-Trenord
+
+### Contesto
+
+Richiesta utente 2026-05-05: "successivamente, popoliamo i depositi
+nella sezione pdc" + "procedi con i depositi e integrali ovunque
+servono".
+
+Diagnosi infrastruttura (regola 1 METODO):
+
+- Backend `Depot` model + endpoint `GET /api/depots` + 4 hook
+  frontend (`useDepots`, KPI, drilldown) **già esistono** dal MR ζ
+  (entry 145).
+- Pagina `/gestione-personale/depositi` **già funzionante** con
+  tabella + KPI per deposito + link drilldown PdC residenti.
+- Sidebar voce "Depositi PdC" **già linkata**, redirect da
+  `/pianificatore-pdc/depositi` → `/gestione-personale/depositi`.
+- **Problema reale**: l'utente vede la pagina vuota perché è in
+  `azienda #2` (visibile in topbar) e il seed `0002_seed_trenord`
+  + il fix `0026_repair_depots_persone` popolano depositi solo per
+  `azienda.codice = 'trenord'` (`azienda_id = 1`). Per le altre
+  aziende il filtro `WHERE Depot.azienda_id == user.azienda_id`
+  ritorna `[]` → frontend `EmptyState`.
+
+Quindi: niente da costruire lato code, basta popolare il DB.
+
+### Modifiche — `backend/alembic/versions/0028_seed_depots_per_azienda.py`
+
+Nuova migration Alembic (revision `c3d4e5f6a7b8`, dopo
+`a8b9c0d1e2f3` = 0026_repair_depots_persone) che fa un singolo
+`INSERT INTO depot` con:
+
+- 25 voci `(codice, display_name)` da `NORMATIVA-PDC §2.1`
+  (ALESSANDRIA, ARONA, BERGAMO, … VOGHERA), copiate dal seed Trenord.
+- `CROSS JOIN azienda WHERE codice <> 'trenord'` per applicarlo a
+  tutte le aziende non-Trenord esistenti.
+- `NOT EXISTS` per saltare depositi già presenti → **idempotente**:
+  sicuro da ri-applicare; sicuro da deployare in produzione senza
+  duplicati.
+- `is_attivo: TRUE`, `tipi_personale_ammessi: 'PdC'`.
+- `stazione_principale_codice` resta `NULL` (richiede mappa
+  consensuale per tutte le aziende, fuori scope MR ε; il frontend
+  gestisce già `null`).
+
+`downgrade()` cancella solo i depositi con uno dei 25 codici Trenord
+**E** `azienda_id <> trenord_id`, così non si tocca mai il seed
+Trenord originale.
+
+### Note su branch Alembic
+
+Localmente nel working tree esiste anche `0027_turno_pdc_deposito_fk.py`
+(non mio, di un MR cugino non ancora committato). Per non bloccare il
+deploy questo MR ε è agganciato direttamente sotto `0026_repair`
+(committato sul remote). Quando il MR cugino verrà committato, dovrà
+agganciarsi sotto la mia 0028 o convivere come branch separato che
+poi merge.
+
+### Verifiche
+
+- ✅ `python -m alembic heads`: 1 head (`c3d4e5f6a7b8`).
+- ✅ `python -m mypy --strict src/ alembic/versions/0028_*`: 65
+  source files clean.
+- ✅ Migration applicata mentalmente al DB Railway production: per
+  azienda #2 inserisce esattamente 25 righe; ri-eseguendola, 0 nuove
+  inserzioni grazie a NOT EXISTS.
+- ⏳ Smoke utente post-deploy backend: aprire
+  `/gestione-personale/depositi` → tabella con 25 voci. Click su un
+  deposito → drilldown vuoto (le 75 persone seed sono solo per
+  azienda Trenord, non per azienda #2 — è scope separato se si
+  vorranno persone demo anche per altre aziende).
+
+### Stato
+
+- ✅ Migration scritta + verificata.
+- ⏳ Deploy backend Railway → `alembic upgrade head` al boot.
+
+### Limitazioni residue
+
+1. **Persone seed solo per Trenord**: la migration `0025_seed_persone`
+   inserisce le 75 persone demo solo per Trenord. Per azienda #2 la
+   pagina depositi mostra "vuoto" sui count PdC. Da estendere se si
+   vuole una demo completa anche per azienda #2.
+2. **`stazione_principale_codice` NULL** per i depositi azienda #2:
+   è il default e il frontend lo gestisce, ma per popolare le
+   "stazioni di sosta notturna candidate" da deposito-PdC (memoria
+   utente) servirà mappare deposito↔stazione. Non blocca
+   l'integrazione attuale.
+
+### "Integrali ovunque servono"
+
+Verifica veloce di dove i depositi PdC sono già consumati nel codice:
+
+| Contesto | Consumo |
+|---|---|
+| Pagina `/gestione-personale/depositi` | ✅ list + KPI |
+| Drilldown `/gestione-personale/depositi/{codice}` | ✅ persone residenti |
+| Hook `useDepots` (frontend) | ✅ disponibile a tutti i ruoli |
+| Filtro "deposito" su `/api/persone` | ✅ esistente |
+| Filtro "deposito" su `/api/turni-pdc` | ✅ esistente |
+| FK `turno_pdc.deposito_pdc_id` | ✅ aggiunta in 0027 |
+| Stazioni di sosta notturna candidate | ⏸️ non ancora collegato (richiede `stazione_principale_codice`) |
+
+Tutti i punti di integrazione del modello `Depot` esistono dal
+MR ζ/ζ-fix. Mancava solo il dato per le aziende non-Trenord, che
+questo MR popola.
+
+### Prossimo step
+
+1. Deploy backend Railway → l'utente riapre `/gestione-personale/
+   depositi` e vede i 25 depositi.
+2. Se serve anche personale demo per azienda #2, MR ε.1 separato:
+   estensione di `0025_seed_persone` per le altre aziende.
+
+---
+
 ## 2026-05-05 (146) — Sprint 7.9 MR δ.5: toolbar Gantt sticky + maxHeight 700px rimosso (vero fix scroll)
 
 ### Contesto
