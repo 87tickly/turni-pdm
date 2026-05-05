@@ -33,14 +33,13 @@ ciclo settimanale completo, S.COMP, assegnazione persone.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.models.anagrafica import Depot, LocalitaManutenzione
-from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
 from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
 from colazione.models.turni_pdc import TurnoPdc, TurnoPdcBlocco, TurnoPdcGiornata
 
@@ -303,6 +302,25 @@ def _build_giornata_pdc(
     if prestazione_min > REFEZIONE_SOGLIA_MIN:
         drafts = _inserisci_refezione(drafts)
 
+    # 6.bis (Sprint 7.10 MR α.4): se la refezione manca ancora ma il
+    # turno tocca una delle finestre normative ai bordi, estendi il
+    # turno con un blocco REFEZ a inizio o fine. Decisione utente
+    # 2026-05-05: *"se manca la refezione, puoi aggiungerla alla fine
+    # o all'inizio se è nelle ore indicate"*. Aumenta prestazione di
+    # 30 min e sposta ora_presa o ora_fine_servizio di conseguenza.
+    if (
+        prestazione_min > REFEZIONE_SOGLIA_MIN
+        and not any(d.tipo_evento == "REFEZ" for d in drafts)
+    ):
+        ora_presa, ora_fine_servizio, drafts, prestazione_min = (
+            _inserisci_refezione_ai_bordi(
+                drafts=drafts,
+                ora_presa=ora_presa,
+                ora_fine_servizio=ora_fine_servizio,
+                prestazione_min=prestazione_min,
+            )
+        )
+
     # Renumera seq dopo eventuale split refezione
     for i, d in enumerate(drafts, start=1):
         d.seq = i
@@ -430,6 +448,93 @@ def _inserisci_refezione(drafts: list[_BloccoPdcDraft]) -> list[_BloccoPdcDraft]
         )
 
     return drafts[:idx] + sostituti + drafts[idx + 1 :]
+
+
+def _inserisci_refezione_ai_bordi(
+    *,
+    drafts: list[_BloccoPdcDraft],
+    ora_presa: int,
+    ora_fine_servizio: int,
+    prestazione_min: int,
+) -> tuple[int, int, list[_BloccoPdcDraft], int]:
+    """Sprint 7.10 MR α.4: fallback refezione ai bordi del turno.
+
+    Quando il turno NON ha PK ≥30' in finestra refezione (=
+    ``_inserisci_refezione`` non ha trovato candidati), prova a
+    estendere il turno con un blocco REFEZ di 30' a inizio o fine,
+    purché il bordo cada in una delle finestre normative
+    (11:30-15:30 o 18:30-22:30).
+
+    Decisione utente 2026-05-05 (entry 154): *"se manca la refezione,
+    puoi aggiungerla alla fine o all'inizio se è nelle ore indicate"*.
+
+    Strategia:
+    1. Se ``ora_presa`` è in finestra → REFEZ 30' PRIMA della presa.
+       L'inizio del turno si sposta a `ora_presa - 30`. Prestazione +30.
+    2. Altrimenti se ``ora_fine_servizio`` è in finestra → REFEZ 30'
+       DOPO la fine. Fine si sposta a `ora_fine_servizio + 30`.
+       Prestazione +30.
+    3. Altrimenti: nessun bordo è in finestra → ritorna invariato
+       (la giornata risulterà con violazione "refezione_mancante").
+
+    Returns:
+        Tupla `(ora_presa_nuova, ora_fine_servizio_nuova, drafts_nuovi,
+        prestazione_min_nuova)`. Se nessun bordo è valido, gli input
+        vengono ritornati invariati.
+    """
+
+    def _in_finestra(t: int) -> bool:
+        return any(fa <= t < fb for fa, fb in REFEZIONE_FINESTRE)
+
+    primo_blocco = drafts[0] if drafts else None
+    ultimo_blocco = drafts[-1] if drafts else None
+
+    # Strategia 1: refez prima della PRESA, se presa in finestra.
+    # NB: la finestra si applica all'ora di INIZIO del blocco REFEZ
+    # (= ora_presa - 30), non alla presa stessa, ma il vincolo
+    # operativo è che la pausa deve cadere "in finestra"; se anche
+    # `ora_presa - 30` è ancora in finestra è OK.
+    if primo_blocco is not None and _in_finestra((ora_presa - REFEZIONE_MIN_DURATA) % (24 * 60)):
+        nuovo_ora_presa = (ora_presa - REFEZIONE_MIN_DURATA) % (24 * 60)
+        refez = _BloccoPdcDraft(
+            seq=0,  # rinumerato dal chiamante
+            tipo_evento="REFEZ",
+            ora_inizio=_from_min(nuovo_ora_presa),
+            ora_fine=_from_min(ora_presa),
+            durata_min=REFEZIONE_MIN_DURATA,
+            stazione_da_codice=primo_blocco.stazione_da_codice,
+            stazione_a_codice=primo_blocco.stazione_da_codice,
+            accessori_note="Refezione anticipata (manca PK in finestra)",
+        )
+        return (
+            nuovo_ora_presa,
+            ora_fine_servizio,
+            [refez] + drafts,
+            prestazione_min + REFEZIONE_MIN_DURATA,
+        )
+
+    # Strategia 2: refez dopo la FINE servizio, se fine in finestra.
+    if ultimo_blocco is not None and _in_finestra(ora_fine_servizio % (24 * 60)):
+        nuovo_ora_fine = (ora_fine_servizio + REFEZIONE_MIN_DURATA) % (24 * 60)
+        refez = _BloccoPdcDraft(
+            seq=0,
+            tipo_evento="REFEZ",
+            ora_inizio=_from_min(ora_fine_servizio),
+            ora_fine=_from_min(nuovo_ora_fine),
+            durata_min=REFEZIONE_MIN_DURATA,
+            stazione_da_codice=ultimo_blocco.stazione_a_codice,
+            stazione_a_codice=ultimo_blocco.stazione_a_codice,
+            accessori_note="Refezione posticipata (manca PK in finestra)",
+        )
+        return (
+            ora_presa,
+            nuovo_ora_fine,
+            drafts + [refez],
+            prestazione_min + REFEZIONE_MIN_DURATA,
+        )
+
+    # Nessun bordo in finestra → invariato.
+    return ora_presa, ora_fine_servizio, drafts, prestazione_min
 
 
 # --- Entry point: persiste un turno PdC dal giro -------------------------

@@ -10,6 +10,116 @@
 
 ---
 
+## 2026-05-05 (154) — Sprint 7.10 MR α.4: accorpa per deposito + codice nuovo + refezione ai bordi
+
+### Contesto
+
+Smoke utente post-MR α.3.fix: il builder multi-turno funziona e
+produce N turni distinti con depositi corretti, ma 3 fix concettuali
+sono richiesti (decisione utente 2026-05-05):
+
+1. *"Quando generi i turni per depositi, devi accorparli e unirli.
+   Il deposito è solo uno per ogni località, crea un unico file"* —
+   N segmenti DP con lo stesso deposito devono diventare **1 turno
+   PdC con N giornate**, non N turni indipendenti.
+2. *"Se manca la refezione, puoi aggiungerla alla fine o all'inizio
+   se è nelle ore indicate"* — quando il builder non trova un PK
+   ≥30' in finestra, deve estendere il turno con un blocco REFEZ ai
+   bordi se l'inizio o la fine cadono in finestra normativa.
+3. *"Quando generi un turno, non serve riportare il nome del turno
+   materiale: sono due cose separate"* — codice turno deve essere
+   `T-{depot}-{NNN}`, niente più `T-{depot}-G-FIO-001-ETR421-8g-...`.
+
+Punti rinviati (MR successivi):
+- *"Tante giornate"* (turno PdC con poche giornate corte = spreco
+  produttivo): chiarito dall'utente come **MR α.6 fill multi-giro**
+  (popolare giornate corte attingendo da altri giri materiali).
+- *"Mancano i rientri in vettura"* + *"usa API live.arturo.travel"*:
+  **MR α.5 vetture passive** — API trovata con Railway CLI sotto
+  `https://arturo-production.up.railway.app` (project `ARTURO-live`,
+  service `arturo`), endpoint `/api/cerca/stazione?q=...` e
+  `/api/partenze/{stazione_id}`, OpenAPI esposta, no auth.
+- *"Gantt è pessimo"*: **MR α.7 redesign Gantt turno PdC**.
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_pdc/builder.py`**:
+
+- Nuovo helper `_inserisci_refezione_ai_bordi(drafts, ora_presa,
+  ora_fine_servizio, prestazione_min) → tuple`:
+  - Strategia 1: se `ora_presa - 30` cade in una finestra
+    (11:30-15:30 o 18:30-22:30) → REFEZ inserita PRIMA della presa.
+    `ora_presa_nuova = ora_presa - 30`. Prestazione +30.
+  - Strategia 2: se `ora_fine_servizio` in finestra → REFEZ DOPO
+    la fine. `ora_fine_nuova = ora_fine_servizio + 30`. Prestazione +30.
+  - Strategia 3 (fallback): nessun bordo in finestra → invariato
+    (la giornata resta con violazione `refezione_mancante`, come
+    pre-α.4).
+  - Precedenza: la strategia 1 vince se entrambi i bordi in finestra.
+- `_build_giornata_pdc` ora invoca `_inserisci_refezione_ai_bordi`
+  *dopo* `_inserisci_refezione` se la prima non è riuscita a
+  trovare un PK utile e la prestazione richiede comunque la pausa.
+- Cleanup: rimossi 3 import inutilizzati pre-esistenti
+  (`datetime.timedelta`, `CorsaCommerciale`, `CorsaMaterialeVuoto`).
+
+**`backend/src/colazione/domain/builder_pdc/multi_turno.py`**
+(refactoring `_persisti_segmenti`):
+
+- Nuovo helper `_prossimo_progressivo_per_deposito(session,
+  azienda_id, deposito_pdc_id) → int` — `count(turno_pdc esistenti
+  del deposito) + 1`. Numerazione *progressiva non riciclata*: se
+  un deposito ha avuto 50 turni e 10 sono stati cancellati, il
+  prossimo è 51. Evita ambiguità di codici riassegnati nel tempo.
+- Refactoring `_persisti_segmenti`:
+  - Costruisce drafts in memoria, raggruppandoli per `depot.id`.
+  - **Per ogni deposito reale**: 1 TurnoPdc con N giornate (ciclo
+    N), con codice `T-{depot.codice}-{NNN:03d}` (es.
+    `T-LECCO-001`, `T-LECCO-002`...).
+  - **Per il `None` legacy** (segmenti senza copertura CV): 1
+    TurnoPdc per segmento, codice `T-LEGACY-{giro_id}-{NN:02d}`
+    (visibilità del problema "tratta scoperta", non nascosto).
+  - Giornate del TurnoPdc-deposito ordinate per
+    `(numero_giornata_giro, idx_start)` — sequenza cronologica.
+  - Metadata estesi: `multi_turno_progressivo`, `multi_turno_giornate`
+    array (mappa `numero_giornata_pdc → giornata_giro_origine +
+    idx_start/end`), `builder_strategy: "multi_turno_dp_alpha4"`.
+
+### Verifiche
+
+- ✅ `uv run mypy --strict src/`: 66 source files, **0 errori**.
+- ✅ `uv run ruff check src/colazione/domain/builder_pdc/`: clean
+  (pulizia degli import inutilizzati pre-esistenti).
+- ✅ `uv run pytest --ignore=tests/test_persister.py`: **594 passed**
+  (era 588, +6 nuovi su `test_refezione_ai_bordi.py`), 12 skipped,
+  0 failed.
+- ⏳ Smoke utente post-deploy: invece di 8 turni T-LECCO-...-G05-S2
+  con codici lunghi e refezione mancante, atteso **3 turni**:
+  T-LECCO-001 (con 6 giornate), T-GARIBALDI_TE-001 (1 giornata),
+  T-FIORENZA-001 (1 giornata) — ognuno con refezione inserita ai
+  bordi se il bordo cade in finestra.
+
+### Stato
+
+- ✅ Punti utente 1, 2, 3 implementati.
+- ✅ MR α.5 (vetture passive) sbloccato — API live trovata.
+- ⏳ Deploy backend Railway.
+- ⏳ MR α.5/α.6/α.7 in coda.
+
+### Limitazioni dichiarate
+
+Nessuna nuova rispetto a MR α.2. La rimozione del codice
+contestuale `G{NN}-S{NN}` toglie una piccola "mappa visiva" di quale
+giornata-giro origina quale turno PdC, ma è ora nei metadata
+(`multi_turno_giornate`) e accessibile dal frontend per il drilldown
+del turno (futuro MR α.7).
+
+### Prossimo step
+
+Commit + push + deploy backend → smoke utente conferma codici nuovi
++ accorpamento + refezione ai bordi. Poi MR α.5 (vetture passive).
+
+---
+
 ## 2026-05-05 (153) — Sprint 7.10 MR α.3.fix: dialog backdrop opaco + larghezza + scroll interno
 
 ### Contesto

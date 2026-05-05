@@ -434,6 +434,35 @@ async def genera_turni_pdc_multi(
     return risultati
 
 
+async def _prossimo_progressivo_per_deposito(
+    session: AsyncSession,
+    azienda_id: int,
+    deposito_pdc_id: int,
+) -> int:
+    """Sprint 7.10 MR α.4 (entry 154): prossimo NNN del codice turno.
+
+    Restituisce ``count(turni_pdc esistenti del deposito) + 1``.
+    Idempotente nei limiti della sessione: il chiamante ha già
+    cancellato i turni del giro corrente prima di questa funzione,
+    quindi il count non li include.
+
+    Numerazione progressiva *non riciclata*: se un deposito ha mai
+    avuto 50 turni e ne sono stati cancellati 10, il prossimo è 51.
+    Evita ambiguità di codici riassegnati nel tempo.
+    """
+    from sqlalchemy import func
+
+    count = (
+        await session.execute(
+            select(func.count(TurnoPdc.id)).where(
+                TurnoPdc.azienda_id == azienda_id,
+                TurnoPdc.deposito_pdc_id == deposito_pdc_id,
+            )
+        )
+    ).scalar_one()
+    return int(count) + 1
+
+
 async def _persisti_segmenti(
     *,
     session: AsyncSession,
@@ -443,61 +472,115 @@ async def _persisti_segmenti(
     valido_da_eff: date,
     giornate_ids_giro: list[int],
 ) -> list[BuilderTurnoPdcResult]:
-    """Persiste 1 TurnoPdc per ogni segmento.
+    """Sprint 7.10 MR α.4 (entry 154): accorpa per deposito + codice nuovo.
 
-    Codice turno: ``T-{depot.codice}-{giro.numero_turno}-G{n_giornata}-S{seq}``
-    (con depot) oppure ``T-{giro.numero_turno}-G{n_giornata}-S{seq}`` (legacy
-    senza depot).
+    Decisione utente 2026-05-05: *"il deposito è solo uno per ogni
+    località, crea un unico file"* + *"non serve riportare il nome
+    del turno materiale, sono due cose separate"*.
 
-    Riusa ``_persisti_un_turno_pdc`` esistente (Sprint 7.4) passando
-    una lista di drafts di 1 elemento per ogni segmento → ogni
-    turno_pdc ha 1 giornata sola (ciclo=1) → modello "PdC fa quel
-    turno una sola volta nel ciclo del materiale".
+    Quindi:
+    - N segmenti DP con lo stesso deposito → **1 TurnoPdc** con N
+      giornate (ciclo N), non N TurnoPdc indipendenti.
+    - Codice: ``T-{depot.codice}-{NNN:03d}`` con NNN progressivo
+      *globale* per (azienda, deposito). Niente più riferimento al
+      numero turno del giro materiale.
+
+    Segmenti SENZA deposito (la tratta non passa da alcun depot
+    popolato) restano persistiti uno per uno con codice
+    ``T-LEGACY-{giro_id}-{seq:02d}`` — segnale visibile al
+    pianificatore che la tratta non ha copertura CV soddisfacente.
     """
-    risultati: list[BuilderTurnoPdcResult] = []
-    # Conteggio sotto-segmenti per giornata, per il suffisso S{seq}.
-    seq_per_giornata: dict[int, int] = {}
-
+    # 1. Costruisco i drafts in memoria, raggruppandoli per deposito.
+    drafts_per_deposito: dict[
+        int | None, list[tuple[_SegmentoTurno, _GiornataPdcDraft]]
+    ] = {}
     for seg in segmenti:
-        seq_per_giornata[seg.numero_giornata] = (
-            seq_per_giornata.get(seg.numero_giornata, 0) + 1
+        depot_key = (
+            seg.deposito_assegnato.id if seg.deposito_assegnato is not None else None
         )
-        seq_idx = seq_per_giornata[seg.numero_giornata]
-        depot = seg.deposito_assegnato
-
-        # Costruisco il draft sul segmento, rinumerando giornata=1
-        # (il TurnoPdc ha 1 sola giornata, ciclo=1).
         draft = _build_giornata_pdc(
-            numero_giornata=1,
+            numero_giornata=1,  # placeholder, rinumerato sotto
             variante_calendario=seg.variante_calendario,
             blocchi_giro=seg.blocchi,
         )
         if draft is None:
             continue
+        drafts_per_deposito.setdefault(depot_key, []).append((seg, draft))
 
-        codice_pieces = ["T"]
-        if depot is not None:
-            codice_pieces.append(depot.codice)
-        codice_pieces.append(giro.numero_turno or f"GIRO{giro.id}")
-        codice_pieces.append(f"G{seg.numero_giornata:02d}")
-        codice_pieces.append(f"S{seq_idx}")
-        codice = "-".join(codice_pieces)[:50]
+    risultati: list[BuilderTurnoPdcResult] = []
 
-        # Stazione sede effettiva: se ho depot con stazione popolata,
-        # uso quella; altrimenti la stazione di partenza del segmento
-        # (legacy fallback, NORMATIVA-PDC §10 dice che ogni PdC ha
-        # una sede di residenza).
+    # 2. Per ogni deposito, persisti 1 TurnoPdc aggregando le sue
+    #    giornate. Per `None` (legacy) faccio 1 turno per segmento
+    #    per visibilità del problema "tratta scoperta".
+    for depot_key, lista in drafts_per_deposito.items():
+        if depot_key is None:
+            for idx, (seg, draft) in enumerate(lista, start=1):
+                draft.numero_giornata = 1
+                codice = f"T-LEGACY-{giro.id}-{idx:02d}"[:50]
+                risultato = await _persisti_un_turno_pdc(
+                    session=session,
+                    azienda_id=azienda_id,
+                    giro=giro,
+                    drafts=[draft],
+                    codice=codice,
+                    stazione_sede=draft.stazione_inizio,
+                    valido_da_eff=valido_da_eff,
+                    giornate_ids=giornate_ids_giro,
+                    extra_metadata={
+                        "fr_giornate": [],
+                        "is_ramo_split": False,
+                        "fr_cap_violazioni": [],
+                        "multi_turno_giornata_origine": seg.numero_giornata,
+                        "multi_turno_idx_start": seg.idx_start,
+                        "multi_turno_idx_end": seg.idx_end,
+                        "multi_turno_seq": idx,
+                        "builder_strategy": "multi_turno_dp_alpha4_legacy",
+                    },
+                    depot_target=None,
+                    violazioni_ciclo_extra=[],
+                )
+                risultati.append(risultato)
+            continue
+
+        # Deposito reale: accorpa N segmenti in 1 TurnoPdc.
+        depot = lista[0][0].deposito_assegnato
+        assert depot is not None and depot.id == depot_key
+
+        nnn = await _prossimo_progressivo_per_deposito(
+            session, azienda_id, depot_key
+        )
+        codice = f"T-{depot.codice}-{nnn:03d}"[:50]
+
+        # Ordina per (giornata-giro origine, idx_start) → giornate
+        # del TurnoPdc in ordine cronologico del giro.
+        lista.sort(key=lambda x: (x[0].numero_giornata, x[0].idx_start))
+
+        # Rinumera giornata=1..N nel ciclo del TurnoPdc.
+        drafts_finali: list[_GiornataPdcDraft] = []
+        meta_giornate: list[dict[str, int]] = []
+        for i, (seg, draft) in enumerate(lista, start=1):
+            draft.numero_giornata = i
+            drafts_finali.append(draft)
+            meta_giornate.append(
+                {
+                    "numero_giornata_pdc": i,
+                    "giornata_giro_origine": seg.numero_giornata,
+                    "idx_start": seg.idx_start,
+                    "idx_end": seg.idx_end,
+                }
+            )
+
         stazione_sede = (
             depot.stazione_principale_codice
-            if depot is not None and depot.stazione_principale_codice is not None
-            else draft.stazione_inizio
+            if depot.stazione_principale_codice is not None
+            else drafts_finali[0].stazione_inizio
         )
 
         risultato = await _persisti_un_turno_pdc(
             session=session,
             azienda_id=azienda_id,
             giro=giro,
-            drafts=[draft],
+            drafts=drafts_finali,
             codice=codice,
             stazione_sede=stazione_sede,
             valido_da_eff=valido_da_eff,
@@ -506,11 +589,9 @@ async def _persisti_segmenti(
                 "fr_giornate": [],
                 "is_ramo_split": False,
                 "fr_cap_violazioni": [],
-                "multi_turno_giornata_origine": seg.numero_giornata,
-                "multi_turno_idx_start": seg.idx_start,
-                "multi_turno_idx_end": seg.idx_end,
-                "multi_turno_seq": seq_idx,
-                "builder_strategy": "multi_turno_dp_alpha2",
+                "multi_turno_progressivo": nnn,
+                "multi_turno_giornate": meta_giornate,
+                "builder_strategy": "multi_turno_dp_alpha4",
             },
             depot_target=depot,
             violazioni_ciclo_extra=[],
