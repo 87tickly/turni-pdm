@@ -1,9 +1,21 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link, useParams } from "react-router-dom";
 import { AlertCircle, ArrowLeft, FileDown, Users, X } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/Popover";
 import { Spinner } from "@/components/ui/Spinner";
 import { useGiroDettaglio, useThreadsGiro } from "@/hooks/useGiri";
 import { useTurniPdcGiro } from "@/hooks/useTurniPdc";
@@ -15,6 +27,7 @@ import type {
   GiroVariante,
 } from "@/lib/api/giri";
 import { formatDateIt, formatNumber } from "@/lib/format";
+import { stazioneAcronimo } from "@/lib/stazioni-acronimi";
 import { cn } from "@/lib/utils";
 import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdcDialog";
 
@@ -578,14 +591,36 @@ function GanttSection({
     persistZoom(z);
   };
 
+  // Sprint 7.9 MR δ.1 (entry 141): a zoom < 100% la timeline si stira
+  // per riempire la viewport disponibile (decisione utente: "al 75% non
+  // si riempie la pagina con sidebar chiusa"). A zoom ≥ 100% mantieni
+  // scala fissa con scroll orizzontale interno.
+  const scrollWrapperRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(0);
+  useLayoutEffect(() => {
+    const el = scrollWrapperRef.current;
+    if (el === null) return;
+    const update = () => setContainerWidth(el.clientWidth);
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const scale = useMemo<GanttScale>(() => {
-    const timelineWidthPx = BASE_TIMELINE_WIDTH_PX * zoom;
+    const baseWidth = BASE_TIMELINE_WIDTH_PX * zoom;
+    const fitWidth =
+      containerWidth > 0
+        ? Math.max(0, containerWidth - GIORNATA_LABEL_COL_PX - PER_KM_COL_PX)
+        : 0;
+    const timelineWidthPx = zoom < 1 ? Math.max(baseWidth, fitWidth) : baseWidth;
     return {
       timelineWidthPx,
       pxPerHour: timelineWidthPx / 24,
       minToPx: (min: number) => _baseMinToPx(min, timelineWidthPx),
     };
-  }, [zoom]);
+  }, [zoom, containerWidth]);
   const innerWidth = GIORNATA_LABEL_COL_PX + scale.timelineWidthPx + PER_KM_COL_PX;
 
   return (
@@ -612,7 +647,11 @@ function GanttSection({
         </div>
 
         {/* Scroll wrapper */}
-        <div className="relative overflow-auto" style={{ maxHeight: "700px" }}>
+        <div
+          ref={scrollWrapperRef}
+          className="relative overflow-auto"
+          style={{ maxHeight: "700px" }}
+        >
           <div className="relative" style={{ width: `${innerWidth}px` }}>
             {/* Sticky header X axis */}
             <AxisHeader />
@@ -875,6 +914,23 @@ function VarianteRow({
   const blocchi = variante.blocchi;
   const gaps = useMemo(() => computeGaps(blocchi), [blocchi]);
   const eventi = useMemo(() => extractEventiComposizione(variante), [variante]);
+  // Sprint 7.9 MR δ.1 (entry 141): flag prima/ultima per stazioni col
+  // nome pieno (decisione utente: "tranne la prima e l'ultima"). Il
+  // criterio è "blocco con ora_inizio min/max tra le corse commerciali
+  // e i materiali vuoti del giro" — escludiamo eventi composizione
+  // (aggancio/sgancio) che non sono né origine né destinazione del giro.
+  const blocchiOrdinati = useMemo(() => {
+    const significativi = blocchi.filter(
+      (b) => b.tipo_blocco !== "aggancio" && b.tipo_blocco !== "sgancio",
+    );
+    return [...significativi].sort((a, b) => {
+      const ta = parseTimeToMin(a.ora_inizio) ?? 0;
+      const tb = parseTimeToMin(b.ora_inizio) ?? 0;
+      return ta - tb;
+    });
+  }, [blocchi]);
+  const firstId = blocchiOrdinati[0]?.id ?? null;
+  const lastId = blocchiOrdinati[blocchiOrdinati.length - 1]?.id ?? null;
 
   // Per/Km per giornata: usiamo km_giornata se presente; "Per" è
   // un campo non ancora persistito nel backend (vedi residui TN-UPDATE).
@@ -936,6 +992,8 @@ function VarianteRow({
             key={b.id}
             blocco={b}
             selected={b.id === selectedBloccoId}
+            isFirstOfRow={b.id === firstId}
+            isLastOfRow={b.id === lastId}
             onSelect={() => onSelectBlocco(b)}
           />
         ))}
@@ -964,10 +1022,14 @@ function VarianteRow({
 function BloccoSegment({
   blocco,
   selected,
+  isFirstOfRow,
+  isLastOfRow,
   onSelect,
 }: {
   blocco: GiroBlocco;
   selected: boolean;
+  isFirstOfRow: boolean;
+  isLastOfRow: boolean;
   onSelect: () => void;
 }) {
   const { minToPx } = useGanttScale();
@@ -992,6 +1054,8 @@ function BloccoSegment({
         startPx={startPx}
         widthPx={widthPx}
         selected={selected}
+        isFirstOfRow={isFirstOfRow}
+        isLastOfRow={isLastOfRow}
         onSelect={onSelect}
         tooltip={tooltip}
       />
@@ -1033,8 +1097,14 @@ function BloccoSegment({
     const sedeLabel = sedeCodice ?? "deposito";
     const direction = isRientroDeposito || isRientroIntraArea ? "ret" : "out";
     const arrow = direction === "ret" ? "←" : "→";
-    const stazioneDa = stazioneShort(blocco.stazione_da_nome ?? blocco.stazione_da_codice);
-    const stazioneA = stazioneShort(blocco.stazione_a_nome ?? blocco.stazione_a_codice);
+    const stazioneDa = labelStazione(
+      blocco.stazione_da_nome ?? blocco.stazione_da_codice,
+      isFirstOfRow,
+    );
+    const stazioneA = labelStazione(
+      blocco.stazione_a_nome ?? blocco.stazione_a_codice,
+      isLastOfRow,
+    );
     const showStazioni = widthPx >= 47;
     const showOrari = widthPx >= 33;
     return (
@@ -1217,6 +1287,8 @@ function CommercialeBlocco({
   startPx,
   widthPx,
   selected,
+  isFirstOfRow,
+  isLastOfRow,
   onSelect,
   tooltip,
 }: {
@@ -1224,16 +1296,26 @@ function CommercialeBlocco({
   startPx: number;
   widthPx: number;
   selected: boolean;
+  isFirstOfRow: boolean;
+  isLastOfRow: boolean;
   onSelect: () => void;
   tooltip: string;
 }) {
   const direction = inferDirection(blocco);
   const arrow = direction === "ret" ? "←" : "→";
-  // Sprint 7.8 MR 4 (decisione utente 2026-05-03): preferisci il nome
-  // umano leggibile (es. "MILANO ROGOREDO") al codice tecnico (S01717).
-  // Fallback al codice se il nome manca dal payload.
-  const stazioneDa = stazioneShort(blocco.stazione_da_nome ?? blocco.stazione_da_codice);
-  const stazioneA = stazioneShort(blocco.stazione_a_nome ?? blocco.stazione_a_codice);
+  // Sprint 7.9 MR δ.1 (entry 141): solo PRIMA stazione del giro (origine
+  // del primo blocco) e ULTIMA (destinazione dell'ultimo) mostrano il
+  // nome pieno; le intermedie usano l'acronimo della mappa
+  // `stazioneAcronimo` (es. MILANO PORTA GARIBALDI → MiPG, LECCO → Lc).
+  // Risolve la sovrapposizione visiva @ zoom 200% su giri densi.
+  const stazioneDa = labelStazione(
+    blocco.stazione_da_nome ?? blocco.stazione_da_codice,
+    isFirstOfRow,
+  );
+  const stazioneA = labelStazione(
+    blocco.stazione_a_nome ?? blocco.stazione_a_codice,
+    isLastOfRow,
+  );
   // Sprint 7.9 entry 110: blocchi stretti mostrano solo arrow+numero
   // per evitare sovrapposizione delle etichette stazione sui blocchi
   // adiacenti. Sopra la soglia stampa entrambe (origine|dest) tronche
@@ -1293,24 +1375,21 @@ function inferDirection(b: GiroBlocco): "out" | "ret" {
   return "out";
 }
 
-function stazioneShort(label: string | null): string {
+/**
+ * Sprint 7.9 MR δ.1 (entry 141): label stazione DENTRO il Gantt giro.
+ * Per le stazioni intermedie usa l'acronimo compatto (mappa Trenord +
+ * fallback algoritmico in `lib/stazioni-acronimi.ts`); per la prima
+ * stazione del giro (origine del primo blocco) e l'ultima (destinazione
+ * dell'ultimo blocco) restituisce il nome pieno troncato dal CSS
+ * `truncate` del container. NotteRow e SidePanel mostrano il nome
+ * originale (`sostaInfo.stazione`, `blocco.stazione_*_nome`) senza
+ * passare di qui — contesto già verboso.
+ */
+function labelStazione(label: string | null, useFullName: boolean): string {
   if (label === null) return "—";
   const trimmed = label.trim();
   if (trimmed.length === 0) return "—";
-  // Sprint 7.8 MR 4: ora riceviamo il NOME (es. "MILANO ROGOREDO") e
-  // non più il codice tecnico ("S01717"). Strategia di compressione:
-  // 1. Se è già corto (≤9 char) → ritorna intero ("BRESCIA", "TIRANO").
-  // 2. Se ha 2+ parole, cerca di mantenere il pezzo distintivo (parte
-  //    dopo la città principale). Es. "MILANO ROGOREDO" → "ROGOREDO".
-  // 3. Fallback troncamento a 8 + ellipsis.
-  if (trimmed.length <= 9) return trimmed;
-  const parole = trimmed.split(/\s+/);
-  if (parole.length >= 2) {
-    // Mantieni la parte distintiva (ultima parola se diversa dalla città).
-    const last = parole[parole.length - 1];
-    if (last.length >= 3 && last.length <= 12) return last;
-  }
-  return trimmed.substring(0, 8) + "…";
+  return useFullName ? trimmed : stazioneAcronimo(trimmed);
 }
 
 function formatTimeShort(t: string | null): string {
@@ -1492,44 +1571,87 @@ function extractEventiComposizione(variante: GiroVariante): EventoComposizione[]
 function EventoCompMarker({ evento }: { evento: EventoComposizione }) {
   const { minToPx } = useGanttScale();
   const px = minToPx(evento.oraMin);
-  const stazioneSeg = evento.stazione !== null ? ` ${evento.stazione}` : "";
   const orario = formatTimeShort(minToTime(evento.oraMin));
   const segno = evento.pezziDelta >= 0 ? "+" : "";
   const descrizione =
     evento.tipo === "aggancio"
       ? evento.sourceDescrizione
       : evento.destDescrizione;
-  const tooltip = [
-    `${evento.tipo === "aggancio" ? "AGGANCIO" : "SGANCIO"} · ${orario}${stazioneSeg}`,
-    `${segno}${evento.pezziDelta} ${evento.materiale}`,
-    descrizione ?? "",
-  ]
-    .filter((s) => s.length > 0)
-    .join(" · ");
-  // Sprint 7.9 MR β2-3: barra colorata + label esterna.
+  // Sprint 7.9 MR β2-3 / MR δ.1 (entry 141):
   // - Aggancio: verde (+ pezzi entrano)
   // - Sgancio: rosso (- pezzi escono)
   // - Capacity warning: giallo lampo
+  // Label compatta `+1` / `-1` (no MAT code) per non sovrapporre il
+  // testo dei blocchi commerciali sotto. Il dettaglio (materiale +
+  // descrizione sourcing) finisce nel Popover su click.
   const color = evento.capacityWarning
     ? "#f59e0b"
     : evento.tipo === "aggancio"
       ? "#16a34a"
       : "#dc2626";
+  const tipoLabel = evento.tipo === "aggancio" ? "AGGANCIO" : "SGANCIO";
   return (
-    <div
-      className="pointer-events-none absolute z-10 flex flex-col items-center"
-      style={{ left: px - 1, top: 8 }}
-      title={tooltip}
-    >
-      <span
-        className="rounded-sm px-1 py-0.5 text-[8px] font-bold leading-none text-white"
-        style={{ background: color }}
-      >
-        {segno}
-        {evento.pezziDelta} {evento.materiale}
-      </span>
-      <div style={{ width: 2, height: 70, background: color }} />
-    </div>
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`${tipoLabel} ${segno}${evento.pezziDelta} ${evento.materiale} alle ${orario}`}
+          className="absolute z-10 flex flex-col items-center"
+          style={{ left: px - 8, top: 0, width: 16 }}
+        >
+          <span
+            className="rounded-sm px-1 py-0.5 text-[9px] font-bold leading-none text-white tabular-nums"
+            style={{ background: color }}
+          >
+            {segno}
+            {evento.pezziDelta}
+          </span>
+          <div
+            className="mt-0.5"
+            style={{ width: 2, height: 80, background: color }}
+          />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="center" sideOffset={4} className="text-xs">
+        <div className="flex items-center gap-2">
+          <span
+            className="rounded-sm px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none text-white"
+            style={{ background: color }}
+          >
+            {tipoLabel}
+          </span>
+          <span className="font-mono tabular-nums text-foreground">
+            {orario}
+          </span>
+          {evento.stazione !== null && (
+            <span className="font-mono text-muted-foreground">
+              · {evento.stazione}
+            </span>
+          )}
+        </div>
+        <div className="mt-2 font-mono text-sm text-foreground">
+          {segno}
+          {evento.pezziDelta}{" "}
+          <span className="text-muted-foreground">{evento.materiale}</span>
+        </div>
+        {descrizione !== null && (
+          <div className="mt-2 border-t border-border pt-2 text-[11px] leading-snug text-muted-foreground">
+            {descrizione}
+          </div>
+        )}
+        {evento.capacityWarning && (
+          <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-900">
+            ⚠ Capacity warning: dotazione azienda potrebbe essere
+            insufficiente per questo aggancio.
+          </div>
+        )}
+        <div className="mt-2 text-[10px] italic text-muted-foreground/70">
+          {evento.tipo === "aggancio"
+            ? "Pezzo che entra nel turno (composizione cresce)."
+            : "Pezzo che esce dal turno (composizione cala)."}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

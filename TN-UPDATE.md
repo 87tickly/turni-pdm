@@ -10,6 +10,129 @@
 
 ---
 
+## 2026-05-05 (141) — Sprint 7.9 MR δ.1: acronimi stazioni + fit-to-container @ 75% + Popover marker EventoComposizione
+
+### Contesto
+
+Smoke utente post-deploy MR δ (entry 140). Tre feedback concreti sullo
+zoom Gantt:
+
+1. **@ zoom 200%**: le label stazione sopra ai blocchi commerciali
+   ("LECCO GARIB...") si appiccicano visivamente con i blocchi adiacenti
+   per via dei nomi lunghi. Decisione utente: **acronimi compatti**
+   (es. MILANO PORTA GARIBALDI → MiPG, LECCO → Lc) per le stazioni
+   intermedie, **nome pieno solo per la prima e l'ultima** stazione del
+   giro.
+2. **@ zoom 75%**: la timeline è 720px ma il container è ~1500px → c'è
+   spazio bianco a destra. Va resa **fit-to-container** quando zoom <
+   100%.
+3. **Marker `EventoCompMarker`** ("-1 ETR421" sopra "sgancio"): label
+   troppo larga si sovrappone al testo dei blocchi sottostanti
+   ("Lgancio" = "L" di "LECCO" + "sgancio"). Decisione utente: "marker
+   proviamo con entrambi" → label compatta `+/-N` + popup esplicativo
+   cliccabile.
+
+### Modifiche
+
+**Nuovo modulo `frontend/src/lib/stazioni-acronimi.ts`**: mappa
+hardcoded di ~70 stazioni Trenord (Milano *, direttrice Tirano, Como/
+Chiasso, Bergamo, Brescia, Mantova/Cremona, Domodossola/Malpensa,
+Varese/Svizzera, Brianza/Pavia) + fallback algoritmico per stazioni
+non mappate (camelcase 2-char per parola singola, prima parola 2-char
++ iniziali maiuscole successive per multi-parola). Risolve collisioni
+(Como vs Colico vs Codogno) con voci esplicite.
+
+**`GiroDettaglioRoute.tsx` — acronimi (A)**:
+- Nuova funzione `labelStazione(label, useFullName)` che ritorna
+  acronimo via mappa o nome pieno troncato dal CSS `truncate` del
+  container.
+- `BloccoSegment` riceve `isFirstOfRow`/`isLastOfRow` (= primo/ultimo
+  blocco "significativo" della variante per `ora_inizio`, escludendo
+  eventi composizione che non sono né origine né destinazione). Li
+  propaga a `CommercialeBlocco` e al branch `materiale_vuoto`.
+- `VarianteRow` calcola firstId/lastId su `blocchiOrdinati` (filtrati
+  per tipo ≠ aggancio/sgancio) e li passa.
+- Rimossa funzione globale `stazioneShort` (non più usata; la copia
+  locale in `TurnoPdcDettaglioRoute.tsx` resta intatta — out of
+  scope).
+
+**`GiroDettaglioRoute.tsx` — fit-to-container (B)**:
+- `GanttSection` ora ha `useRef(scrollWrapperRef)` + `useLayoutEffect`
+  con `ResizeObserver` per misurare `clientWidth` del container.
+- `scale.timelineWidthPx = zoom < 1 ? max(BASE * zoom, containerWidth
+  - GIORNATA_LABEL_COL_PX - PER_KM_COL_PX) : BASE * zoom`. Ovvero:
+  - Zoom 75%: si stira fino a riempire il container disponibile
+    (almeno 720px = 30 px/h, ma anche di più se schermo grande).
+  - Zoom 100/150/200%: scala fissa con scroll orizzontale interno
+    quando supera il viewport (comportamento MR δ invariato).
+
+**`GiroDettaglioRoute.tsx` — Popover marker (C-marker parte 1)**:
+- Nuovo wrapper `frontend/src/components/ui/Popover.tsx` (Radix wrap
+  tipo Dialog: `Popover`, `PopoverTrigger`, `PopoverContent`,
+  `PopoverAnchor`).
+- `EventoCompMarker` non è più `pointer-events-none`: diventa
+  `<button>` cliccabile con label compatta `+1` / `-1` (no MAT code) e
+  Popover che mostra:
+  - tipo (AGGANCIO/SGANCIO badge colorato) + orario + stazione
+  - delta + materiale completo (es. `-1 ETR421`)
+  - descrizione sourcing (`source_descrizione` per aggancio,
+    `dest_descrizione` per sgancio — popolato da MR β2-3)
+  - banner ⚠ giallo se `capacity_warning=true`
+  - sublabel "Pezzo che entra/esce dal turno (composizione cresce/cala)"
+- La barra verticale 80px sotto il marker indica visivamente l'ora
+  dell'evento sull'asse, allineata al px esatto di `oraMin`.
+- Width hitbox 16px (era pointer-events-none, ora cliccabile da +/-8 px
+  attorno al px esatto).
+
+### Verifiche
+
+- ✅ `tsc -b --noEmit`: clean.
+- ✅ `pnpm lint`: 0 errors, 5 warning preesistenti (non miei).
+- ✅ `pnpm test`: 13/13 file, 52 passed + 1 skipped (entry 140), 0
+  failed.
+- ✅ `pnpm build` (vite production): 1761 modules, 567KB JS / 158KB
+  gzipped (+13KB vs MR δ per `@radix-ui/react-popover` già installato
+  ma non usato altrove finora).
+
+### Stato
+
+- ✅ A: acronimi stazioni con mappa Trenord (70 voci) + fallback +
+  eccezione prima/ultima.
+- ✅ B: fit-to-container @ zoom < 100% via ResizeObserver.
+- ✅ C-marker (parte 1): label compatta + Popover esplicativo.
+- ⏳ Smoke utente in produzione (giro 128, varia zoom 75-200%, click
+  sui marker `+/-N` per vedere il Popover).
+- ⏳ MR δ.2 (separato): C-corsa = dialog dettaglio corsa commerciale al
+  click sul blocco rosso (sostituisce o affianca `BloccoSidePanel`
+  laterale) + link "Apri thread del convoglio" dal Popover marker se
+  evento collegato a `MaterialeThread`.
+
+### Limitazioni residue
+
+1. **Mappa stazioni hardcoded**: 70 voci coprono i grandi flussi
+   Trenord ma esistono ~250 stazioni in regione. Le mancanti cadono nel
+   fallback algoritmico (es. "ARESE LAINATE" → "ArL"). Se l'utente vede
+   un acronimo confuso/scomodo, basta aggiungerlo alla mappa.
+2. **`TurnoPdcDettaglioRoute.tsx` non aggiornato**: usa ancora la sua
+   `stazioneShort` locale e scala fissa. Refactor gemello quando il
+   ruolo Pianificatore PdC sarà attivo.
+3. **`formatTimeShort` produce "23 24" invece di "23:24"** (visibile
+   in `NotteRow`): non corretto in questo MR perché potrebbe essere
+   stile compatto voluto (PDF Trenord usa orari senza separatore). Da
+   chiarire con utente in MR successivo.
+
+### Prossimo step
+
+MR δ.2: aprendo dialog dettaglio corsa commerciale (= "popup turno in
+pagina dedicata" della richiesta utente, lettura B). Cliccando un
+blocco commerciale rosso si apre un Dialog modal con: orari/stazioni
+da-a/durata/km/tipo blocco/eventi composizione associati + bottone
+"Vai al thread del convoglio" se collegato a un `MaterialeThread`
+esistente. Sostituisce o affianca il `BloccoSidePanel` laterale
+attuale.
+
+---
+
 ## 2026-05-05 (140) — Sprint 7.9 MR δ: zoom Gantt giro materiale (75/100/150/200%) + fix collaterale test legacy
 
 ### Contesto
