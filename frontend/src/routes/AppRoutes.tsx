@@ -21,6 +21,7 @@ import { GestionePersonaleIndisponibilitaRoute } from "@/routes/gestione-persona
 import { GestionePersonaleLayout } from "@/routes/gestione-personale/GestionePersonaleLayout";
 import { GestionePersonalePersonaDettaglioRoute } from "@/routes/gestione-personale/PersonaDettaglioRoute";
 import { GestionePersonalePersoneRoute } from "@/routes/gestione-personale/PersoneRoute";
+import { PersonalePdcMioTurnoRoute } from "@/routes/personale-pdc/MioTurnoRoute";
 import { PianificatorePdcDashboardRoute } from "@/routes/pianificatore-pdc/DashboardRoute";
 import { PianificatorePdcGiriRoute } from "@/routes/pianificatore-pdc/GiriRoute";
 import { PianificatorePdcRevisioniCascadingRoute } from "@/routes/pianificatore-pdc/RevisioniCascadingRoute";
@@ -32,6 +33,7 @@ import { PianificatorePdcTurnoDettaglioRoute } from "@/routes/pianificatore-pdc/
 const ROLE_PIANIFICATORE_GIRO = "PIANIFICATORE_GIRO";
 const ROLE_PIANIFICATORE_PDC = "PIANIFICATORE_PDC";
 const ROLE_GESTIONE_PERSONALE = "GESTIONE_PERSONALE";
+const ROLE_PERSONALE_PDC = "PERSONALE_PDC";
 
 /**
  * Tabella route dichiarativa.
@@ -126,6 +128,16 @@ export function AppRoutes() {
                 element={<GestionePersonaleIndisponibilitaRoute />}
               />
             </Route>
+          </Route>
+        </Route>
+      </Route>
+
+      {/* Dashboard 5 — Personale PdC (Sprint 8.0 MR 3, entry 168) */}
+      <Route element={<ProtectedRoute requiredRole={ROLE_PERSONALE_PDC} />}>
+        <Route element={<AppLayout />}>
+          <Route path="/personale-pdc">
+            <Route index element={<Navigate to="/personale-pdc/mio-turno" replace />} />
+            <Route path="mio-turno" element={<PersonalePdcMioTurnoRoute />} />
           </Route>
         </Route>
       </Route>

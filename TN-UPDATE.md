@@ -10,6 +10,123 @@
 
 ---
 
+## 2026-05-05 (168) — Sprint 8.0 MR 3: vista PdC finale (`/personale-pdc/mio-turno`)
+
+### Contesto
+
+Apre il **5° ruolo** dell'ecosistema (``PERSONALE_PDC``): il singolo
+macchinista vede le proprie giornate di servizio, filtrate
+server-side per programmi in stato pipeline ``VISTA_PUBBLICATA``
+(stato terminale del ramo PdC). Niente write — il PdC è il
+consumatore finale.
+
+### Modifiche backend
+
+**`backend/src/colazione/api/personale_pdc.py`** (nuovo, ~150 righe):
+
+- Nuovo router ``/api/personale-pdc/`` con auth
+  ``require_any_role("PERSONALE_PDC", "PIANIFICATORE_PDC")``
+  (admin bypassa). ``PIANIFICATORE_PDC`` ammesso per debug/visione
+  cross-utente del flusso operativo.
+- ``GET /mio-turno`` → lista ``MioTurnoGiornata``: lookup persona
+  via ``app_user.id == persona.user_id``, JOIN
+  ``AssegnazioneGiornata → TurnoPdcGiornata → TurnoPdc``, filter
+  via subquery sui giri appartenenti a programmi ``VISTA_PUBBLICATA``.
+- Empty state esplicito: se l'utente non ha persona collegata
+  → 200 con ``[]`` (più ergonomico del 404 per il frontend, che
+  evita branch di gestione no-persona vs no-turni).
+- Side-effect documentato: i turni "legacy" senza
+  ``generation_metadata_json["giro_materiale_id"]`` sono esclusi
+  perché il cast NULL rende il filtro ``IN (...)`` falso.
+
+**`backend/src/colazione/main.py`** — registrato il nuovo router.
+
+### Modifiche test backend
+
+**`backend/tests/test_personale_pdc_api.py`** (nuovo, 5 test):
+
+- ``test_mio_turno_personale_senza_persona_collegata_ritorna_lista_vuota``
+- ``test_mio_turno_pianificatore_pdc_ammesso_per_debug``
+- ``test_mio_turno_gestione_personale_403`` (boundary corretto)
+- ``test_mio_turno_admin_bypassa``
+- ``test_mio_turno_senza_token_401``
+
+Helper ``_ensure_test_users`` crea on-the-fly 3 utenti con i
+prefissi ``_test_personale_pdc_*`` (cleanup nel fixture
+``_module_setup``). Pattern identico a ``test_api_programmi_conferma.py``
+con cast esplicito ``CAST(:u AS VARCHAR)`` per evitare
+``AmbiguousParameter`` di psycopg3.
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/personalePdc.ts`** (nuovo): interfaccia
+``MioTurnoGiornata`` + wrapper ``getMioTurno()``.
+
+**`frontend/src/hooks/usePersonalePdc.ts`** (nuovo): hook
+``useMioTurno()`` con TanStack Query e cache key
+``["personale-pdc", "mio-turno"]``.
+
+**`frontend/src/routes/personale-pdc/MioTurnoRoute.tsx`** (nuovo):
+
+- Componente principale ``PersonalePdcMioTurnoRoute`` con header
+  + tabella delle assegnazioni.
+- ``EmptyState`` con icona calendario per "nessuna giornata
+  disponibile, attendi la pubblicazione di un programma".
+- ``MioTurnoTable``: colonne data, turno+impianto, giornata,
+  inizio/fine prestazione, prestazione/condotta in formato HHhMM,
+  flag notturno/riposo come testo + icona luna.
+
+**`frontend/src/routes/AppRoutes.tsx`**:
+
+- Import ``PersonalePdcMioTurnoRoute`` + costante
+  ``ROLE_PERSONALE_PDC = "PERSONALE_PDC"``.
+- Block route protetto con ``ProtectedRoute requiredRole={ROLE_PERSONALE_PDC}``:
+  ``/personale-pdc/`` → redirect a ``/personale-pdc/mio-turno``.
+
+### Verifiche
+
+- ✅ ``uv run mypy --strict src/``: 70 file clean (nuovo file +
+  main.py).
+- ✅ ``uv run ruff check`` su file MR 3: 0 errori.
+- ✅ ``uv run pytest tests/test_personale_pdc_api.py``: 5 verdi.
+- ✅ ``pnpm tsc -b --noEmit``: clean.
+- ✅ ``pnpm test --run``: 52 passed | 1 skipped.
+- ✅ Smoke locale (preview server post-restart): pagina ``/login``
+  renderizza, console clean.
+
+### Stato
+
+- ✅ Codice MR 3 pronto (endpoint backend + auth + filter
+  ``VISTA_PUBBLICATA`` + frontend route ``/personale-pdc/mio-turno``
+  con tabella).
+- ⏳ Commit + push + deploy backend + frontend Railway.
+- ⏳ Smoke production: utente con ruolo ``PERSONALE_PDC`` vede
+  la nuova route accessibile.
+
+### Decisioni di scope rinviate (dichiarate)
+
+- **Algoritmo assegnazione persone → turni** (presupposto per
+  popolare le righe ``mio-turno``): scope MR 2.bis o nuovo MR
+  dedicato. Senza algoritmo, la response sarà ``[]`` per la maggior
+  parte degli utenti — il frontend mostra l'empty state.
+- **Vista Gantt readonly** del turno completo (oggi tabella
+  semplice): rinviato a MR ergonomia successivo.
+- **Notifiche push al PdC** quando il programma diventa
+  ``VISTA_PUBBLICATA``: scope futuro, dipende da infra notifiche.
+- **Filtro per data corrente / settimana**: oggi mostra TUTTE le
+  assegnazioni dei programmi pubblicati. Aggiungere filtri
+  ``data_da`` / ``data_a`` query params al maturare del bisogno.
+
+### Prossimo step
+
+MR 4: dashboard Manutenzione + algoritmo matricole (ramo parallelo,
+indipendente da MR 0/1/2/3). Layout dedicato per ruolo
+``MANUTENZIONE``, vista programmi ``stato_manutenzione`` +
+assegnazione matricole materiali (logica già impostata in entry 88
+sulla schema matricole `{TIPO}-{NNN}`).
+
+---
+
 ## 2026-05-05 (167) — Sprint 8.0 MR 2: handoff PdC → Personale (freeze + dashboard PdC + dashboard Personale)
 
 ### Contesto

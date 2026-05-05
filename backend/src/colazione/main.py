@@ -16,6 +16,7 @@ from colazione.api import anagrafiche as anagrafiche_routes
 from colazione.api import auth as auth_routes
 from colazione.api import giri as giri_routes
 from colazione.api import personale as personale_routes
+from colazione.api import personale_pdc as personale_pdc_routes
 from colazione.api import pianificatore_pdc as pianificatore_pdc_routes
 from colazione.api import programmi as programmi_routes
 from colazione.api import turni_pdc as turni_pdc_routes
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
     app.include_router(turni_pdc_routes.turni_pdc_router)
     app.include_router(pianificatore_pdc_routes.router)
     app.include_router(personale_routes.router)
+    app.include_router(personale_pdc_routes.router)
 
     return app
 
