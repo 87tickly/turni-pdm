@@ -455,3 +455,158 @@ async def test_list_gestione_personale_filtra_a_pdc_confermato(
     ids = {p["id"] for p in res.json()}
     assert pid_alto in ids
     assert pid_basso not in ids
+
+
+# =====================================================================
+# Freeze read-only post MATERIALE_CONFERMATO (Sprint 8.0 MR 1, entry 165)
+# =====================================================================
+
+
+_PATCH_PAYLOAD = {"km_max_giornaliero": 999}
+_REGOLA_PAYLOAD: dict[str, object] = {
+    "filtri_json": [{"campo": "codice_linea", "op": "eq", "valore": "S5"}],
+    "composizione": [{"materiale_tipo_codice": "ALe711", "n_pezzi": 1}],
+    "priorita": 50,
+}
+
+
+async def test_patch_programma_pre_freeze_ok(client: TestClient) -> None:
+    """PATCH ok in PDE_IN_LAVORAZIONE."""
+    pid = await _crea_programma_in_stato("freeze_patch_pre", "PDE_IN_LAVORAZIONE")
+    res = client.patch(
+        f"/api/programmi/{pid}",
+        json=_PATCH_PAYLOAD,
+        headers=_h(_admin_token(client)),
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["km_max_giornaliero"] == 999
+
+
+async def test_patch_programma_post_freeze_409(client: TestClient) -> None:
+    """PATCH 409 in MATERIALE_CONFERMATO."""
+    pid = await _crea_programma_in_stato("freeze_patch_post", "MATERIALE_CONFERMATO")
+    res = client.patch(
+        f"/api/programmi/{pid}",
+        json=_PATCH_PAYLOAD,
+        headers=_h(_admin_token(client)),
+    )
+    assert res.status_code == 409, res.text
+    assert "MATERIALE_CONFERMATO" in res.json()["detail"]
+
+
+async def test_patch_programma_post_freeze_pdc_confermato_409(
+    client: TestClient,
+) -> None:
+    """Freeze attivo anche in stati successivi (PDC_CONFERMATO)."""
+    pid = await _crea_programma_in_stato("freeze_patch_pdcc", "PDC_CONFERMATO")
+    res = client.patch(
+        f"/api/programmi/{pid}",
+        json=_PATCH_PAYLOAD,
+        headers=_h(_admin_token(client)),
+    )
+    assert res.status_code == 409
+
+
+async def test_post_regola_post_freeze_409(client: TestClient) -> None:
+    pid = await _crea_programma_in_stato(
+        "freeze_regola_post", "MATERIALE_CONFERMATO"
+    )
+    res = client.post(
+        f"/api/programmi/{pid}/regole",
+        json=_REGOLA_PAYLOAD,
+        headers=_h(_admin_token(client)),
+    )
+    assert res.status_code == 409
+
+
+async def test_post_regola_pre_freeze_ok(client: TestClient) -> None:
+    pid = await _crea_programma_in_stato("freeze_regola_pre", "PDE_CONSOLIDATO")
+    res = client.post(
+        f"/api/programmi/{pid}/regole",
+        json=_REGOLA_PAYLOAD,
+        headers=_h(_admin_token(client)),
+    )
+    assert res.status_code == 201, res.text
+
+
+async def test_delete_regola_post_freeze_409(client: TestClient) -> None:
+    """Crea regola pre-freeze, confermala (transizione applicativa), poi
+    tenta delete: 409."""
+    pid = await _crea_programma_in_stato("freeze_del_pre", "PDE_CONSOLIDATO")
+    res_create = client.post(
+        f"/api/programmi/{pid}/regole",
+        json=_REGOLA_PAYLOAD,
+        headers=_h(_admin_token(client)),
+    )
+    assert res_create.status_code == 201
+    regola_id = res_create.json()["id"]
+
+    # Avanza il programma a MATERIALE_CONFERMATO via endpoint pipeline.
+    res_conf = client.post(
+        f"/api/programmi/{pid}/conferma-materiale",
+        headers=_h(_admin_token(client)),
+    )
+    assert res_conf.status_code == 200
+
+    res_del = client.delete(
+        f"/api/programmi/{pid}/regole/{regola_id}",
+        headers=_h(_admin_token(client)),
+    )
+    assert res_del.status_code == 409
+
+
+async def test_genera_giri_post_freeze_409(client: TestClient) -> None:
+    """``POST /programmi/{id}/genera-giri`` blocca con 409 dopo
+    MATERIALE_CONFERMATO. Niente setup di località/regole: il check
+    di freeze precede ``genera_giri()`` quindi il test è independent
+    da quegli artefatti.
+    """
+    pid = await _crea_programma_in_stato(
+        "freeze_giri_post", "MATERIALE_CONFERMATO"
+    )
+    res = client.post(
+        f"/api/programmi/{pid}/genera-giri",
+        params={"localita_codice": "DUMMY", "force": False},
+        headers=_h(_admin_token(client)),
+    )
+    assert res.status_code == 409
+    assert "MATERIALE_CONFERMATO" in res.json()["detail"]
+
+
+async def test_sblocca_riapre_modifiche(client: TestClient) -> None:
+    """Verifica end-to-end del workflow: conferma → freeze 409 → admin
+    sblocca → modifica torna a 200."""
+    pid = await _crea_programma_in_stato("freeze_unblock", "MATERIALE_GENERATO")
+    # Conferma (freeze attivo)
+    assert (
+        client.post(
+            f"/api/programmi/{pid}/conferma-materiale",
+            headers=_h(_admin_token(client)),
+        ).status_code
+        == 200
+    )
+    # PATCH ora è 409
+    assert (
+        client.patch(
+            f"/api/programmi/{pid}",
+            json=_PATCH_PAYLOAD,
+            headers=_h(_admin_token(client)),
+        ).status_code
+        == 409
+    )
+    # Admin sblocca → torna a MATERIALE_GENERATO
+    assert (
+        client.post(
+            f"/api/programmi/{pid}/sblocca",
+            json={"ramo": "pdc", "motivo": "test riapertura"},
+            headers=_h(_admin_token(client)),
+        ).status_code
+        == 200
+    )
+    # PATCH ora ok
+    res_patch = client.patch(
+        f"/api/programmi/{pid}",
+        json=_PATCH_PAYLOAD,
+        headers=_h(_admin_token(client)),
+    )
+    assert res_patch.status_code == 200, res_patch.text

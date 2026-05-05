@@ -36,6 +36,8 @@ function makeProgramma(over: Partial<ProgrammaDettaglioRead> = {}): ProgrammaDet
     valido_da: "2026-01-01",
     valido_a: "2026-12-31",
     stato: "bozza",
+    stato_pipeline_pdc: "PDE_IN_LAVORAZIONE",
+    stato_manutenzione: "IN_ATTESA",
     km_max_giornaliero: null,
     km_max_ciclo: 10000,
     n_giornate_default: 30,

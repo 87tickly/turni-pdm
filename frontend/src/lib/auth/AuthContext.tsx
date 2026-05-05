@@ -42,7 +42,7 @@ interface AuthContextValue {
   hasRole: (role: string) => boolean;
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+export const AuthContext = createContext<AuthContextValue | null>(null);
 
 interface AuthProviderProps {
   children: ReactNode;

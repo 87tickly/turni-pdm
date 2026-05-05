@@ -273,6 +273,37 @@ def soglia_pipeline_per_ruoli(
     return min(soglie, key=ordinale_pdc)
 
 
+# ---------------------------------------------------------------------------
+# Freeze read-only del ramo Materiale (Sprint 8.0 MR 1)
+# ---------------------------------------------------------------------------
+
+
+def materiale_freezato(stato_pipeline_pdc: str) -> bool:
+    """``True`` se lo stato pipeline congela regole/giri/parametri del
+    ramo Materiale.
+
+    Sprint 8.0 MR 1: oltre la soglia ``MATERIALE_CONFERMATO`` il programma
+    è in handoff verso il PIANIFICATORE_PDC. Le scritture al programma
+    (PATCH parametri), alle regole (POST/DELETE) e ai giri (POST
+    genera-giri) sono bloccate finché un admin non chiama
+    ``POST /programmi/{id}/sblocca`` (regressione a
+    ``MATERIALE_GENERATO``).
+
+    Difensivo: stato fuori enum → ``False`` (= libero), per non bloccare
+    accidentalmente operazioni se la migration/codice si disallineano;
+    il CHECK constraint DB dovrebbe comunque impedirlo.
+    """
+    try:
+        stato = StatoPipelinePdc(stato_pipeline_pdc)
+    except ValueError:
+        _logger.warning(
+            "stato_pipeline_pdc fuori enum (%r): freeze NON applicato.",
+            stato_pipeline_pdc,
+        )
+        return False
+    return ordinale_pdc(stato) >= ordinale_pdc(StatoPipelinePdc.MATERIALE_CONFERMATO)
+
+
 def programma_visibile_per_ruoli(
     stato_pipeline_pdc: str, roles: list[str], is_admin: bool
 ) -> bool:

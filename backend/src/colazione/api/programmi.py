@@ -35,6 +35,7 @@ from colazione.domain.pipeline import (
     StatoManutenzione,
     StatoPipelinePdc,
     TransizioneNonAmmessaError,
+    materiale_freezato,
     programma_visibile_per_ruoli,
     soglia_pipeline_per_ruoli,
     stati_pdc_da,
@@ -95,6 +96,27 @@ def _programma_visibile_per_user(
     return programma_visibile_per_ruoli(
         programma.stato_pipeline_pdc, user.roles, user.is_admin
     )
+
+
+def _verifica_modificabile_o_409(programma: ProgrammaMateriale) -> None:
+    """Solleva ``HTTPException(409)`` se il programma è in stato che
+    congela parametri/regole/giri del ramo Materiale.
+
+    Sprint 8.0 MR 1 (entry 165): freeze read-only post
+    ``MATERIALE_CONFERMATO``. Per modificare oltre quella soglia,
+    l'admin deve prima chiamare ``POST /programmi/{id}/sblocca``
+    (regressione a ``MATERIALE_GENERATO``).
+    """
+    if materiale_freezato(programma.stato_pipeline_pdc):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"programma in stato pipeline {programma.stato_pipeline_pdc!r} "
+                "(>= MATERIALE_CONFERMATO): regole, parametri e giri sono "
+                "read-only. Per modificare richiedi a un admin POST "
+                "/api/programmi/{id}/sblocca."
+            ),
+        )
 
 
 # =====================================================================
@@ -324,8 +346,12 @@ async def update_programma(
 
     Solo i campi forniti vengono aggiornati (Pydantic exclude_unset).
     Il programma deve appartenere all'azienda corrente.
+
+    Sprint 8.0 MR 1: 409 se ``stato_pipeline_pdc >= MATERIALE_CONFERMATO``
+    (parametri freezati al handoff Materiale → PdC).
     """
     p = await _get_programma_or_404(session, programma_id, user.azienda_id)
+    _verifica_modificabile_o_409(p)
 
     data = payload.model_dump(exclude_unset=True)
     # Stato non si tocca via PATCH
@@ -382,6 +408,8 @@ async def add_regola(
     Entry 96: i vincoli HARD a livello tipo materiale non sono più
     applicati qui. Il pianificatore può creare regole "ampie"; il
     builder filtra a runtime con ``risolvi_corsa``.
+
+    Sprint 8.0 MR 1: 409 se ``stato_pipeline_pdc >= MATERIALE_CONFERMATO``.
     """
     p = await _get_programma_or_404(session, programma_id, user.azienda_id)
     if p.stato == "archiviato":
@@ -389,6 +417,7 @@ async def add_regola(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="programma archiviato: regole non modificabili",
         )
+    _verifica_modificabile_o_409(p)
 
     composizione = payload.composizione
     regola = ProgrammaRegolaAssegnazione(
@@ -419,13 +448,17 @@ async def delete_regola(
     session: AsyncSession = Depends(get_session),
 ) -> None:
     """Cancella una regola. Solo `archiviato` blocca la cancellazione
-    (Sprint 7.9 MR 13, entry 119)."""
+    (Sprint 7.9 MR 13, entry 119).
+
+    Sprint 8.0 MR 1: 409 se ``stato_pipeline_pdc >= MATERIALE_CONFERMATO``.
+    """
     p = await _get_programma_or_404(session, programma_id, user.azienda_id)
     if p.stato == "archiviato":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="programma archiviato: regole non cancellabili",
         )
+    _verifica_modificabile_o_409(p)
 
     stmt = (
         select(ProgrammaRegolaAssegnazione)

@@ -14,6 +14,51 @@ import { apiJson } from "@/lib/api/client";
 
 export type ProgrammaStato = "bozza" | "attivo" | "archiviato";
 
+/**
+ * Sprint 8.0 MR 0 (entry 164): pipeline state machine ramo PdC.
+ * Mantenere allineato con `colazione.domain.pipeline.StatoPipelinePdc`.
+ */
+export type StatoPipelinePdc =
+  | "PDE_IN_LAVORAZIONE"
+  | "PDE_CONSOLIDATO"
+  | "MATERIALE_GENERATO"
+  | "MATERIALE_CONFERMATO"
+  | "PDC_GENERATO"
+  | "PDC_CONFERMATO"
+  | "PERSONALE_ASSEGNATO"
+  | "VISTA_PUBBLICATA";
+
+/**
+ * Sprint 8.0 MR 0 (entry 164): pipeline state machine ramo Manutenzione.
+ * Mantenere allineato con `colazione.domain.pipeline.StatoManutenzione`.
+ */
+export type StatoManutenzione =
+  | "IN_ATTESA"
+  | "IN_LAVORAZIONE"
+  | "MATRICOLE_ASSEGNATE";
+
+const STATI_PIPELINE_PDC_ORDER: ReadonlyArray<StatoPipelinePdc> = [
+  "PDE_IN_LAVORAZIONE",
+  "PDE_CONSOLIDATO",
+  "MATERIALE_GENERATO",
+  "MATERIALE_CONFERMATO",
+  "PDC_GENERATO",
+  "PDC_CONFERMATO",
+  "PERSONALE_ASSEGNATO",
+  "VISTA_PUBBLICATA",
+];
+
+/**
+ * Sprint 8.0 MR 1 (entry 165): replica della logica `materiale_freezato`
+ * server-side. Quando `True`, il pianificatore non può modificare
+ * regole/parametri/giri (PATCH/POST regole/genera-giri ritornano 409).
+ */
+export function materialeFreezato(stato: StatoPipelinePdc): boolean {
+  const idx = STATI_PIPELINE_PDC_ORDER.indexOf(stato);
+  const soglia = STATI_PIPELINE_PDC_ORDER.indexOf("MATERIALE_CONFERMATO");
+  return idx >= 0 && idx >= soglia;
+}
+
 export interface StrictOptions {
   no_corse_residue: boolean;
   no_overcapacity: boolean;
@@ -30,6 +75,10 @@ export interface ProgrammaMaterialeRead {
   valido_da: string;
   valido_a: string;
   stato: ProgrammaStato;
+  /** Sprint 8.0 MR 0 (entry 164): stato pipeline ramo PdC. */
+  stato_pipeline_pdc: StatoPipelinePdc;
+  /** Sprint 8.0 MR 0 (entry 164): stato pipeline ramo Manutenzione. */
+  stato_manutenzione: StatoManutenzione;
   km_max_giornaliero: number | null;
   km_max_ciclo: number | null;
   n_giornate_default: number;
@@ -217,5 +266,55 @@ export async function addRegola(
 export async function deleteRegola(programmaId: number, regolaId: number): Promise<void> {
   await apiJson<void>(`/api/programmi/${programmaId}/regole/${regolaId}`, {
     method: "DELETE",
+  });
+}
+
+// =====================================================================
+// Pipeline state machine — Sprint 8.0 MR 0 (entry 164)
+// =====================================================================
+
+export interface SbloccaProgrammaPayload {
+  ramo: "pdc" | "manutenzione";
+  motivo?: string | null;
+}
+
+export async function confermaMateriale(id: number): Promise<ProgrammaMaterialeRead> {
+  return apiJson<ProgrammaMaterialeRead>(`/api/programmi/${id}/conferma-materiale`, {
+    method: "POST",
+  });
+}
+
+export async function confermaPdc(id: number): Promise<ProgrammaMaterialeRead> {
+  return apiJson<ProgrammaMaterialeRead>(`/api/programmi/${id}/conferma-pdc`, {
+    method: "POST",
+  });
+}
+
+export async function confermaPersonale(id: number): Promise<ProgrammaMaterialeRead> {
+  return apiJson<ProgrammaMaterialeRead>(`/api/programmi/${id}/conferma-personale`, {
+    method: "POST",
+  });
+}
+
+export async function pubblicaVistaPdc(id: number): Promise<ProgrammaMaterialeRead> {
+  return apiJson<ProgrammaMaterialeRead>(`/api/programmi/${id}/pubblica-vista-pdc`, {
+    method: "POST",
+  });
+}
+
+export async function confermaManutenzione(id: number): Promise<ProgrammaMaterialeRead> {
+  return apiJson<ProgrammaMaterialeRead>(
+    `/api/programmi/${id}/conferma-manutenzione`,
+    { method: "POST" },
+  );
+}
+
+export async function sbloccaProgramma(
+  id: number,
+  payload: SbloccaProgrammaPayload,
+): Promise<ProgrammaMaterialeRead> {
+  return apiJson<ProgrammaMaterialeRead>(`/api/programmi/${id}/sblocca`, {
+    method: "POST",
+    body: payload,
   });
 }

@@ -13,6 +13,8 @@ function makeProgramma(over: Partial<ProgrammaMaterialeRead> = {}): ProgrammaMat
     valido_da: "2025-12-14",
     valido_a: "2026-12-12",
     stato: "bozza",
+    stato_pipeline_pdc: "PDE_IN_LAVORAZIONE",
+    stato_manutenzione: "IN_ATTESA",
     km_max_giornaliero: null,
     km_max_ciclo: 10000,
     n_giornate_default: 30,

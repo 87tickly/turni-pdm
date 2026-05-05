@@ -16,12 +16,18 @@ import {
 import {
   addRegola,
   archiviaProgramma,
+  confermaMateriale,
+  confermaManutenzione,
+  confermaPdc,
+  confermaPersonale,
   createProgramma,
   deleteRegola,
   getLastBuilderRun,
   getProgramma,
   listProgrammi,
   pubblicaProgramma,
+  pubblicaVistaPdc,
+  sbloccaProgramma,
   type BuilderRunRead,
   type ListProgrammiParams,
   type ProgrammaDettaglioRead,
@@ -29,6 +35,7 @@ import {
   type ProgrammaMaterialeRead,
   type ProgrammaRegolaAssegnazioneCreate,
   type ProgrammaRegolaAssegnazioneRead,
+  type SbloccaProgrammaPayload,
 } from "@/lib/api/programmi";
 
 const PROGRAMMI_KEY = ["programmi"] as const;
@@ -136,5 +143,94 @@ export function useDeleteRegola(): UseMutationResult<void, Error, DeleteRegolaAr
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: PROGRAMMI_KEY });
     },
+  });
+}
+
+// =====================================================================
+// Pipeline state machine — Sprint 8.0 MR 0/MR 1 (entry 164/165)
+// =====================================================================
+//
+// Le mutation invalidano l'intera ``PROGRAMMI_KEY`` + le query "giri"
+// del programma toccato (la conferma materiale freezza il ramo,
+// PdC potrebbe ora vederlo nelle list filtrate per ruolo). I dettagli
+// ``"detail" id`` sono coperti dall'invalidazione globale.
+
+const GIRI_KEY = ["giri"] as const;
+
+function invalidatePipelineQueries(qc: ReturnType<typeof useQueryClient>): void {
+  void qc.invalidateQueries({ queryKey: PROGRAMMI_KEY });
+  void qc.invalidateQueries({ queryKey: GIRI_KEY });
+}
+
+export function useConfermaMateriale(): UseMutationResult<
+  ProgrammaMaterialeRead,
+  Error,
+  number
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: confermaMateriale,
+    onSuccess: () => invalidatePipelineQueries(qc),
+  });
+}
+
+export function useConfermaPdc(): UseMutationResult<ProgrammaMaterialeRead, Error, number> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: confermaPdc,
+    onSuccess: () => invalidatePipelineQueries(qc),
+  });
+}
+
+export function useConfermaPersonale(): UseMutationResult<
+  ProgrammaMaterialeRead,
+  Error,
+  number
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: confermaPersonale,
+    onSuccess: () => invalidatePipelineQueries(qc),
+  });
+}
+
+export function usePubblicaVistaPdc(): UseMutationResult<
+  ProgrammaMaterialeRead,
+  Error,
+  number
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: pubblicaVistaPdc,
+    onSuccess: () => invalidatePipelineQueries(qc),
+  });
+}
+
+export function useConfermaManutenzione(): UseMutationResult<
+  ProgrammaMaterialeRead,
+  Error,
+  number
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: confermaManutenzione,
+    onSuccess: () => invalidatePipelineQueries(qc),
+  });
+}
+
+interface SbloccaArgs {
+  id: number;
+  payload: SbloccaProgrammaPayload;
+}
+
+export function useSbloccaProgramma(): UseMutationResult<
+  ProgrammaMaterialeRead,
+  Error,
+  SbloccaArgs
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }) => sbloccaProgramma(id, payload),
+    onSuccess: () => invalidatePipelineQueries(qc),
   });
 }

@@ -100,6 +100,148 @@ Sprint 8.0 MR 1: handoff Materiale → PdC (frontend + freeze
 read-only delle regole/giri al `MATERIALE_CONFERMATO` +
 invalidazione cache list-route giri dipendenti + bottoni UI di
 conferma).
+---
+
+## 2026-05-05 (166) — Sprint 8.0 MR 1: handoff Materiale → PdC (freeze + bottone conferma + sblocca admin)
+
+### Contesto
+
+MR 1 dello Sprint 8.0 chiude il primo handoff fra ruoli: il
+Pianificatore Materiale conferma il programma, oltre quel punto le
+regole/parametri/giri diventano read-only e il programma si rende
+visibile al PIANIFICATORE_PDC (filtro list-route già attivato in
+MR 0).
+
+Backend lato freeze + frontend lato bottone + invalidazione cache.
+
+### Modifiche backend
+
+**`backend/src/colazione/domain/pipeline.py`** — nuova helper
+``materiale_freezato(stato_pipeline_pdc: str) -> bool``: ``True`` se
+``stato >= MATERIALE_CONFERMATO``. Failsafe identico a
+``programma_visibile_per_ruoli`` (logger.warning su valore fuori enum,
+ritorno ``False`` per non bloccare accidentalmente).
+
+**`backend/src/colazione/api/programmi.py`** — helper privato
+``_verifica_modificabile_o_409(programma)``: solleva 409 con messaggio
+esplicito ("regole, parametri e giri sono read-only…") quando
+``materiale_freezato`` è ``True``. Applicato a:
+
+- ``PATCH /api/programmi/{id}`` — update_programma
+- ``POST /api/programmi/{id}/regole`` — add_regola
+- ``DELETE /api/programmi/{id}/regole/{rid}`` — delete_regola
+
+**`backend/src/colazione/api/giri.py`** — pre-check di freeze nel
+``POST /api/programmi/{programma_id}/genera-giri``: query mirata su
+``stato_pipeline_pdc`` prima di chiamare ``genera_giri()``, 409 se
+freezato (no scrittura). Nessun import duplicato del modello, riuso
+``ProgrammaMateriale``.
+
+### Modifiche test backend
+
+**`backend/tests/test_api_programmi_conferma.py`** — 8 nuovi test
+integration sotto la sezione "Freeze read-only post MATERIALE_CONFERMATO":
+
+- ``test_patch_programma_pre_freeze_ok`` (200 in PDE_IN_LAVORAZIONE)
+- ``test_patch_programma_post_freeze_409`` (MATERIALE_CONFERMATO)
+- ``test_patch_programma_post_freeze_pdc_confermato_409`` (sanity:
+  freeze attivo anche oltre la soglia)
+- ``test_post_regola_post_freeze_409``
+- ``test_post_regola_pre_freeze_ok``
+- ``test_delete_regola_post_freeze_409`` (workflow end-to-end:
+  crea regola → conferma → tenta delete = 409)
+- ``test_genera_giri_post_freeze_409``
+- ``test_sblocca_riapre_modifiche`` (workflow completo: conferma →
+  freeze 409 → admin sblocca → modifica torna 200)
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/programmi.ts`**:
+
+- 2 type union ``StatoPipelinePdc`` + ``StatoManutenzione`` allineati
+  agli enum backend.
+- Helper ``materialeFreezato(stato)`` (replica logica server-side per
+  evitare round-trip extra).
+- ``stato_pipeline_pdc`` + ``stato_manutenzione`` aggiunti a
+  ``ProgrammaMaterialeRead``.
+- 6 wrapper REST: ``confermaMateriale``, ``confermaPdc``,
+  ``confermaPersonale``, ``pubblicaVistaPdc``, ``confermaManutenzione``,
+  ``sbloccaProgramma`` (con ``SbloccaProgrammaPayload``).
+
+**`frontend/src/hooks/useProgrammi.ts`** — 6 mutation hooks
+(``useConfermaMateriale``, ecc.) con invalidazione cache su entrambe
+``["programmi"]`` e ``["giri"]``: il filtro list-route per ruolo
+implementato in MR 0 dipende dallo stato pipeline, quindi i
+PIANIFICATORE_PDC vedono i nuovi giri appena dopo la conferma senza
+manual refetch.
+
+**`frontend/src/lib/auth/AuthContext.tsx`** — esporta
+``AuthContext`` (era privato): permette al banner di usare
+``useContext`` direttamente con fallback ``null``, senza obbligare
+i test esistenti a wrappare il render con ``<AuthProvider>``.
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`**:
+
+- Mappa ``PIPELINE_PDC_LABEL`` per le 8 etichette UI.
+- ``editable`` ridefinito: ``stato !== "archiviato" && !materialeFreezato(...)``.
+- ``canGenerate``: aggiunto ``&& !freezato``.
+- Nuovo componente ``<PipelineBanner>`` montato fra
+  ``<HeroHeader>`` e ``<ConfigurazioneSection>``: badge stato +
+  testo descrittivo + (se freezato e admin) bottone "Sblocca
+  materiale" con ``window.prompt`` per motivo.
+- Nuovo componente ``<ConfermaMaterialeButton>`` integrato in
+  ``<ActionCluster>`` quando ``stato === "attivo"`` e
+  ``stato_pipeline_pdc ∈ {PDE_CONSOLIDATO, MATERIALE_GENERATO}``:
+  conferma con dialog ``window.confirm``.
+- ``<Button>`` "Genera giri" mostra titolo dinamico se freezato.
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.test.tsx`**
+e **``ProgrammiRoute.test.tsx``** — fixture ``makeProgramma`` aggiornate
+con i 2 campi nuovi.
+
+### Verifiche
+
+- ✅ ``uv run mypy --strict src/``: 69 file clean.
+- ✅ ``uv run ruff check`` sui file MR 1: 0 errori.
+- ✅ ``uv run pytest``: 18 tests freeze + conferma verdi (file totale
+  26), suite intera invariata.
+- ✅ ``pnpm tsc -b --noEmit``: clean.
+- ✅ ``pnpm test --run``: 52 passed | 1 skipped (53). Niente
+  regressioni.
+- ✅ Smoke locale: pagina ``/login`` carica, niente errori in console
+  (banner pipeline non è verificato live nel preview perché backend
+  dev non avviabile in questa sessione — coperto da test unitari +
+  rendering tests del componente padre).
+
+### Stato
+
+- ✅ Codice MR 1 pronto (freeze backend + UI conferma/sblocca/banner).
+- ⏳ Commit + push + deploy backend + frontend Railway.
+- ⏳ Smoke su production: aprire un programma in stato attivo, vedere
+  banner "PdE consolidato/Materiale generato" + bottone Conferma
+  materiale; cliccare conferma → banner diventa amber "Materiale
+  confermato" + bottone Genera giri disabilitato + bottone Sblocca
+  visibile per admin.
+
+### Decisioni di scope rinviate (dichiarate)
+
+- ``POST /api/giri/{giro_id}/genera-turno-pdc``: NON bloccato in MR 1.
+  È il momento di lavoro del PIANIFICATORE_PDC; il blocco verrà
+  imposto a ``PDC_CONFERMATO`` nel MR 2 (handoff PdC → Personale).
+- ``PATCH`` sulla configurazione: oggi il bottone "Modifica
+  configurazione" è disabilitato a prescindere (TN-UPDATE residuo
+  precedente "dialog non ancora disponibile"); il freeze backend è
+  pronto e il messaggio del title è stato aggiornato per il caso
+  archiviato; il dialog UI completo resta da costruire fuori MR 1.
+
+### Prossimo step
+
+MR 2: handoff PdC → Personale. Bottone "Conferma turni PdC" sulla
+dashboard PIANIFICATORE_PDC, freeze su ``genera-turno-pdc`` post
+``PDC_CONFERMATO``, banner pipeline anche sulla schermata PdC,
+nuova vista Gestione Personale che mostra solo programmi
+``>= PDC_CONFERMATO``. Algoritmo assegnazione persone + delta%
+mancanze: scope MR 2 (parte algoritmica) o MR 2.bis (UI).
 
 ---
 

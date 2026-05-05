@@ -49,6 +49,7 @@ from colazione.domain.builder_giro.risolvi_corsa import (
     RegolaAmbiguaError,
 )
 from colazione.domain.pipeline import (
+    materiale_freezato,
     programma_visibile_per_ruoli,
     soglia_pipeline_per_ruoli,
     stati_pdc_da,
@@ -184,7 +185,30 @@ async def genera_giri_endpoint(
 
     Risposta 200: ``BuilderResultResponse`` con ``giri_ids`` (id dei
     `GiroMateriale` creati) + statistiche per il pianificatore.
+
+    Sprint 8.0 MR 1: 409 se ``stato_pipeline_pdc >= MATERIALE_CONFERMATO``
+    (giri freezati al handoff Materiale → PdC). Per rigenerare, l'admin
+    deve prima sbloccare via ``POST /api/programmi/{id}/sblocca``.
     """
+    # Freeze read-only post MATERIALE_CONFERMATO (Sprint 8.0 MR 1).
+    stato_pipeline = (
+        await session.execute(
+            select(ProgrammaMateriale.stato_pipeline_pdc).where(
+                ProgrammaMateriale.id == programma_id,
+                ProgrammaMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if stato_pipeline is not None and materiale_freezato(stato_pipeline):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"programma in stato pipeline {stato_pipeline!r} "
+                "(>= MATERIALE_CONFERMATO): giri read-only. Per rigenerare "
+                "richiedi a un admin POST /api/programmi/{id}/sblocca."
+            ),
+        )
+
     try:
         result = await genera_giri(
             programma_id=programma_id,

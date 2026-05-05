@@ -1,6 +1,17 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertCircle, Archive, ArrowLeft, ListOrdered, Play, Plus, Send } from "lucide-react";
+import {
+  AlertCircle,
+  Archive,
+  ArrowLeft,
+  CheckCircle2,
+  ListOrdered,
+  Lock,
+  Play,
+  Plus,
+  Send,
+  Unlock,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -13,16 +24,21 @@ import { useMateriali } from "@/hooks/useAnagrafiche";
 import { useGiriProgramma } from "@/hooks/useGiri";
 import {
   useArchiviaProgramma,
+  useConfermaMateriale,
   useLastBuilderRun,
   useProgramma,
   usePubblicaProgramma,
+  useSbloccaProgramma,
 } from "@/hooks/useProgrammi";
 import { ApiError } from "@/lib/api/client";
 import type { GiroListItem } from "@/lib/api/giri";
-import type {
-  ProgrammaDettaglioRead,
-  StrictOptions,
+import {
+  materialeFreezato,
+  type ProgrammaDettaglioRead,
+  type StatoPipelinePdc,
+  type StrictOptions,
 } from "@/lib/api/programmi";
+import { AuthContext } from "@/lib/auth/AuthContext";
 import { formatDateIt, formatPeriodo } from "@/lib/format";
 import { GeneraGiriDialog } from "@/routes/pianificatore-giro/GeneraGiriDialog";
 import { RegoleInvioSostaSection } from "@/routes/pianificatore-giro/RegoleInvioSostaSection";
@@ -37,6 +53,23 @@ const STRICT_OPTION_KEYS: ReadonlyArray<keyof StrictOptions> = [
   "no_giro_appeso",
   "no_km_eccesso",
 ];
+
+// Sprint 8.0 MR 1 (entry 165): label + tone per il banner pipeline.
+const PIPELINE_PDC_LABEL: Record<StatoPipelinePdc, string> = {
+  PDE_IN_LAVORAZIONE: "PdE in lavorazione",
+  PDE_CONSOLIDATO: "PdE consolidato",
+  MATERIALE_GENERATO: "Materiale generato",
+  MATERIALE_CONFERMATO: "Materiale confermato",
+  PDC_GENERATO: "PdC generato",
+  PDC_CONFERMATO: "PdC confermato",
+  PERSONALE_ASSEGNATO: "Personale assegnato",
+  VISTA_PUBBLICATA: "Vista pubblicata",
+};
+
+const STATI_PRE_CONFERMA_MATERIALE: ReadonlySet<StatoPipelinePdc> = new Set([
+  "PDE_CONSOLIDATO",
+  "MATERIALE_GENERATO",
+]);
 
 export function ProgrammaDettaglioRoute() {
   const { programmaId: programmaIdParam } = useParams<{ programmaId: string }>();
@@ -72,10 +105,13 @@ export function ProgrammaDettaglioRoute() {
 
   const programma = query.data;
   // Sprint 7.9 MR 13 (entry 119): regole modificabili anche in stato
-  // 'attivo'. Solo 'archiviato' è read-only. Dopo modifica su programma
-  // attivo l'utente rigenera i giri con force=true per allineare output.
-  const editable = programma.stato !== "archiviato";
-  const canGenerate = programma.stato === "attivo" && programma.regole.length > 0;
+  // 'attivo'. Solo 'archiviato' è read-only.
+  // Sprint 8.0 MR 1 (entry 165): freeze read-only anche post
+  // MATERIALE_CONFERMATO — il backend restituirebbe 409 sui write.
+  const freezato = materialeFreezato(programma.stato_pipeline_pdc);
+  const editable = programma.stato !== "archiviato" && !freezato;
+  const canGenerate =
+    programma.stato === "attivo" && programma.regole.length > 0 && !freezato;
   const giri = giriQuery.data ?? [];
   const giriCount = giri.length;
 
@@ -99,6 +135,9 @@ export function ProgrammaDettaglioRoute() {
         onMutated={() => void query.refetch()}
         onVediGiri={() => navigate(`/pianificatore-giro/programmi/${programma.id}/giri`)}
       />
+
+      {/* ═══ 1.5 · PIPELINE BANNER (Sprint 8.0 MR 1) ════════════ */}
+      <PipelineBanner programma={programma} onMutated={() => void query.refetch()} />
 
       {/* ═══ 2 · CONFIGURAZIONE ═════════════════════════════════ */}
       <ConfigurazioneSection programma={programma} editable={editable} />
@@ -298,17 +337,31 @@ function ActionCluster({
   }
 
   if (programma.stato === "attivo") {
+    // Sprint 8.0 MR 1 (entry 165): bottone "Conferma materiale" attivo
+    // quando il pipeline è in {PDE_CONSOLIDATO, MATERIALE_GENERATO}.
+    // Dopo conferma, il programma è freezato (read-only su parametri,
+    // regole, giri); il banner pipeline mostra lo stato + sblocco admin.
+    const stato = programma.stato_pipeline_pdc;
+    const showConferma = STATI_PRE_CONFERMA_MATERIALE.has(stato);
+    const freezato = materialeFreezato(stato);
+    const generaTitle = !canGenerate
+      ? freezato
+        ? "Materiale confermato: i giri sono read-only finché un admin non sblocca"
+        : "Aggiungi almeno una regola per generare"
+      : "Lancia il builder per costruire i giri";
     return (
       <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {showConferma ? (
+          <ConfermaMaterialeButton
+            programma={programma}
+            onMutated={onMutated}
+          />
+        ) : null}
         <Button
           variant="primary"
           onClick={onGenera}
           disabled={!canGenerate}
-          title={
-            canGenerate
-              ? "Lancia il builder per costruire i giri"
-              : "Aggiungi almeno una regola per generare"
-          }
+          title={generaTitle}
         >
           <Play className="mr-2 h-4 w-4" aria-hidden /> Genera giri
         </Button>
@@ -342,6 +395,144 @@ function ActionCluster({
         <ListOrdered className="mr-2 h-4 w-4" aria-hidden /> Vedi giri generati
       </Button>
     </div>
+  );
+}
+
+// =====================================================================
+// 1.5 · Pipeline banner + Conferma materiale (Sprint 8.0 MR 1, entry 165)
+// =====================================================================
+
+function ConfermaMaterialeButton({
+  programma,
+  onMutated,
+}: {
+  programma: ProgrammaDettaglioRead;
+  onMutated: () => void;
+}) {
+  const mutation = useConfermaMateriale();
+  return (
+    <Button
+      variant="primary"
+      disabled={mutation.isPending}
+      onClick={() => {
+        if (
+          !window.confirm(
+            `Confermare il materiale del programma "${programma.nome}"?\n` +
+              "Dopo la conferma, regole, parametri e giri saranno read-only " +
+              "finché un admin non sblocca il programma.",
+          )
+        ) {
+          return;
+        }
+        mutation.mutate(programma.id, {
+          onSuccess: onMutated,
+          onError: (err) => {
+            const msg = err instanceof ApiError ? err.message : err.message;
+            window.alert(`Conferma fallita: ${msg}`);
+          },
+        });
+      }}
+      title="Conferma il materiale e fai partire l'handoff verso il Pianificatore PdC"
+    >
+      <CheckCircle2 className="mr-2 h-4 w-4" aria-hidden /> Conferma materiale
+    </Button>
+  );
+}
+
+function PipelineBanner({
+  programma,
+  onMutated,
+}: {
+  programma: ProgrammaDettaglioRead;
+  onMutated: () => void;
+}) {
+  // Uso ``useContext`` direttamente (anziché ``useAuth``) così se il
+  // banner viene renderizzato in un test senza ``AuthProvider`` il
+  // fallback è ``isAdmin=false`` (no bottone sblocca, ok per snapshot).
+  const auth = useContext(AuthContext);
+  const isAdmin = auth?.user?.is_admin === true;
+  const stato = programma.stato_pipeline_pdc;
+  const freezato = materialeFreezato(stato);
+  const sbloccaMutation = useSbloccaProgramma();
+
+  return (
+    <Card
+      className={cn(
+        "p-4",
+        freezato
+          ? "border-amber-300 bg-amber-50"
+          : "border-border bg-muted/40",
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          {freezato ? (
+            <Lock className="h-5 w-5 shrink-0 text-amber-600" aria-hidden />
+          ) : (
+            <CheckCircle2
+              className="h-5 w-5 shrink-0 text-blue-600"
+              aria-hidden
+            />
+          )}
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              Pipeline ramo PdC
+            </div>
+            <div className="text-sm font-semibold tabular-nums text-foreground">
+              {PIPELINE_PDC_LABEL[stato]}
+            </div>
+            {freezato ? (
+              <p className="mt-1 text-xs text-amber-800">
+                Materiale confermato: regole, parametri e giri sono read-only.
+                {isAdmin
+                  ? " Puoi sbloccare il programma per consentire modifiche."
+                  : " Per modificare contatta un admin per lo sblocco."}
+              </p>
+            ) : null}
+          </div>
+        </div>
+        {freezato && isAdmin ? (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={sbloccaMutation.isPending}
+            onClick={() => {
+              const motivo = window.prompt(
+                "Motivo dello sblocco (opzionale):",
+                "",
+              );
+              if (
+                !window.confirm(
+                  `Sbloccare il programma "${programma.nome}"?\n` +
+                    "Lo stato pipeline tornerà a MATERIALE_GENERATO.",
+                )
+              ) {
+                return;
+              }
+              sbloccaMutation.mutate(
+                {
+                  id: programma.id,
+                  payload: {
+                    ramo: "pdc",
+                    motivo: motivo !== null && motivo.length > 0 ? motivo : null,
+                  },
+                },
+                {
+                  onSuccess: onMutated,
+                  onError: (err) => {
+                    const msg =
+                      err instanceof ApiError ? err.message : err.message;
+                    window.alert(`Sblocco fallito: ${msg}`);
+                  },
+                },
+              );
+            }}
+          >
+            <Unlock className="mr-2 h-4 w-4" aria-hidden /> Sblocca materiale
+          </Button>
+        ) : null}
+      </div>
+    </Card>
   );
 }
 
