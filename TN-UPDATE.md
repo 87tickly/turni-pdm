@@ -10,6 +10,174 @@
 
 ---
 
+## 2026-05-05 (145) — Sprint 7.9 MR ζ: Gestione Personale (4° ruolo) — backend + 7 schermate frontend popolate
+
+### Contesto
+
+L'utente apre il 4° ruolo richiesto da `RUOLI-E-DASHBOARD.md` §6:
+*"come possiamo gestirla? normalmente abbiamo un calendario, suddiviso
+per depositi e molteplici sezioni, turni, malattie ferie ecc, un
+calcolo in percentuale su quante persone mancano. […] inoltre popola
+i nomi con personaggi famosi italiani"*. Successivamente: *"aggiungi
+anche i depositi pdc"* (depositi PdC sotto Gestione Personale, non
+più sotto Pianificatore PdC) e *"usa font, colori e tutto il resto
+nel contesto del sito"* (design system coerente). Infine: *"inizia a
+popolare tutto il sito cosi mi faccio una prima idea, avvisami quando
+hai finito push e commit"* — un solo MR completo per "prima idea".
+
+Decisioni di default (assunte in assenza di risposta esplicita):
+1. **Volume seed**: 75 PdC (3 per deposito × 25 depositi PdC Trenord)
+2. **% personale mancante** = % copertura su matricole attive
+   (subito calcolabile, indipendente dal builder PdC)
+3. **Sequenza** α→β→γ→δ→ε→η→ζ in **un unico commit**
+
+### Modifiche backend
+
+**Schemi Pydantic estesi** (`schemas/personale.py`):
+- `PersonaWithDepositoRead`: persona + deposito (codice/display) +
+  `indisponibilita_oggi` (tipo) o NULL se in servizio.
+- `IndisponibilitaWithPersonaRead`: indisponibilità con anagrafica
+  persona + deposito + `giorni_totali` calcolato.
+- `GestionePersonaleKpiRead`: KPI riepilogativi (attivi,
+  in_servizio_oggi, in_ferie, in_malattia, in_rol, in_altra_assenza,
+  copertura_pct).
+- `GestionePersonaleKpiPerDepositoRead`: breakdown per deposito.
+
+**Nuovo router** `api/personale.py` (`require_any_role(GESTIONE_PERSONALE,
+PIANIFICATORE_PDC)`, admin bypassa):
+- `GET /api/persone?depot=&profilo=&search=&only_active=`
+- `GET /api/persone/{id}`
+- `GET /api/depots/{codice}/persone`
+- `GET /api/indisponibilita?tipo=&attive_oggi=&depot=`
+- `GET /api/gestione-personale/kpi`
+- `GET /api/gestione-personale/kpi-depositi`
+
+**Migration** `0025_seed_persone.py`: 75 personaggi italiani famosi
+distribuiti 3 per deposito con affinità geografica/storica dove
+possibile (Manzoni → LECCO, Stradivari → CREMONA, Donizetti → BERGAMO,
+Volta → COMO, Virgilio → MANTOVA, ecc.) + 12 indisponibilità seed
+attorno alla data di apply per popolare i KPI con valori non-zero.
+
+**Bug pre-esistenti sistemati lungo la strada**:
+- `tests/test_models.py`: `EXPECTED_TABLE_COUNT 38 → 43` (5 tabelle
+  Sprint 7.9 mai aggiunte al test).
+- `models/__init__.py`: aggiunti import e `__all__` per LocalitaSosta,
+  RegolaInvioSosta, MaterialeIstanza, MaterialeThread,
+  MaterialeThreadEvento (mai esportati dagli MR β2-0/1/4).
+
+`main.py`: registrato `personale_routes.router`.
+
+### Modifiche frontend
+
+**Nuovo modulo** `lib/api/gestione-personale.ts`: types + 6 wrapper
+client (apiJson) coerenti con `lib/api/anagrafiche.ts`.
+
+**Nuovo hook** `hooks/useGestionePersonale.ts`: 6 React Query hooks
+(`usePersone`, `usePersona`, `usePersoneByDepot`, `useIndisponibilita`,
+`useGestionePersonaleKpi`, `useGestionePersonaleKpiDepositi`) con
+`staleTime: 30s` (più volatili delle anagrafiche).
+
+**7 route** in `routes/gestione-personale/`:
+1. `DashboardRoute.tsx` — banner copertura (verde ≥90% / ambra 80-90%
+   / rosso <80%) + 4 KPI cards + tabella 25 depositi colorata.
+2. `PersoneRoute.tsx` — anagrafica con search + dropdown deposito.
+3. `PersonaDettaglioRoute.tsx` — scheda persona 2-col anagrafica +
+   storico.
+4. `DepositiRoute.tsx` — migrazione + arricchimento dell'ex
+   `pianificatore-pdc/DepositiRoute.tsx`: aggiunge colonne PdC, In
+   servizio, Copertura colorata.
+5. `DepositoDettaglioRoute.tsx` — drilldown con KPI pill e tabella
+   PdC del deposito; banner ambra se ci sono indisponibilità.
+6. `CalendarioRoute.tsx` — schermata "alla Trenord": griglia 14 giorni
+   × persone del deposito. Celle T (turno placeholder) / F (ferie sky)
+   / M (malattia rosso) / R (ROL viola) / S/Fo/C (altre). Sticky
+   header, freeze prima colonna, navigazione settimanale ←/→.
+7. `IndisponibilitaRoute.tsx` — tab Tutte/Ferie/Malattia/ROL/Altre
+   con counter live, filtro "solo in corso oggi".
+
+**Sidebar attivata** (`components/layout/Sidebar.tsx`): rimosso
+`preview: true` da `NAV_GESTIONE_PERSONALE`, popolati 5 items con
+icone Lucide. Rimosso anche il link "Depositi PdC" dalla sidebar PdC
+(migrato).
+
+**AppRoutes.tsx**: nuovo blocco `<Route requiredRole="GESTIONE_PERSONALE">`
+con le 7 paths. Redirect dalla vecchia `/pianificatore-pdc/depositi`
+→ `/gestione-personale/depositi` per non rompere bookmark.
+
+**File rimosso**: `routes/pianificatore-pdc/DepositiRoute.tsx`
+(migrato sotto gestione-personale come da docstring originale).
+
+### Design system
+
+Stile uniforme con il resto del sito (richiesta utente "usa font,
+colori e tutto il resto nel contesto del sito"):
+- Font Exo 2 (default sans, già globale).
+- Palette: `text-primary` (#0062CC) per heading e codici deposito;
+  `bg-primary/[0.04]` per hover; `border-border` neutrale.
+- Pattern accent: emerald (≥90%), amber (80-89%), red (<80%).
+- KPI cards e tabelle replicano il pattern di
+  `pianificatore-pdc/DashboardRoute.tsx`.
+- Componenti shadcn riusati: Card, Button, Badge, Input, Spinner.
+
+### Verifiche
+
+**Backend**:
+- ✅ `uv run ruff check`: clean.
+- ✅ `uv run mypy --strict`: clean.
+- ✅ `uv run pytest --ignore=tests/test_persister.py`: tutti passano
+  (i 2 test_persister falliti erano già rotti su master, fuori scope).
+- ✅ `alembic upgrade head`: migration 0025 applicata.
+- ✅ Verifica DB: persona=75, indisponibilita_persona=12,
+  persone_con_depot=75.
+
+**Frontend**:
+- ✅ `pnpm tsc -b --noEmit`: clean.
+- ✅ `pnpm lint`: 0 errors, 4 warning preesistenti (non miei).
+- ✅ `pnpm test`: 13 file, 52 passed + 1 skipped, 0 failed.
+- ✅ `pnpm build`: 1778 modules, 619KB JS / 167KB gzipped.
+
+**Verifica visuale preview** (admin/admin12345 → /gestione-personale):
+- Dashboard: KPI 75 attivi, 65 in servizio (86.7%), 3 ferie, 2
+  malattia, 2 ROL, 3 altre. Banner copertura ambra "sotto target".
+  Tabella 25 depositi con copertura per deposito.
+- Anagrafica: 75 PdC ordinati per cognome (ALFIERI → ALESSANDRIA,
+  ANGUISSOLA → CREMONA, ARMANI → PIACENZA, ecc.).
+- Depositi: 25 voci con KPI inline + drilldown.
+- Calendario: BERGAMO → 3 PdC (Caravaggio, Donizetti, Lotto). Celle
+  "T" verdi + "M" rosso su Lotto coerentemente col seed (malattia
+  0d-5d).
+- Console: nessun errore.
+
+### Stato
+
+- ✅ Ruolo GESTIONE_PERSONALE attivato in sidebar (non più "preview").
+- ✅ 7 schermate operative, popolate con dati reali dal seed.
+- ✅ Cross-link PdC ↔ Deposito ↔ Indisponibilità.
+- ✅ Design system coerente.
+- ⏳ Smoke utente in produzione.
+
+### Limitazioni note (per MR successivi)
+
+1. **Celle "T" placeholder**: le celle turno sono cromaticamente
+   posizionate ma non collegate a `turno_pdc_giornata` reali. Diventeranno
+   "T1/T2/T3" + click → drawer giornata quando il builder PdC produrrà
+   turni su volume e `assegnazione_giornata` sarà popolata.
+2. **CRUD persone/indisponibilità**: oggi solo lettura. Workflow
+   richiesta ferie → approvazione + nuova persona in MR successivo.
+3. **Sostituzioni `/sostituzioni`** (RUOLI-E-DASHBOARD.md §6.6) non
+   ancora costruita.
+4. **Calendario annuale per persona**: la scheda mostra solo storico
+   indisponibilità, non turni reali (mancano i dati).
+5. **Multi-profilo**: tutti i 75 seed sono `profilo='PdC'`. Manovra/
+   CT/Coord arriveranno con UI dedicata.
+
+### Prossimo step
+
+Smoke utente. Se OK, aprire CRUD ferie (workflow approvazione) o
+attaccare al builder PdC quando avrà turni reali su volume.
+
+---
+
 ## 2026-05-05 (144) — Sprint 7.9 MR δ.4: scrollbar Gantt sempre visibile su Mac + bottoni ← → in toolbar
 
 ### Contesto

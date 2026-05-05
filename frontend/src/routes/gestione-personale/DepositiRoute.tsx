@@ -6,47 +6,50 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { useDepots } from "@/hooks/useAnagrafiche";
-import { usePianificatorePdcOverview } from "@/hooks/usePianificatorePdc";
+import { useGestionePersonaleKpiDepositi } from "@/hooks/useGestionePersonale";
 import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 
 /**
- * Sprint 7.11 MR 7.11.3 — Depositi PdC Trenord (anagrafica).
+ * Sprint 7.9 MR ζ — Depositi PdC (Gestione Personale).
  *
- * Anteprima del futuro ruolo GESTIONE_PERSONALE: per ora la route vive
- * sotto path `/pianificatore-pdc/depositi` (drilldown del 2° ruolo) e
- * mostra in lettura le 25 voci canoniche dei depositi PdC Trenord.
- * Quando il ruolo (4) sarà implementato, sposteremo la route sotto
- * `/gestione-personale/depositi` con CRUD + assegnazione personale.
- *
- * Cross-reference con turni: usa l'overview PdC per indicare quanti
- * turni sono assegnati a ciascun deposito (1 sola fetch riusata).
+ * Migrazione della precedente `pianificatore-pdc/DepositiRoute.tsx` sotto
+ * il ruolo Gestione Personale (a cui i depositi PdC concettualmente
+ * appartengono). Arricchita con KPI per deposito: PdC attivi, in
+ * servizio oggi, copertura % — tutti drill-downable cliccando sulla
+ * riga.
  */
-export function PianificatorePdcDepositiRoute() {
+export function GestionePersonaleDepositiRoute() {
   const depotsQuery = useDepots();
-  const overview = usePianificatorePdcOverview();
+  const kpi = useGestionePersonaleKpiDepositi();
 
-  // Map codice impianto → count turni dall'overview (cross-azienda).
-  const turniByImpianto = useMemo(() => {
-    const map = new Map<string, number>();
-    overview.data?.turni_pdc_per_impianto.forEach((item) => {
-      map.set(item.impianto, item.count);
-    });
-    return map;
-  }, [overview.data]);
+  const kpiByDepot = useMemo(() => {
+    const m = new Map<string, { attivi: number; in_servizio: number; copertura: number }>();
+    (kpi.data ?? []).forEach((k) =>
+      m.set(k.depot_codice, {
+        attivi: k.persone_attive,
+        in_servizio: k.in_servizio_oggi,
+        copertura: k.copertura_pct,
+      }),
+    );
+    return m;
+  }, [kpi.data]);
 
-  const depots = depotsQuery.data ?? [];
+  const depots = useMemo(() => depotsQuery.data ?? [], [depotsQuery.data]);
   const totale = depots.length;
-  const conTurni = useMemo(
-    () => depots.filter((d) => (turniByImpianto.get(d.codice) ?? 0) > 0).length,
-    [depots, turniByImpianto],
+  const conPersone = useMemo(
+    () => depots.filter((d) => (kpiByDepot.get(d.codice)?.attivi ?? 0) > 0).length,
+    [depots, kpiByDepot],
   );
 
   return (
     <div className="flex flex-col gap-5">
-      {/* breadcrumb */}
       <div className="text-xs text-muted-foreground">
-        Home <span className="mx-1 text-muted-foreground/40">/</span> Depositi PdC
+        <Link to="/gestione-personale/dashboard" className="hover:text-primary">
+          Home
+        </Link>
+        <span className="mx-1 text-muted-foreground/40">/</span>
+        Depositi PdC
       </div>
 
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -56,26 +59,21 @@ export function PianificatorePdcDepositiRoute() {
             Depositi PdC Trenord
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Anagrafica dei depositi del personale di macchina. Anteprima del
-            futuro ruolo{" "}
-            <span className="font-medium text-foreground">
-              Gestione Personale
-            </span>
-            : qui in sola lettura, da Sprint 7.6+ aggiungeremo CRUD,
-            assegnazioni, indisponibilità.
+            Anagrafica depositi del personale di macchina con conta PdC
+            assegnati e copertura giornaliera. Click su un deposito per il
+            drilldown.
           </p>
         </div>
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
             <span>
-              <span className="font-mono tabular-nums text-foreground">{conTurni}</span> con turni
+              <span className="font-mono tabular-nums text-foreground">{conPersone}</span> con PdC
             </span>
           </span>
           <span className="text-muted-foreground/40">|</span>
           <span>
-            <span className="font-mono tabular-nums text-foreground">{totale}</span> depositi
-            totali
+            <span className="font-mono tabular-nums text-foreground">{totale}</span> totali
           </span>
         </div>
       </header>
@@ -104,57 +102,60 @@ export function PianificatorePdcDepositiRoute() {
                   <th className="w-12 px-3 py-2 text-left font-semibold">#</th>
                   <th className="w-44 px-3 py-2 text-left font-semibold">Codice</th>
                   <th className="px-3 py-2 text-left font-semibold">Nome esteso</th>
-                  <th className="w-40 px-3 py-2 text-left font-semibold">
-                    Stazione principale
-                  </th>
-                  <th className="w-32 px-3 py-2 text-right font-semibold">Turni PdC</th>
+                  <th className="w-24 px-3 py-2 text-right font-semibold">PdC</th>
+                  <th className="w-28 px-3 py-2 text-right font-semibold">In servizio</th>
+                  <th className="w-32 px-3 py-2 text-right font-semibold">Copertura</th>
                   <th className="w-8 px-3 py-2" aria-hidden />
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
                 {depots.map((d, i) => {
-                  const turniCount = turniByImpianto.get(d.codice) ?? 0;
-                  const hasTurni = turniCount > 0;
+                  const k = kpiByDepot.get(d.codice);
+                  const attivi = k?.attivi ?? 0;
+                  const inServ = k?.in_servizio ?? 0;
+                  const cop = k?.copertura ?? 0;
+                  const pctClass =
+                    attivi === 0
+                      ? "text-muted-foreground/40"
+                      : cop >= 90
+                        ? "text-emerald-700"
+                        : cop >= 80
+                          ? "text-amber-700"
+                          : "text-red-700";
                   return (
                     <tr
                       key={d.codice}
-                      className={cn(
-                        "transition-colors",
-                        hasTurni ? "hover:bg-primary/[0.03]" : "hover:bg-muted/40",
-                      )}
+                      className="transition-colors hover:bg-primary/[0.03]"
                     >
                       <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">
                         {String(i + 1).padStart(2, "0")}
                       </td>
-                      <td className="px-3 py-2.5 font-mono text-[13px] font-semibold text-primary">
-                        {d.codice}
+                      <td className="px-3 py-2.5">
+                        <Link
+                          to={`/gestione-personale/depositi/${encodeURIComponent(d.codice)}`}
+                          className="font-mono text-[13px] font-semibold text-primary hover:underline"
+                        >
+                          {d.codice}
+                        </Link>
                       </td>
                       <td className="px-3 py-2.5 text-foreground/80">{d.display_name}</td>
-                      <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">
-                        {d.stazione_principale_codice ?? "—"}
-                      </td>
-                      <td className="px-3 py-2.5 text-right">
-                        {hasTurni ? (
-                          <Link
-                            to={`/pianificatore-pdc/turni?impianto=${encodeURIComponent(d.codice)}`}
-                            className="inline-flex items-center gap-1.5 font-mono tabular-nums text-primary hover:underline"
-                          >
-                            {turniCount}
-                            <ArrowRight className="h-3 w-3" aria-hidden />
-                          </Link>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums">
+                        {attivi > 0 ? (
+                          attivi
                         ) : (
                           <Badge variant="outline" className="text-[9px]">
-                            nessun turno
+                            vuoto
                           </Badge>
                         )}
                       </td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-emerald-700">
+                        {attivi > 0 ? inServ : "—"}
+                      </td>
+                      <td className={cn("px-3 py-2.5 text-right font-mono tabular-nums font-semibold", pctClass)}>
+                        {attivi > 0 ? `${cop.toFixed(1)}%` : "—"}
+                      </td>
                       <td className="px-3 py-2.5 text-right">
-                        {hasTurni && (
-                          <span
-                            className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500"
-                            aria-hidden
-                          />
-                        )}
+                        <ArrowRight className="h-3 w-3 text-muted-foreground/40" aria-hidden />
                       </td>
                     </tr>
                   );
@@ -165,8 +166,9 @@ export function PianificatorePdcDepositiRoute() {
           <div className="border-t border-border bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground">
             Anagrafica caricata da{" "}
             <span className="font-mono">/api/depots</span> · seed Trenord
-            (NORMATIVA-PDC §2.1) inserito dalla migration{" "}
-            <span className="font-mono">0002_seed_trenord</span>.
+            (NORMATIVA-PDC §2.1) — KPI da{" "}
+            <span className="font-mono">/api/gestione-personale/kpi-depositi</span>
+            .
           </div>
         </section>
       )}

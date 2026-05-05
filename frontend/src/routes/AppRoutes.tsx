@@ -13,8 +13,14 @@ import { ProgrammaGiriRoute } from "@/routes/pianificatore-giro/ProgrammaGiriRou
 import { ProgrammiRoute } from "@/routes/pianificatore-giro/ProgrammiRoute";
 import { TurniPdcGiroRoute } from "@/routes/pianificatore-giro/TurniPdcGiroRoute";
 import { TurnoPdcDettaglioRoute } from "@/routes/pianificatore-giro/TurnoPdcDettaglioRoute";
+import { GestionePersonaleCalendarioRoute } from "@/routes/gestione-personale/CalendarioRoute";
+import { GestionePersonaleDashboardRoute } from "@/routes/gestione-personale/DashboardRoute";
+import { GestionePersonaleDepositiRoute } from "@/routes/gestione-personale/DepositiRoute";
+import { GestionePersonaleDepositoDettaglioRoute } from "@/routes/gestione-personale/DepositoDettaglioRoute";
+import { GestionePersonaleIndisponibilitaRoute } from "@/routes/gestione-personale/IndisponibilitaRoute";
+import { GestionePersonalePersonaDettaglioRoute } from "@/routes/gestione-personale/PersonaDettaglioRoute";
+import { GestionePersonalePersoneRoute } from "@/routes/gestione-personale/PersoneRoute";
 import { PianificatorePdcDashboardRoute } from "@/routes/pianificatore-pdc/DashboardRoute";
-import { PianificatorePdcDepositiRoute } from "@/routes/pianificatore-pdc/DepositiRoute";
 import { PianificatorePdcGiriRoute } from "@/routes/pianificatore-pdc/GiriRoute";
 import { PianificatorePdcRevisioniCascadingRoute } from "@/routes/pianificatore-pdc/RevisioniCascadingRoute";
 import { PianificatorePdcTurniRoute } from "@/routes/pianificatore-pdc/TurniRoute";
@@ -24,6 +30,7 @@ import { PianificatorePdcTurnoDettaglioRoute } from "@/routes/pianificatore-pdc/
 
 const ROLE_PIANIFICATORE_GIRO = "PIANIFICATORE_GIRO";
 const ROLE_PIANIFICATORE_PDC = "PIANIFICATORE_PDC";
+const ROLE_GESTIONE_PERSONALE = "GESTIONE_PERSONALE";
 
 /**
  * Tabella route dichiarativa.
@@ -77,10 +84,41 @@ export function AppRoutes() {
             <Route path="giri" element={<PianificatorePdcGiriRoute />} />
             <Route path="turni" element={<PianificatorePdcTurniRoute />} />
             <Route path="turni/:turnoId" element={<PianificatorePdcTurnoDettaglioRoute />} />
-            <Route path="depositi" element={<PianificatorePdcDepositiRoute />} />
+            {/* Sprint 7.9 MR ζ: i depositi PdC sono migrati sotto Gestione
+                Personale. Redirect dalla vecchia path per non rompere
+                eventuali bookmark. */}
+            <Route
+              path="depositi"
+              element={<Navigate to="/gestione-personale/depositi" replace />}
+            />
             <Route
               path="revisioni-cascading"
               element={<PianificatorePdcRevisioniCascadingRoute />}
+            />
+          </Route>
+        </Route>
+      </Route>
+
+      {/* Dashboard 4 — Gestione Personale (Sprint 7.9 MR ζ) */}
+      <Route element={<ProtectedRoute requiredRole={ROLE_GESTIONE_PERSONALE} />}>
+        <Route element={<AppLayout />}>
+          <Route path="/gestione-personale">
+            <Route index element={<Navigate to="/gestione-personale/dashboard" replace />} />
+            <Route path="dashboard" element={<GestionePersonaleDashboardRoute />} />
+            <Route path="persone" element={<GestionePersonalePersoneRoute />} />
+            <Route
+              path="persone/:personaId"
+              element={<GestionePersonalePersonaDettaglioRoute />}
+            />
+            <Route path="depositi" element={<GestionePersonaleDepositiRoute />} />
+            <Route
+              path="depositi/:codice"
+              element={<GestionePersonaleDepositoDettaglioRoute />}
+            />
+            <Route path="calendario" element={<GestionePersonaleCalendarioRoute />} />
+            <Route
+              path="indisponibilita"
+              element={<GestionePersonaleIndisponibilitaRoute />}
             />
           </Route>
         </Route>

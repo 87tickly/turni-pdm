@@ -4,12 +4,15 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   AlertTriangle,
   Building2,
+  CalendarRange,
   ChevronLeft,
   ChevronRight,
   IdCard,
   LayoutDashboard,
   ListOrdered,
+  PlaneTakeoff,
   Users,
+  UsersRound,
   Workflow,
   Wrench,
 } from "lucide-react";
@@ -73,9 +76,6 @@ const NAV_PIANIFICATORE_PDC: NavGroup = {
     { to: "/pianificatore-pdc/dashboard", label: "Home", icon: LayoutDashboard },
     { to: "/pianificatore-pdc/giri", label: "Vista giri", icon: Workflow },
     { to: "/pianificatore-pdc/turni", label: "Turni PdC", icon: ListOrdered },
-    // Sprint 7.11: anteprima depositi PdC, sotto path PdC fino a quando
-    // il ruolo Gestione Personale non sarà implementato.
-    { to: "/pianificatore-pdc/depositi", label: "Depositi PdC", icon: Building2 },
     {
       to: "/pianificatore-pdc/revisioni-cascading",
       label: "Rev. cascading",
@@ -110,9 +110,22 @@ const NAV_GESTIONE_PERSONALE: NavGroup = {
   label: "Gestione Personale",
   requiredRole: "GESTIONE_PERSONALE",
   pathPrefix: "/gestione-personale",
-  preview: true,
   icon: Users,
-  items: [],
+  items: [
+    { to: "/gestione-personale/dashboard", label: "Home", icon: LayoutDashboard },
+    { to: "/gestione-personale/persone", label: "Anagrafica PdC", icon: UsersRound },
+    { to: "/gestione-personale/depositi", label: "Depositi PdC", icon: Building2 },
+    {
+      to: "/gestione-personale/calendario",
+      label: "Calendario",
+      icon: CalendarRange,
+    },
+    {
+      to: "/gestione-personale/indisponibilita",
+      label: "Ferie & assenze",
+      icon: PlaneTakeoff,
+    },
+  ],
 };
 
 const NAV_PERSONALE: NavGroup = {
