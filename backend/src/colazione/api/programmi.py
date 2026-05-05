@@ -20,17 +20,25 @@ non rivelare l'esistenza).
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import BigInteger, and_, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from colazione.auth import require_admin, require_any_role, require_role
 from colazione.db import get_session
+from colazione.domain.calendario import festivita_italiane, tipo_giorno
+from colazione.domain.normativa.assegnazione_persone import (
+    AssegnazioneEsistente,
+    GiornataDaAssegnare,
+    IndisponibilitaPeriodo,
+    PersonaCandidata,
+    auto_assegna,
+)
 from colazione.domain.pipeline import (
     StatoManutenzione,
     StatoPipelinePdc,
@@ -44,14 +52,26 @@ from colazione.domain.pipeline import (
     valida_transizione_manutenzione,
     valida_transizione_pdc,
 )
+from colazione.models.anagrafica import Depot, FestivitaUfficiale
 from colazione.models.corse import CorsaImportRun
+from colazione.models.giri import GiroMateriale
+from colazione.models.personale import (
+    AssegnazioneGiornata,
+    IndisponibilitaPersona,
+    Persona,
+)
 from colazione.models.programmi import (
     BuilderRun,
     ProgrammaMateriale,
     ProgrammaRegolaAssegnazione,
 )
+from colazione.models.turni_pdc import TurnoPdc, TurnoPdcGiornata
 from colazione.schemas.corse import CorsaImportRunRead
 from colazione.schemas.programmi import (
+    AssegnazioneCreataRead,
+    AutoAssegnaPersoneRequest,
+    AutoAssegnaPersoneResponse,
+    MancanzaRead,
     ProgrammaMaterialeCreate,
     ProgrammaMaterialeRead,
     ProgrammaMaterialeUpdate,
@@ -59,6 +79,7 @@ from colazione.schemas.programmi import (
     ProgrammaRegolaAssegnazioneRead,
     SbloccaProgrammaRequest,
     VariazionePdERequest,
+    WarningSoftRead,
 )
 from colazione.schemas.security import CurrentUser
 
@@ -636,6 +657,340 @@ async def conferma_personale(
     await session.commit()
     await session.refresh(p)
     return p
+
+
+# =====================================================================
+# Auto-assegna persone — Sub-MR 2.bis-a (Sprint 8.0)
+# =====================================================================
+
+
+def _variante_matcha_tipo_giorno(variante: str, tipo: str) -> bool:
+    """True se la ``variante_calendario`` di una ``TurnoPdcGiornata``
+    copre il ``tipo`` calendariale di una data (feriale/sabato/domenica/festivo).
+
+    Mapping pragmatico MVP — il campo ``variante_calendario`` (max 20
+    char) deriva da ``GiroVariante.validita_testo`` che riprende il
+    testo PdE grezzo (memoria utente: il PdE testo Periodicità è
+    verità). Casi gestiti:
+
+    - ``"GG"`` (default builder ``multi_turno.py``) → matches all
+    - ``"LMXGV"`` / ``"LV"`` / token che inizia con ``"L"`` + giorno:
+      → ``"feriale"`` (Lun-Ven)
+    - ``"S"`` → ``"sabato"``
+    - ``"D"`` → ``"domenica"``
+    - ``"F"`` (e prefissi ``"FE"``/``"FEST"``) → ``"festivo"``
+    - ``"SD"`` → ``"sabato"`` o ``"domenica"``
+
+    **Fallback unknown**: una ``variante_calendario`` non riconosciuta
+    matcha qualsiasi tipo (comportamento liberale "GG-like"). Decisione
+    MVP per non bloccare l'algoritmo su varianti future; eventuali
+    sovra-assegnazioni emergono come warning soft (riposo settimanale).
+    Caso da rivisitare in 2.bis-c se si osservano problemi reali.
+    """
+    v = variante.strip().upper()
+    if v in {"GG", "TUTTI", "GIORNALMENTE", "G", "OGNI"}:
+        return True
+    if tipo == "feriale":
+        if v in {"LV", "FE", "FERIALE", "LAVORATIVO"} or v.startswith("LM"):
+            return True
+        # "L" da solo o "L1:5" → feriale
+        if v == "L" or v.startswith("L"):
+            # Esclude "LMXGV" già catturato sopra; gestisce "L" / "LV"
+            return True
+        return False
+    if tipo == "sabato":
+        if v == "S" or v == "SAB" or v == "SABATO":
+            return True
+        if v == "SD":
+            return True
+        return False
+    if tipo == "domenica":
+        if v == "D" or v == "DOM" or v == "DOMENICA":
+            return True
+        if v == "SD":
+            return True
+        return False
+    if tipo == "festivo":
+        if v == "F" or v.startswith("FES"):
+            return True
+        return False
+    # Fallback liberale: variante non riconosciuta → match
+    return True
+
+
+@router.post(
+    "/{programma_id}/auto-assegna-persone",
+    response_model=AutoAssegnaPersoneResponse,
+    summary="Auto-assegna persone PdC alle giornate dei turni del programma",
+)
+async def auto_assegna_persone_endpoint(
+    programma_id: int,
+    payload: AutoAssegnaPersoneRequest,
+    user: CurrentUser = _authz_personale,
+    session: AsyncSession = Depends(get_session),
+) -> AutoAssegnaPersoneResponse:
+    """Esegue l'algoritmo greedy di auto-assegnazione persone alle
+    giornate dei turni del programma (sub-MR 2.bis-a).
+
+    **Pre-condizioni**:
+
+    - Il programma esiste e appartiene all'azienda corrente.
+    - ``stato_pipeline_pdc == PDC_CONFERMATO`` (else 409): l'algoritmo
+      gira solo su programmi consolidati dal Pianificatore PdC.
+
+    **Effetti**:
+
+    - Inserisce nuove ``AssegnazioneGiornata`` per ogni
+      ``(turno_pdc_giornata, data)`` slot non già coperto, scegliendo
+      una persona compatibile con i vincoli HARD (sede, indisp,
+      doppia assegnazione, riposo intraturno §11.5).
+    - Le esistenti ``AssegnazioneGiornata`` (manuali o di run
+      precedenti) sono rispettate, mai sovrascritte.
+
+    **Output**: ``AutoAssegnaPersoneResponse`` con KPI
+    ``delta_copertura_pct`` + lista mancanze + warning soft (FR cap
+    §10.6, riposo settimanale §11.4, primo giorno post-riposo §11.2).
+
+    **Idempotenza**: una seconda chiamata con stessa finestra produce
+    0 nuove assegnazioni se nulla è cambiato (le esistenti già
+    coprono ogni slot).
+    """
+    p = await _get_programma_or_404(
+        session, programma_id, user.azienda_id, for_update=True
+    )
+    if p.stato_pipeline_pdc != StatoPipelinePdc.PDC_CONFERMATO.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"programma in stato pipeline {p.stato_pipeline_pdc!r}: "
+                "auto-assegna richiede PDC_CONFERMATO"
+            ),
+        )
+
+    # Finestra: payload o default = valido_da..valido_a
+    data_da = payload.data_da or p.valido_da
+    data_a = payload.data_a or p.valido_a or p.valido_da
+    if data_da > data_a:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"finestra invalida: data_da {data_da.isoformat()} > data_a {data_a.isoformat()}",
+        )
+
+    # Festività: italiane fisse + mobili per gli anni della finestra,
+    # + festività ufficiali da DB per la stessa azienda (se esistono).
+    fest_set: set[date] = set()
+    for anno in range(data_da.year, data_a.year + 1):
+        for d_fest, _nome in festivita_italiane(anno):
+            fest_set.add(d_fest)
+    db_fest_rows = await session.execute(
+        select(FestivitaUfficiale.data).where(
+            and_(
+                FestivitaUfficiale.data >= data_da,
+                FestivitaUfficiale.data <= data_a,
+                or_(
+                    FestivitaUfficiale.azienda_id.is_(None),
+                    FestivitaUfficiale.azienda_id == user.azienda_id,
+                ),
+            )
+        )
+    )
+    for (d_fest,) in db_fest_rows.all():
+        fest_set.add(d_fest)
+    festivita_set: frozenset[date] = frozenset(fest_set)
+
+    # Carica turni del programma + giornate non riposo + stazione deposito.
+    # Filter via JSONB cast (pattern MR 3, entry 168).
+    giri_subq = (
+        select(GiroMateriale.id)
+        .where(
+            GiroMateriale.programma_id == programma_id,
+            GiroMateriale.azienda_id == user.azienda_id,
+        )
+        .scalar_subquery()
+    )
+    turni_giornate_stmt = (
+        select(
+            TurnoPdc.id.label("turno_id"),
+            TurnoPdc.deposito_pdc_id.label("deposito_id"),
+            Depot.stazione_principale_codice.label("deposito_stazione"),
+            TurnoPdcGiornata.id.label("giornata_id"),
+            TurnoPdcGiornata.variante_calendario,
+            TurnoPdcGiornata.inizio_prestazione,
+            TurnoPdcGiornata.fine_prestazione,
+            TurnoPdcGiornata.is_notturno,
+            TurnoPdcGiornata.stazione_fine,
+        )
+        .join(TurnoPdcGiornata, TurnoPdcGiornata.turno_pdc_id == TurnoPdc.id)
+        .join(Depot, Depot.id == TurnoPdc.deposito_pdc_id, isouter=True)
+        .where(
+            TurnoPdc.azienda_id == user.azienda_id,
+            cast(
+                TurnoPdc.generation_metadata_json["giro_materiale_id"].astext,
+                BigInteger,
+            ).in_(giri_subq),
+            TurnoPdcGiornata.is_riposo.is_(False),
+            TurnoPdcGiornata.inizio_prestazione.is_not(None),
+            TurnoPdcGiornata.fine_prestazione.is_not(None),
+            TurnoPdc.deposito_pdc_id.is_not(None),
+        )
+    )
+    turni_rows = (await session.execute(turni_giornate_stmt)).all()
+
+    # Espansione calendariale: una GiornataDaAssegnare per ogni
+    # combinazione (giornata, data) dove la variante matcha.
+    giornate_da_assegnare: list[GiornataDaAssegnare] = []
+    deposito_ids: set[int] = set()
+    for tr in turni_rows:
+        deposito_ids.add(tr.deposito_id)
+        is_fr = (
+            tr.stazione_fine is not None
+            and tr.deposito_stazione is not None
+            and tr.stazione_fine != tr.deposito_stazione
+        )
+        d = data_da
+        while d <= data_a:
+            tipo = tipo_giorno(d, festivita_set)
+            if _variante_matcha_tipo_giorno(tr.variante_calendario, tipo):
+                giornate_da_assegnare.append(
+                    GiornataDaAssegnare(
+                        turno_pdc_giornata_id=tr.giornata_id,
+                        turno_pdc_id=tr.turno_id,
+                        data=d,
+                        deposito_pdc_id=tr.deposito_id,
+                        inizio_prestazione=tr.inizio_prestazione,
+                        fine_prestazione=tr.fine_prestazione,
+                        is_notturno=tr.is_notturno,
+                        is_fr=is_fr,
+                    )
+                )
+            d = d + timedelta(days=1)
+
+    # Persone candidate: PdC attivi del/i deposito/i dei turni.
+    persone_data: list[tuple[int, int]] = []
+    if deposito_ids:
+        persone_rows = await session.execute(
+            select(Persona.id, Persona.sede_residenza_id).where(
+                Persona.azienda_id == user.azienda_id,
+                Persona.profilo == "PdC",
+                Persona.is_matricola_attiva.is_(True),
+                Persona.sede_residenza_id.in_(deposito_ids),
+            )
+        )
+        persone_data = [
+            (pr.id, pr.sede_residenza_id) for pr in persone_rows.all()
+        ]
+    persona_ids = [pid for pid, _sede in persone_data]
+
+    # Indisponibilità approvate sovrapposte alla finestra.
+    indisp_per_persona: dict[int, list[IndisponibilitaPeriodo]] = {}
+    if persona_ids:
+        indisp_rows = await session.execute(
+            select(
+                IndisponibilitaPersona.persona_id,
+                IndisponibilitaPersona.data_inizio,
+                IndisponibilitaPersona.data_fine,
+            ).where(
+                IndisponibilitaPersona.persona_id.in_(persona_ids),
+                IndisponibilitaPersona.is_approvato.is_(True),
+                IndisponibilitaPersona.data_fine >= data_da,
+                IndisponibilitaPersona.data_inizio <= data_a,
+            )
+        )
+        for ir in indisp_rows.all():
+            indisp_per_persona.setdefault(ir.persona_id, []).append(
+                IndisponibilitaPeriodo(
+                    data_inizio=ir.data_inizio, data_fine=ir.data_fine
+                )
+            )
+    persone_candidate = [
+        PersonaCandidata(
+            id=pid,
+            sede_residenza_id=sede,
+            indisponibilita=tuple(indisp_per_persona.get(pid, [])),
+        )
+        for pid, sede in persone_data
+    ]
+
+    # Assegnazioni esistenti sulle giornate del programma in finestra
+    # (escluse le annullate). Usiamo (turno_pdc_giornata_id, data) come
+    # marker di slot già coperto.
+    giornate_ids = {g.turno_pdc_giornata_id for g in giornate_da_assegnare}
+    assegnazioni_esistenti: list[AssegnazioneEsistente] = []
+    if giornate_ids:
+        esist_rows = await session.execute(
+            select(
+                AssegnazioneGiornata.persona_id,
+                AssegnazioneGiornata.data,
+                AssegnazioneGiornata.turno_pdc_giornata_id,
+            ).where(
+                AssegnazioneGiornata.turno_pdc_giornata_id.in_(giornate_ids),
+                AssegnazioneGiornata.data >= data_da,
+                AssegnazioneGiornata.data <= data_a,
+                AssegnazioneGiornata.stato != "annullato",
+            )
+        )
+        assegnazioni_esistenti = [
+            AssegnazioneEsistente(
+                persona_id=er.persona_id,
+                data=er.data,
+                turno_pdc_giornata_id=er.turno_pdc_giornata_id,
+            )
+            for er in esist_rows.all()
+        ]
+
+    # Esegui algoritmo (pure)
+    risultato = auto_assegna(
+        giornate=giornate_da_assegnare,
+        persone=persone_candidate,
+        assegnazioni_esistenti=assegnazioni_esistenti,
+    )
+
+    # Persistenza nuove assegnazioni
+    for ass in risultato.assegnazioni:
+        session.add(
+            AssegnazioneGiornata(
+                persona_id=ass.persona_id,
+                data=ass.data,
+                turno_pdc_giornata_id=ass.turno_pdc_giornata_id,
+                stato="pianificato",
+            )
+        )
+    await session.commit()
+
+    return AutoAssegnaPersoneResponse(
+        finestra_data_da=data_da,
+        finestra_data_a=data_a,
+        n_giornate_totali=risultato.n_giornate_totali,
+        n_giornate_coperte=risultato.n_giornate_coperte,
+        n_assegnazioni_create=len(risultato.assegnazioni),
+        delta_copertura_pct=risultato.delta_copertura_pct,
+        assegnazioni=[
+            AssegnazioneCreataRead(
+                persona_id=a.persona_id,
+                turno_pdc_giornata_id=a.turno_pdc_giornata_id,
+                data=a.data,
+            )
+            for a in risultato.assegnazioni
+        ],
+        mancanze=[
+            MancanzaRead(
+                turno_pdc_giornata_id=m.turno_pdc_giornata_id,
+                turno_pdc_id=m.turno_pdc_id,
+                data=m.data,
+                motivo=m.motivo.value,
+            )
+            for m in risultato.mancanze
+        ],
+        warning_soft=[
+            WarningSoftRead(
+                persona_id=w.persona_id,
+                data=w.data,
+                tipo=w.tipo.value,
+                descrizione=w.descrizione,
+            )
+            for w in risultato.warning_soft
+        ],
+    )
 
 
 @router.post(

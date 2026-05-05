@@ -10,6 +10,205 @@
 
 ---
 
+## 2026-05-05 (172) — Sub-MR 2.bis-a: algoritmo auto-assegna persone PdC (backend)
+
+### Contesto
+
+Apertura del sub-MR **2.bis-a**, primo dei tre concordati con l'utente
+per chiudere lo scope del MR 2.bis (entry 167 — algoritmo
+assegnazione persone PdC ai turni). Lo split deciso in apertura
+sessione:
+
+- **2.bis-a (questa entry)**: backend domain algoritmo + endpoint
+  ``POST /api/programmi/{id}/auto-assegna-persone`` + test integration.
+- **2.bis-b**: frontend UI drilldown Gestione Personale (bottone
+  "Auto-assegna" + tabella mancanze + override manuale).
+- **2.bis-c**: side effect su ``conferma-personale`` (gating su
+  ``delta_copertura_pct ≥ 95%``).
+
+### Decisioni di design (concordate con utente)
+
+- **Finestra calendariale**: parametrica (``data_da/data_a`` opzionali
+  in payload, default = ``programma.valido_da..valido_a``).
+- **Qualifiche persona vs linee**: skip per v0 (richiederebbe
+  un campo ``linee_richieste`` su ``TurnoPdc`` che oggi non esiste).
+- **Strategia algoritmo**: greedy first-fit (deterministico per
+  ``persona.id`` minimo, idempotente).
+- **Vincoli HARD** (bloccano): sede residenza == deposito turno,
+  indisp approvata copre data, no doppia assegnazione stessa data,
+  riposo intraturno §11.5 (11h std / 14h notte tarda 00:01-01:00 /
+  16h notturna).
+- **Vincoli SOFT** (warning): FR cap §10.6 (1/sett ISO + 3/28gg),
+  riposo settimanale §11.4 (euristica: ≥6 assegnazioni in 7gg →
+  warning), §11.2 primo giorno post-riposo non mattino.
+- **Differiti dichiarati**: §11.3 ultimo giorno pre-riposo ≤15:00
+  (richiede schedule futuro), prestazione max 7h/8h30 (§11.8) e
+  condotta max 5h30 (§3) e refezione 30' (§4) — già validati dal
+  builder PdC al momento della generazione del turno.
+
+### Modifiche backend
+
+**`backend/src/colazione/domain/normativa/assegnazione_persone.py`**
+(nuovo, 480 righe): modulo pure-Python DB-agnostic.
+
+- Costanti normative (``RIPOSO_INTRATURNO_MIN_*``, ``FR_CAP_*``,
+  ``SOGLIA_WARNING_RIPOSO_SETTIMANALE``).
+- Enum ``MotivoMancanza`` (5 valori) + ``TipoWarningSoft`` (4 valori).
+- Dataclass frozen di input: ``GiornataDaAssegnare`` (con
+  ``is_fr: bool`` calcolato dal caller via
+  ``stazione_fine != Depot.stazione_principale_codice``),
+  ``PersonaCandidata``, ``IndisponibilitaPeriodo``,
+  ``AssegnazioneEsistente``.
+- Dataclass di output: ``Assegnazione``, ``Mancanza``, ``WarningSoft``,
+  ``RisultatoAutoAssegna`` (con property
+  ``delta_copertura_pct: float``).
+- Stato interno mutabile ``_StatoAssegna`` (assegnate per
+  persona/data, storia per persona, FR per persona).
+- Helpers: ``_datetime_inizio/fine``, ``_riposo_richiesto_h``
+  (§11.5), ``_indisponibile_in_data``, ``_check_warning_soft``
+  (FR §10.6 + riposo settimanale §11.4 + §11.2).
+- Entry point ``auto_assegna()``: ordina giornate per
+  ``(data, turno_pdc_giornata_id)``, per ogni giornata cerca primo
+  candidato compatibile (HARD), assegna o emette mancanza con
+  motivo specifico (selezionato in base al pattern di skip),
+  valuta SOFT post-assegnamento.
+
+**`backend/src/colazione/schemas/programmi.py`** — nuovi schemi
+Pydantic ``extra=forbid``:
+
+- ``AutoAssegnaPersoneRequest``: ``data_da/data_a`` opzionali, validator
+  ``data_da ≤ data_a``.
+- ``AssegnazioneCreataRead``, ``MancanzaRead``, ``WarningSoftRead``.
+- ``AutoAssegnaPersoneResponse``: ``finestra_data_da/data_a``,
+  ``n_giornate_totali/coperte``, ``n_assegnazioni_create``,
+  ``delta_copertura_pct``, lista assegnazioni/mancanze/warning_soft.
+
+**`backend/src/colazione/api/programmi.py`** — endpoint nuovo:
+
+- ``POST /api/programmi/{id}/auto-assegna-persone``
+  (auth ``GESTIONE_PERSONALE``):
+  1. Lock programma con ``SELECT FOR UPDATE`` (pattern MR 0).
+  2. Verifica ``stato_pipeline_pdc == PDC_CONFERMATO`` (else 409).
+  3. Calcola finestra (default = ``valido_da..valido_a``).
+  4. Carica ``FestivitaUfficiale`` (italiane via
+     ``domain/calendario.festivita_italiane`` + DB per azienda).
+  5. JOIN ``TurnoPdc ⨝ TurnoPdcGiornata ⨝ Depot`` con cast JSONB
+     ``generation_metadata_json["giro_materiale_id"]`` per filtrare
+     i turni del programma (pattern MR 3, entry 168).
+  6. Espande giornate → date iterando il calendario (matching
+     ``variante_calendario`` vs ``tipo_giorno(data)`` via helper
+     ``_variante_matcha_tipo_giorno`` con fallback liberale per
+     varianti unknown).
+  7. ``is_fr = stazione_fine != Depot.stazione_principale_codice``.
+  8. Carica persone candidate (PdC attivi, sede in deposito_ids).
+  9. Carica indisponibilità approvate sovrapposte.
+  10. Carica ``AssegnazioneGiornata`` esistenti (escludendo
+      ``stato='annullato'``).
+  11. Chiama ``auto_assegna()`` (pure).
+  12. Persiste nuove ``AssegnazioneGiornata`` con ``stato='pianificato'``.
+  13. Ritorna response con KPI ``delta_copertura_pct``.
+- Helper ``_variante_matcha_tipo_giorno`` (private): mapping pragmatico
+  per ``LMXGV/L*/LV/LM*`` → feriale, ``S/SD`` → sabato, ``D/SD`` →
+  domenica, ``F/FE*`` → festivo, ``GG/TUTTI`` → all. Unknown = match
+  liberale (limitazione dichiarata da rivisitare in 2.bis-c se
+  causa sovra-assegnazioni).
+
+### Test
+
+**`backend/tests/test_domain_assegnazione_persone.py`** (nuovo, 24
+test pure unit, 0.06s):
+
+- Caso base + first-fit deterministico + idempotenza.
+- HARD: nessun PdC deposito, indisponibilità (estremi inclusivi),
+  doppia assegnazione, esistente blocca persona, giornata già
+  coperta skip-no-riassegna, riposo intraturno 11h/14h/16h.
+- SOFT: FR cap settimana (>1), FR cap 28gg (>3), no FR no warning,
+  riposo settimanale ≥6/7gg, primo giorno post-riposo mattina.
+- ``delta_copertura_pct``: 0/100, 50%, round 1 decimale.
+- Frozen dataclass equality.
+
+**`backend/tests/test_api_programmi_conferma.py`** — nuova sezione
+"Auto-assegna persone" (9 test integration):
+
+- ``_wipe_aa_data`` cleanup FK-safe per prefissi ``TEST_AA_*`` /
+  ``TEST_AAM*`` (assegnazioni → indisponibilità → persone →
+  turni → giri → programmi).
+- ``_clean_aa`` autouse fixture (parallelo a ``_clean_programmi``).
+- Helper ``_crea_setup_aa()``: bootstrap completo (programma
+  PDC_CONFERMATO + stazione + depot + giro + turno con
+  ``generation_metadata_json giro_materiale_id`` + N giornate
+  ``LMXGV`` + N persone PdC nel depot).
+- Test:
+  1. ``test_auto_assegna_pre_pdc_confermato_409`` (stato PDE_*
+     non ammesso).
+  2. ``test_auto_assegna_403_se_ruolo_diverso_da_gestione_personale``
+     (PIANIFICATORE_PDC → 403).
+  3. ``test_auto_assegna_401_senza_token``.
+  4. ``test_auto_assegna_caso_base_assegnazione_creata``: 1 turno +
+     1 giornata + 1 persona + 1 lunedì → ``n_assegnazioni_create=1``,
+     ``delta_copertura_pct=100``.
+  5. ``test_auto_assegna_indisponibilita_genera_mancanza``: unica
+     persona indisponibile su data → ``mancanze[0].motivo ==
+     "tutti_indisponibili"``.
+  6. ``test_auto_assegna_idempotente``: 2° call ha
+     ``n_assegnazioni_create=0``, ``delta_copertura_pct=100``.
+  7. ``test_auto_assegna_finestra_default_da_programma``: payload
+     ``{}`` usa ``valido_da..valido_a``, 5 lun-ven ``LMXGV`` → 5
+     assegnazioni.
+  8. ``test_auto_assegna_finestra_data_da_dopo_a_400``: validator
+     Pydantic → 422.
+  9. ``test_auto_assegna_persisted_su_db``: SELECT diretto verifica
+     ``stato='pianificato'`` e ``data`` corrette.
+
+### Verifiche
+
+- ✅ ``uv run mypy --strict src/``: 72 source files clean.
+- ✅ ``uv run ruff check`` su tutti i file MR: 0 errori.
+- ✅ ``uv run pytest``: **745 passed, 12 skipped, 0 failed** (24 nuovi
+  domain unit + 9 nuovi integration). Suite completa verde.
+- ⚠️ Smoke production rinviato a 2.bis-b (oggi solo backend, niente
+  UI per testare da browser; verifica con ``curl`` post-deploy se
+  utente lo richiede).
+
+### Decisioni di scope rinviate (dichiarate)
+
+- **Frontend UI** (sub-MR 2.bis-b): drilldown Gestione Personale,
+  bottone "Auto-assegna", tabella mancanze, override manuale.
+- **Side effect conferma-personale** (sub-MR 2.bis-c): gating su
+  ``delta_copertura_pct ≥ soglia`` (default 95%) per la transizione
+  ``PDC_CONFERMATO → PERSONALE_ASSEGNATO``.
+- **FR detection raffinata**: oggi heuristic-only via
+  ``stazione_fine != Depot.stazione_principale_codice``. Ricontrolllare
+  se in produzione i FR risultano sotto/sopra-stimati.
+- **Qualifiche persona ↔ linee turno**: richiede prima definizione
+  campo ``linee_richieste`` su ``TurnoPdc``. Scope MR successivo.
+- **Algoritmo more-than-greedy**: backtracking limitato o CP-SAT con
+  OR-Tools. Da valutare se la copertura % in produzione è
+  insoddisfacente.
+- **Variante calendario unknown**: oggi fallback liberale
+  (match-all). Da rivedere se in produzione si osservano
+  sovra-assegnazioni inattese per varianti non riconosciute.
+
+### Stato
+
+- ✅ Codice 2.bis-a pronto (domain + endpoint + schemi + 33 test
+  nuovi).
+- ⏳ Commit + push + deploy backend Railway.
+
+### Prossimo step
+
+Sub-MR 2.bis-b: frontend UI drilldown Gestione Personale per
+auto-assegna + override. Oggi la dashboard Gestione Personale
+(entry 167) mostra solo lista programmi visibili; serve route
+dettaglio (``/gestione-personale/programmi/:id/assegna``) con:
+- bottone "Auto-assegna persone" che apre dialog con
+  selettore data_da/data_a (default valido_da/a)
+- chiamata endpoint + display KPI + tabella mancanze con motivo
+- override manuale per giornata mancata (POST nuovo endpoint o
+  riuso di un POST per ``AssegnazioneGiornata`` esistente)
+
+---
+
 ## 2026-05-05 (171) — Sprint 8.0 MR 6: dashboard pipeline trasversale (admin)
 
 ### Contesto

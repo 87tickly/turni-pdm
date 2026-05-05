@@ -394,3 +394,93 @@ class SbloccaProgrammaRequest(BaseModel):
 
     ramo: Literal["pdc", "manutenzione"] = "pdc"
     motivo: str | None = Field(default=None, max_length=500)
+
+
+# =====================================================================
+# Auto-assegna persone — Sub-MR 2.bis-a (Sprint 8.0)
+# =====================================================================
+
+
+class AutoAssegnaPersoneRequest(BaseModel):
+    """Body per ``POST /api/programmi/{id}/auto-assegna-persone``.
+
+    Specifica la finestra calendariale ``[data_da, data_a]`` da
+    auto-assegnare. Entrambi i campi sono opzionali: se omessi, il
+    backend usa ``programma.valido_da`` / ``programma.valido_a``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    data_da: date | None = Field(
+        default=None,
+        description="Inizio finestra (incluso). Default = programma.valido_da.",
+    )
+    data_a: date | None = Field(
+        default=None,
+        description="Fine finestra (inclusa). Default = programma.valido_a.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_finestra(self) -> AutoAssegnaPersoneRequest:
+        if self.data_da and self.data_a and self.data_da > self.data_a:
+            raise ValueError("data_da deve essere ≤ data_a")
+        return self
+
+
+class AssegnazioneCreataRead(BaseModel):
+    """Una assegnazione persona → giornata creata dall'algoritmo."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    persona_id: int
+    turno_pdc_giornata_id: int
+    data: date
+
+
+class MancanzaRead(BaseModel):
+    """Una giornata non coperta + motivo (richiede override manuale)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    turno_pdc_giornata_id: int
+    turno_pdc_id: int
+    data: date
+    motivo: str
+    """Valore di ``MotivoMancanza`` enum (vedi
+    ``domain/normativa/assegnazione_persone.py``)."""
+
+
+class WarningSoftRead(BaseModel):
+    """Un warning soft: assegnazione effettuata ma con possibile
+    violazione di vincolo non rigido."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    persona_id: int
+    data: date
+    tipo: str
+    """Valore di ``TipoWarningSoft`` enum."""
+    descrizione: str
+
+
+class AutoAssegnaPersoneResponse(BaseModel):
+    """Response del ``POST /auto-assegna-persone``.
+
+    KPI principale: ``delta_copertura_pct`` (0..100). Il side-effect su
+    ``conferma-personale`` (sub-MR 2.bis-c) gaterà la transizione a
+    ``PERSONALE_ASSEGNATO`` su questo valore.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    finestra_data_da: date
+    finestra_data_a: date
+    n_giornate_totali: int
+    n_giornate_coperte: int
+    n_assegnazioni_create: int
+    """Quante NUOVE assegnazioni l'algoritmo ha persistito (≠
+    ``n_giornate_coperte`` perché alcune erano già coperte)."""
+    delta_copertura_pct: float
+    assegnazioni: list[AssegnazioneCreataRead]
+    mancanze: list[MancanzaRead]
+    warning_soft: list[WarningSoftRead]

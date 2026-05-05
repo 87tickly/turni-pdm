@@ -756,3 +756,478 @@ async def test_sblocca_riapre_modifiche(client: TestClient) -> None:
         headers=_h(_admin_token(client)),
     )
     assert res_patch.status_code == 200, res_patch.text
+
+
+# =====================================================================
+# Auto-assegna persone — Sub-MR 2.bis-a (Sprint 8.0)
+# =====================================================================
+#
+# Pattern: per ogni test si crea un setup completo (programma in
+# PDC_CONFERMATO + giro + turno_pdc con generation_metadata_json giro_id
+# + giornate LMXGV + persone nel deposito test). La fixture
+# ``_clean_aa_data`` autouse pulisce tutte le righe AA prima di ogni
+# test (in ordine FK-safe).
+#
+# Prefissi (isolati dai test pipeline TEST_PIPELINE_):
+# - programma.nome / turno.codice / giro.numero_turno: ``TEST_AA_``
+# - persona.codice_dipendente: ``TEST_AAM``
+# - depot.codice: ``TEST_AA_DEPOT``
+# - stazione.codice: ``S99TESTAA``
+
+
+_AA_PROG_PREFIX = "TEST_AA_"
+_AA_PERSONA_PREFIX = "TEST_AAM"
+_AA_DEPOT_CODICE = "TEST_AA_DEPOT"
+_AA_STAZIONE_CODICE = "STESTAA"  # solo lettere uppercase per ~'^[A-Z]+$'
+
+
+async def _wipe_aa_data() -> None:
+    """Pulisce tutti i dati creati dai test AA, in ordine FK-safe."""
+    async with session_scope() as session:
+        # 1) Assegnazioni → persona/turno_pdc_giornata
+        await session.execute(
+            text(
+                "DELETE FROM assegnazione_giornata WHERE persona_id IN ("
+                "  SELECT id FROM persona WHERE codice_dipendente LIKE :p)"
+            ),
+            {"p": f"{_AA_PERSONA_PREFIX}%"},
+        )
+        # 2) Indisponibilità → persona
+        await session.execute(
+            text(
+                "DELETE FROM indisponibilita_persona WHERE persona_id IN ("
+                "  SELECT id FROM persona WHERE codice_dipendente LIKE :p)"
+            ),
+            {"p": f"{_AA_PERSONA_PREFIX}%"},
+        )
+        # 3) Persone (dopo aver tolto FK figlie)
+        await session.execute(
+            text("DELETE FROM persona WHERE codice_dipendente LIKE :p"),
+            {"p": f"{_AA_PERSONA_PREFIX}%"},
+        )
+        # 4) turno_pdc_giornata + turno_pdc (CASCADE su giornata)
+        await session.execute(
+            text("DELETE FROM turno_pdc WHERE codice LIKE :p"),
+            {"p": f"{_AA_PROG_PREFIX}%"},
+        )
+        # 5) giro_materiale
+        await session.execute(
+            text("DELETE FROM giro_materiale WHERE numero_turno LIKE :p"),
+            {"p": f"{_AA_PROG_PREFIX}%"},
+        )
+        # 6) programma_materiale (regole + master)
+        await session.execute(
+            text(
+                "DELETE FROM programma_regola_assegnazione WHERE programma_id IN ("
+                "  SELECT id FROM programma_materiale WHERE nome LIKE :p)"
+            ),
+            {"p": f"{_AA_PROG_PREFIX}%"},
+        )
+        await session.execute(
+            text("DELETE FROM programma_materiale WHERE nome LIKE :p"),
+            {"p": f"{_AA_PROG_PREFIX}%"},
+        )
+
+
+@pytest.fixture(autouse=True)
+async def _clean_aa() -> None:
+    """Wipe AA data before each test (parallelo a _clean_programmi)."""
+    await _wipe_aa_data()
+
+
+async def _crea_setup_aa(
+    programma_suffix: str,
+    *,
+    n_persone: int = 2,
+    n_giornate: int = 1,
+    valido_da: date = date(2026, 5, 4),  # lunedì
+    valido_a: date = date(2026, 5, 8),   # venerdì
+    inizio_giornata: str = "06:00:00",
+    fine_giornata: str = "14:00:00",
+    is_notturno: bool = False,
+    stazione_fine_codice: str | None = None,
+    variante: str = "LMXGV",
+) -> dict[str, int | list[int]]:
+    """Crea programma PDC_CONFERMATO + giro + turno + giornate + persone.
+
+    Ritorna ids per asserzioni nei test. ``stazione_fine_codice=None``
+    significa stazione_fine = stazione del depot test (= no FR).
+    """
+    pid = await _crea_programma_in_stato(
+        f"{programma_suffix}_AA",  # nome che inizia con TEST_PIPELINE_<suffix>_AA
+        "PDC_CONFERMATO",
+    )
+    # Cambia il nome del programma al prefisso AA per cleanup isolato
+    async with session_scope() as session:
+        await session.execute(
+            text(
+                "UPDATE programma_materiale SET nome = :n, valido_da = :da, "
+                "valido_a = :a WHERE id = :pid"
+            ),
+            {
+                "n": f"{_AA_PROG_PREFIX}{programma_suffix}",
+                "da": valido_da,
+                "a": valido_a,
+                "pid": pid,
+            },
+        )
+
+        # 1) Stazione test (idempotente)
+        await session.execute(
+            text(
+                "INSERT INTO stazione (codice, nome, azienda_id) "
+                "SELECT :c, 'TEST AA STAZIONE', a.id "
+                "FROM azienda a WHERE a.codice = 'trenord' "
+                "ON CONFLICT (codice) DO NOTHING"
+            ),
+            {"c": _AA_STAZIONE_CODICE},
+        )
+        # 2) Depot test
+        depot_row = (
+            await session.execute(
+                text(
+                    "INSERT INTO depot "
+                    "(codice, display_name, azienda_id, "
+                    " stazione_principale_codice, tipi_personale_ammessi) "
+                    "SELECT :c, 'TEST AA DEPOT', a.id, :s, 'PdC' "
+                    "FROM azienda a WHERE a.codice = 'trenord' "
+                    "ON CONFLICT (codice) DO UPDATE "
+                    "SET display_name = EXCLUDED.display_name "
+                    "RETURNING id"
+                ),
+                {"c": _AA_DEPOT_CODICE, "s": _AA_STAZIONE_CODICE},
+            )
+        ).first()
+        assert depot_row is not None
+        depot_id = int(depot_row[0])
+
+        # 3) Giro materiale (FK programma)
+        giro_row = (
+            await session.execute(
+                text(
+                    "INSERT INTO giro_materiale "
+                    "(azienda_id, programma_id, numero_turno, tipo_materiale, "
+                    " materiale_tipo_codice, numero_giornate, stato, "
+                    " localita_manutenzione_partenza_id, "
+                    " localita_manutenzione_arrivo_id, "
+                    " generation_metadata_json) "
+                    "SELECT pm.azienda_id, :pid, :nt, 'TEST_AA', NULL, :ng, 'bozza', "
+                    " (SELECT id FROM localita_manutenzione "
+                    "  WHERE azienda_id = pm.azienda_id LIMIT 1), "
+                    " (SELECT id FROM localita_manutenzione "
+                    "  WHERE azienda_id = pm.azienda_id LIMIT 1), "
+                    " '{}'::jsonb "
+                    "FROM programma_materiale pm WHERE pm.id = :pid "
+                    "RETURNING id"
+                ),
+                {
+                    "pid": pid,
+                    "nt": f"{_AA_PROG_PREFIX}{programma_suffix}_GIRO",
+                    "ng": n_giornate,
+                },
+            )
+        ).first()
+        assert giro_row is not None
+        giro_id = int(giro_row[0])
+
+        # 4) Turno PdC (FK depot + generation_metadata_json giro_id)
+        turno_row = (
+            await session.execute(
+                text(
+                    "INSERT INTO turno_pdc "
+                    "(azienda_id, codice, impianto, profilo, ciclo_giorni, "
+                    " valido_da, valido_a, deposito_pdc_id, "
+                    " generation_metadata_json, stato) "
+                    "SELECT a.id, :c, 'TEST_AA', 'Condotta', 7, "
+                    " :da, :a, :did, "
+                    " jsonb_build_object('giro_materiale_id', CAST(:gid AS BIGINT)), "
+                    " 'bozza' "
+                    "FROM azienda a WHERE a.codice = 'trenord' "
+                    "RETURNING id"
+                ),
+                {
+                    "c": f"{_AA_PROG_PREFIX}{programma_suffix}_T",
+                    "da": valido_da,
+                    "a": valido_a,
+                    "did": depot_id,
+                    "gid": giro_id,
+                },
+            )
+        ).first()
+        assert turno_row is not None
+        turno_id = int(turno_row[0])
+
+        # 5) N giornate
+        giornate_ids: list[int] = []
+        sf_codice = stazione_fine_codice or _AA_STAZIONE_CODICE
+        for n in range(1, n_giornate + 1):
+            g_row = (
+                await session.execute(
+                    text(
+                        "INSERT INTO turno_pdc_giornata "
+                        "(turno_pdc_id, numero_giornata, variante_calendario, "
+                        " stazione_inizio, stazione_fine, "
+                        " inizio_prestazione, fine_prestazione, "
+                        " prestazione_min, condotta_min, refezione_min, km, "
+                        " is_notturno, is_riposo, is_disponibile, riposo_min) "
+                        "VALUES (:tid, :n, :v, :si, :sf, "
+                        " CAST(:ip AS TIME), CAST(:fp AS TIME), "
+                        " 480, 240, 30, 0, :nt, FALSE, FALSE, 0) "
+                        "RETURNING id"
+                    ),
+                    {
+                        "tid": turno_id,
+                        "n": n,
+                        "v": variante,
+                        "si": _AA_STAZIONE_CODICE,
+                        "sf": sf_codice,
+                        "ip": inizio_giornata,
+                        "fp": fine_giornata,
+                        "nt": is_notturno,
+                    },
+                )
+            ).first()
+            assert g_row is not None
+            giornate_ids.append(int(g_row[0]))
+
+        # 6) N persone nel depot
+        persone_ids: list[int] = []
+        for i in range(n_persone):
+            p_row = (
+                await session.execute(
+                    text(
+                        "INSERT INTO persona "
+                        "(azienda_id, codice_dipendente, nome, cognome, profilo, "
+                        " sede_residenza_id, qualifiche_json, is_matricola_attiva) "
+                        "SELECT a.id, :c, :nome, 'TEST', 'PdC', :did, "
+                        " '[]'::jsonb, TRUE "
+                        "FROM azienda a WHERE a.codice = 'trenord' "
+                        "RETURNING id"
+                    ),
+                    {
+                        "c": f"{_AA_PERSONA_PREFIX}{i:03d}",
+                        "nome": f"PdC{i}",
+                        "did": depot_id,
+                    },
+                )
+            ).first()
+            assert p_row is not None
+            persone_ids.append(int(p_row[0]))
+
+    return {
+        "programma_id": pid,
+        "depot_id": depot_id,
+        "giro_id": giro_id,
+        "turno_id": turno_id,
+        "giornate_ids": giornate_ids,
+        "persone_ids": persone_ids,
+    }
+
+
+async def test_auto_assegna_pre_pdc_confermato_409(
+    client: TestClient,
+) -> None:
+    """Programma in MATERIALE_CONFERMATO → 409 (richiede PDC_CONFERMATO)."""
+    pid = await _crea_programma_in_stato("aa_pre_409", "MATERIALE_CONFERMATO")
+    res = client.post(
+        f"/api/programmi/{pid}/auto-assegna-persone",
+        json={},
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res.status_code == 409, res.text
+    assert "PDC_CONFERMATO" in res.json()["detail"]
+
+
+async def test_auto_assegna_403_se_ruolo_diverso_da_gestione_personale(
+    client: TestClient,
+) -> None:
+    """Auth: PIANIFICATORE_PDC non può auto-assegnare (è ruolo dedicato a Personale)."""
+    pid = await _crea_programma_in_stato("aa_403", "PDC_CONFERMATO")
+    # pianificatore_pdc è in _TEST_ROLES (creato dal _module_setup)
+    res = client.post(
+        f"/api/programmi/{pid}/auto-assegna-persone",
+        json={},
+        headers=_h(_ruolo_token(client, "pianificatore_pdc")),
+    )
+    assert res.status_code == 403
+
+
+def test_auto_assegna_401_senza_token(client: TestClient) -> None:
+    res = client.post("/api/programmi/9999/auto-assegna-persone", json={})
+    assert res.status_code == 401
+
+
+async def test_auto_assegna_caso_base_assegnazione_creata(
+    client: TestClient,
+) -> None:
+    """1 turno + 1 giornata LMXGV + 1 persona + 1 lunedì → 1 assegnazione."""
+    setup = await _crea_setup_aa(
+        "case_base",
+        n_persone=1,
+        n_giornate=1,
+        valido_da=date(2026, 5, 4),
+        valido_a=date(2026, 5, 4),
+    )
+    res = client.post(
+        f"/api/programmi/{setup['programma_id']}/auto-assegna-persone",
+        json={
+            "data_da": "2026-05-04",
+            "data_a": "2026-05-04",
+        },
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["n_giornate_totali"] == 1
+    assert body["n_giornate_coperte"] == 1
+    assert body["n_assegnazioni_create"] == 1
+    assert body["delta_copertura_pct"] == 100.0
+    assert body["mancanze"] == []
+    assert len(body["assegnazioni"]) == 1
+    persone_ids = setup["persone_ids"]
+    assert isinstance(persone_ids, list)
+    assert body["assegnazioni"][0]["persona_id"] == persone_ids[0]
+
+
+async def test_auto_assegna_indisponibilita_genera_mancanza(
+    client: TestClient,
+) -> None:
+    """Unica persona indisponibile → mancanza con motivo TUTTI_INDISPONIBILI."""
+    setup = await _crea_setup_aa(
+        "case_indisp",
+        n_persone=1,
+        valido_da=date(2026, 5, 4),
+        valido_a=date(2026, 5, 4),
+    )
+    persone_ids = setup["persone_ids"]
+    assert isinstance(persone_ids, list)
+    persona_id = persone_ids[0]
+    # Inserisco indisponibilità approvata che copre la data
+    async with session_scope() as session:
+        await session.execute(
+            text(
+                "INSERT INTO indisponibilita_persona "
+                "(persona_id, tipo, data_inizio, data_fine, is_approvato) "
+                "VALUES (:pid, 'ferie', :da, :a, TRUE)"
+            ),
+            {
+                "pid": persona_id,
+                "da": date(2026, 5, 4),
+                "a": date(2026, 5, 4),
+            },
+        )
+
+    res = client.post(
+        f"/api/programmi/{setup['programma_id']}/auto-assegna-persone",
+        json={"data_da": "2026-05-04", "data_a": "2026-05-04"},
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["n_giornate_coperte"] == 0
+    assert body["n_assegnazioni_create"] == 0
+    assert body["delta_copertura_pct"] == 0.0
+    assert len(body["mancanze"]) == 1
+    assert body["mancanze"][0]["motivo"] == "tutti_indisponibili"
+
+
+async def test_auto_assegna_idempotente(client: TestClient) -> None:
+    """2° call con stessa finestra → 0 nuove (esistenti già coprono)."""
+    setup = await _crea_setup_aa(
+        "case_idempotent",
+        n_persone=1,
+        valido_da=date(2026, 5, 4),
+        valido_a=date(2026, 5, 4),
+    )
+    body = {"data_da": "2026-05-04", "data_a": "2026-05-04"}
+    # 1° run: crea 1 assegnazione
+    res1 = client.post(
+        f"/api/programmi/{setup['programma_id']}/auto-assegna-persone",
+        json=body,
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res1.status_code == 200
+    assert res1.json()["n_assegnazioni_create"] == 1
+    # 2° run: 0 nuove (la giornata è già coperta)
+    res2 = client.post(
+        f"/api/programmi/{setup['programma_id']}/auto-assegna-persone",
+        json=body,
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res2.status_code == 200
+    body2 = res2.json()
+    assert body2["n_assegnazioni_create"] == 0
+    assert body2["n_giornate_coperte"] == 1
+    assert body2["delta_copertura_pct"] == 100.0
+
+
+async def test_auto_assegna_finestra_default_da_programma(
+    client: TestClient,
+) -> None:
+    """Senza payload, usa programma.valido_da..valido_a."""
+    setup = await _crea_setup_aa(
+        "case_default_window",
+        n_persone=5,  # abbastanza per coprire 5 giorni
+        n_giornate=1,
+        valido_da=date(2026, 5, 4),
+        valido_a=date(2026, 5, 8),  # 5 lun-ven feriali
+    )
+    res = client.post(
+        f"/api/programmi/{setup['programma_id']}/auto-assegna-persone",
+        json={},  # no data_da/data_a → default
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["finestra_data_da"] == "2026-05-04"
+    assert body["finestra_data_a"] == "2026-05-08"
+    assert body["n_giornate_totali"] == 5  # 5 lun-ven match LMXGV
+    assert body["n_assegnazioni_create"] == 5
+    assert body["delta_copertura_pct"] == 100.0
+
+
+async def test_auto_assegna_finestra_data_da_dopo_a_400(
+    client: TestClient,
+) -> None:
+    """data_da > data_a esplicito → 400 dal validator Pydantic."""
+    setup = await _crea_setup_aa("case_400", valido_da=date(2026, 5, 4))
+    res = client.post(
+        f"/api/programmi/{setup['programma_id']}/auto-assegna-persone",
+        json={"data_da": "2026-05-10", "data_a": "2026-05-04"},
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    # Pydantic validator raises ValueError → 422
+    assert res.status_code == 422, res.text
+
+
+async def test_auto_assegna_persisted_su_db(client: TestClient) -> None:
+    """Verifica che le assegnazioni sono persistite su ``assegnazione_giornata``."""
+    setup = await _crea_setup_aa(
+        "case_persist",
+        n_persone=1,
+        valido_da=date(2026, 5, 4),
+        valido_a=date(2026, 5, 4),
+    )
+    res = client.post(
+        f"/api/programmi/{setup['programma_id']}/auto-assegna-persone",
+        json={"data_da": "2026-05-04", "data_a": "2026-05-04"},
+        headers=_h(_ruolo_token(client, "gestione_personale")),
+    )
+    assert res.status_code == 200
+    # Verifica DB
+    async with session_scope() as session:
+        giornate_ids = setup["giornate_ids"]
+        assert isinstance(giornate_ids, list)
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT persona_id, data, turno_pdc_giornata_id, stato "
+                    "FROM assegnazione_giornata "
+                    "WHERE turno_pdc_giornata_id = :gid"
+                ),
+                {"gid": giornate_ids[0]},
+            )
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].stato == "pianificato"
+        assert rows[0].data == date(2026, 5, 4)
