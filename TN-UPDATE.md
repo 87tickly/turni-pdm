@@ -10,6 +10,205 @@
 
 ---
 
+## 2026-05-05 (175) — Sprint 8.0 MR 5.bis: applicazione concreta variazioni PdE
+
+### Contesto
+
+Chiusura del MR 5 (entry 170): l'endpoint
+``POST /api/programmi/{id}/variazioni`` registrava i **metadati** di
+una variazione del PdE (tipo + source_file + n_corse) ma non
+modificava le ``CorsaCommerciale``. Lo scope MR 5.bis era esplicitamente
+rinviato. MR 5.bis introduce la logica concreta: dato un file PdE
+incrementale (.numbers/.xlsx) caricato via multipart, il backend fa il
+diff con lo stato corrente e applica le 4 semantiche di variazione.
+
+### Memoria utente vincolante
+
+- "PdE testo Periodicità = verità": il parser segue letteralmente il
+  testo, senza DSL del Codice Periodicità e senza auto-suppress
+  festività. MR 5.bis riusa direttamente
+  ``importers/pde.parse_corsa_row``, quindi eredita la convenzione.
+- "Niente errori sui dati DB": MR 5.bis NON cancella mai una corsa.
+  Le ``VARIAZIONE_CANCELLAZIONE`` sono soft (svuoto
+  ``valido_in_date_json``, lascio la riga in DB per audit trail).
+
+### Decisioni di design
+
+- **Strato pure DB-agnostic** in
+  ``backend/src/colazione/domain/variazioni_pde.py``. 4 dataclass
+  frozen di operazione (``OpInsert``, ``OpUpdateOrari``,
+  ``OpUpdateValidoInDate``) + ``RisultatoPianificazione`` che le
+  raccoglie + ``warnings``. 4 funzioni planner pure
+  (``pianifica_integrazione``, ``pianifica_variazione_orario``,
+  ``pianifica_variazione_interruzione``,
+  ``pianifica_variazione_cancellazione``). Pattern allineato al MR
+  2.bis-a (entry 172) per ``assegnazione_persone``.
+- **Match keys** (preservare il principio "no train left behind" del
+  MR β/Sprint 3.7):
+  - ``INTEGRAZIONE`` → match per ``row_hash`` (idempotente: skip se
+    hash già in DB).
+  - ``VARIAZIONE_ORARIO`` / ``VARIAZIONE_CANCELLAZIONE`` → chiave a 5
+    ``(numero_treno, valido_da, valido_a, codice_origine,
+    codice_destinazione)``. Match ambiguo (>1 row) → applica a tutte
+    + warning.
+  - ``VARIAZIONE_INTERRUZIONE`` → chiave a 3
+    ``(numero_treno, valido_da, valido_a)``. Una linea interrotta
+    coinvolge tutte le origini/destinazioni di quel treno.
+- **Algoritmi**:
+  - INTEGRAZIONE: per ogni parsed target, se ``row_hash`` non è in
+    DB → ``OpInsert``; altrimenti skip.
+  - VARIAZIONE_ORARIO: aggiorna i 9 campi orario/durata/distanza
+    (``ora_partenza``, ``ora_arrivo``, ``ora_inizio_cds``,
+    ``ora_fine_cds``, ``min_tratta``, ``min_cds``, ``km_tratta``,
+    ``km_cds``).
+  - VARIAZIONE_INTERRUZIONE: nuova lista date =
+    ``existing_dates ∩ target_dates`` (date "interrotte" =
+    ``existing - target``). Se target dichiara date non presenti in
+    DB → warning ma applico l'intersezione (non aggiungo: sarebbe
+    INTEGRAZIONE). Edge case: target con periodicità vuota = warning
+    "cancellazione totale, considera VARIAZIONE_CANCELLAZIONE".
+  - VARIAZIONE_CANCELLAZIONE: ``valido_in_date_json = []``.
+    Idempotente se già vuoto.
+- **Endpoint multipart**: ``POST /api/programmi/{id}/variazioni/
+  {run_id}/applica`` accetta ``file: UploadFile`` (.numbers/.xlsx).
+  Pattern multipart introdotto qui per la prima volta nel backend
+  (l'importer base è CLI). Necessario per Railway: il file PdE non
+  vive sul filesystem del container.
+- **Idempotenza side-effect**: la run è marcata ``completed_at != NULL``
+  dopo l'applicazione. Riapplicare la stessa run → 409. Per
+  riapplicare lo stesso file occorre POST /variazioni di una nuova run.
+
+### Modifiche backend
+
+**``backend/src/colazione/domain/variazioni_pde.py``** (nuovo, ~480 righe):
+
+- Dataclass frozen ``CorsaEsistente`` (snapshot subset DB) e
+  ``ParsedTarget`` (snapshot della riga parsata, costruito a partire
+  da ``CorsaParsedRow``).
+- 3 dataclass operazione + ``RisultatoPianificazione`` con property
+  ``n_create`` / ``n_update``.
+- Helpers indici per chiave: ``_index_by_key3``, ``_index_by_key5``,
+  ``_index_by_id``.
+- 4 funzioni planner pure documentate.
+
+**``backend/src/colazione/api/programmi.py``** — endpoint nuovo +
+helpers di orchestrazione:
+
+- ``_payload_corsa_da_parsed`` / ``_composizione_payloads`` /
+  ``_to_parsed_target`` / ``_carica_corse_esistenti``: utilità
+  per convertire tra Pydantic ``CorsaParsedRow`` e dataclass pure +
+  caricamento snapshot DB.
+- ``_planner_per_tipo``: dispatch da ``run.tipo`` → planner pure.
+  400 se tipo è ``BASE`` o sconosciuto.
+- ``_applica_operazioni``: traduce ``RisultatoPianificazione`` in
+  SQL (INSERT corse + 9 composizioni; UPDATE orari; UPDATE
+  ``valido_in_date_json``).
+- ``POST /{programma_id}/variazioni/{run_id}/applica`` (auth
+  ``PIANIFICATORE_GIRO``): lock ``SELECT FOR UPDATE`` su programma,
+  verifica run + idempotenza ``completed_at IS NULL``, salva file in
+  ``tempfile.NamedTemporaryFile``, parse con ``read_pde_file`` +
+  ``parse_corsa_row``, filtro BUS sostitutivi, planner pure, applica
+  operazioni, update run con
+  ``n_corse=lette_da_file, n_corse_create, n_corse_update,
+  completed_at, note=warnings``. Ritorna
+  ``ApplicaVariazionePdEResponse``.
+
+**``backend/src/colazione/schemas/programmi.py``** — nuovo schema
+``ApplicaVariazionePdEResponse`` (response endpoint):
+``run_id``, ``tipo``, ``n_corse_lette_da_file``, ``n_corse_create``,
+``n_corse_update``, ``n_warnings``, ``warnings: list[str]``,
+``completed_at: datetime``.
+
+### Test
+
+**``backend/tests/test_domain_variazioni_pde.py``** (nuovo, 20 pure
+unit, 0.03s):
+
+- INTEGRAZIONE: corsa nuova, idempotente, misto nuove+duplicate,
+  duplicato nel file preservato (no dedup).
+- VARIAZIONE_ORARIO: match a 5, no match warning, ambiguo → tutti,
+  origini diverse → no match.
+- VARIAZIONE_INTERRUZIONE: intersezione date, idempotente, match
+  chiave a 3 (origini diverse OK), target vuoto → warning "cancellazione
+  totale", no match warning.
+- VARIAZIONE_CANCELLAZIONE: svuota date, idempotente, ambiguo
+  applica a tutti, no match warning.
+- Frozen dataclass invariants (equality + hashable).
+
+**``backend/tests/test_api_variazioni_applica.py``** (nuovo, 11
+integration end-to-end):
+
+- Helper ``_build_xlsx_pde_mini`` costruisce xlsx in-memory con le 7
+  colonne PdE obbligatorie + ``Periodicità`` (no fixture su disco —
+  suite auto-contenuta).
+- Helper ``_seed_corsa`` per inserire ``CorsaCommerciale`` di test
+  via SQL grezzo (rispettando il CHECK ``stazione_codice_format =
+  '^[A-Z]+$'`` con prefisso ``ZTV``).
+- Helper ``_registra_variazione`` + ``_applica_variazione`` per il
+  flusso 2-step: POST /variazioni → POST /variazioni/{run_id}/applica.
+- 4 test happy-path (1 per tipo): INTEGRAZIONE inserisce, ORARIO
+  aggiorna orari, INTERRUZIONE intersezione, CANCELLAZIONE svuota.
+- INTEGRAZIONE idempotente su ri-applicazione (2 run successive
+  con stesso file → 1+0 INSERT).
+- ORARIO no match → warning.
+- Errori HTTP: 404 run inesistente, 409 run già completata, 415
+  estensione file non supportata, 401 senza token.
+- Side-effect run: ``n_corse``, ``n_corse_create``,
+  ``n_corse_update``, ``completed_at`` salvati su DB.
+
+### Verifiche
+
+- ✅ ``uv run mypy --strict src/``: 73 source files clean (74 con il
+  modulo nuovo).
+- ✅ ``uv run ruff check`` su tutti i file MR: 0 errori.
+- ✅ ``uv run pytest``: **790 passed, 12 skipped, 0 failed** (20
+  domain unit + 11 integration nuovi). Suite verde.
+- ✅ Code review Fausto (mcp__grok__code_review focus parser logic):
+  identificati ``by_id`` unused in ``pianifica_variazione_orario`` +
+  edge case "target vuoto in INTERRUZIONE = cancellazione totale".
+  Applicati entrambi i fix (rimozione + nuovo warning).
+- ⚠️ Idempotenza fine-grained sugli orari: documentata come
+  limitazione conscia (richiederebbe caricare i 9 campi orario in
+  ``CorsaEsistente`` — query più pesante). UPDATE no-op a livello DB
+  è innocuo (PostgreSQL non scrive tuple identiche a livello fisico,
+  niente trigger su corsa_commerciale).
+
+### Decisioni di scope rinviate (dichiarate)
+
+- **UI cli per applicare variazioni**: ad oggi solo API REST con
+  multipart upload. Bottone "Carica e applica variazione" nella
+  dashboard PIANIFICATORE_GIRO è scope MR successivo.
+- **Idempotenza orari fine-grained**: documentata sopra. Se in
+  produzione si osservano UPDATE inutili che pesano sul DB, ampliare
+  ``CorsaEsistente`` con i 9 campi orario e short-circuitare in
+  ``pianifica_variazione_orario``.
+- **Audit log dettagliato delle modifiche**: ad oggi le modifiche
+  vengono "tracciate" via ``CorsaImportRun.note`` (warning testuali)
+  + ``corsa_commerciale.import_run_id`` (per le INSERT da
+  INTEGRAZIONE). Per UPDATE/CANCELLAZIONE non c'è ancora una storia
+  per-corsa. Da progettare se serve.
+- **Composizioni nelle variazioni di orario**: oggi MR 5.bis non
+  tocca le 9 ``corsa_composizione`` per VARIAZIONE_ORARIO (gli
+  orari non cambiano la composizione). Se in futuro emerge una
+  variazione che modifica composizioni, va aggiunta come tipo
+  separato.
+
+### Stato
+
+- ✅ Codice MR 5.bis pronto (domain + endpoint + schemi + 31 test
+  nuovi). Mypy/ruff puliti.
+- ⏳ Commit + push + deploy backend Railway.
+
+### Prossimo step
+
+Sprint 8.0 totalmente chiuso (entry 164-175 + sub-MR 2.bis-a/b/c).
+Prossima fase: aprire il piano del prossimo Sprint con l'utente —
+candidati naturali sono il **builder turno PdC** (entry 42 era MVP),
+**dashboard Manutenzione drilldown matricole**, oppure **UI MR 5.bis**
+(carica+applica variazioni dal frontend). Da concordare priorità.
+
+---
+
 ## 2026-05-05 (174) — Sub-MR 2.bis-c: gating conferma-personale su copertura ≥ 95% (chiusura MR 2.bis)
 
 ### Contesto

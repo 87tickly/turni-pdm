@@ -384,6 +384,39 @@ class VariazionePdERequest(BaseModel):
     note: str | None = Field(default=None, max_length=1000)
 
 
+class ApplicaVariazionePdEResponse(BaseModel):
+    """Response del ``POST /api/programmi/{id}/variazioni/{run_id}/applica``
+    (Sprint 8.0 MR 5.bis, entry 173).
+
+    Riassume le operazioni eseguite dal parser incrementale + planner
+    (vedi ``colazione.domain.variazioni_pde``):
+
+    - ``n_corse_create``: nuove ``CorsaCommerciale`` inserite
+      (solo per ``INTEGRAZIONE``).
+    - ``n_corse_update``: corse esistenti modificate (orari per
+      ``VARIAZIONE_ORARIO``, calendario per ``VARIAZIONE_INTERRUZIONE``
+      / ``VARIAZIONE_CANCELLAZIONE``).
+    - ``warnings``: lista di problemi non bloccanti (es. corse target
+      non trovate, match ambigui). Persistite anche in ``run.note``
+      per audit trail.
+
+    La run viene marcata ``completed_at != NULL`` dopo questa chiamata
+    e diventa **non riapplicabile** (nuovo POST /applica → 409).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: int
+    tipo: str
+    n_corse_lette_da_file: int
+    """Righe parsate dal file (al netto dei BUS sostitutivi scartati)."""
+    n_corse_create: int
+    n_corse_update: int
+    n_warnings: int
+    warnings: list[str]
+    completed_at: datetime
+
+
 class SbloccaProgrammaRequest(BaseModel):
     """Body opzionale per ``POST /programmi/{id}/sblocca`` (admin only).
 

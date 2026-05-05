@@ -21,12 +21,24 @@ non rivelare l'esistenza).
 
 import logging
 import os
+import tempfile
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import BigInteger, and_, cast, or_, select
+from sqlalchemy import BigInteger, and_, cast, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -43,6 +55,7 @@ from colazione.domain.normativa.assegnazione_persone import (
 from colazione.domain.pipeline import (
     StatoManutenzione,
     StatoPipelinePdc,
+    TipoImportRun,
     TransizioneNonAmmessaError,
     materiale_freezato,
     programma_visibile_per_ruoli,
@@ -53,8 +66,27 @@ from colazione.domain.pipeline import (
     valida_transizione_manutenzione,
     valida_transizione_pdc,
 )
+from colazione.domain.variazioni_pde import (
+    CorsaEsistente,
+    ParsedTarget,
+    RisultatoPianificazione,
+    pianifica_integrazione,
+    pianifica_variazione_cancellazione,
+    pianifica_variazione_interruzione,
+    pianifica_variazione_orario,
+)
+from colazione.importers.pde import (
+    CorsaParsedRow,
+    parse_corsa_row,
+    read_pde_file,
+)
+from colazione.importers.pde_importer import compute_row_hash
 from colazione.models.anagrafica import Depot, FestivitaUfficiale
-from colazione.models.corse import CorsaImportRun
+from colazione.models.corse import (
+    CorsaCommerciale,
+    CorsaComposizione,
+    CorsaImportRun,
+)
 from colazione.models.giri import GiroMateriale
 from colazione.models.personale import (
     AssegnazioneGiornata,
@@ -69,6 +101,7 @@ from colazione.models.programmi import (
 from colazione.models.turni_pdc import TurnoPdc, TurnoPdcGiornata
 from colazione.schemas.corse import CorsaImportRunRead
 from colazione.schemas.programmi import (
+    ApplicaVariazionePdEResponse,
     AssegnaManualeRequest,
     AssegnazioneCreataRead,
     AutoAssegnaPersoneRequest,
@@ -1483,3 +1516,385 @@ async def list_variazioni_pde(
         .order_by(CorsaImportRun.started_at.desc())
     )
     return list((await session.execute(stmt)).scalars().all())
+
+
+# ---------------------------------------------------------------------
+# Applica variazione registrata — Sprint 8.0 MR 5.bis (entry 173)
+# ---------------------------------------------------------------------
+
+
+def _payload_corsa_da_parsed(
+    parsed: CorsaParsedRow,
+    azienda_id: int,
+    import_run_id: int,
+    row_hash: str,
+) -> dict[str, Any]:
+    """Mappa un :class:`CorsaParsedRow` → payload INSERT corsa_commerciale.
+
+    Versione locale (l'omologa in ``importers/pde_importer.py`` è
+    privata al modulo). Riusare la stessa firma + chiavi del DB schema
+    via :class:`CorsaCommerciale`.
+    """
+    return {
+        "azienda_id": azienda_id,
+        "row_hash": row_hash,
+        "numero_treno": parsed.numero_treno,
+        "rete": parsed.rete,
+        "numero_treno_rfi": parsed.numero_treno_rfi,
+        "numero_treno_fn": parsed.numero_treno_fn,
+        "categoria": parsed.categoria,
+        "codice_linea": parsed.codice_linea,
+        "direttrice": parsed.direttrice,
+        "codice_origine": parsed.codice_origine,
+        "codice_destinazione": parsed.codice_destinazione,
+        "codice_inizio_cds": parsed.codice_inizio_cds,
+        "codice_fine_cds": parsed.codice_fine_cds,
+        "ora_partenza": parsed.ora_partenza,
+        "ora_arrivo": parsed.ora_arrivo,
+        "ora_inizio_cds": parsed.ora_inizio_cds,
+        "ora_fine_cds": parsed.ora_fine_cds,
+        "min_tratta": parsed.min_tratta,
+        "min_cds": parsed.min_cds,
+        "km_tratta": parsed.km_tratta,
+        "km_cds": parsed.km_cds,
+        "valido_da": parsed.valido_da,
+        "valido_a": parsed.valido_a,
+        "codice_periodicita": parsed.codice_periodicita,
+        "periodicita_breve": parsed.periodicita_breve,
+        "is_treno_garantito_feriale": parsed.is_treno_garantito_feriale,
+        "is_treno_garantito_festivo": parsed.is_treno_garantito_festivo,
+        "fascia_oraria": parsed.fascia_oraria,
+        "giorni_per_mese_json": parsed.giorni_per_mese_json,
+        "valido_in_date_json": parsed.valido_in_date_json,
+        "totale_km": parsed.totale_km,
+        "totale_minuti": parsed.totale_minuti,
+        "posti_km": parsed.posti_km,
+        "velocita_commerciale": parsed.velocita_commerciale,
+        "import_source": "pde",
+        "import_run_id": import_run_id,
+    }
+
+
+def _composizione_payloads(
+    corsa_id: int, parsed: CorsaParsedRow
+) -> list[dict[str, Any]]:
+    """Mappa le 9 ``ComposizioneParsed`` → payload INSERT."""
+    return [
+        {
+            "corsa_commerciale_id": corsa_id,
+            "stagione": c.stagione,
+            "giorno_tipo": c.giorno_tipo,
+            "categoria_posti": c.categoria_posti,
+            "is_doppia_composizione": c.is_doppia_composizione,
+            "tipologia_treno": c.tipologia_treno,
+            "vincolo_dichiarato": c.vincolo_dichiarato,
+            "categoria_bici": c.categoria_bici,
+            "categoria_prm": c.categoria_prm,
+        }
+        for c in parsed.composizioni
+    ]
+
+
+def _to_parsed_target(parsed: CorsaParsedRow, row_hash: str) -> ParsedTarget:
+    """Converte il :class:`CorsaParsedRow` (Pydantic) nel snapshot
+    :class:`ParsedTarget` (frozen dataclass) consumato dal modulo
+    domain pure ``variazioni_pde``."""
+    return ParsedTarget(
+        row_hash=row_hash,
+        numero_treno=parsed.numero_treno,
+        valido_da=parsed.valido_da,
+        valido_a=parsed.valido_a,
+        codice_origine=parsed.codice_origine,
+        codice_destinazione=parsed.codice_destinazione,
+        ora_partenza=parsed.ora_partenza,
+        ora_arrivo=parsed.ora_arrivo,
+        ora_inizio_cds=parsed.ora_inizio_cds,
+        ora_fine_cds=parsed.ora_fine_cds,
+        min_tratta=parsed.min_tratta,
+        min_cds=parsed.min_cds,
+        km_tratta=parsed.km_tratta,
+        km_cds=parsed.km_cds,
+        valido_in_date_json=tuple(parsed.valido_in_date_json),
+    )
+
+
+async def _carica_corse_esistenti(
+    session: AsyncSession, azienda_id: int
+) -> list[CorsaEsistente]:
+    """Snapshot delle corse dell'azienda nei campi necessari al match.
+
+    Carica solo i campi richiesti da :class:`CorsaEsistente` (no orari,
+    no Decimal di km/composizioni). Per il PdE Trenord 2026 sono
+    ~6500 righe — accettabile in memory per il flusso di applica
+    variazione (non richiamato a alta frequenza).
+    """
+    stmt = select(
+        CorsaCommerciale.id,
+        CorsaCommerciale.row_hash,
+        CorsaCommerciale.numero_treno,
+        CorsaCommerciale.valido_da,
+        CorsaCommerciale.valido_a,
+        CorsaCommerciale.codice_origine,
+        CorsaCommerciale.codice_destinazione,
+        CorsaCommerciale.valido_in_date_json,
+    ).where(CorsaCommerciale.azienda_id == azienda_id)
+    rows = (await session.execute(stmt)).all()
+    return [
+        CorsaEsistente(
+            id=row.id,
+            row_hash=row.row_hash,
+            numero_treno=row.numero_treno,
+            valido_da=row.valido_da,
+            valido_a=row.valido_a,
+            codice_origine=row.codice_origine,
+            codice_destinazione=row.codice_destinazione,
+            valido_in_date_json=tuple(row.valido_in_date_json or []),
+        )
+        for row in rows
+    ]
+
+
+_PlannerFn = Callable[
+    [list[ParsedTarget], list[CorsaEsistente]], RisultatoPianificazione
+]
+
+
+def _planner_per_tipo(tipo: str) -> _PlannerFn:
+    """Ritorna la funzione di pianificazione per il ``tipo`` di run.
+
+    Solleva 400 se il tipo è ``BASE`` o sconosciuto (rinforzo a
+    runtime: il payload del POST /variazioni è già validato Pydantic).
+    """
+    mapping: dict[str, _PlannerFn] = {
+        TipoImportRun.INTEGRAZIONE.value: pianifica_integrazione,
+        TipoImportRun.VARIAZIONE_ORARIO.value: pianifica_variazione_orario,
+        TipoImportRun.VARIAZIONE_INTERRUZIONE.value: (
+            pianifica_variazione_interruzione
+        ),
+        TipoImportRun.VARIAZIONE_CANCELLAZIONE.value: (
+            pianifica_variazione_cancellazione
+        ),
+    }
+    if tipo not in mapping:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"applica variazione: tipo {tipo!r} non supportato "
+                "(deve essere INTEGRAZIONE / VARIAZIONE_*)"
+            ),
+        )
+    return mapping[tipo]
+
+
+async def _applica_operazioni(
+    session: AsyncSession,
+    azienda_id: int,
+    run_id: int,
+    parsed_rows: list[CorsaParsedRow],
+    risultato: RisultatoPianificazione,
+) -> None:
+    """Esegue le operazioni del :class:`RisultatoPianificazione` sul DB.
+
+    Tutte le operazioni sono dentro la stessa transazione del caller —
+    la sessione viene committata dall'endpoint a fine flusso. Errori
+    SQL → rollback automatico via ``get_session`` dependency.
+    """
+    # 1) INSERT nuove corse + 9 composizioni ciascuna.
+    if risultato.insert:
+        for op in risultato.insert:
+            parsed = parsed_rows[op.parsed_index]
+            payload = _payload_corsa_da_parsed(
+                parsed, azienda_id, run_id, op.row_hash
+            )
+            ins = await session.execute(
+                pg_insert(CorsaCommerciale)
+                .values(payload)
+                .returning(CorsaCommerciale.id)
+            )
+            corsa_id_raw = ins.scalar_one()
+            corsa_id = int(corsa_id_raw)
+            comp_payloads = _composizione_payloads(corsa_id, parsed)
+            if comp_payloads:
+                await session.execute(
+                    pg_insert(CorsaComposizione).values(comp_payloads)
+                )
+
+    # 2) UPDATE orari/durate/distanze.
+    for upd in risultato.update_orari:
+        await session.execute(
+            update(CorsaCommerciale)
+            .where(CorsaCommerciale.id == upd.corsa_id)
+            .values(
+                ora_partenza=upd.ora_partenza,
+                ora_arrivo=upd.ora_arrivo,
+                ora_inizio_cds=upd.ora_inizio_cds,
+                ora_fine_cds=upd.ora_fine_cds,
+                min_tratta=upd.min_tratta,
+                min_cds=upd.min_cds,
+                km_tratta=upd.km_tratta,
+                km_cds=upd.km_cds,
+            )
+        )
+
+    # 3) UPDATE valido_in_date_json (interruzione + cancellazione).
+    for upd_dates in risultato.update_valido_in_date:
+        await session.execute(
+            update(CorsaCommerciale)
+            .where(CorsaCommerciale.id == upd_dates.corsa_id)
+            .values(valido_in_date_json=list(upd_dates.valido_in_date_json))
+        )
+
+
+@router.post(
+    "/{programma_id}/variazioni/{run_id}/applica",
+    response_model=ApplicaVariazionePdEResponse,
+    summary="Applica una variazione PdE registrata alle CorsaCommerciale",
+)
+async def applica_variazione_pde(
+    programma_id: int,
+    run_id: int,
+    file: UploadFile = File(  # noqa: B008
+        ..., description="File PdE incrementale (.numbers o .xlsx)"
+    ),
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> ApplicaVariazionePdEResponse:
+    """Applica al DB una variazione PdE precedentemente registrata.
+
+    Sprint 8.0 MR 5.bis (entry 173). Il MR 5 (entry 170) ha registrato
+    la run di variazione (metadati). Questo endpoint **esegue
+    concretamente** le operazioni sulle ``CorsaCommerciale`` esistenti
+    o ne aggiunge di nuove, in funzione del ``tipo`` della run:
+
+    - ``INTEGRAZIONE``: INSERT corse nuove (idempotente per ``row_hash``).
+    - ``VARIAZIONE_ORARIO``: UPDATE orari/durate/km su match a 5 campi.
+    - ``VARIAZIONE_INTERRUZIONE``: UPDATE ``valido_in_date_json`` =
+      intersezione con date del file (rimuove date interrotte). Match
+      a 3 campi (linee intere).
+    - ``VARIAZIONE_CANCELLAZIONE``: UPDATE ``valido_in_date_json`` =
+      ``[]`` (soft cancellation, audit trail). Match a 5 campi.
+
+    Errori HTTP:
+
+    - 404: programma o run non trovata o non appartiene al programma.
+    - 409: run già applicata (``completed_at`` non NULL).
+    - 400: tipo run non valido (``BASE`` non applicabile da qui).
+    - 415: estensione file non supportata.
+
+    Auth: ``PIANIFICATORE_GIRO`` (admin bypassa).
+    """
+    p = await _get_programma_or_404(
+        session, programma_id, user.azienda_id, for_update=True
+    )
+
+    # 1) Run + appartenenza + idempotenza.
+    run = (
+        await session.execute(
+            select(CorsaImportRun).where(
+                CorsaImportRun.id == run_id,
+                CorsaImportRun.programma_materiale_id == p.id,
+                CorsaImportRun.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="run di variazione non trovata per questo programma",
+        )
+    if run.completed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"run {run_id} già applicata il "
+                f"{run.completed_at:%Y-%m-%d %H:%M} — "
+                "registra una nuova variazione (POST /variazioni)"
+            ),
+        )
+
+    planner = _planner_per_tipo(run.tipo)
+
+    # 2) Salva file uploaded in tempfile + parse.
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in {".numbers", ".xlsx"}:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=(
+                f"estensione file non supportata: {suffix!r}. "
+                "Usa .numbers o .xlsx"
+            ),
+        )
+
+    file_bytes = await file.read()
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
+        tmp.write(file_bytes)
+        tmp.flush()
+        try:
+            raw_rows = read_pde_file(Path(tmp.name))
+        except Exception as exc:  # noqa: BLE001 - errore di parsing PdE
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"errore lettura file PdE: {exc}",
+            ) from exc
+
+    # Filtro BUS sostitutivi (allineato a importa_pde — entry 56).
+    raw_rows = [
+        r for r in raw_rows if r.get("Modalità di effettuazione") != "B"
+    ]
+
+    if not raw_rows:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="il file di variazione non contiene righe (post filtro BUS)",
+        )
+
+    parsed_rows = [parse_corsa_row(r) for r in raw_rows]
+    row_hashes = [compute_row_hash(r) for r in raw_rows]
+    targets = [
+        _to_parsed_target(parsed, h)
+        for parsed, h in zip(parsed_rows, row_hashes, strict=True)
+    ]
+
+    # 3) Snapshot esistenti + planner pure.
+    esistenti = await _carica_corse_esistenti(session, user.azienda_id)
+    risultato = planner(targets, esistenti)
+
+    # 4) Applica al DB.
+    await _applica_operazioni(
+        session,
+        azienda_id=user.azienda_id,
+        run_id=run_id,
+        parsed_rows=parsed_rows,
+        risultato=risultato,
+    )
+
+    # 5) Update run con conteggi + completed_at + note (warning).
+    n_create = risultato.n_create
+    n_update = risultato.n_update
+    note_warning = "\n".join(risultato.warnings)[:1000] if risultato.warnings else None
+    await session.execute(
+        update(CorsaImportRun)
+        .where(CorsaImportRun.id == run_id)
+        .values(
+            n_corse=len(parsed_rows),
+            n_corse_create=n_create,
+            n_corse_update=n_update,
+            completed_at=datetime.now(UTC),
+            note=note_warning,
+        )
+    )
+
+    await session.commit()
+    await session.refresh(run)
+
+    completed_at = run.completed_at or datetime.now(UTC)
+    return ApplicaVariazionePdEResponse(
+        run_id=run.id,
+        tipo=run.tipo,
+        n_corse_lette_da_file=len(parsed_rows),
+        n_corse_create=n_create,
+        n_corse_update=n_update,
+        n_warnings=len(risultato.warnings),
+        warnings=risultato.warnings,
+        completed_at=completed_at,
+    )
