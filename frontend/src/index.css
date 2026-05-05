@@ -136,3 +136,27 @@ body {
 .gantt-selecting .blk.is-selected {
   z-index: 5;
 }
+
+/* Sprint 7.9 MR δ.4 (entry 144): scrollbar Gantt sempre visibile
+   anche su macOS (Chrome/Safari di default la nascondono finché
+   non si scrolla). Senza questa regola l'utente non capisce di
+   poter scrollare orizzontalmente quando il Gantt eccede la viewport. */
+.gantt-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(156 163 175 / 0.5) transparent;
+}
+.gantt-scroll::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+.gantt-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.gantt-scroll::-webkit-scrollbar-thumb {
+  background: rgb(156 163 175 / 0.5);
+  border-radius: 5px;
+  border: 2px solid white;
+}
+.gantt-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgb(107 114 128 / 0.7);
+}

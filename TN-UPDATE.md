@@ -10,6 +10,97 @@
 
 ---
 
+## 2026-05-05 (144) — Sprint 7.9 MR δ.4: scrollbar Gantt sempre visibile su Mac + bottoni ← → in toolbar
+
+### Contesto
+
+Smoke utente post-MR δ.3 su un giro nuovo a 6 giornate. Lo screenshot
+mostra solo 16 ticks orari su 24 (04→19, mancano 20-21-22-23-00-01-02-03)
+e il Gantt si interrompe a destra con un blocco "Mi..." troncato.
+Feedback: "non scrolla orizzontalmente e non posso vedere se hai
+realmente fatto la modifica".
+
+Diagnosi: il content del Gantt eccede la viewport del container, ma
+**su macOS Chrome/Safari nascondono la scrollbar orizzontale** finché
+non si scrolla attivamente (con shift+wheel o trackpad two-finger).
+L'utente non si accorge di poter scrollare → sembra "non scrolla".
+Oltre a ciò, manca un'affordance visiva.
+
+### Modifiche
+
+**`GiroDettaglioRoute.tsx` — bottoni ← → in toolbar**:
+
+- Nuovo stato derivato `hasOverflow = innerWidth > containerWidth + 1`
+  (calcolato dal `containerWidth` già misurato dal ResizeObserver).
+- Quando `hasOverflow` è true, la toolbar mostra un cluster di 2
+  bottoni `<ChevronLeft />` / `<ChevronRight />` (lucide) prima dello
+  ZoomToggle.
+- Click chiama `scrollWrapperRef.current?.scrollBy({ left: ±60% del
+  containerWidth, behavior: "smooth" })` → scroll programmaticamente
+  ~60% della viewport per click. Tooltip "Scorri a sinistra/destra
+  (anche shift+wheel)" educa sull'alternativa keyboard/wheel.
+
+**`GiroDettaglioRoute.tsx` — overflow esplicito**:
+
+- Lo scrollWrapper ora ha classi separate `overflow-x-auto
+  overflow-y-auto` (era `overflow-auto` shorthand) + nuova classe CSS
+  `gantt-scroll` per styling scrollbar custom.
+
+**`index.css` — scrollbar Gantt sempre visibile**:
+
+```css
+.gantt-scroll {
+  scrollbar-width: thin;                          /* Firefox */
+  scrollbar-color: rgb(156 163 175 / 0.5) transparent;
+}
+.gantt-scroll::-webkit-scrollbar { height: 10px; width: 10px; }  /* Chrome/Safari */
+.gantt-scroll::-webkit-scrollbar-thumb {
+  background: rgb(156 163 175 / 0.5);
+  border-radius: 5px;
+  border: 2px solid white;
+}
+```
+
+Risultato: la scrollbar orizzontale è sempre presente sotto il Gantt
+(barra grigia chiara, ~10px di altezza) anche su macOS dove di default
+sarebbe nascosta. L'utente vede subito che può trascinare/scrollare.
+
+### Verifiche
+
+- ✅ `tsc -b --noEmit`: clean.
+- ✅ `pnpm lint`: 0 errors, 5 warning preesistenti.
+- ✅ `pnpm test`: 13/13 file, 52 passed + 1 skipped, 0 failed.
+- ✅ `pnpm build`: clean.
+
+### Stato
+
+- ✅ Bottoni ← / → in toolbar quando il Gantt eccede il container
+  (zoom 150-200% su giri grandi, o anche zoom 100% se schermo
+  stretto).
+- ✅ Scrollbar orizzontale sempre visibile su Mac/Chrome/Safari/
+  Firefox.
+- ⏳ Smoke utente: navigare al giro nuovo a 6 giornate, controllare
+  che ora sia visibile l'intera 04→04 (anche ricaricando). Se lo zoom
+  era persistito a 200% in localStorage, ora si vede chiaramente la
+  scrollbar e si possono usare i bottoni in toolbar.
+
+### Limitazioni residue
+
+1. Lo scroll del Gantt non è sincronizzato col body main della pagina
+   (l'utente potrebbe aspettarsi che lo scroll del Gantt scrolli
+   anche la pagina). Per ora restano due scroll indipendenti come
+   prima.
+2. Il marker mezzanotte (linea verticale) è rendered solo dentro la
+   `VarianteRow`. Se il giro va oltre il giorno (cross-midnight) lo
+   scroll deve raggiungere quel marker.
+
+### Prossimo step
+
+Smoke utente. Se OK → MR ε popolare depositi nella sezione PdC come
+da richiesta entry 143.
+
+---
+
 ## 2026-05-05 (143) — Sprint 7.9 MR δ.3: soglie label abbassate per acronimi @ 100% + spiegazione "Convogli del turno"
 
 ### Contesto

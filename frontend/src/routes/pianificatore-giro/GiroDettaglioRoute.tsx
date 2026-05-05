@@ -7,7 +7,14 @@ import {
   useState,
 } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AlertCircle, ArrowLeft, FileDown, Users } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  FileDown,
+  Users,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -641,6 +648,14 @@ function GanttSection({
     };
   }, [zoom, containerWidth]);
   const innerWidth = GIORNATA_LABEL_COL_PX + scale.timelineWidthPx + PER_KM_COL_PX;
+  // Sprint 7.9 MR δ.4 (entry 144): su Mac/Chrome la scrollbar orizzontale
+  // è nascosta di default → l'utente non capisce di poter scrollare. Se
+  // il content eccede il container mostriamo bottoni ← / → in toolbar
+  // che scrollano programmaticamente (anche con shift+wheel come prima).
+  const hasOverflow = containerWidth > 0 && innerWidth > containerWidth + 1;
+  const handleScrollBy = (delta: number) => {
+    scrollWrapperRef.current?.scrollBy({ left: delta, behavior: "smooth" });
+  };
 
   return (
     <GanttScaleContext.Provider value={scale}>
@@ -657,6 +672,29 @@ function GanttSection({
             </span>
           </div>
           <div className="flex items-center gap-3 text-muted-foreground/80">
+            {hasOverflow && (
+              <div className="inline-flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => handleScrollBy(-Math.round(containerWidth * 0.6))}
+                  aria-label="Scorri Gantt a sinistra"
+                  title="Scorri a sinistra (anche shift+wheel)"
+                  className="rounded border border-border bg-white p-1 text-muted-foreground hover:bg-muted"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleScrollBy(Math.round(containerWidth * 0.6))}
+                  aria-label="Scorri Gantt a destra"
+                  title="Scorri a destra (anche shift+wheel)"
+                  className="rounded border border-border bg-white p-1 text-muted-foreground hover:bg-muted"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+                </button>
+                <span className="text-border">·</span>
+              </div>
+            )}
             <ZoomToggle current={zoom} onChange={handleZoomChange} />
             <span className="text-border">·</span>
             <span className="tabular-nums">
@@ -665,10 +703,12 @@ function GanttSection({
           </div>
         </div>
 
-        {/* Scroll wrapper */}
+        {/* Scroll wrapper — overflow-x esplicito + scrollbar sempre visibile
+            anche su macOS (Chrome/Safari nascondono la barra di default,
+            l'utente non si accorge di poter scrollare). */}
         <div
           ref={scrollWrapperRef}
-          className="relative overflow-auto"
+          className="gantt-scroll relative overflow-x-auto overflow-y-auto"
           style={{ maxHeight: "700px" }}
         >
           <div className="relative" style={{ width: `${innerWidth}px` }}>
