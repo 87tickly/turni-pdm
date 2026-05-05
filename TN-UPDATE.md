@@ -10,6 +10,85 @@
 
 ---
 
+## 2026-05-05 (158) — Sprint 7.10 MR α.7: redesign Gantt turno PdC (asse default + icona vettura + badge giornata + tooltip)
+
+### Contesto
+
+Decisione utente 2026-05-05: *"il Gantt è pessimo"*. Audit del Gantt
+attuale (TurnoPdcDettaglioRoute.tsx + GanttPdc + GiornataRow +
+CommercialBlock + SimpleBlock): la struttura è solida (single-line
+per giornata, palette PdC dedicata, asse 00→23 con toggle 04→04,
+tooltip via `title`), ma 4 problemi di leggibilità a colpo d'occhio.
+
+### Modifiche
+
+**`frontend/src/routes/pianificatore-giro/TurnoPdcDettaglioRoute.tsx`**:
+
+1. **Default `oraOffset = 4`** (era 0). I turni PdC tipicamente
+   coprono dalle prime ore del mattino fino a dopo mezzanotte;
+   l'asse 04→04 mostra la "giornata operativa" intera su una sola
+   riga, evitando il troncamento causato dal wrap su 00:00.
+   Toggle 00→23 resta disponibile per chi preferisce la vista
+   "calendario umano".
+2. **VETTURA con icona `UserRound` nel blocco multi-line**
+   (`CommercialBlock`). CONDOTTA e VETTURA condividono il layout
+   (stazioni sopra + treno centro + orari sotto) ma ora la VETTURA
+   ha un'icona "passeggero" inline, distinguibile a vista anche
+   nelle larghezze piccole dove le stazioni potrebbero non
+   apparire.
+3. **Badge VETTURA nella riga giornata header** (`GiornataRow`).
+   Conteggio dei blocchi VETTURA della giornata + pillola
+   `bg-sky-100 text-sky-800` con icona UserRound + numero.
+   `title` esplicativo: *"Questa giornata include N viaggio/i in
+   vettura (passeggero PdC)"*. Visibile a colpo d'occhio nello
+   sticky-left della riga.
+4. **Tooltip arricchito** (`bloccoTooltip`): tipo evento ora con
+   emoji descrittiva (🚆 Condotta, 🪑 Vettura passiva, 🍽
+   Refezione, 🛠 Accessori, 🟢/🔴 Presa/Fine, 🅿 Parking, 🛏
+   Dormita FR). `durata_min` ora con unità esplicita "min". Resto
+   invariato (stazione_da → stazione_a, treno, note).
+
+### Verifiche
+
+- ✅ `pnpm tsc -b --noEmit`: clean.
+- ✅ `pnpm test --run`: **52 passed**, 1 skipped, 0 failed.
+- ✅ `pnpm build`: 1778 modules, bundle ~628KB / ~169KB gz.
+- ⏳ Smoke utente post-deploy frontend.
+
+### Stato
+
+- ✅ 4 fix mirati al Gantt completati.
+- ⏳ Deploy frontend Railway.
+
+### Limitazioni dichiarate (rinviate a MR successivi)
+
+1. **Multi-giornata estese (N > 9)**: con turni accorpati per
+   deposito (MR α.4) è plausibile arrivare a 15+ giornate per un
+   deposito grande (LECCO). Il Gantt scrolla verticalmente
+   (`maxHeight: 640px`) ma la fishbone in toolbar diventa stretta.
+   MR α.7.bis può aggiungere un "minimap" / pagination per N>9.
+2. **Codici stazione troncati**: `stazioneShort` taglia a 8 char +
+   ellipsis. Per stazioni con prefisso "MILANO" è OK ma nomi
+   particolari possono perdere informazione. Tooltip ne dà il nome
+   completo.
+3. **Vettura senza dettaglio operatore inline**: l'operatore (es.
+   TRENORD) è nel tooltip e in `accessori_note`. Per visibilità
+   piena del rientro, MR α.7.ter potrebbe aggiungere una piccola
+   pillola sotto il blocco VETTURA con il treno+operatore.
+
+### Prossimo step
+
+Commit + push + deploy frontend → smoke utente:
+- Aprire un turno con N giornate, verificare default 04→04
+- Aprire un turno con vettura passiva → riga giornata mostra
+  pillola sky con icona UserRound + numero
+- Hover blocco condotta → emoji 🚆 nel tooltip; hover vettura →
+  emoji 🪑.
+
+Poi MR α.6 (fill multi-giro).
+
+---
+
 ## 2026-05-05 (157) — Sprint 7.10 MR α.5.fix: parser fermate stazione_id vuota + quality gate VETTURA nella heuristic deposito
 
 ### Contesto

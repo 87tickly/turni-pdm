@@ -7,6 +7,7 @@ import {
   ArrowRight,
   Bed,
   Moon,
+  UserRound,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -66,7 +67,11 @@ export function TurnoPdcDettaglioRoute() {
   const isPdcRoute = location.pathname.startsWith("/pianificatore-pdc");
   const query = useTurnoPdcDettaglio(turnoId);
 
-  const [oraOffset, setOraOffset] = useState<0 | 4>(0);
+  // Sprint 7.10 MR α.7: default 04→04 (ciclo operativo ferroviario).
+  // I turni PdC tipicamente coprono dalle prime ore del mattino fino a
+  // dopo mezzanotte; l'asse 04→04 mostra la "giornata operativa" intera
+  // su una sola riga, evitando il troncamento causato dal wrap su 00:00.
+  const [oraOffset, setOraOffset] = useState<0 | 4>(4);
   // MR 7.11.6: blocco selezionato per il Dialog dettagli. null = chiuso.
   const [blockDetail, setBlockDetail] = useState<{
     blocco: TurnoPdcBlocco;
@@ -477,6 +482,13 @@ function GiornataRow({
   const fine = giornata.fine_prestazione ?? "?";
   const hasViolazioneHard =
     giornata.prestazione_violata || giornata.condotta_violata;
+  // Sprint 7.10 MR α.7: rilevamento blocchi VETTURA per il badge
+  // riga (= "il PdC viaggia come passeggero in questa giornata").
+  // Conteggio anche per distinguere giornate con UNA vettura da quelle
+  // con multiple (es. rientro intermedio + rientro finale).
+  const nVetture = giornata.blocchi.filter(
+    (b) => b.tipo_evento === "VETTURA",
+  ).length;
 
   return (
     <div
@@ -497,6 +509,16 @@ function GiornataRow({
           </span>
           {giornata.is_notturno && (
             <Moon className="h-3 w-3 text-violet-600" aria-hidden />
+          )}
+          {nVetture > 0 && (
+            <span
+              className="inline-flex items-center gap-0.5 rounded bg-sky-100 px-1 py-0.5 font-mono text-[8px] font-semibold text-sky-800"
+              title={`Questa giornata include ${nVetture} viaggio${nVetture === 1 ? "" : " (passeggero PdC)"} in vettura`}
+              aria-label={`${nVetture} blocchi vettura`}
+            >
+              <UserRound className="h-2.5 w-2.5" aria-hidden />
+              {nVetture}
+            </span>
           )}
         </div>
         <Badge variant="outline" className="w-fit text-[9px]">
@@ -766,14 +788,24 @@ function CommercialBlock({
         <div className="h-[10px]" aria-hidden />
       )}
 
-      {/* Riga 2: barra colorata centrata con treno+freccia */}
+      {/* Riga 2: barra colorata centrata con treno+freccia.
+          Sprint 7.10 MR α.7: VETTURA ha icona UserRound (PdC come
+          passeggero) per distinguerla a colpo d'occhio dalla
+          CONDOTTA, anche nelle larghezze piccole dove le stazioni
+          potrebbero non essere visibili. */}
       <div
         className={cn(
-          "relative mt-1.5 flex h-7 items-center justify-center rounded-sm shadow-sm transition",
+          "relative mt-1.5 flex h-7 items-center justify-center gap-1 rounded-sm shadow-sm transition",
           centerBg,
           isSelected && "ring-2 ring-amber-400 ring-offset-1",
         )}
       >
+        {!isCondotta && (
+          <UserRound
+            className="h-3 w-3 shrink-0 text-sky-900"
+            aria-hidden
+          />
+        )}
         <span className="truncate px-1 font-mono text-[11px] font-semibold tabular-nums">
           {arrow} {treno}
         </span>
@@ -919,12 +951,42 @@ function bloccoLabel(b: TurnoPdcBlocco): string {
 }
 
 function bloccoTooltip(b: TurnoPdcBlocco): string {
+  // Sprint 7.10 MR α.7: tooltip arricchito con tipo human-readable
+  // + indicatore VETTURA per leggibilità rapida senza dover guardare
+  // l'icona/colore del blocco.
   const da = stazioneLabel(b.stazione_da_nome, b.stazione_da_codice);
   const a = stazioneLabel(b.stazione_a_nome, b.stazione_a_codice);
-  const treno = b.numero_treno !== null ? `\nTreno ${b.numero_treno}` : "";
+  const tipoLabel = (() => {
+    switch (b.tipo_evento) {
+      case "CONDOTTA":
+        return "🚆 Condotta";
+      case "VETTURA":
+        return "🪑 Vettura passiva (PdC come passeggero)";
+      case "REFEZ":
+        return "🍽 Refezione";
+      case "ACCp":
+        return "🛠 Accessori partenza";
+      case "ACCa":
+        return "🛠 Accessori arrivo";
+      case "PRESA":
+        return "🟢 Presa servizio";
+      case "FINE":
+        return "🔴 Fine servizio";
+      case "PK":
+        return "🅿 Parking";
+      case "DORMITA":
+        return "🛏 Dormita FR (pernotto fuori sede)";
+      default:
+        return b.tipo_evento;
+    }
+  })();
+  const treno =
+    b.numero_treno !== null && b.numero_treno.length > 0
+      ? `\nTreno ${b.numero_treno}`
+      : "";
   const note = b.accessori_note !== null ? `\n${b.accessori_note}` : "";
-  const durata = b.durata_min !== null ? ` (${b.durata_min}')` : "";
-  return `${b.tipo_evento}${durata} · ${b.ora_inizio ?? "?"} → ${b.ora_fine ?? "?"}\n${da} → ${a}${treno}${note}`;
+  const durata = b.durata_min !== null ? ` (${b.durata_min}min)` : "";
+  return `${tipoLabel}${durata} · ${b.ora_inizio ?? "?"} → ${b.ora_fine ?? "?"}\n${da} → ${a}${treno}${note}`;
 }
 
 function stazioneLabel(nome: string | null, codice: string | null): string {
