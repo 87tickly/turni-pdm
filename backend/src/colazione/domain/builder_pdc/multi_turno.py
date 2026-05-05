@@ -74,6 +74,7 @@ from colazione.domain.builder_pdc.builder import (
 )
 from colazione.domain.builder_pdc.split_cv import lista_stazioni_cv_ammesse
 from colazione.integrations.live_arturo import (
+    PartenzeCache,
     TrenoVettura,
     trova_treno_vettura,
 )
@@ -274,6 +275,7 @@ async def _scegli_deposito_per_segmento(
     ora_apertura_min: int,
     ora_chiusura_min: int,
     live_client: httpx.AsyncClient,
+    partenze_cache: PartenzeCache | None = None,
 ) -> _RisultatoHeuristic | None:
     """Heuristic post-DP con quality gate VETTURA + DORMITA — Sprint 7.10 MR α.8.
 
@@ -354,6 +356,7 @@ async def _scegli_deposito_per_segmento(
             ora_apertura_min=ora_apertura_min,
             ora_chiusura_min=ora_chiusura_min,
             live_client=live_client,
+            partenze_cache=partenze_cache,
         )
         if risultato is not None:
             return risultato
@@ -384,6 +387,7 @@ async def _valuta_candidato(
     ora_apertura_min: int,
     ora_chiusura_min: int,
     live_client: httpx.AsyncClient,
+    partenze_cache: PartenzeCache | None = None,
 ) -> _RisultatoHeuristic | None:
     """Valuta se il `depot` è ammissibile per il segmento.
 
@@ -419,6 +423,7 @@ async def _valuta_candidato(
             ora_min_partenza=ora_min_partenza_mattutina,
             max_attesa_min=6 * 60,
             client=live_client,
+            cache=partenze_cache,
         )
         if vettura_partenza is not None:
             arrivo_min_vettura = vettura_partenza.arrivo_min
@@ -446,6 +451,7 @@ async def _valuta_candidato(
                 ora_min_partenza=19 * 60,  # non prima delle 19:00
                 max_attesa_min=4 * 60 + 30,  # finestra fino alle 23:30
                 client=live_client,
+                cache=partenze_cache,
             )
             if vettura_serale is not None:
                 vettura_partenza = vettura_serale
@@ -467,6 +473,7 @@ async def _valuta_candidato(
             ora_min_partenza=ora_chiusura_min + VETTURA_GAP_PRE_MIN,
             max_attesa_min=VETTURA_ATTESA_MAX_MIN,
             client=live_client,
+            cache=partenze_cache,
         )
         if vettura_rientro is None:
             dormita_rientro = True
@@ -626,8 +633,14 @@ async def genera_turni_pdc_multi(
     # deposito (quality gate vettura) e persistenza (assegnazione
     # vettura al draft). Una sola connessione TLS, ammortizzata sui
     # ~3-5 depositi tipici × N segmenti.
+    # Sprint 7.10 MR α.8.2: + cache per stazione delle response
+    # ``/api/partenze/{stazione}``. Un giro tipico (8 segmenti × 25
+    # depositi candidati × 3 lookup) farebbe 600 chiamate API
+    # saturando il rate limiter (429). Con la cache scendono a ~30
+    # (= 1 per ogni stazione distinta toccata).
     settings = get_settings()
     live_client = httpx.AsyncClient(timeout=settings.live_arturo_timeout_sec)
+    partenze_cache = PartenzeCache()
 
     try:
         for gg, validita, blocchi_gg, ranges in ranges_per_giornata:
@@ -660,6 +673,7 @@ async def genera_turni_pdc_multi(
                     ora_apertura_min=ora_apertura_min,
                     ora_chiusura_min=ora_chiusura_min,
                     live_client=live_client,
+                    partenze_cache=partenze_cache,
                 )
                 segmenti_globali.append(
                     _SegmentoTurno(
@@ -698,7 +712,18 @@ async def genera_turni_pdc_multi(
             valido_da_eff=valido_da_eff,
             giornate_ids_giro=giornata_ids,
             live_client=live_client,
+            partenze_cache=partenze_cache,
         )
+        # Log statistico per debug rate-limiter API live.
+        if partenze_cache is not None:
+            logger.info(
+                "live_arturo cache: %d hit / %d miss / %d errori, "
+                "%d stazioni distinte",
+                partenze_cache.hits,
+                partenze_cache.misses,
+                partenze_cache.errori,
+                len(partenze_cache.by_stazione),
+            )
     finally:
         await live_client.aclose()
 
@@ -794,6 +819,7 @@ async def _aggiungi_vettura_rientro(
     depot: Depot,
     client: httpx.AsyncClient,
     treno_pre_calcolato: TrenoVettura | None = None,
+    cache: PartenzeCache | None = None,
 ) -> tuple[_GiornataPdcDraft, TrenoVettura | None]:
     """Sprint 7.10 MR α.5: estende l'ultima giornata del turno con un
     blocco VETTURA per riportare il PdC al deposito.
@@ -840,6 +866,7 @@ async def _aggiungi_vettura_rientro(
             ora_min_partenza=ora_fine_min + VETTURA_GAP_PRE_MIN,
             max_attesa_min=VETTURA_ATTESA_MAX_MIN,
             client=client,
+            cache=cache,
         )
     if treno is None:
         return draft, None
@@ -940,6 +967,7 @@ async def _persisti_segmenti(
     valido_da_eff: date,
     giornate_ids_giro: list[int],
     live_client: httpx.AsyncClient,
+    partenze_cache: PartenzeCache | None = None,
 ) -> list[BuilderTurnoPdcResult]:
     """Sprint 7.10 MR α.4 (entry 154): accorpa per deposito + codice nuovo.
 
@@ -1157,6 +1185,7 @@ async def _persisti_segmenti(
                 depot=depot,
                 client=live_client,
                 treno_pre_calcolato=treno_pre,
+                cache=partenze_cache,
             )
             drafts_finali[ultimo_idx] = ultimo_aggiornato
             if treno is not None:

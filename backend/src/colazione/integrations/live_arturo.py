@@ -22,12 +22,21 @@ intermedio: passare direttamente lo stazione_codice al client.
 malformata, le funzioni ritornano ``None``. Mai propagare eccezioni
 verso il chiamante (= il builder PdC). Loggare un warning con
 contesto utile.
+
+**Sprint 7.10 MR α.8.2**: cache per (azienda, stazione) + retry
+backoff su 429. Per un giro tipico (8 segmenti × 25 depositi
+candidati × 3 lookup) avrei 600 chiamate; con cache + retry
+diventano ~30 chiamate (= 1 per ogni stazione distinta toccata).
+La cache è scope-funzione: l'utente la inizializza all'inizio
+della generazione di un giro e la passa al client per tutta la
+durata.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -36,6 +45,34 @@ import httpx
 from colazione.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PartenzeCache:
+    """Sprint 7.10 MR α.8.2: cache in-memory delle response
+    ``/api/partenze/{stazione_id}``. Una entry per stazione, riusata
+    per tutti i lookup dentro la stessa generazione di giro.
+
+    NB: la cache assume che lo stato dell'API live sia "fermo" per la
+    durata della generazione (in pratica pochi secondi). Se più di
+    qualche minuto passa, le partenze potrebbero essere variate ma
+    per i nostri lookup (orari programmati) è ininfluente.
+    """
+
+    by_stazione: dict[str, list[dict[str, Any]] | None] = field(default_factory=dict)
+    """``stazione_id → response (lista treni)`` se trovata; ``None``
+    se l'API ha definitivamente fallito (429 dopo retry, 500, ecc.)
+    e non vogliamo riprovare nello stesso giro."""
+
+    hits: int = 0
+    misses: int = 0
+    errori: int = 0
+
+
+_RETRY_429_DELAYS_SEC: tuple[float, ...] = (0.2, 0.5, 1.0)
+"""Sprint 7.10 MR α.8.2: backoff per retry su 429 Too Many Requests.
+3 retry totali con delay crescente. Se anche dopo il terzo fallisce,
+arrendersi e cachare None."""
 
 
 @dataclass(frozen=True)
@@ -114,6 +151,78 @@ async def cerca_stazione(
         return None
 
 
+async def _fetch_partenze(
+    stazione_codice: str,
+    *,
+    client: httpx.AsyncClient,
+    cache: PartenzeCache | None,
+) -> list[dict[str, Any]] | None:
+    """Fetch /api/partenze/{stazione} con cache + retry 429.
+
+    Se ``cache`` è valorizzata e contiene già un'entry per la
+    stazione, riusa quella senza fare la chiamata. Altrimenti fa la
+    chiamata e cacha il risultato (anche se è ``None`` per evitare
+    di ripetere errori).
+
+    Retry su 429: backoff 200ms → 500ms → 1s. Se dopo il terzo
+    retry ancora 429 → ritorna None.
+    """
+    if cache is not None and stazione_codice in cache.by_stazione:
+        cache.hits += 1
+        return cache.by_stazione[stazione_codice]
+
+    settings = get_settings()
+    url = f"{settings.live_arturo_api_url}/api/partenze/{stazione_codice}"
+
+    last_exc: Exception | None = None
+    data: list[dict[str, Any]] | None = None
+
+    for tentativo, delay_pre in enumerate([0.0, *_RETRY_429_DELAYS_SEC]):
+        if delay_pre > 0:
+            await asyncio.sleep(delay_pre)
+        try:
+            resp = await client.get(url)
+            if resp.status_code == 429:
+                logger.info(
+                    "live_arturo: 429 su %s (tentativo %d/%d), retry in %.1fs",
+                    stazione_codice,
+                    tentativo + 1,
+                    len(_RETRY_429_DELAYS_SEC) + 1,
+                    _RETRY_429_DELAYS_SEC[tentativo]
+                    if tentativo < len(_RETRY_429_DELAYS_SEC)
+                    else 0.0,
+                )
+                continue
+            resp.raise_for_status()
+            payload = resp.json()
+            if isinstance(payload, list):
+                data = payload
+            else:
+                data = None
+            break
+        except httpx.HTTPError as e:
+            last_exc = e
+            break  # errore non-429: non riprovare
+        except ValueError as e:
+            last_exc = e
+            data = None
+            break
+
+    if last_exc is not None:
+        logger.warning(
+            "live_arturo._fetch_partenze GET %s fallita: %s", url, last_exc
+        )
+        if cache is not None:
+            cache.errori += 1
+            cache.by_stazione[stazione_codice] = None
+        return None
+
+    if cache is not None:
+        cache.misses += 1
+        cache.by_stazione[stazione_codice] = data
+    return data
+
+
 async def trova_treno_vettura(
     *,
     stazione_partenza_codice: str,
@@ -121,51 +230,49 @@ async def trova_treno_vettura(
     ora_min_partenza: int,
     max_attesa_min: int = 120,
     client: httpx.AsyncClient | None = None,
+    cache: PartenzeCache | None = None,
 ) -> TrenoVettura | None:
     """Cerca il primo treno passante per (partenza, arrivo) dopo
     ``ora_min_partenza``.
 
-    Strategia:
-    1. ``GET /api/partenze/{stazione_partenza_codice}``
-    2. Filtra i treni che:
-       - hanno una fermata con ``stazione_id == stazione_arrivo_codice``
-         (= il treno passa per il deposito di rientro)
-       - partono da ``stazione_partenza_codice`` dopo ``ora_min_partenza``
-       - l'attesa (gap fra ``ora_min_partenza`` e partenza treno) ≤
-         ``max_attesa_min``
-    3. Tra i candidati, sceglie quello con ``partenza_min`` minimo
-       (= attesa più breve).
+    Sprint 7.10 MR α.8.2: la chiamata API ``/api/partenze/{stazione}``
+    è cachata per la durata della generazione del giro tramite
+    ``cache``. Una sola chiamata HTTP per stazione, indipendentemente
+    da quante coppie (partenza, arrivo, finestra) la usano.
 
-    Returns ``None`` se nessun treno trovato (può capitare:
-    nessun passante in finestra, API down, stazione errata, ecc.).
-    Il builder usa ``None`` come segnale di "vettura non disponibile"
-    e flagga la cosa nei metadata, senza bloccare la generazione.
+    Strategia:
+    1. Recupera (o cacha) la lista treni passanti per
+       ``stazione_partenza_codice`` da ``/api/partenze/{stazione}``.
+    2. Filtra in-memory i treni che:
+       - hanno una fermata con ``stazione_id == stazione_arrivo_codice``
+       - partono da ``stazione_partenza_codice`` dopo
+         ``ora_min_partenza`` (con attesa ≤ ``max_attesa_min``).
+    3. Tra i candidati, sceglie quello con ``partenza_min`` minimo.
+
+    Returns ``None`` se nessun treno trovato (nessun passante in
+    finestra, API down dopo retry, stazione errata, ecc.).
     """
-    settings = get_settings()
-    url = f"{settings.live_arturo_api_url}/api/partenze/{stazione_partenza_codice}"
     own_client = client is None
     try:
         if client is None:
+            settings = get_settings()
             client = httpx.AsyncClient(timeout=settings.live_arturo_timeout_sec)
         try:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
+            data = await _fetch_partenze(
+                stazione_partenza_codice, client=client, cache=cache
+            )
         finally:
             if own_client:
                 await client.aclose()
     except httpx.HTTPError as e:
         logger.warning(
-            "live_arturo.trova_treno_vettura GET %s fallita: %s", url, e
-        )
-        return None
-    except ValueError as e:
-        logger.warning(
-            "live_arturo.trova_treno_vettura JSON malformato per %s: %s", url, e
+            "live_arturo.trova_treno_vettura wrapper failure for %s: %s",
+            stazione_partenza_codice,
+            e,
         )
         return None
 
-    if not isinstance(data, list):
+    if data is None:
         return None
 
     candidati: list[TrenoVettura] = []
@@ -269,6 +376,7 @@ def _estrai_candidato(
 
 
 __all__ = [
+    "PartenzeCache",
     "TrenoVettura",
     "cerca_stazione",
     "trova_treno_vettura",
