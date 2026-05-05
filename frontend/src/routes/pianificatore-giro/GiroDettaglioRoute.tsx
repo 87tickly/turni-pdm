@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AlertCircle, ArrowLeft, FileDown, Users, X } from "lucide-react";
 
@@ -43,21 +43,68 @@ import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdc
  */
 
 // =====================================================================
-// Constants — time axis 04:00 → 04:00 next day (24h, 1440 min, 960px @ 40px/h)
+// Constants — time axis 04:00 → 04:00 next day (24h, 1440 min)
 // =====================================================================
 
 const AXIS_START_MIN = 4 * 60; // 04:00 reference
 const AXIS_TOTAL_MIN = 24 * 60; // 1440 min
 
-// Sprint 7.9 MR γ (decisione utente 2026-05-04): asse compresso da
-// 1h=60px (1440px totale) a 1h=40px (960px totale). Riduce
-// l'innerWidth Gantt da 1660px a 1180px → entra in qualunque schermo
-// ≥1280px senza scroll orizzontale. Densità coerente col PDF Trenord.
-const TIMELINE_WIDTH_PX = 960;
+// Sprint 7.9 MR γ (2026-05-04) ha portato il default da 1h=60px a
+// 1h=40px (960px totale) per evitare scroll orizzontale su schermi
+// ≥1280px. Sprint 7.9 MR δ (2026-05-05): scala parametrizzata via
+// `GanttScaleContext`, l'utente sceglie 75/100/150/200% in toolbar
+// (default 100% = 960px = scala MR γ). Risolve il troncamento di
+// numeri/orari sui giri densi tipo direttrice Tirano (~26 treni/g).
+const BASE_TIMELINE_WIDTH_PX = 960;
 const GIORNATA_LABEL_COL_PX = 100;
 const PER_KM_COL_PX = 120;
 const TIMELINE_ROW_HEIGHT_PX = 88;
 const NOTTE_ROW_HEIGHT_PX = 24;
+
+const ZOOM_LEVELS = [0.75, 1, 1.5, 2] as const;
+type ZoomLevel = (typeof ZOOM_LEVELS)[number];
+const DEFAULT_ZOOM: ZoomLevel = 1;
+const LS_KEY_GANTT_ZOOM = "colazione.gantt-giro.zoom";
+
+interface GanttScale {
+  /** Larghezza totale della timeline in px (24h scalate da zoom). */
+  timelineWidthPx: number;
+  /** Pixel per ora effettivi (per UI/tick). */
+  pxPerHour: number;
+  /** Mappa minuti-da-mezzanotte → pixel sull'asse 04:00→04:00. */
+  minToPx: (min: number) => number;
+}
+
+function _baseMinToPx(min: number, totalWidthPx: number): number {
+  let rel = min - AXIS_START_MIN;
+  if (rel < 0) rel += AXIS_TOTAL_MIN;
+  return (rel / AXIS_TOTAL_MIN) * totalWidthPx;
+}
+
+const GanttScaleContext = createContext<GanttScale>({
+  timelineWidthPx: BASE_TIMELINE_WIDTH_PX,
+  pxPerHour: BASE_TIMELINE_WIDTH_PX / 24,
+  minToPx: (min) => _baseMinToPx(min, BASE_TIMELINE_WIDTH_PX),
+});
+
+function useGanttScale(): GanttScale {
+  return useContext(GanttScaleContext);
+}
+
+function readPersistedZoom(): ZoomLevel {
+  if (typeof window === "undefined") return DEFAULT_ZOOM;
+  const raw = window.localStorage.getItem(LS_KEY_GANTT_ZOOM);
+  if (raw === null) return DEFAULT_ZOOM;
+  const parsed = Number.parseFloat(raw);
+  return (ZOOM_LEVELS as readonly number[]).includes(parsed)
+    ? (parsed as ZoomLevel)
+    : DEFAULT_ZOOM;
+}
+
+function persistZoom(z: ZoomLevel): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(LS_KEY_GANTT_ZOOM, String(z));
+}
 
 /** Soglia gap "long" (tratteggio aggiuntivo). */
 const GAP_LONG_THRESHOLD = 30;
@@ -525,68 +572,125 @@ function GanttSection({
   onChangeActiveVariant: (giornataId: number, idx: number) => void;
 }) {
   const stats = useMemo(() => computeGiroKpi(giro), [giro]);
-  const innerWidth = GIORNATA_LABEL_COL_PX + TIMELINE_WIDTH_PX + PER_KM_COL_PX;
+  const [zoom, setZoom] = useState<ZoomLevel>(() => readPersistedZoom());
+  const handleZoomChange = (z: ZoomLevel) => {
+    setZoom(z);
+    persistZoom(z);
+  };
+
+  const scale = useMemo<GanttScale>(() => {
+    const timelineWidthPx = BASE_TIMELINE_WIDTH_PX * zoom;
+    return {
+      timelineWidthPx,
+      pxPerHour: timelineWidthPx / 24,
+      minToPx: (min: number) => _baseMinToPx(min, timelineWidthPx),
+    };
+  }, [zoom]);
+  const innerWidth = GIORNATA_LABEL_COL_PX + scale.timelineWidthPx + PER_KM_COL_PX;
 
   return (
-    <Card className={cn("overflow-hidden", selectedBlocco !== null && "gantt-selecting")}>
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-2.5 text-xs">
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <span className="font-medium uppercase tracking-wide text-foreground">Gantt giro</span>
-          <span className="text-border">·</span>
-          <span>
-            {giro.giornate.length} giornat{giro.giornate.length === 1 ? "a" : "e"} ·{" "}
-            {stats.nVariantiTotale} variant{stats.nVariantiTotale === 1 ? "e" : "i"} calendarial
-            {stats.nVariantiTotale === 1 ? "e" : "i"}
-          </span>
+    <GanttScaleContext.Provider value={scale}>
+      <Card className={cn("overflow-hidden", selectedBlocco !== null && "gantt-selecting")}>
+        {/* Toolbar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-2.5 text-xs">
+          <div className="flex items-center gap-3 text-muted-foreground">
+            <span className="font-medium uppercase tracking-wide text-foreground">Gantt giro</span>
+            <span className="text-border">·</span>
+            <span>
+              {giro.giornate.length} giornat{giro.giornate.length === 1 ? "a" : "e"} ·{" "}
+              {stats.nVariantiTotale} variant{stats.nVariantiTotale === 1 ? "e" : "i"} calendarial
+              {stats.nVariantiTotale === 1 ? "e" : "i"}
+            </span>
+          </div>
+          <div className="flex items-center gap-3 text-muted-foreground/80">
+            <ZoomToggle current={zoom} onChange={handleZoomChange} />
+            <span className="text-border">·</span>
+            <span className="tabular-nums">
+              1h = {Math.round(scale.pxPerHour)}px
+            </span>
+          </div>
         </div>
-        <div className="text-muted-foreground/80">
-          Asse 04:00 → 04:00 (giorno seguente) · 1h = 40px · stile PDF Trenord
-        </div>
-      </div>
 
-      {/* Scroll wrapper */}
-      <div className="relative overflow-auto" style={{ maxHeight: "700px" }}>
-        <div className="relative" style={{ width: `${innerWidth}px` }}>
-          {/* Sticky header X axis */}
-          <AxisHeader />
+        {/* Scroll wrapper */}
+        <div className="relative overflow-auto" style={{ maxHeight: "700px" }}>
+          <div className="relative" style={{ width: `${innerWidth}px` }}>
+            {/* Sticky header X axis */}
+            <AxisHeader />
 
-          {/* Per giornata: header row + variante row + (notte band se non ultima) */}
-          {giro.giornate.map((g, idx) => {
-            const activeIdx = activeVariantByGiornata[g.id] ?? 0;
-            const active = g.varianti[activeIdx] ?? g.varianti[0];
-            const next = giro.giornate[idx + 1];
-            return (
-              <div key={g.id}>
-                <GiornataHeaderRow
-                  giornata={g}
-                  activeIdx={activeIdx}
-                  selectedClusterA1Ids={selectedClusterA1Ids}
-                  onChangeActive={(i) => onChangeActiveVariant(g.id, i)}
-                />
-                {active !== undefined && (
-                  <VarianteRow
+            {/* Per giornata: header row + variante row + (notte band se non ultima) */}
+            {giro.giornate.map((g, idx) => {
+              const activeIdx = activeVariantByGiornata[g.id] ?? 0;
+              const active = g.varianti[activeIdx] ?? g.varianti[0];
+              const next = giro.giornate[idx + 1];
+              return (
+                <div key={g.id}>
+                  <GiornataHeaderRow
                     giornata={g}
-                    variante={active}
-                    selectedBloccoId={selectedBlocco?.id ?? null}
-                    onSelectBlocco={onSelectBlocco}
+                    activeIdx={activeIdx}
+                    selectedClusterA1Ids={selectedClusterA1Ids}
+                    onChangeActive={(i) => onChangeActiveVariant(g.id, i)}
                   />
-                )}
-                {next !== undefined && (
-                  <NotteRow giornataPrev={g} giornataNext={next} activeVariantByGiornata={activeVariantByGiornata} />
-                )}
-              </div>
-            );
-          })}
+                  {active !== undefined && (
+                    <VarianteRow
+                      giornata={g}
+                      variante={active}
+                      selectedBloccoId={selectedBlocco?.id ?? null}
+                      onSelectBlocco={onSelectBlocco}
+                    />
+                  )}
+                  {next !== undefined && (
+                    <NotteRow giornataPrev={g} giornataNext={next} activeVariantByGiornata={activeVariantByGiornata} />
+                  )}
+                </div>
+              );
+            })}
 
-          {/* Totali */}
-          <TotaliRow giro={giro} stats={stats} />
+            {/* Totali */}
+            <TotaliRow giro={giro} stats={stats} />
+          </div>
         </div>
-      </div>
 
-      {/* Legenda */}
-      <Legenda />
-    </Card>
+        {/* Legenda */}
+        <Legenda />
+      </Card>
+    </GanttScaleContext.Provider>
+  );
+}
+
+function ZoomToggle({
+  current,
+  onChange,
+}: {
+  current: ZoomLevel;
+  onChange: (z: ZoomLevel) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Zoom Gantt"
+      className="inline-flex items-center rounded border border-border bg-white p-0.5 text-[10px] font-medium tabular-nums"
+    >
+      {ZOOM_LEVELS.map((z) => {
+        const active = current === z;
+        return (
+          <button
+            key={z}
+            type="button"
+            onClick={() => onChange(z)}
+            aria-pressed={active}
+            title={`Zoom Gantt al ${Math.round(z * 100)}% (1h = ${Math.round((BASE_TIMELINE_WIDTH_PX * z) / 24)}px)`}
+            className={cn(
+              "rounded px-2 py-0.5 transition-colors",
+              active
+                ? "bg-foreground text-white"
+                : "text-muted-foreground hover:bg-muted",
+            )}
+          >
+            {Math.round(z * 100)}%
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -599,6 +703,8 @@ const HOUR_TICKS = [
 ];
 
 function AxisHeader() {
+  const { timelineWidthPx } = useGanttScale();
+  const tickWidth = timelineWidthPx / 24;
   return (
     <div
       className="sticky top-0 z-30 flex border-b border-border bg-white"
@@ -612,10 +718,10 @@ function AxisHeader() {
         Giornata
       </div>
       {/* 24 tick orari */}
-      <div className="relative" style={{ width: TIMELINE_WIDTH_PX }}>
+      <div className="relative" style={{ width: timelineWidthPx }}>
         <div className="absolute inset-0 flex">
           {HOUR_TICKS.map((h, i) => (
-            <div key={`${h}-${i}`} className="relative" style={{ width: 60 }}>
+            <div key={`${h}-${i}`} className="relative" style={{ width: tickWidth }}>
               <span
                 className={cn(
                   "absolute left-1 top-1 font-mono text-[10px] tabular-nums",
@@ -659,6 +765,7 @@ function GiornataHeaderRow({
   selectedClusterA1Ids: Set<number> | null;
   onChangeActive: (idx: number) => void;
 }) {
+  const { timelineWidthPx } = useGanttScale();
   const varianti = giornata.varianti;
   const hasMultiple = varianti.length > 1;
   const active = varianti[activeIdx] ?? varianti[0];
@@ -687,7 +794,7 @@ function GiornataHeaderRow({
       </div>
       <div
         className="flex flex-1 items-center gap-1.5 overflow-x-auto px-3 py-2"
-        style={{ width: TIMELINE_WIDTH_PX }}
+        style={{ width: timelineWidthPx }}
       >
         {varianti.map((v, idx) => {
           const isActive = idx === activeIdx;
@@ -764,6 +871,7 @@ function VarianteRow({
   selectedBloccoId: number | null;
   onSelectBlocco: (b: GiroBlocco) => void;
 }) {
+  const { timelineWidthPx, minToPx } = useGanttScale();
   const blocchi = variante.blocchi;
   const gaps = useMemo(() => computeGaps(blocchi), [blocchi]);
   const eventi = useMemo(() => extractEventiComposizione(variante), [variante]);
@@ -795,7 +903,7 @@ function VarianteRow({
       {/* Timeline */}
       <div
         className="ticks-bg relative"
-        style={{ width: TIMELINE_WIDTH_PX, height: TIMELINE_ROW_HEIGHT_PX }}
+        style={{ width: timelineWidthPx, height: TIMELINE_ROW_HEIGHT_PX }}
       >
         {/* Linea base sottile centrata */}
         <div
@@ -862,6 +970,7 @@ function BloccoSegment({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const { minToPx } = useGanttScale();
   const inizio = parseTimeToMin(blocco.ora_inizio);
   const fine = parseTimeToMin(blocco.ora_fine);
   if (inizio === null || fine === null) return null;
@@ -1293,6 +1402,7 @@ function formatGap(min: number): string {
 }
 
 function GapMarker({ gap }: { gap: GapInfo }) {
+  const { minToPx } = useGanttScale();
   const startPx = minToPx(gap.startMin);
   const endPx = minToPx(gap.endMin);
   const widthPx = Math.max(1, endPx - startPx);
@@ -1380,6 +1490,7 @@ function extractEventiComposizione(variante: GiroVariante): EventoComposizione[]
 }
 
 function EventoCompMarker({ evento }: { evento: EventoComposizione }) {
+  const { minToPx } = useGanttScale();
   const px = minToPx(evento.oraMin);
   const stazioneSeg = evento.stazione !== null ? ` ${evento.stazione}` : "";
   const orario = formatTimeShort(minToTime(evento.oraMin));
@@ -1435,6 +1546,7 @@ function NotteRow({
   giornataNext: GiroGiornata;
   activeVariantByGiornata: Record<number, number>;
 }) {
+  const { timelineWidthPx } = useGanttScale();
   const prevVar =
     giornataPrev.varianti[activeVariantByGiornata[giornataPrev.id] ?? 0] ??
     giornataPrev.varianti[0];
@@ -1464,7 +1576,7 @@ function NotteRow({
           "flex items-center px-3",
           sostaInfo.discontinua ? "border-y border-destructive/30 bg-destructive/5" : "night-band",
         )}
-        style={{ width: TIMELINE_WIDTH_PX }}
+        style={{ width: timelineWidthPx }}
       >
         {sostaInfo.stazione !== null ? (
           <>
@@ -1590,6 +1702,7 @@ function computeSostaNotturna(
 // =====================================================================
 
 function TotaliRow({ giro, stats }: { giro: GiroDettaglio; stats: GiroKpiStats }) {
+  const { timelineWidthPx } = useGanttScale();
   const totalKm =
     giro.km_media_giornaliera !== null && giro.km_media_giornaliera > 0
       ? formatNumber(Math.round(giro.km_media_giornaliera * giro.numero_giornate))
@@ -1604,7 +1717,7 @@ function TotaliRow({ giro, stats }: { giro: GiroDettaglio; stats: GiroKpiStats }
       </div>
       <div
         className="px-3 py-2 text-[11px] text-muted-foreground"
-        style={{ width: TIMELINE_WIDTH_PX }}
+        style={{ width: timelineWidthPx }}
       >
         {giro.numero_giornate} giornat{giro.numero_giornate === 1 ? "a" : "e"} ·{" "}
         {stats.nBlocchi} blocch{stats.nBlocchi === 1 ? "o" : "i"} · {stats.nVariantiTotale}{" "}
@@ -1966,13 +2079,6 @@ function parseTimeToMin(t: string | null): number | null {
   const m = Number.parseInt(parts[1], 10);
   if (Number.isNaN(h) || Number.isNaN(m)) return null;
   return h * 60 + m;
-}
-
-/** Minuti da 00:00 → pixel sull'asse 04:00→04:00 (TIMELINE_WIDTH_PX totali). */
-function minToPx(min: number): number {
-  let rel = min - AXIS_START_MIN;
-  if (rel < 0) rel += AXIS_TOTAL_MIN;
-  return (rel / AXIS_TOTAL_MIN) * TIMELINE_WIDTH_PX;
 }
 
 /** Minuti da 00:00 → "HH:MM" (per logging/tooltip). */

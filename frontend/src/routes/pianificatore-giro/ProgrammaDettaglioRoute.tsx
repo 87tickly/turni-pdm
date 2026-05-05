@@ -702,6 +702,7 @@ function RegoleSection({
           onClick={onAddRegola}
           disabled={!editable}
           title={editable ? "Aggiungi una nuova regola" : "Programma archiviato: regole read-only"}
+          data-testid="nuova-regola-assegnazione-btn"
         >
           <Plus className="mr-1 h-3.5 w-3.5" aria-hidden /> Nuova regola
         </Button>
