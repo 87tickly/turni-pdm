@@ -93,7 +93,7 @@ export function GeneraTurnoPdcDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Genera turno PdC</DialogTitle>
           <DialogDescription>

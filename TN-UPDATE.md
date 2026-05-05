@@ -10,6 +10,79 @@
 
 ---
 
+## 2026-05-05 (153) — Sprint 7.10 MR α.3.fix: dialog backdrop opaco + larghezza + scroll interno
+
+### Contesto
+
+Smoke utente post-deploy MR α.3: il builder multi-turno funziona
+(produce N turni distinti — visibili nello screenshot 8 turni
+T-LECCO/T-GARIBALDI_TE/T-FIORENZA per il giro G-FIO-001-ETR421-8g
+con depositi LECCO, GARIBALDI_TE, FIORENZA), MA il dialog è
+illeggibile: l'utente ha screenshottato con i contenuti della
+pagina sotto chiaramente visibili attraverso l'overlay. Citazione:
+*"fix questo bug, non posso riconoscere"*.
+
+Diagnosi: 3 problemi visivi cumulativi sul Dialog di Radix UI.
+
+1. **Backdrop trasparente al 60%** (`bg-black/40`): troppo poco
+   coprente per pagine dense. La sidebar + righe tabella + numeri
+   colonna restavano leggibili sotto il dialog.
+2. **Dialog `max-w-lg`** (~512px): angusto per una lista di 8-30+
+   turni con codici lunghi (`T-LECCO-G-FIO-001-ETR421-8g-G05-S2`).
+   Il contenuto del dialog "stringato" lasciava grandi bordi
+   laterali dove il backdrop al 40% non bastava a oscurare la
+   pagina.
+3. **Niente scroll interno**: con N>10 turni, il contenuto eccede
+   l'altezza viewport e si perde sotto la fold.
+
+### Modifiche
+
+**`components/ui/Dialog.tsx`** (impatto: tutti i dialog dell'app):
+
+- `DialogOverlay`: `bg-black/40` → `bg-black/70 backdrop-blur-sm`.
+  Backdrop al 70% + blur leggero → il dialog "salta in primo piano"
+  con netto distacco dalla pagina sotto. Contestualmente rimossi
+  i no-op `data-[state=open]:animate-in data-[state=closed]:animate-out`
+  che richiedono `tailwindcss-animate` (non installato) e non
+  facevano nulla.
+- `DialogContent`: aggiunto `max-h-[90vh] overflow-y-auto` →
+  scroll interno automatico quando il contenuto eccede la viewport.
+
+**`pianificatore-giro/GeneraTurnoPdcDialog.tsx`** (impatto: solo
+quel dialog):
+
+- `DialogContent` className `max-w-lg` → `max-w-2xl` (~672px).
+  Più largo per ospitare i codici turno lunghi e il banner
+  riepilogo N turni / M depositi distinti senza wrapping eccessivo.
+
+### Verifiche
+
+- ✅ `pnpm tsc -b --noEmit`: clean.
+- ✅ `pnpm build`: 1778 modules, **bundle CSS compila** le 4 nuove
+  classi:
+  - `.bg-black\/70{...rgb(0 0 0 / .7)}`
+  - `.backdrop-blur-sm{...blur(4px)}`
+  - `.max-h-\[90vh\]{max-height:90vh}`
+  - `.max-w-2xl{max-width:42rem}`
+- ⏳ Smoke utente post-deploy: dialog deve apparire con sfondo
+  scurito + leggermente sfocato, contenuto chiaramente in primo
+  piano, lista N turni scrollabile internamente.
+
+### Stato
+
+- ✅ Hotfix scritto + verificato statically.
+- ⏳ Deploy frontend Railway.
+
+### Prossimo step
+
+Commit + push + deploy frontend → smoke utente conferma:
+1. Dialog leggibile (no contenuto pagina sotto visibile)
+2. Lista N turni scrollabile fluidamente
+3. Banner riepilogo "Generati N turni / Coperti da M depositi
+   distinti / X dormite FR / Y violazioni" visibile in cima
+
+---
+
 ## 2026-05-05 (152) — Sprint 7.10 MR α.3: UI dialog multi-turno (banner riepilogo N turni / depositi distinti)
 
 ### Contesto

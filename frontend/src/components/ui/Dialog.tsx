@@ -17,7 +17,12 @@ export const DialogOverlay = forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "data-[state=open]:animate-in data-[state=closed]:animate-out fixed inset-0 z-50 bg-black/40",
+      // Sprint 7.10 MR α.3.fix: backdrop più opaco (40% → 70%) +
+      // backdrop-blur per leggibilità chiara del dialog su pagine
+      // dense come la lista giri. Smoke utente 2026-05-05 mostrava
+      // contenuto della pagina visibile attraverso al dialog perché
+      // 40% di nero non bastava.
+      "fixed inset-0 z-50 bg-black/70 backdrop-blur-sm",
       className,
     )}
     {...props}
@@ -34,7 +39,11 @@ export const DialogContent = forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border border-border bg-white p-6 shadow-lg",
+        // Sprint 7.10 MR α.3.fix: aggiunto `max-h-[90vh] overflow-y-auto`
+        // per dialog con liste lunghe (es. generazione N turni del
+        // multi-turno DP che può produrre 18-30+ turni). Senza scroll
+        // interno il contenuto eccede sotto la viewport.
+        "fixed left-1/2 top-1/2 z-50 grid max-h-[90vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-lg border border-border bg-white p-6 shadow-lg",
         className,
       )}
       {...props}
