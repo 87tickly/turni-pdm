@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import distinct, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from colazione.auth import require_role
+from colazione.auth import require_any_role, require_role
 from colazione.db import get_session
 from colazione.domain.calendario import tipo_giorno
 from colazione.models.anagrafica import (
@@ -46,6 +46,12 @@ from colazione.schemas.security import CurrentUser
 router = APIRouter(prefix="/api", tags=["anagrafiche"])
 
 _authz = Depends(require_role("PIANIFICATORE_GIRO"))
+# Sprint 7.9 MR η: l'anagrafica depot serve anche a PIANIFICATORE_PDC
+# (selettore deposito target nella generazione turni) e a
+# GESTIONE_PERSONALE (vista Depositi sotto Gestione Personale).
+_authz_depots = Depends(
+    require_any_role("PIANIFICATORE_GIRO", "PIANIFICATORE_PDC", "GESTIONE_PERSONALE")
+)
 
 
 class StazioneRead(BaseModel):
@@ -67,6 +73,9 @@ class MaterialeRead(BaseModel):
 
 class DepotRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+    # Sprint 7.9 MR η — esposto l'``id`` per i selettori UI che devono
+    # passare la FK alle API di scrittura (es. genera turno PdC).
+    id: int
     codice: str
     display_name: str
     stazione_principale_codice: str | None
@@ -162,7 +171,7 @@ async def list_materiali(
 
 @router.get("/depots", response_model=list[DepotRead])
 async def list_depots(
-    user: CurrentUser = _authz,
+    user: CurrentUser = _authz_depots,
     session: AsyncSession = Depends(get_session),
 ) -> list[DepotRead]:
     """Depot PdC dell'azienda corrente con stazione principale collegata.

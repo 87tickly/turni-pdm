@@ -19,8 +19,15 @@ Violazioni rilevate (segnalate ma non bloccanti per MVP):
 - refezione mancante con prestazione > 6h
 - PdC che termina fuori dal deposito di partenza (FR — Sprint 7.4)
 
-Scope rimandato a Sprint 7.4+: CV intermedi, FR, vettura passiva,
-ciclo settimanale, S.COMP, assegnazione persone.
+Sprint 7.9 MR η: il builder accetta ``deposito_pdc_id`` opzionale.
+Quando valorizzato, la stazione di residenza per il calcolo FR è
+``Depot.stazione_principale_codice`` (la sede del *macchinista*, non
+del materiale). Il builder marca le dormite FR rispetto a quella e
+applica i cap normativi (max 1 FR/settimana, 3 FR/28gg —
+NORMATIVA-PDC §10.6) come violazioni di ciclo.
+
+Scope rimandato: CV intermedi (chiuso 7.4), vettura passiva,
+ciclo settimanale completo, S.COMP, assegnazione persone.
 """
 
 from __future__ import annotations
@@ -32,7 +39,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from colazione.models.anagrafica import LocalitaManutenzione
+from colazione.models.anagrafica import Depot, LocalitaManutenzione
 from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
 from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
 from colazione.models.turni_pdc import TurnoPdc, TurnoPdcBlocco, TurnoPdcGiornata
@@ -58,6 +65,9 @@ REFEZIONE_FINESTRE: list[tuple[int, int]] = [
     (11 * 60 + 30, 15 * 60 + 30),  # 11:30 - 15:30
     (18 * 60 + 30, 22 * 60 + 30),  # 18:30 - 22:30
 ]
+# Sprint 7.9 MR η — cap FR per PdC (NORMATIVA-PDC §10.6).
+FR_MAX_PER_SETTIMANA = 1
+FR_MAX_PER_28GG = 3
 
 
 # --- Errori e risultati ---------------------------------------------------
@@ -69,6 +79,10 @@ class GiroNonTrovatoError(Exception):
 
 class GiroVuotoError(Exception):
     """Il giro non ha blocchi: niente da costruire."""
+
+
+class DepositoPdcNonTrovatoError(Exception):
+    """Il depot indicato non esiste o non appartiene all'azienda."""
 
 
 @dataclass
@@ -89,6 +103,11 @@ class BuilderTurnoPdcResult:
     split_origine_giornata: int | None = None
     split_ramo: int | None = None
     split_totale_rami: int | None = None
+    # Sprint 7.9 MR η: associazione esplicita al deposito PdC.
+    deposito_pdc_id: int | None = None
+    deposito_pdc_codice: str | None = None
+    n_dormite_fr: int = 0
+    fr_cap_violazioni: list[str] = field(default_factory=list)
 
 
 # --- Helper temporali -----------------------------------------------------
@@ -423,6 +442,7 @@ async def genera_turno_pdc(
     giro_id: int,
     valido_da: date | None = None,
     force: bool = False,
+    deposito_pdc_id: int | None = None,
 ) -> list[BuilderTurnoPdcResult]:
     """Genera (e persiste) i `TurnoPdc` per il giro indicato — uno per
     ogni combinazione di varianti calendario delle giornate-tipo.
@@ -433,6 +453,26 @@ async def genera_turno_pdc(
     combinazioni il suffisso `-V{idx:02d}` discrimina i turni
     (1-based: V01, V02, ...).
 
+    Sprint 7.9 MR η: parametro ``deposito_pdc_id`` opzionale. Quando
+    valorizzato:
+
+    - La stazione di residenza usata per identificare i FR è la
+      ``Depot.stazione_principale_codice`` (sede *del macchinista*),
+      non più la ``LocalitaManutenzione.stazione_collegata`` (sede
+      *del materiale*).
+    - Il turno persiste con ``deposito_pdc_id`` valorizzato — la
+      dashboard può raggrupparlo per deposito senza ambiguità.
+    - I cap FR (1/settimana, 3/28gg — NORMATIVA-PDC §10.6) sono
+      verificati e annotati come violazioni di ciclo.
+
+    Quando ``None``, il builder mantiene il comportamento legacy
+    (sede = stazione del materiale di partenza). Utile per script
+    di migrazione o regressione.
+
+    Codice del turno: con ``deposito_pdc_id`` valorizzato il prefisso
+    diventa ``T-{depot.codice}-{giro.numero_turno}`` per evitare
+    collisioni quando lo stesso giro genera turni per più depositi.
+
     Pre-MR 5 (Sprint 7.2 MVP): la funzione ritornava un `BuilderTurnoPdcResult`
     singolo, prendendo arbitrariamente la prima variante per giornata e
     ignorando le altre. MR 5 chiude il bug 5 lato PdC: ogni variante
@@ -442,16 +482,19 @@ async def genera_turno_pdc(
     quindi 1 sola combinazione → 1 solo turno (invariante di
     comportamento per i giri generati dal builder MR 4).
 
-    Se esiste già un turno PdC per questo giro e ``force=False``, alza
-    ``GiriEsistentiError``. Con ``force=True`` cancella tutti i turni
-    PdC precedenti del giro e ricrea da zero.
+    Se esiste già un turno PdC per questo giro+deposito e ``force=False``,
+    alza ``GiriEsistentiError``. Con ``force=True`` cancella tutti i
+    turni PdC precedenti per questa coppia e ricrea da zero. Se
+    ``deposito_pdc_id`` è None, il match anti-rigenerazione è solo
+    su giro (legacy).
 
     Returns:
         ``list[BuilderTurnoPdcResult]`` ordinata per indice combinazione
         (deterministica). Sempre almeno 1 elemento se il giro è valido.
 
     Raises:
-        GiroNonTrovatoError, GiroVuotoError, GiriEsistentiError.
+        GiroNonTrovatoError, GiroVuotoError, GiriEsistentiError,
+        DepositoPdcNonTrovatoError.
     """
     giro = (
         await session.execute(
@@ -463,6 +506,27 @@ async def genera_turno_pdc(
     ).scalar_one_or_none()
     if giro is None:
         raise GiroNonTrovatoError(f"Giro {giro_id} non trovato per azienda {azienda_id}")
+
+    # Sprint 7.9 MR η — risolvi deposito target (se richiesto). Il
+    # caricamento serve sia per validare l'input (FK valida + scoping
+    # azienda) sia per usare la `stazione_principale_codice` come
+    # sede effettiva nel calcolo FR.
+    depot_target: Depot | None = None
+    if deposito_pdc_id is not None:
+        depot_target = (
+            await session.execute(
+                select(Depot).where(
+                    Depot.id == deposito_pdc_id,
+                    Depot.azienda_id == azienda_id,
+                    Depot.is_attivo,
+                )
+            )
+        ).scalar_one_or_none()
+        if depot_target is None:
+            raise DepositoPdcNonTrovatoError(
+                f"Deposito PdC {deposito_pdc_id} non trovato o non attivo "
+                f"per azienda {azienda_id}"
+            )
 
     # Carica giornate ordinate
     giornate_giro = list(
@@ -514,10 +578,16 @@ async def genera_turno_pdc(
             gg_id = var_to_gg[b.giro_variante_id]
             blocchi_per_giornata.setdefault(gg_id, []).append(b)
 
-    # Stazione sede del PdC: collegata alla località di manutenzione di
-    # partenza del giro. Calcolata una volta per tutto il loop.
+    # Stazione sede del PdC.
+    # - Se è stato passato ``deposito_pdc_id`` (Sprint 7.9 MR η), la
+    #   sede è la ``stazione_principale_codice`` del depot — sede *del
+    #   macchinista*. È la semantica corretta per il calcolo FR.
+    # - Altrimenti (legacy) ricade sulla stazione del materiale di
+    #   partenza del giro.
     stazione_sede: str | None = None
-    if giro.localita_manutenzione_partenza_id is not None:
+    if depot_target is not None and depot_target.stazione_principale_codice is not None:
+        stazione_sede = depot_target.stazione_principale_codice
+    elif giro.localita_manutenzione_partenza_id is not None:
         loc = (
             await session.execute(
                 select(LocalitaManutenzione).where(
@@ -528,8 +598,10 @@ async def genera_turno_pdc(
         if loc is not None and loc.stazione_collegata_codice is not None:
             stazione_sede = loc.stazione_collegata_codice
 
-    # Anti-rigenerazione: cancella tutti i turni PdC del giro se force,
-    # altrimenti errore se anche solo uno esiste.
+    # Anti-rigenerazione: cancella i turni PdC del giro+deposito se
+    # force, altrimenti errore se uno esiste già. Sprint 7.9 MR η:
+    # match per coppia (giro, deposito_pdc_id) — lo stesso giro può
+    # generare turni distinti per depositi diversi.
     existing = list(
         (
             await session.execute(
@@ -537,12 +609,23 @@ async def genera_turno_pdc(
             )
         ).scalars()
     )
-    legati = [
-        t for t in existing if (t.generation_metadata_json or {}).get("giro_materiale_id") == giro_id
-    ]
+
+    def _matches_giro_e_deposito(t: TurnoPdc) -> bool:
+        if (t.generation_metadata_json or {}).get("giro_materiale_id") != giro_id:
+            return False
+        if deposito_pdc_id is None:
+            # Legacy: il caller non ha specificato deposito → un turno
+            # esistente conflitta indipendentemente dal proprio deposito.
+            return True
+        return t.deposito_pdc_id == deposito_pdc_id
+
+    legati = [t for t in existing if _matches_giro_e_deposito(t)]
     if legati and not force:
+        depot_label = (
+            f" deposito {depot_target.codice}" if depot_target is not None else ""
+        )
         raise GiriEsistentiError(
-            f"Esistono già {len(legati)} turno/i PdC per giro {giro_id}: "
+            f"Esistono già {len(legati)} turno/i PdC per giro {giro_id}{depot_label}: "
             f"{legati[0].codice}"
             + (f" ... +{len(legati)-1} altri" if len(legati) > 1 else "")
         )
@@ -577,6 +660,7 @@ async def genera_turno_pdc(
         stazione_sede=stazione_sede,
         stazioni_cv=stazioni_cv,
         valido_da_eff=valido_da_eff,
+        depot_target=depot_target,
     )
 
     if not risultati:
@@ -599,6 +683,7 @@ async def _genera_un_turno_pdc(
     stazione_sede: str | None,
     stazioni_cv: set[str],
     valido_da_eff: date,
+    depot_target: Depot | None = None,
 ) -> list[BuilderTurnoPdcResult]:
     """Persiste i `TurnoPdc` per il giro indicato.
 
@@ -665,7 +750,10 @@ async def _genera_un_turno_pdc(
             rami_split.append(rami)
 
     # 3. Codice base e variabili comuni.
-    codice_principale = _genera_codice_turno(giro)
+    # Sprint 7.9 MR η: con deposito target il codice è
+    # ``T-{depot_codice}-{numero_turno}`` (es. T-FIORENZA-001-ETR526).
+    # Senza deposito (legacy) resta ``T-{numero_turno}``.
+    codice_principale = _genera_codice_turno(giro, depot_target)
 
     primo_draft = (
         drafts_principali[0] if drafts_principali else rami_split[0][0]
@@ -681,6 +769,14 @@ async def _genera_un_turno_pdc(
     # 4. TurnoPdc principale (solo se ha almeno 1 giornata non-split).
     if drafts_principali:
         fr_giornate = _aggiungi_dormite_fr(drafts_principali, stazione_sede_eff)
+        # Sprint 7.9 MR η: cap normativi FR per PdC. Calcolati sul
+        # ciclo del turno (n_giornate = ciclo del PdC), confrontati
+        # con limiti settimana e 28gg. NORMATIVA-PDC §10.6.
+        fr_cap_violazioni = _calcola_violazioni_cap_fr(
+            n_dormite_fr=len(fr_giornate),
+            ciclo_giorni=giro.numero_giornate,
+        )
+        violazioni_extra = list(fr_cap_violazioni)
         risultato = await _persisti_un_turno_pdc(
             session=session,
             azienda_id=azienda_id,
@@ -693,7 +789,10 @@ async def _genera_un_turno_pdc(
             extra_metadata={
                 "fr_giornate": fr_giornate,
                 "is_ramo_split": False,
+                "fr_cap_violazioni": fr_cap_violazioni,
             },
+            depot_target=depot_target,
+            violazioni_ciclo_extra=violazioni_extra,
         )
         risultati.append(risultato)
 
@@ -736,7 +835,10 @@ async def _genera_un_turno_pdc(
                     "split_ramo": idx_ramo,
                     "split_totale_rami": totale_rami,
                     "split_parent_codice": codice_principale,
+                    "fr_cap_violazioni": [],
                 },
+                depot_target=depot_target,
+                violazioni_ciclo_extra=[],
             )
             risultati.append(risultato_ramo)
 
@@ -754,12 +856,20 @@ async def _persisti_un_turno_pdc(
     valido_da_eff: date,
     giornate_ids: list[int],
     extra_metadata: dict[str, Any],
+    depot_target: Depot | None = None,
+    violazioni_ciclo_extra: list[str] | None = None,
 ) -> BuilderTurnoPdcResult:
     """Helper: persiste un singolo TurnoPdc + le sue giornate + blocchi.
 
     Sprint 7.4 MR 2: estratto da `_genera_un_turno_pdc` per riutilizzo
     fra TurnoPdc "principale" (giornate non-split + FR) e TurnoPdc-
     ramo-split (1 sola giornata, niente FR).
+
+    Sprint 7.9 MR η: ``depot_target`` valorizza ``TurnoPdc.deposito_pdc_id``
+    (FK fisica) e ``TurnoPdc.impianto`` (display name del deposito,
+    sostituendo il fallback ``tipo_materiale`` legacy quando un depot
+    è disponibile). ``violazioni_ciclo_extra`` aggiunge violazioni
+    a livello ciclo (es. ``"fr_max_settimanale"``) al campo metadata.
 
     `extra_metadata` viene fuso dentro `generation_metadata_json` e
     deve includere `fr_giornate` (lista, eventualmente vuota) e
@@ -771,6 +881,8 @@ async def _persisti_un_turno_pdc(
     for d in drafts:
         for v_str in d.violazioni:
             violazioni.append(f"giornata{d.numero_giornata}:{v_str}")
+    if violazioni_ciclo_extra:
+        violazioni.extend(violazioni_ciclo_extra)
 
     metadata: dict[str, Any] = {
         "giro_materiale_id": giro.id,
@@ -778,25 +890,41 @@ async def _persisti_un_turno_pdc(
         "violazioni": violazioni,
         "stazione_sede": stazione_sede,
         "generato_at": datetime.utcnow().isoformat(),
-        "builder_version": "mvp-7.7.3",
+        "builder_version": "mvp-7.9-eta",
         # Sprint 7.7 MR 3: il giro materiale è ora UN pattern
         # calendariale specifico (etichetta_tipo) — niente più
         # combinazioni di varianti. ``giornate_ids`` traccia le
         # giornate del giro che alimentano questo TurnoPdc per
         # tracciabilità in audit.
         "giornate_giro_ids": giornate_ids,
+        # Sprint 7.9 MR η: traccia identità deposito sia in metadata
+        # (per compat strumenti di audit / dump JSON) sia in colonna
+        # FK (per query indicizzate).
+        "deposito_pdc_codice": depot_target.codice if depot_target is not None else None,
+        "deposito_pdc_display": (
+            depot_target.display_name if depot_target is not None else None
+        ),
     }
     metadata.update(extra_metadata)
+
+    # Impianto: con depot esplicito è il display name del deposito;
+    # altrimenti (legacy) il tipo_materiale del giro per non rompere
+    # la dashboard "Distribuzione per impianto" pre-MR η.
+    if depot_target is not None:
+        impianto = depot_target.display_name[:80]
+    else:
+        impianto = giro.tipo_materiale[:80] if giro.tipo_materiale else "ND"
 
     turno = TurnoPdc(
         azienda_id=azienda_id,
         codice=codice,
-        impianto=giro.tipo_materiale[:80] if giro.tipo_materiale else "ND",
+        impianto=impianto,
         profilo="Condotta",
         ciclo_giorni=max(1, min(14, giro.numero_giornate)),
         valido_da=valido_da_eff,
         valido_a=None,
         source_file=None,
+        deposito_pdc_id=depot_target.id if depot_target is not None else None,
         generation_metadata_json=metadata,
         stato="bozza",
     )
@@ -849,6 +977,8 @@ async def _persisti_un_turno_pdc(
                 )
             )
 
+    fr_giornate_meta = extra_metadata.get("fr_giornate") or []
+    fr_cap_meta = extra_metadata.get("fr_cap_violazioni") or []
     return BuilderTurnoPdcResult(
         turno_pdc_id=turno.id,
         codice=turno.codice,
@@ -860,6 +990,10 @@ async def _persisti_un_turno_pdc(
         split_origine_giornata=extra_metadata.get("split_origine_giornata"),
         split_ramo=extra_metadata.get("split_ramo"),
         split_totale_rami=extra_metadata.get("split_totale_rami"),
+        deposito_pdc_id=depot_target.id if depot_target is not None else None,
+        deposito_pdc_codice=depot_target.codice if depot_target is not None else None,
+        n_dormite_fr=len(fr_giornate_meta),
+        fr_cap_violazioni=list(fr_cap_meta),
     )
 
 
@@ -939,11 +1073,68 @@ def _aggiungi_dormite_fr(
     return fr_log
 
 
-def _genera_codice_turno(giro: GiroMateriale) -> str:
-    """Codice turno PdC derivato dal giro: T-<giro.numero_turno>."""
-    prefix = "T-"
-    base = (giro.numero_turno or f"GIRO{giro.id}")[:48]
-    return f"{prefix}{base}"
+def _genera_codice_turno(
+    giro: GiroMateriale, depot: Depot | None = None
+) -> str:
+    """Codice turno PdC derivato dal giro.
+
+    - Senza ``depot``: ``T-<giro.numero_turno>`` (legacy MVP).
+    - Con ``depot``: ``T-<depot.codice>-<giro.numero_turno>``. Permette
+      a uno stesso giro di avere turni distinti per depositi diversi
+      senza conflitto di chiave (Sprint 7.9 MR η).
+
+    Il troncamento finale a 48 char rispetta il VARCHAR(50) di
+    ``turno_pdc.codice`` (-2 char per ``T-``).
+    """
+    base = (giro.numero_turno or f"GIRO{giro.id}")
+    if depot is not None:
+        composto = f"{depot.codice}-{base}"
+    else:
+        composto = base
+    return f"T-{composto[:48]}"
+
+
+def _calcola_violazioni_cap_fr(
+    *, n_dormite_fr: int, ciclo_giorni: int
+) -> list[str]:
+    """Calcola violazioni dei cap FR (NORMATIVA-PDC §10.6).
+
+    I cap normativi sono **per PdC** (1/settimana, 3/28gg), non per
+    turno. Tuttavia, dentro un singolo turno-ciclo, il numero di FR
+    fissi (= dormite incorporate nel pattern del turno) può già da
+    solo eccedere il limite settimanale o mensile, perché ciascun PdC
+    assegnato a quel turno le subisce per quel ciclo.
+
+    Conversione conservativa applicata qui:
+
+    - se ``ciclo_giorni <= 7`` → tetto = ``FR_MAX_PER_SETTIMANA`` (1).
+      Eccedere significa che il singolo PdC, in una settimana di
+      lavoro, supererebbe il cap.
+    - per cicli più lunghi (più settimane) il tetto cresce
+      proporzionalmente: ``ceil(ciclo / 7) * FR_MAX_PER_SETTIMANA``,
+      a meno che non venga prima superato il cap mensile
+      (``FR_MAX_PER_28GG = 3``) per cicli ≥ 28 giorni.
+
+    Output: lista vuota se tutto in regola; altrimenti tag descrittivi
+    pronti per il pannello "Vincoli ciclo" della UI.
+    """
+    if n_dormite_fr <= 0 or ciclo_giorni <= 0:
+        return []
+
+    out: list[str] = []
+    settimane = max(1, (ciclo_giorni + 6) // 7)
+    tetto_settimanale = settimane * FR_MAX_PER_SETTIMANA
+    if n_dormite_fr > tetto_settimanale:
+        out.append(
+            f"fr_cap_settimanale:{n_dormite_fr}>{tetto_settimanale}"
+            f"(ciclo {ciclo_giorni}gg, max {FR_MAX_PER_SETTIMANA}/sett)"
+        )
+    if ciclo_giorni <= 28 and n_dormite_fr > FR_MAX_PER_28GG:
+        out.append(
+            f"fr_cap_28gg:{n_dormite_fr}>{FR_MAX_PER_28GG}"
+            f"(ciclo {ciclo_giorni}gg)"
+        )
+    return out
 
 
 class GiriEsistentiError(Exception):

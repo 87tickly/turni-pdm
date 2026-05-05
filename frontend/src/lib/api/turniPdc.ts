@@ -24,6 +24,11 @@ export interface TurnoPdcGenerazioneResponse extends SplitCvFields {
   condotta_totale_min: number;
   violazioni: string[];
   warnings: string[];
+  // Sprint 7.9 MR η — deposito PdC + KPI FR del turno generato.
+  deposito_pdc_id: number | null;
+  deposito_pdc_codice: string | null;
+  n_dormite_fr: number;
+  fr_cap_violazioni: string[];
 }
 
 export interface TurnoPdcListItem extends SplitCvFields {
@@ -40,6 +45,11 @@ export interface TurnoPdcListItem extends SplitCvFields {
   condotta_totale_min: number;
   n_violazioni: number;
   n_dormite_fr: number;
+  // Sprint 7.9 MR η — deposito PdC associato (FK).
+  deposito_pdc_id: number | null;
+  deposito_pdc_codice: string | null;
+  deposito_pdc_display: string | null;
+  n_fr_cap_violazioni: number;
 }
 
 export interface TurnoPdcBlocco {
@@ -108,7 +118,10 @@ export interface TurnoPdcDettaglio {
     giro_numero_turno?: string;
     violazioni?: string[];
     fr_giornate?: FrGiornata[];
+    fr_cap_violazioni?: string[];
     stazione_sede?: string;
+    deposito_pdc_codice?: string | null;
+    deposito_pdc_display?: string | null;
     builder_version?: string;
     [key: string]: unknown;
   };
@@ -119,11 +132,23 @@ export interface TurnoPdcDettaglio {
   n_violazioni_hard: number;
   n_violazioni_soft: number;
   validazioni_ciclo: string[];
+  // Sprint 7.9 MR η — deposito PdC + KPI FR.
+  deposito_pdc_id: number | null;
+  deposito_pdc_codice: string | null;
+  deposito_pdc_display: string | null;
+  n_dormite_fr: number;
+  fr_cap_violazioni: string[];
 }
 
 export interface GeneraTurnoPdcParams {
   valido_da?: string;
   force?: boolean;
+  /**
+   * Sprint 7.9 MR η — deposito PdC che coprirà il turno. Quando
+   * valorizzato, il builder usa la stazione del deposito come sede
+   * residenza e applica i cap FR (1/sett, 3/28gg).
+   */
+  deposito_pdc_id?: number;
 }
 
 export async function generaTurnoPdc(
@@ -137,6 +162,8 @@ export async function generaTurnoPdc(
   const search = new URLSearchParams();
   if (params.valido_da !== undefined) search.set("valido_da", params.valido_da);
   if (params.force === true) search.set("force", "true");
+  if (params.deposito_pdc_id !== undefined)
+    search.set("deposito_pdc_id", String(params.deposito_pdc_id));
   const qs = search.toString();
   return apiJson<TurnoPdcGenerazioneResponse[]>(
     `/api/giri/${giroId}/genera-turno-pdc${qs ? `?${qs}` : ""}`,
@@ -158,6 +185,8 @@ export async function getTurnoPdcDettaglio(turnoId: number): Promise<TurnoPdcDet
 
 export interface ListTurniPdcAziendaParams {
   impianto?: string;
+  /** Sprint 7.9 MR η — filtro per FK depot (esclude legacy). */
+  deposito_pdc_id?: number;
   stato?: string;
   profilo?: string;
   /** ISO date YYYY-MM-DD */
@@ -175,6 +204,8 @@ export async function listTurniPdcAzienda(
   const search = new URLSearchParams();
   if (params.impianto !== undefined && params.impianto !== "")
     search.set("impianto", params.impianto);
+  if (params.deposito_pdc_id !== undefined)
+    search.set("deposito_pdc_id", String(params.deposito_pdc_id));
   if (params.stato !== undefined && params.stato !== "") search.set("stato", params.stato);
   if (params.profilo !== undefined && params.profilo !== "") search.set("profilo", params.profilo);
   if (params.valido_da_min !== undefined) search.set("valido_da_min", params.valido_da_min);

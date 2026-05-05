@@ -25,6 +25,8 @@ export interface MaterialeRead {
 }
 
 export interface DepotRead {
+  /** Sprint 7.9 MR η — FK numerica per i selettori UI. */
+  id: number;
   codice: string;
   display_name: string;
   stazione_principale_codice: string | null;

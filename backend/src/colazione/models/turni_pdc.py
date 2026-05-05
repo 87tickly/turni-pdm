@@ -16,6 +16,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -42,10 +43,22 @@ class TurnoPdc(Base):
     valido_da: Mapped[date] = mapped_column(Date)
     valido_a: Mapped[date | None] = mapped_column(Date)
     source_file: Mapped[str | None] = mapped_column(Text)
+    # Sprint 7.9 MR η: deposito PdC che copre il turno. Nullable per
+    # backward compat con i turni pre-MR η; il builder aggiornato lo
+    # valorizza sempre quando l'utente sceglie un deposito target.
+    # ondelete=SET NULL per non perdere i turni se un deposito viene
+    # cancellato (caso raro: i depositi sono anagrafica stabile).
+    deposito_pdc_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("depot.id", ondelete="SET NULL")
+    )
     generation_metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     stato: Mapped[str] = mapped_column(String(20), default="bozza")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_turno_pdc_azienda_deposito", "azienda_id", "deposito_pdc_id"),
+    )
 
 
 class TurnoPdcGiornata(Base):

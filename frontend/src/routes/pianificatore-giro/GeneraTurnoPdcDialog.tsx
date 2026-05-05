@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, BedDouble, Building2, CheckCircle2 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import {
@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/Dialog";
 import { Spinner } from "@/components/ui/Spinner";
+import { useDepots } from "@/hooks/useAnagrafiche";
 import { useGeneraTurnoPdc } from "@/hooks/useTurniPdc";
 import { ApiError } from "@/lib/api/client";
 import type { TurnoPdcGenerazioneResponse } from "@/lib/api/turniPdc";
@@ -45,14 +46,26 @@ export function GeneraTurnoPdcDialog({
   // (1 elemento per variante calendario del giro). Con A1 strict default
   // = 1 elemento, con varianti multiple cresce.
   const [results, setResults] = useState<TurnoPdcGenerazioneResponse[] | null>(null);
+  // Sprint 7.9 MR η — deposito PdC target per minimizzare FR.
+  const [depositoPdcId, setDepositoPdcId] = useState<number | "">("");
 
   const generaMutation = useGeneraTurnoPdc();
+  const depotsQuery = useDepots();
+
+  const depotOptions = useMemo(
+    () =>
+      (depotsQuery.data ?? [])
+        .slice()
+        .sort((a, b) => a.display_name.localeCompare(b.display_name, "it")),
+    [depotsQuery.data],
+  );
 
   const handleClose = (next: boolean) => {
     if (!next) {
       setError(null);
       setNeedsForce(false);
       setResults(null);
+      setDepositoPdcId("");
     }
     onOpenChange(next);
   };
@@ -62,7 +75,11 @@ export function GeneraTurnoPdcDialog({
     try {
       const r = await generaMutation.mutateAsync({
         giroId,
-        params: { force: forceFlag },
+        params: {
+          force: forceFlag,
+          deposito_pdc_id:
+            depositoPdcId === "" ? undefined : Number(depositoPdcId),
+        },
       });
       setResults(r);
       setNeedsForce(false);
@@ -80,6 +97,7 @@ export function GeneraTurnoPdcDialog({
   const running = generaMutation.isPending;
   const showForm = results === null;
   const showResult = results !== null;
+  const depotChosen = depositoPdcId !== "";
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -96,6 +114,39 @@ export function GeneraTurnoPdcDialog({
 
         {showForm && (
           <div className="flex flex-col gap-3 text-sm">
+            {/* Sprint 7.9 MR η — selettore deposito PdC target */}
+            <div className="flex flex-col gap-1.5">
+              <label
+                htmlFor="genera-pdc-depot"
+                className="flex items-center gap-1.5 text-xs font-semibold text-foreground"
+              >
+                <Building2 className="h-3.5 w-3.5 text-primary" aria-hidden />
+                Deposito PdC che coprirà il turno
+              </label>
+              <select
+                id="genera-pdc-depot"
+                value={depositoPdcId}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setDepositoPdcId(v === "" ? "" : Number(v));
+                }}
+                disabled={running || depotsQuery.isLoading}
+                className="h-9 rounded-md border border-border bg-background px-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-60"
+              >
+                <option value="">— Nessun deposito (legacy: usa sede materiale) —</option>
+                {depotOptions.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.display_name} ({d.codice})
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground">
+                Quando scegli un deposito, il builder usa la sua stazione
+                principale come residenza del PdC e applica i cap FR
+                normativi (max 1 dormita/settimana, 3 ogni 28 giorni).
+                L&apos;obiettivo è minimizzare i pernotti fuori sede.
+              </p>
+            </div>
             <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
               <strong>MVP Sprint 7.2.</strong> Il builder costruisce un turno
               monolitico per giornata. Il CV intermedio (split per
@@ -110,7 +161,10 @@ export function GeneraTurnoPdcDialog({
                   <span>{error}</span>
                   <span>
                     Cliccando &quot;Sovrascrivi&quot; il vecchio turno PdC
-                    associato al giro viene eliminato e ricreato.
+                    {depotChosen
+                      ? " del deposito selezionato"
+                      : " associato al giro"}{" "}
+                    viene eliminato e ricreato.
                   </span>
                 </div>
               </div>
@@ -221,6 +275,7 @@ function ResultCard({ result }: { result: TurnoPdcGenerazioneResponse }) {
     result.split_origine_giornata !== null
       ? `Ramo ${result.split_ramo} di ${result.split_totale_rami} (giornata ${result.split_origine_giornata} split CV)`
       : null;
+  const frCap = result.fr_cap_violazioni;
   return (
     <div className="flex flex-col gap-3 text-sm">
       <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-900">
@@ -230,12 +285,49 @@ function ResultCard({ result }: { result: TurnoPdcGenerazioneResponse }) {
           {ramoLabel !== null && (
             <span className="text-xs text-emerald-700">{ramoLabel}</span>
           )}
+          {result.deposito_pdc_codice !== null && (
+            <span className="inline-flex items-center gap-1 text-xs text-emerald-800">
+              <Building2 className="h-3 w-3" aria-hidden />
+              Deposito{" "}
+              <span className="font-mono font-semibold">
+                {result.deposito_pdc_codice}
+              </span>
+            </span>
+          )}
           <span className="text-xs text-emerald-800">
             {result.n_giornate} giornate · {formatHM(result.prestazione_totale_min)} prestazione
             totale · {formatHM(result.condotta_totale_min)} condotta totale
           </span>
+          {result.n_dormite_fr > 0 && (
+            <span className="inline-flex items-center gap-1 text-xs text-emerald-800">
+              <BedDouble className="h-3 w-3" aria-hidden />
+              {result.n_dormite_fr} dormit
+              {result.n_dormite_fr === 1 ? "a" : "e"} FR nel ciclo
+            </span>
+          )}
         </div>
       </div>
+      {frCap.length > 0 && (
+        <div className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-900">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <div className="flex flex-col gap-1">
+            <span className="font-semibold">
+              Cap FR violato: {frCap.length} regola
+              {frCap.length === 1 ? "" : "/e"}
+            </span>
+            <ul className="space-y-0.5 font-mono">
+              {frCap.map((v, i) => (
+                <li key={i}>· {v}</li>
+              ))}
+            </ul>
+            <span className="text-[11px] text-red-800">
+              Considera un deposito più vicino alle stazioni di chiusura
+              giornata, oppure un giro materiale con meno pernotti fuori
+              sede.
+            </span>
+          </div>
+        </div>
+      )}
       {violazioni.length > 0 && (
         <details className="rounded-md border border-amber-300 bg-amber-50 text-xs text-amber-900">
           <summary className="cursor-pointer px-3 py-2 font-medium">

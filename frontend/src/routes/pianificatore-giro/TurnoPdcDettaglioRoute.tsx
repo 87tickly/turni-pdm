@@ -166,7 +166,13 @@ function Header({ turno }: { turno: TurnoPdcDettaglio }) {
     <header className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">{turno.codice}</h1>
-        <Badge variant="outline">{turno.impianto}</Badge>
+        {turno.deposito_pdc_codice !== null ? (
+          <Badge variant="outline" title={turno.deposito_pdc_display ?? ""}>
+            Deposito {turno.deposito_pdc_codice}
+          </Badge>
+        ) : (
+          <Badge variant="outline">{turno.impianto}</Badge>
+        )}
         <Badge variant="secondary">{turno.profilo}</Badge>
         {typeof meta.giro_numero_turno === "string" && (
           <span className="text-xs text-muted-foreground">
@@ -187,6 +193,7 @@ function Stats({ turno }: { turno: TurnoPdcDettaglio }) {
   const totCondotta = turno.giornate.reduce((s, g) => s + g.condotta_min, 0);
   const totRefezione = turno.giornate.reduce((s, g) => s + g.refezione_min, 0);
   const hasViolazioni = turno.n_violazioni_hard > 0 || turno.n_violazioni_soft > 0;
+  const hasFr = turno.n_dormite_fr > 0 || turno.fr_cap_violazioni.length > 0;
   return (
     <div className="flex flex-col gap-3">
       <div className="grid grid-cols-2 gap-3 rounded-md border border-border bg-white p-4 md:grid-cols-4">
@@ -195,6 +202,30 @@ function Stats({ turno }: { turno: TurnoPdcDettaglio }) {
         <Stat label="Refezione totale" value={formatHM(totRefezione)} />
         <Stat label="Giornate" value={String(turno.giornate.length)} />
       </div>
+      {hasFr && (
+        <div
+          className={cn(
+            "grid grid-cols-1 gap-3 rounded-md border p-4 md:grid-cols-3",
+            turno.fr_cap_violazioni.length > 0
+              ? "border-red-300 bg-red-50"
+              : "border-amber-300 bg-amber-50",
+          )}
+        >
+          <Stat label="Dormite FR" value={String(turno.n_dormite_fr)} />
+          <Stat
+            label="Cap FR violati"
+            value={String(turno.fr_cap_violazioni.length)}
+          />
+          <Stat
+            label="Sede PdC"
+            value={
+              turno.deposito_pdc_codice !== null
+                ? turno.deposito_pdc_codice
+                : "(legacy)"
+            }
+          />
+        </div>
+      )}
       {hasViolazioni && (
         <div className="grid grid-cols-1 gap-3 rounded-md border border-amber-300 bg-amber-50 p-4 md:grid-cols-3">
           <Stat

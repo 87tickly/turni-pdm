@@ -4,6 +4,8 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowRight,
+  BedDouble,
+  Building2,
   Download,
   RotateCcw,
 } from "lucide-react";
@@ -197,11 +199,22 @@ export function PianificatorePdcTurniRoute() {
                   <tr className="border-b border-border bg-muted/50 text-[10px] uppercase tracking-wider text-muted-foreground">
                     <th className="w-16 px-3 py-2 text-left font-semibold">ID</th>
                     <th className="px-3 py-2 text-left font-semibold">Codice</th>
-                    <th className="w-32 px-3 py-2 text-left font-semibold">Impianto</th>
+                    <th
+                      className="w-32 px-3 py-2 text-left font-semibold"
+                      title="Deposito PdC che copre il turno (Sprint 7.9 MR η). Per i turni legacy mostra l'impianto."
+                    >
+                      Deposito
+                    </th>
                     <th className="w-24 px-3 py-2 text-left font-semibold">Profilo</th>
                     <th className="w-20 px-3 py-2 text-right font-semibold">Giorn.</th>
                     <th className="w-24 px-3 py-2 text-right font-semibold">Prest.</th>
                     <th className="w-24 px-3 py-2 text-right font-semibold">Cond.</th>
+                    <th
+                      className="w-20 px-3 py-2 text-right font-semibold"
+                      title="Dormite FR del ciclo (NORMATIVA-PDC §10)"
+                    >
+                      FR
+                    </th>
                     <th className="w-20 px-3 py-2 text-right font-semibold">Violaz.</th>
                     <th className="w-28 px-3 py-2 text-left font-semibold">Stato</th>
                     <th className="w-28 px-3 py-2 text-left font-semibold">Valido da</th>
@@ -227,7 +240,7 @@ export function PianificatorePdcTurniRoute() {
                           className={FILTER_INPUT_CLASS}
                           value={impianto}
                           onChange={(e) => setImpianto(e.target.value)}
-                          aria-label="Filtra per impianto"
+                          aria-label="Filtra per deposito"
                         >
                           <option value="">
                             Tutti ({depotsQuery.data.length})
@@ -246,10 +259,11 @@ export function PianificatorePdcTurniRoute() {
                           placeholder="MILANO_GA, BRESCIA, …"
                           value={impianto}
                           onChange={(e) => setImpianto(e.target.value)}
-                          aria-label="Filtra per impianto"
+                          aria-label="Filtra per deposito"
                         />
                       )}
                     </th>
+                    <th className="px-2 py-1.5" />
                     <th className="px-2 py-1.5" />
                     <th className="px-2 py-1.5" />
                     <th className="px-2 py-1.5" />
@@ -278,7 +292,7 @@ export function PianificatorePdcTurniRoute() {
                   {data.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={11}
+                        colSpan={12}
                         className="px-3 py-8 text-center text-sm text-muted-foreground"
                       >
                         Nessun turno corrisponde ai filtri attivi.
@@ -348,7 +362,18 @@ function TurnoRow({ t, onOpen }: { t: TurnoPdcListItem; onOpen: () => void }) {
           )}
         </span>
       </td>
-      <td className="px-3 py-2.5 text-sm">{t.impianto}</td>
+      <td className="px-3 py-2.5 text-sm">
+        {t.deposito_pdc_codice !== null ? (
+          <span className="inline-flex items-center gap-1 text-foreground">
+            <Building2 className="h-3 w-3 text-primary/60" aria-hidden />
+            <span title={t.deposito_pdc_display ?? ""}>
+              {t.deposito_pdc_codice}
+            </span>
+          </span>
+        ) : (
+          <span className="text-muted-foreground italic">{t.impianto}</span>
+        )}
+      </td>
       <td className="px-3 py-2.5 text-sm text-muted-foreground">{t.profilo}</td>
       <td className="px-3 py-2.5 text-right tabular-nums">{t.n_giornate}</td>
       <td className="px-3 py-2.5 text-right tabular-nums">
@@ -356,6 +381,26 @@ function TurnoRow({ t, onOpen }: { t: TurnoPdcListItem; onOpen: () => void }) {
       </td>
       <td className="px-3 py-2.5 text-right tabular-nums">
         {formatNumber(t.condotta_totale_min)}
+      </td>
+      <td className="px-3 py-2.5 text-right tabular-nums">
+        {t.n_dormite_fr > 0 ? (
+          <span
+            className={cn(
+              "inline-flex items-center gap-1",
+              t.n_fr_cap_violazioni > 0 ? "text-red-700" : "text-amber-700",
+            )}
+            title={
+              t.n_fr_cap_violazioni > 0
+                ? `${t.n_fr_cap_violazioni} cap FR violato/i`
+                : `${t.n_dormite_fr} dormite FR nel ciclo`
+            }
+          >
+            <BedDouble className="h-3 w-3" aria-hidden />
+            {t.n_dormite_fr}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">0</span>
+        )}
       </td>
       <td className="px-3 py-2.5 text-right tabular-nums">
         {t.n_violazioni > 0 ? (

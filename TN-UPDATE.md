@@ -10,6 +10,196 @@
 
 ---
 
+## 2026-05-05 (148) — Sprint 7.9 MR η: builder PdC parte dal deposito + cap FR
+
+### Contesto
+
+Smoke utente sulla dashboard Pianificatore Turno PdC: *"nel pianificare i
+turni pdc, mancano i depositi, e di conseguenza quando generiamo i turni
+cerchiamo di assegnare i turni materiale al pdc in base ai depositi.
+obiettivo? meno FR possibili ok?"*. Successivamente: *"organizzati come
+meglio credi... ma completa tutto"*.
+
+Diagnosi pre-MR: l'infrastruttura c'era (entry 145 MR ζ ha popolato 75
+PdC e 25 depositi su `persona.sede_residenza_id → depot.id`), ma il
+builder PdC la ignorava. Specifico:
+
+- ``TurnoPdc`` non aveva ``deposito_pdc_id``: l'associazione era solo
+  semantica via `assegnazione_giornata.persona_id → persona.sede_residenza_id`,
+  che oggi non è popolata.
+- ``builder_pdc.builder.genera_turno_pdc`` calcolava la `stazione_sede`
+  per il check FR dalla `localita_manutenzione_partenza` del giro
+  (sede *del materiale*) — non dal deposito *del macchinista*.
+- I cap normativi NORMATIVA-PDC §10.6 (max 1 FR/settimana, max 3 FR/28gg
+  per PdC) erano documentati ma non enforced.
+- Il widget dashboard "IMPIANTI COPERTI 2/0" (su 0 depositi totali)
+  era effetto collaterale di MR ζ (la query del denominatore restava
+  funzionante ma i dati non c'erano).
+
+### Modifiche
+
+**Backend**:
+
+- **Migration 0029_turno_pdc_deposito_fk** (revision `b7c8d9e0f1a2`,
+  branch in `c3d4e5f6a7b8` di MR ε): aggiunge
+  `turno_pdc.deposito_pdc_id BIGINT NULL` con FK→`depot.id ON DELETE
+  SET NULL`, indice composito `ix_turno_pdc_azienda_deposito`, e
+  backfill best-effort (matching `metadata->>'stazione_sede' ↔
+  depot.stazione_principale_codice` su match unico per azienda).
+- **`models/turni_pdc.TurnoPdc`**: campo `deposito_pdc_id` ORM +
+  `__table_args__` con l'indice.
+- **`domain/builder_pdc/builder.genera_turno_pdc`**: nuovo parametro
+  `deposito_pdc_id: int | None = None`. Quando valorizzato:
+  1. carica il `Depot`, valida scope azienda (`DepositoPdcNonTrovatoError`
+     in caso di errore);
+  2. usa `Depot.stazione_principale_codice` come `stazione_sede`;
+  3. anti-rigenerazione applicata sulla coppia `(giro, deposito)` —
+     stesso giro può convivere con più turni per depositi diversi;
+  4. codice turno: `T-{depot.codice}-{numero_turno}` per evitare
+     collisioni;
+  5. `TurnoPdc.deposito_pdc_id` valorizzato; `impianto` ora è il
+     display name del depot; `metadata` traccia `deposito_pdc_codice`
+     + `deposito_pdc_display`;
+  6. nuovo helper `_calcola_violazioni_cap_fr` enforces i cap
+     `FR_MAX_PER_SETTIMANA=1` e `FR_MAX_PER_28GG=3` con tag
+     descrittivi (es. `"fr_cap_settimanale:2>1(ciclo 7gg, max 1/sett)"`)
+     che vengono propagati come violazioni di ciclo.
+- **`api/turni_pdc.genera_turno_pdc_endpoint`**: query param
+  `deposito_pdc_id`. Risposta `TurnoPdcGenerazioneResponse` estesa
+  con `deposito_pdc_id`, `deposito_pdc_codice`, `n_dormite_fr`,
+  `fr_cap_violazioni`. `404` su depot inesistente.
+- **`api/turni_pdc.list_turni_pdc_*` + `get_turno_pdc_dettaglio`**:
+  helper `_carica_depot_per_turni` (no N+1) e `_to_list_item`
+  centralizzato. List/Dettaglio ora ritornano `deposito_pdc_id`,
+  `deposito_pdc_codice`, `deposito_pdc_display`, `n_fr_cap_violazioni`,
+  più `n_dormite_fr` + `fr_cap_violazioni` in dettaglio. Filtro
+  `?deposito_pdc_id=` su `GET /api/turni-pdc`.
+- **`api/pianificatore_pdc.OverviewResponse`**: nuovi KPI
+  `turni_pdc_per_deposito` (per FK), `dormite_fr_totali`,
+  `turni_con_fr_cap_violazioni`, `depositi_pdc_totali`. Vecchio
+  `turni_pdc_per_impianto` mantenuto per backward compat.
+- **`api/anagrafiche.list_depots`**: ruoli ammessi estesi a
+  `PIANIFICATORE_PDC` + `GESTIONE_PERSONALE` (servono il selettore
+  deposito sul dialog generazione turno e la vista Depositi sotto
+  Gestione Personale). `DepotRead` espone `id` per i selettori UI.
+- **Test**: nuovo `test_builder_pdc_eta.py` con 12 unit test pure su
+  `_calcola_violazioni_cap_fr` (dormite=0 / ciclo<=7 / 14gg / 28gg
+  cap mensile / >28gg solo settimanale) e `_genera_codice_turno`
+  (legacy / depot prepend / troncamento 48 char).
+
+**Frontend**:
+
+- **`lib/api/turniPdc.ts`**: `TurnoPdcGenerazioneResponse` +
+  `TurnoPdcListItem` + `TurnoPdcDettaglio` arricchiti con
+  `deposito_pdc_id`, `deposito_pdc_codice`, `deposito_pdc_display`,
+  `n_dormite_fr`, `fr_cap_violazioni` / `n_fr_cap_violazioni`.
+  `GeneraTurnoPdcParams.deposito_pdc_id` + propagazione in query
+  string.
+- **`lib/api/pianificatorePdc.ts`**: tipi `TurniPerDepositoItem` +
+  `PianificatorePdcOverview` con i 4 nuovi campi.
+- **`lib/api/anagrafiche.ts`**: `DepotRead.id`.
+- **`routes/pianificatore-giro/GeneraTurnoPdcDialog.tsx`**: selettore
+  `<select>` "Deposito PdC che coprirà il turno" (con
+  "— Nessun deposito (legacy) —" come default). Spiegazione cap FR
+  inline. ResultsCard mostra Deposito + Dormite FR + box rosso
+  "Cap FR violato" con elenco violazioni e suggerimento.
+- **`routes/pianificatore-pdc/TurniRoute.tsx`**: colonna
+  "Deposito" (con `Building2` icon) prende il display dal codice
+  depot, fallback al vecchio `impianto` per turni legacy. Nuova
+  colonna "FR" con conteggio dormite e colorazione rossa quando
+  ci sono cap violati.
+- **`routes/pianificatore-pdc/DashboardRoute.tsx`**: 5 KPI grandi
+  (era 4): aggiunto "Dormite FR" con accento rosso/ambra/neutral
+  in base ai cap violati. "Distribuzione per impianto" → "per
+  deposito PdC" usando la nuova FK e mostra le dormite FR per
+  deposito accanto al count. CTA banner: priorità a "Cap FR
+  violato" sui turni hard-violazioni standard. Memoizzato
+  `turniList` per non invalidare gli `useMemo` ad ogni render.
+- **`routes/pianificatore-giro/TurnoPdcDettaglioRoute.tsx`**: badge
+  header diventa "Deposito {codice}" quando FK presente. Nuovo
+  blocco Stats FR (dormite + cap violati + sede PdC) con
+  evidenziazione rossa se cap violati.
+
+### Verifiche
+
+**Backend**:
+- ✅ `uv run ruff check` (file MR-η): clean (gli unused/B008 segnalati
+  erano pre-esistenti).
+- ✅ `uv run mypy --strict` su builder + api turni-pdc + pianificatore_pdc
+  + models: 0 errori.
+- ✅ `uv run alembic upgrade head` su locale: applicata 0028 (di MR ε)
+  e poi 0029.
+- ✅ `uv run pytest --ignore=tests/test_persister.py`: **569 passed,
+  12 skipped**, 0 failed (i 12 nuovi unit test inclusi).
+- ✅ Smoke API con curl + token admin:
+  - `/api/depots` → 25 depositi con `id` esposto.
+  - `/api/pianificatore-pdc/overview` → `depositi_pdc_totali=25`,
+    nuovi campi presenti.
+
+**Frontend**:
+- ✅ `pnpm tsc -b --noEmit`: clean (dopo aggiornamento 4 mock test).
+- ✅ `pnpm lint`: 0 errors, 2 warning preesistenti.
+- ✅ `pnpm test --run`: **52 passed, 1 skipped**, 0 failed
+  (aggiornati `DashboardRoute.test.tsx` per nuova label
+  "Su N deposito/i" + "turni_pdc_per_deposito: []" nel caso vuoto;
+  `TurniRoute.test.tsx` per nuova label aria "Filtra per deposito";
+  `TurnoDettaglioRoute.test.tsx` + `TurnoValidazioni.test.tsx` per
+  i nuovi campi non opzionali).
+- ✅ `pnpm build`: 1778 modules, 625KB JS / 169KB gzipped.
+- ✅ Smoke preview frontend (admin azienda #2 fresh, no dati):
+  - 5 KPI presenti in DOM (`Giri materiali`, `Turni PdC`,
+    `Violazioni hard`, `Dormite FR`, `Depositi coperti`).
+  - "Depositi coperti" mostra `0/25` correttamente
+    (denominator dall'overview backend).
+  - Console: 0 errori.
+
+### Stato
+
+- ✅ Builder PdC parte dal deposito target.
+- ✅ Cap FR (1/sett, 3/28gg) enforced come violazioni di ciclo.
+- ✅ TurnoPdc ha FK al deposito; Lista/Dettaglio/Dashboard la usano.
+- ✅ Dialog generazione turno mostra il selettore deposito con
+  spiegazione FR.
+- ✅ KPI "Dormite FR" + CTA priorità su cap violato.
+- ⏳ Smoke utente in produzione (Railway deploy).
+
+### Limitazioni note (per MR successivi)
+
+1. **FR "scelti" (operatore-driven)**: oggi le dormite FR sono
+   ancora calcolate "forzate" dalla geografia (giornata che chiude
+   in stazione ≠ sede). NORMATIVA-PDC §10.7 prevede una spunta
+   "FR abilitato" per deposito; l'esposizione dell'opzione UI è
+   scope MR successivo (oggi il builder propone sempre FR
+   geografici, e il pianificatore valuta a posteriori se cambiare
+   deposito o giro).
+2. **Backfill best-effort**: la migration 0029 valorizza
+   `deposito_pdc_id` solo per i turni con `metadata.stazione_sede`
+   che corrisponde univocamente a un `depot.stazione_principale_codice`.
+   I depot creati da 0028 senza `stazione_principale_codice` non
+   matchano. I turni esistenti restano per ora con FK NULL e
+   andranno rigenerati (force=true) per associarli al deposito.
+3. **`stazione_principale_codice` non popolata**: l'anagrafica
+   `Depot` ha la colonna ma è NULL per la maggior parte dei
+   depositi (apart 0002_seed_trenord che lo popola per Trenord).
+   Senza quella, il builder con `deposito_pdc_id` cade comunque
+   sul fallback giro (vedi `genera_turno_pdc`); il match non è
+   semantico al 100%. Popolare la mappa
+   `(depot, stazione_principale)` resta scope futuro.
+4. **Algoritmo "scegli automaticamente il miglior deposito"**:
+   oggi l'utente sceglie. Un'euristica greedy che propone il
+   deposito col minor numero di FR resta scope MR successivo.
+
+### Prossimo step
+
+Smoke utente: rigenerare i 2 turni esistenti su Trenord scegliendo
+il deposito FIORENZA dal selettore, verificare che codice diventi
+`T-FIORENZA-...` e che la dashboard mostri "1/25 depositi coperti".
+Poi valutare se intercalare l'auto-suggerimento del deposito o
+chiudere il MR ε.7 (popolazione `stazione_principale_codice` per
+le aziende seed).
+
+---
+
 ## 2026-05-05 (147) — Sprint 7.9 MR ε: depositi PdC popolati per le aziende non-Trenord
 
 ### Contesto

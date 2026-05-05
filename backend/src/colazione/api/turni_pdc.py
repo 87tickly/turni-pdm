@@ -30,12 +30,13 @@ from colazione.domain.builder_pdc.builder import (
     PRESTAZIONE_MAX_NOTTURNO,
     PRESTAZIONE_MAX_STANDARD,
     BuilderTurnoPdcResult,
+    DepositoPdcNonTrovatoError,
     GiriEsistentiError,
     GiroNonTrovatoError,
     GiroVuotoError,
     genera_turno_pdc,
 )
-from colazione.models.anagrafica import Stazione
+from colazione.models.anagrafica import Depot, Stazione
 from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
 from colazione.models.turni_pdc import TurnoPdc, TurnoPdcBlocco, TurnoPdcGiornata
 from colazione.schemas.security import CurrentUser
@@ -79,6 +80,12 @@ class TurnoPdcGenerazioneResponse(BaseModel):
     split_origine_giornata: int | None = None
     split_ramo: int | None = None
     split_totale_rami: int | None = None
+    # Sprint 7.9 MR η: associazione esplicita al deposito PdC + KPI
+    # FR del turno generato.
+    deposito_pdc_id: int | None = None
+    deposito_pdc_codice: str | None = None
+    n_dormite_fr: int = 0
+    fr_cap_violazioni: list[str] = []
 
 
 class TurnoPdcListItem(BaseModel):
@@ -103,6 +110,11 @@ class TurnoPdcListItem(BaseModel):
     split_origine_giornata: int | None = None
     split_ramo: int | None = None
     split_totale_rami: int | None = None
+    # Sprint 7.9 MR η: deposito PdC associato.
+    deposito_pdc_id: int | None = None
+    deposito_pdc_codice: str | None = None
+    deposito_pdc_display: str | None = None
+    n_fr_cap_violazioni: int = 0
 
 
 class TurnoPdcBloccoRead(BaseModel):
@@ -178,6 +190,12 @@ class TurnoPdcDettaglioRead(BaseModel):
     # (popolate dal builder, vedi NORMATIVA-PDC §11/§10.6). MR 4 non
     # le ricalcola, le passa attraverso.
     validazioni_ciclo: list[str] = []
+    # Sprint 7.9 MR η: deposito PdC associato + cap FR.
+    deposito_pdc_id: int | None = None
+    deposito_pdc_codice: str | None = None
+    deposito_pdc_display: str | None = None
+    n_dormite_fr: int = 0
+    fr_cap_violazioni: list[str] = []
 
 
 # =====================================================================
@@ -194,6 +212,15 @@ async def genera_turno_pdc_endpoint(
     giro_id: int,
     valido_da: date | None = Query(default=None, description="Data validità turno (default: oggi)"),
     force: bool = Query(default=False, description="Sovrascrive turni precedenti"),
+    deposito_pdc_id: int | None = Query(
+        default=None,
+        description=(
+            "ID del deposito PdC che coprirà il turno. Se valorizzato, "
+            "la stazione di residenza per il calcolo FR è la "
+            "stazione_principale del deposito. Se None mantiene il "
+            "comportamento legacy (sede = stazione del materiale)."
+        ),
+    ),
     user: CurrentUser = _authz_write_turni,
     session: AsyncSession = Depends(get_session),
 ) -> list[TurnoPdcGenerazioneResponse]:
@@ -201,6 +228,9 @@ async def genera_turno_pdc_endpoint(
     PdC, uno per ogni combinazione di varianti calendario delle giornate
     del giro. Con A1 strict (default oggi) la lista contiene 1 elemento;
     con varianti multiple aggiunte manualmente la lista cresce.
+
+    Sprint 7.9 MR η: il parametro ``deposito_pdc_id`` rende il turno
+    "di proprietà" di un deposito PdC, e impone i cap FR (1/sett, 3/28gg).
     """
     try:
         results: list[BuilderTurnoPdcResult] = await genera_turno_pdc(
@@ -209,8 +239,11 @@ async def genera_turno_pdc_endpoint(
             giro_id=giro_id,
             valido_da=valido_da,
             force=force,
+            deposito_pdc_id=deposito_pdc_id,
         )
     except GiroNonTrovatoError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except DepositoPdcNonTrovatoError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except GiroVuotoError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)) from e
@@ -230,6 +263,10 @@ async def genera_turno_pdc_endpoint(
             split_origine_giornata=r.split_origine_giornata,
             split_ramo=r.split_ramo,
             split_totale_rami=r.split_totale_rami,
+            deposito_pdc_id=r.deposito_pdc_id,
+            deposito_pdc_codice=r.deposito_pdc_codice,
+            n_dormite_fr=r.n_dormite_fr,
+            fr_cap_violazioni=r.fr_cap_violazioni,
         )
         for r in results
     ]
@@ -238,6 +275,60 @@ async def genera_turno_pdc_endpoint(
 # =====================================================================
 # GET /api/giri/{giro_id}/turni-pdc
 # =====================================================================
+
+
+async def _carica_depot_per_turni(
+    session: AsyncSession, turni: list[TurnoPdc]
+) -> dict[int, Depot]:
+    """Carica i Depot referenziati dai turni in un'unica query.
+
+    Sprint 7.9 MR η: usato dai list/detail endpoint per arricchire la
+    response con ``deposito_pdc_codice`` / ``deposito_pdc_display``
+    senza N+1.
+    """
+    depot_ids = {t.deposito_pdc_id for t in turni if t.deposito_pdc_id is not None}
+    if not depot_ids:
+        return {}
+    rows = list(
+        (
+            await session.execute(select(Depot).where(Depot.id.in_(depot_ids)))
+        ).scalars()
+    )
+    return {d.id: d for d in rows}
+
+
+def _to_list_item(
+    t: TurnoPdc,
+    giornate: list[TurnoPdcGiornata],
+    depot_by_id: dict[int, Depot],
+) -> TurnoPdcListItem:
+    """Mapping uniforme TurnoPdc → TurnoPdcListItem (Sprint 7.9 MR η)."""
+    meta = t.generation_metadata_json or {}
+    depot = depot_by_id.get(t.deposito_pdc_id) if t.deposito_pdc_id is not None else None
+    fr_cap = meta.get("fr_cap_violazioni") or []
+    return TurnoPdcListItem(
+        id=t.id,
+        codice=t.codice,
+        impianto=t.impianto,
+        profilo=t.profilo,
+        ciclo_giorni=t.ciclo_giorni,
+        valido_da=t.valido_da,
+        stato=t.stato,
+        created_at=t.created_at,
+        n_giornate=len(giornate),
+        prestazione_totale_min=sum(g.prestazione_min for g in giornate),
+        condotta_totale_min=sum(g.condotta_min for g in giornate),
+        n_violazioni=len(meta.get("violazioni", []) or []),
+        n_dormite_fr=len(meta.get("fr_giornate", []) or []),
+        is_ramo_split=bool(meta.get("is_ramo_split", False)),
+        split_origine_giornata=meta.get("split_origine_giornata"),
+        split_ramo=meta.get("split_ramo"),
+        split_totale_rami=meta.get("split_totale_rami"),
+        deposito_pdc_id=t.deposito_pdc_id,
+        deposito_pdc_codice=depot.codice if depot is not None else None,
+        deposito_pdc_display=depot.display_name if depot is not None else None,
+        n_fr_cap_violazioni=len(fr_cap),
+    )
 
 
 @router.get(
@@ -278,32 +369,8 @@ async def list_turni_pdc_giro(
     for g in giornate:
         giornate_per_turno.setdefault(g.turno_pdc_id, []).append(g)
 
-    out: list[TurnoPdcListItem] = []
-    for t in turni:
-        gg = giornate_per_turno.get(t.id, [])
-        meta = t.generation_metadata_json or {}
-        out.append(
-            TurnoPdcListItem(
-                id=t.id,
-                codice=t.codice,
-                impianto=t.impianto,
-                profilo=t.profilo,
-                ciclo_giorni=t.ciclo_giorni,
-                valido_da=t.valido_da,
-                stato=t.stato,
-                created_at=t.created_at,
-                n_giornate=len(gg),
-                prestazione_totale_min=sum(g.prestazione_min for g in gg),
-                condotta_totale_min=sum(g.condotta_min for g in gg),
-                n_violazioni=len(meta.get("violazioni", []) or []),
-                n_dormite_fr=len(meta.get("fr_giornate", []) or []),
-                is_ramo_split=bool(meta.get("is_ramo_split", False)),
-                split_origine_giornata=meta.get("split_origine_giornata"),
-                split_ramo=meta.get("split_ramo"),
-                split_totale_rami=meta.get("split_totale_rami"),
-            )
-        )
-    return out
+    depot_by_id = await _carica_depot_per_turni(session, turni)
+    return [_to_list_item(t, giornate_per_turno.get(t.id, []), depot_by_id) for t in turni]
 
 
 # =====================================================================
@@ -319,6 +386,13 @@ async def list_turni_pdc_giro(
 async def list_turni_pdc_azienda(
     impianto: str | None = Query(
         None, description="Filtra per impianto (deposito personale)."
+    ),
+    deposito_pdc_id: int | None = Query(
+        None,
+        description=(
+            "Filtra per deposito PdC associato (Sprint 7.9 MR η). "
+            "Esclude i turni legacy senza FK valorizzata."
+        ),
     ),
     stato: str | None = Query(None, description="Filtra per stato (es. 'bozza')."),
     profilo: str | None = Query(None, description="Filtra per profilo (es. 'Condotta')."),
@@ -349,6 +423,8 @@ async def list_turni_pdc_azienda(
     stmt = select(TurnoPdc).where(TurnoPdc.azienda_id == user.azienda_id)
     if impianto is not None:
         stmt = stmt.where(TurnoPdc.impianto == impianto)
+    if deposito_pdc_id is not None:
+        stmt = stmt.where(TurnoPdc.deposito_pdc_id == deposito_pdc_id)
     if stato is not None:
         stmt = stmt.where(TurnoPdc.stato == stato)
     if profilo is not None:
@@ -378,32 +454,8 @@ async def list_turni_pdc_azienda(
     for g in giornate:
         giornate_per_turno.setdefault(g.turno_pdc_id, []).append(g)
 
-    out: list[TurnoPdcListItem] = []
-    for t in turni:
-        gg = giornate_per_turno.get(t.id, [])
-        meta = t.generation_metadata_json or {}
-        out.append(
-            TurnoPdcListItem(
-                id=t.id,
-                codice=t.codice,
-                impianto=t.impianto,
-                profilo=t.profilo,
-                ciclo_giorni=t.ciclo_giorni,
-                valido_da=t.valido_da,
-                stato=t.stato,
-                created_at=t.created_at,
-                n_giornate=len(gg),
-                prestazione_totale_min=sum(g.prestazione_min for g in gg),
-                condotta_totale_min=sum(g.condotta_min for g in gg),
-                n_violazioni=len(meta.get("violazioni", []) or []),
-                n_dormite_fr=len(meta.get("fr_giornate", []) or []),
-                is_ramo_split=bool(meta.get("is_ramo_split", False)),
-                split_origine_giornata=meta.get("split_origine_giornata"),
-                split_ramo=meta.get("split_ramo"),
-                split_totale_rami=meta.get("split_totale_rami"),
-            )
-        )
-    return out
+    depot_by_id = await _carica_depot_per_turni(session, turni)
+    return [_to_list_item(t, giornate_per_turno.get(t.id, []), depot_by_id) for t in turni]
 
 
 # =====================================================================
@@ -663,6 +715,17 @@ async def get_turno_pdc_dettaglio(
     raw_validazioni = metadata.get("violazioni", []) or []
     validazioni_ciclo: list[str] = [str(v) for v in raw_validazioni if isinstance(v, str)]
 
+    # Sprint 7.9 MR η — deposito PdC + KPI FR
+    depot: Depot | None = None
+    if turno.deposito_pdc_id is not None:
+        depot = (
+            await session.execute(
+                select(Depot).where(Depot.id == turno.deposito_pdc_id)
+            )
+        ).scalar_one_or_none()
+    fr_giornate_meta = metadata.get("fr_giornate", []) or []
+    fr_cap_meta = metadata.get("fr_cap_violazioni", []) or []
+
     return TurnoPdcDettaglioRead(
         id=turno.id,
         codice=turno.codice,
@@ -679,4 +742,9 @@ async def get_turno_pdc_dettaglio(
         n_violazioni_hard=n_violazioni_hard,
         n_violazioni_soft=n_violazioni_soft,
         validazioni_ciclo=validazioni_ciclo,
+        deposito_pdc_id=turno.deposito_pdc_id,
+        deposito_pdc_codice=depot.codice if depot is not None else None,
+        deposito_pdc_display=depot.display_name if depot is not None else None,
+        n_dormite_fr=len(fr_giornate_meta),
+        fr_cap_violazioni=[str(v) for v in fr_cap_meta if isinstance(v, str)],
     )

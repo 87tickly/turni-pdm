@@ -13,8 +13,27 @@ function makeOverview(over: Partial<PianificatorePdcOverview> = {}): Pianificato
       { impianto: "BRESCIA", count: 4 },
       { impianto: "MILANO_GA", count: 8 },
     ],
+    turni_pdc_per_deposito: [
+      {
+        deposito_pdc_id: 1,
+        deposito_pdc_codice: "BRESCIA",
+        deposito_pdc_display: "Brescia",
+        count: 4,
+        n_dormite_fr_totali: 0,
+      },
+      {
+        deposito_pdc_id: 2,
+        deposito_pdc_codice: "MILANO_GA",
+        deposito_pdc_display: "Milano Garibaldi",
+        count: 8,
+        n_dormite_fr_totali: 0,
+      },
+    ],
     turni_con_violazioni_hard: 2,
     revisioni_cascading_attive: 0,
+    dormite_fr_totali: 0,
+    turni_con_fr_cap_violazioni: 0,
+    depositi_pdc_totali: 25,
     ...over,
   };
 }
@@ -67,7 +86,8 @@ describe("PianificatorePdcDashboardRoute", () => {
     });
     // KPI Turni PdC totali (somma 4+8 = 12)
     expect(screen.getByText("12")).toBeInTheDocument();
-    expect(screen.getByText("Su 2 impianto/i")).toBeInTheDocument();
+    // Sprint 7.9 MR η: "Su N deposito/i" deriva da `turni_pdc_per_deposito`.
+    expect(screen.getByText("Su 2 deposito/i")).toBeInTheDocument();
     // KPI Violazioni hard
     expect(
       screen.getByText("Prestazione/condotta fuori cap"),
@@ -91,7 +111,14 @@ describe("PianificatorePdcDashboardRoute", () => {
 
   it("breakdown vuoto → messaggio nessun turno", async () => {
     fetchSpy.mockResolvedValueOnce(
-      jsonResponse(makeOverview({ turni_pdc_per_impianto: [] })),
+      jsonResponse(
+        makeOverview({
+          turni_pdc_per_impianto: [],
+          // Sprint 7.9 MR η: la dashboard guarda `turni_pdc_per_deposito`,
+          // serve azzerare anche questo per il caso "nessun turno".
+          turni_pdc_per_deposito: [],
+        }),
+      ),
     );
 
     renderRoute();

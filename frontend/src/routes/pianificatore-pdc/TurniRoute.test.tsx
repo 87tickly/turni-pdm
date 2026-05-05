@@ -25,6 +25,10 @@ function makeTurno(over: Partial<TurnoPdcListItem> = {}): TurnoPdcListItem {
     split_origine_giornata: null,
     split_ramo: null,
     split_totale_rami: null,
+    deposito_pdc_id: null,
+    deposito_pdc_codice: null,
+    deposito_pdc_display: null,
+    n_fr_cap_violazioni: 0,
     ...over,
   };
 }
@@ -152,7 +156,10 @@ describe("PianificatorePdcTurniRoute", () => {
     });
 
     fetchSpy.mockResolvedValueOnce(jsonResponse([]));
-    fireEvent.change(screen.getByLabelText(/Filtra per impianto/i), {
+    // Sprint 7.9 MR η: filtro rinominato "Filtra per deposito" (semantica
+    // FK), continua a popolare la query string `impianto=` per backward
+    // compat con l'endpoint esistente.
+    fireEvent.change(screen.getByLabelText(/Filtra per deposito/i), {
       target: { value: "BRESCIA" },
     });
 

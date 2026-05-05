@@ -52,6 +52,11 @@ function makeTurno(over: Partial<TurnoPdcDettaglio> = {}): TurnoPdcDettaglio {
     n_violazioni_hard: 0,
     n_violazioni_soft: 0,
     validazioni_ciclo: [],
+    deposito_pdc_id: null,
+    deposito_pdc_codice: null,
+    deposito_pdc_display: null,
+    n_dormite_fr: 0,
+    fr_cap_violazioni: [],
     ...over,
   };
 }

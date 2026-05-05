@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowRight,
+  BedDouble,
   Building2,
   CheckCircle2,
   ListChecks,
@@ -54,14 +55,33 @@ export function PianificatorePdcDashboardRoute() {
   const turniTotali = data === undefined
     ? 0
     : data.turni_pdc_per_impianto.reduce((sum, item) => sum + item.count, 0);
-  const impiantiCount = data?.turni_pdc_per_impianto.length ?? 0;
-  const impiantiTotali = depotsQuery.data?.length ?? null;
+  // Sprint 7.9 MR η — ora usiamo la distribuzione per deposito FK
+  // (`turni_pdc_per_deposito`); i turni con FK valorizzata danno i
+  // depositi "veri", quelli legacy hanno deposito_pdc_id null.
+  const depositiCoperti = useMemo(() => {
+    if (data === undefined) return 0;
+    return data.turni_pdc_per_deposito.filter(
+      (d) => d.deposito_pdc_id !== null && d.count > 0,
+    ).length;
+  }, [data]);
+  const impiantiTotali =
+    data?.depositi_pdc_totali ?? depotsQuery.data?.length ?? null;
   const violazioniHard = data?.turni_con_violazioni_hard ?? 0;
+  const dormiteFr = data?.dormite_fr_totali ?? 0;
+  const turniFrCap = data?.turni_con_fr_cap_violazioni ?? 0;
 
-  const turniList = turniQuery.data ?? [];
+  // Stabilizziamo l'array per evitare di invalidare i useMemo a valle
+  // ad ogni render (regola react-hooks/exhaustive-deps).
+  const turniList = useMemo(() => turniQuery.data ?? [], [turniQuery.data]);
 
   // Primo turno con violazioni (per CTA banner). Lista sortata da API
   // per created_at desc; client-side filtra per n_violazioni > 0.
+  // Sprint 7.9 MR η: prioritizza turni con cap FR violato — più urgente
+  // di un'eccedenza prestazione perché tocca il vincolo PdC normativo.
+  const turnoFrCap = useMemo(
+    () => turniList.find((t) => t.n_fr_cap_violazioni > 0),
+    [turniList],
+  );
   const turnoViolato = useMemo(
     () => turniList.find((t) => t.n_violazioni > 0),
     [turniList],
@@ -74,6 +94,14 @@ export function PianificatorePdcDashboardRoute() {
     }
     if (overview.isError) {
       return { kind: "error" as const };
+    }
+    if (turniFrCap > 0 && turnoFrCap !== undefined) {
+      return {
+        kind: "fr-cap" as const,
+        count: turniFrCap,
+        primoTurno: turnoFrCap.codice,
+        href: `/pianificatore-pdc/turni/${turnoFrCap.id}`,
+      };
     }
     if (violazioniHard > 0 && turnoViolato !== undefined) {
       return {
@@ -111,7 +139,16 @@ export function PianificatorePdcDashboardRoute() {
       };
     }
     return { kind: "empty" as const };
-  }, [overview.isLoading, overview.isError, violazioniHard, turnoViolato, giriCount, turniTotali]);
+  }, [
+    overview.isLoading,
+    overview.isError,
+    turniFrCap,
+    turnoFrCap,
+    violazioniHard,
+    turnoViolato,
+    giriCount,
+    turniTotali,
+  ]);
 
   const ultimiTurni = useMemo(() => turniList.slice(0, 5), [turniList]);
 
@@ -134,8 +171,8 @@ export function PianificatorePdcDashboardRoute() {
       {/* BANNER CTA "Cosa fare ora" */}
       <CtaBanner cta={cta} />
 
-      {/* 4 KPI grandi */}
-      <section className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+      {/* 5 KPI grandi (Sprint 7.9 MR η: aggiunto FR) */}
+      <section className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
         <KpiCard
           icon={Workflow}
           label="Giri materiali"
@@ -152,7 +189,7 @@ export function PianificatorePdcDashboardRoute() {
           error={overview.isError}
           hint={
             turniTotali > 0
-              ? `Su ${impiantiCount} impianto/i`
+              ? `Su ${depositiCoperti} deposito/i`
               : "Nessuno generato"
           }
           accent={turniTotali === 0 && !overview.isLoading ? "warning" : "neutral"}
@@ -167,9 +204,22 @@ export function PianificatorePdcDashboardRoute() {
           accent={violazioniHard > 0 ? "danger" : "neutral"}
         />
         <KpiCard
+          icon={BedDouble}
+          label="Dormite FR"
+          value={dormiteFr}
+          loading={overview.isLoading}
+          error={overview.isError}
+          hint={
+            turniFrCap > 0
+              ? `${turniFrCap} turno/i con cap FR violato`
+              : "Pernotti fuori sede totali"
+          }
+          accent={turniFrCap > 0 ? "danger" : dormiteFr > 0 ? "warning" : "neutral"}
+        />
+        <KpiCard
           icon={Building2}
-          label="Impianti coperti"
-          value={impiantiCount}
+          label="Depositi coperti"
+          value={depositiCoperti}
           loading={overview.isLoading}
           error={overview.isError}
           hint={
@@ -245,9 +295,13 @@ export function PianificatorePdcDashboardRoute() {
         <Card className="flex flex-col p-4">
           <div className="mb-3 flex items-baseline justify-between">
             <h2 className="text-sm font-semibold text-primary">
-              Distribuzione per impianto
+              Distribuzione per deposito PdC
             </h2>
-            <span className="text-xs text-muted-foreground">25 depositi PdC Trenord</span>
+            {impiantiTotali !== null && (
+              <span className="text-xs text-muted-foreground">
+                {impiantiTotali} depositi PdC totali
+              </span>
+            )}
           </div>
           {overview.isLoading ? (
             <div className="flex items-center justify-center py-8">
@@ -257,26 +311,46 @@ export function PianificatorePdcDashboardRoute() {
             <p className="py-4 text-sm text-destructive" role="alert">
               Errore caricamento KPI: {overview.error?.message ?? "errore sconosciuto"}
             </p>
-          ) : data === undefined || data.turni_pdc_per_impianto.length === 0 ? (
+          ) : data === undefined || data.turni_pdc_per_deposito.length === 0 ? (
             <p className="py-4 text-sm text-muted-foreground">
               Nessun turno PdC presente per la tua azienda.
             </p>
           ) : (
             <ul className="flex flex-col gap-1 text-sm">
-              {data.turni_pdc_per_impianto.map((item) => {
+              {data.turni_pdc_per_deposito.map((item) => {
                 // Mini-bar proporzionale al max nella lista (visual quick-scan)
                 const max = Math.max(
-                  ...data.turni_pdc_per_impianto.map((x) => x.count),
+                  ...data.turni_pdc_per_deposito.map((x) => x.count),
                   1,
                 );
                 const widthPct = (item.count / max) * 100;
+                const label =
+                  item.deposito_pdc_codice ?? "(senza deposito)";
+                const tooltip = item.deposito_pdc_display ?? "Turni legacy senza FK deposito";
                 return (
                   <li
-                    key={item.impianto}
+                    key={`${item.deposito_pdc_id ?? "legacy"}-${label}`}
                     className="flex items-center justify-between gap-3 py-1"
                   >
-                    <span className="font-medium">{item.impianto}</span>
-                    <span className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "font-medium truncate",
+                        item.deposito_pdc_id === null && "italic text-muted-foreground",
+                      )}
+                      title={tooltip}
+                    >
+                      {label}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      {item.n_dormite_fr_totali > 0 && (
+                        <span
+                          className="inline-flex items-center gap-0.5 text-[10px] text-amber-700"
+                          title={`${item.n_dormite_fr_totali} dormite FR`}
+                        >
+                          <BedDouble className="h-3 w-3" aria-hidden />
+                          {item.n_dormite_fr_totali}
+                        </span>
+                      )}
                       <span
                         className="h-1.5 rounded-full bg-primary/30"
                         style={{ width: `${widthPct * 0.8}px` }}
@@ -326,6 +400,7 @@ type LucideIcon = ComponentType<SVGProps<SVGSVGElement>>;
 type CtaState =
   | { kind: "loading" }
   | { kind: "error" }
+  | { kind: "fr-cap"; count: number; primoTurno: string; href: string }
   | { kind: "violazioni"; count: number; primoTurno: string; href: string }
   | { kind: "violazioni-no-link"; count: number }
   | { kind: "primo-turno"; giri: number; href: string }
@@ -338,6 +413,38 @@ function CtaBanner({ cta }: { cta: CtaState }) {
     return (
       <div className="rounded-lg border border-border bg-muted/30 px-5 py-4 text-sm text-muted-foreground">
         {cta.kind === "loading" ? "Verifico lo stato della pianificazione…" : "Stato pianificazione non disponibile."}
+      </div>
+    );
+  }
+
+  if (cta.kind === "fr-cap") {
+    return (
+      <div className="flex items-center justify-between gap-4 rounded-lg border border-red-300 bg-red-50 px-5 py-4">
+        <div className="flex items-start gap-3">
+          <BedDouble className="mt-0.5 h-5 w-5 shrink-0 text-red-600" aria-hidden />
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-red-700">
+              Cosa fare ora · Cap FR violato
+            </div>
+            <div className="text-base font-semibold text-red-900">
+              Hai {cta.count} turno
+              {cta.count === 1 ? "" : "/i"} oltre il limite FR di NORMATIVA-PDC §10.6
+            </div>
+            <div className="text-xs text-red-800">
+              Inizia dal turno{" "}
+              <span className="font-mono font-semibold">{cta.primoTurno}</span>:
+              valuta un deposito più vicino al fine giornata, oppure rigenera
+              senza FR.
+            </div>
+          </div>
+        </div>
+        <Link
+          to={cta.href}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-red-700"
+        >
+          Apri il turno
+          <ArrowRight className="h-4 w-4" aria-hidden />
+        </Link>
       </div>
     );
   }
