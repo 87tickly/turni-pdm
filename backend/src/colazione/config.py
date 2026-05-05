@@ -50,11 +50,20 @@ class Settings(BaseSettings):
     default_azienda: str = "trenord"
 
     # --- Sprint 7.10 MR α.5: API live arturo (vetture passive) ---
+    # Sprint 7.10 MR α.8.3 (entry 164): default switched dal backend
+    # diretto Railway (arturo-production.up.railway.app) al dominio
+    # pubblico live.arturo.travel — il frontend Next.js fa proxy sul
+    # backend interno con rate limit meno aggressivo. Decisione
+    # utente 2026-05-05: *"usa questo link https://live.arturo.travel/
+    # per chiamare l'API"*.
     live_arturo_api_url: str = Field(
-        default="https://arturo-production.up.railway.app",
+        default="https://live.arturo.travel",
         description=(
-            "Base URL per l'API live di ARTURO (project Railway "
-            "ARTURO-live, service arturo). Esposta senza auth in MR α.5."
+            "Base URL per l'API live di ARTURO. Default = dominio "
+            "pubblico (live.arturo.travel) che proxia il backend "
+            "interno (arturo-production.up.railway.app) con rate "
+            "limit meno aggressivo. Sovrascrivibile via env var per "
+            "test locali."
         ),
     )
     live_arturo_timeout_sec: float = Field(
