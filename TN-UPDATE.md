@@ -10,6 +10,97 @@
 
 ---
 
+## 2026-05-05 (152) — Sprint 7.10 MR α.3: UI dialog multi-turno (banner riepilogo N turni / depositi distinti)
+
+### Contesto
+
+MR α.2 (entry 151) è in produzione: l'endpoint
+`POST /api/giri/{id}/genera-turno-pdc` ora produce N turni PdC
+autonomi via DP + heuristic depot. Il dialog frontend deve
+riflettere questa semantica: niente più selettore manuale del
+deposito (il builder lo sceglie auto per ogni segmento), banner
+riepilogo che mostra N turni + N depositi distinti.
+
+### Modifiche
+
+**`GeneraTurnoPdcDialog.tsx`**:
+
+- `DialogDescription` aggiornata: *"Genera **N turni PdC** autonomi
+  che coprono questo giro materiale. L'algoritmo segmenta ogni
+  giornata-giro in sotto-segmenti entro cap normativi e assegna
+  ad ogni segmento il deposito più vicino alla sua tratta."*
+- **Rimosso** il blocco selettore manuale "Deposito PdC che coprirà
+  il turno" (era MR η) — non si applica al multi-turno (= ogni
+  segmento ha il suo deposito).
+- **Rimosso** `<SuggerimentiBlock>` + `<SuggerimentoCard>` (erano
+  MR η.1) — l'auto-suggerimento aveva senso quando l'utente
+  sceglieva 1 deposito; nel multi-turno la scelta è automatica
+  per ogni segmento. Hook `useSuggerisciDepositi` resta esportato
+  da `useTurniPdc.ts` per usi futuri.
+- **Sostituito** con banner verde *"Builder multi-turno (Sprint 7.10
+  α.2). L'algoritmo DP segmenta il giro in N turni PdC autonomi
+  entro cap normativi e assegna a ciascuno il deposito più vicino
+  alla sua tratta. Niente scelta manuale per giro: il deposito è
+  per-segmento."*
+- Rimosso il messaggio obsoleto *"MVP Sprint 7.2"* + *"split CV
+  intermedio arriva Sprint 7.4"* (chiusi entrambi).
+- **`<ResultsCard>`** rifatto: invece del semplice count, ora mostra:
+  - "Generati N turni PdC autonomi"
+  - "Coperti da M depositi distinti" (calcolato da
+    `new Set(results.map(r => r.deposito_pdc_codice).filter(...))`)
+  - "K segmenti senza deposito (tratta non coperta da CV)" se
+    qualche `deposito_pdc_codice === null` (= la tratta non passa
+    da nessun depot popolato → flag esplicito, non nascosto)
+  - "X dormite FR totali" se qualcuno > 0
+  - "Y violazioni normativa" in rosso se qualcuno > 0
+- **`submit`** non passa più `deposito_pdc_id`: il backend lo
+  ignorerebbe comunque nel multi-turno.
+- Stato `depositoPdcId` + `useDepots` + `useMemo` rimossi (dead
+  code dopo refactor).
+
+### Verifiche
+
+- ✅ `pnpm tsc -b --noEmit`: clean.
+- ✅ `pnpm test --run`: **52 passed, 1 skipped**, 0 failed.
+- ✅ `pnpm lint`: 0 errors (2 warning pre-esistenti su Sidebar/Auth
+  Context).
+- ✅ `pnpm build`: 1778 modules, **627KB JS / 169KB gz** (-4KB
+  rispetto al MR η.1 grazie alla rimozione del componente
+  `<SuggerimentiBlock>` e dei suoi import).
+- ⏳ Smoke utente Trenord post-deploy frontend: aprire dialog su
+  giro reale, verificare che produca N turni distinti (è il test
+  di accettazione richiesto dall'utente).
+
+### Stato
+
+- ✅ Sprint 7.10 MR α (α.1 + α.2 + α.3) chiuso a livello di
+  codice.
+- ⏳ Smoke utente in produzione (Railway frontend deploy in corso
+  appena dopo questo push).
+
+### Limitazioni dichiarate
+
+Nessuna nuova rispetto a MR α.2. Resta vero che:
+
+- Il DP è LOCALE per giornata-giro, non globale sullo "spaghetto"
+  intero del giro. Lo scambio inter-giornata è scope MR α.2.bis
+  se i casi reali lo richiedono.
+- Il deposito è scelto da heuristic post-DP (non DP completa sullo
+  stato deposito). Se vediamo casi sub-ottimali in produzione,
+  evolviamo in α.2.ter.
+- Refezione gestita come pre-α.2 dal builder MVP per ogni segmento.
+
+### Prossimo step
+
+Smoke utente in produzione su un giro Trenord reale (es. ETR421-6g
+o quello del screenshot). Atteso: invece di 1 turno con 124h53
+prestazione + 6/6 violazioni, **N turni** (probabilmente 3-5 per
+giornata-giro × 6 giornate ≈ 18-30 turni totali) ognuno con il
+suo deposito FIORENZA/LECCO/CREMONA/etc. e **0 violazioni hard**
+(o segmenti residui con violazioni se la tratta non ha CV).
+
+---
+
 ## 2026-05-05 (151) — Sprint 7.10 MR α.2: builder PdC multi-turno con DP
 
 ### Contesto

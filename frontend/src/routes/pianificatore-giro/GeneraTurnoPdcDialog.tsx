@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -18,13 +18,9 @@ import {
   DialogTitle,
 } from "@/components/ui/Dialog";
 import { Spinner } from "@/components/ui/Spinner";
-import { useDepots } from "@/hooks/useAnagrafiche";
-import { useGeneraTurnoPdc, useSuggerisciDepositi } from "@/hooks/useTurniPdc";
+import { useGeneraTurnoPdc } from "@/hooks/useTurniPdc";
 import { ApiError } from "@/lib/api/client";
-import type {
-  DepositoSuggerimentoResponse,
-  TurnoPdcGenerazioneResponse,
-} from "@/lib/api/turniPdc";
+import type { TurnoPdcGenerazioneResponse } from "@/lib/api/turniPdc";
 
 interface GeneraTurnoPdcDialogProps {
   giroId: number;
@@ -51,34 +47,18 @@ export function GeneraTurnoPdcDialog({
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [needsForce, setNeedsForce] = useState(false);
-  // Sprint 7.5 MR 5: la mutation ritorna `TurnoPdcGenerazioneResponse[]`
-  // (1 elemento per variante calendario del giro). Con A1 strict default
-  // = 1 elemento, con varianti multiple cresce.
+  // Sprint 7.5 MR 5: la mutation ritorna `TurnoPdcGenerazioneResponse[]`.
+  // Con il builder multi-turno (Sprint 7.10 α.2) la lista contiene N
+  // elementi: un turno PdC autonomo per ogni segmento DP del giro.
   const [results, setResults] = useState<TurnoPdcGenerazioneResponse[] | null>(null);
-  // Sprint 7.9 MR η — deposito PdC target per minimizzare FR.
-  const [depositoPdcId, setDepositoPdcId] = useState<number | "">("");
 
   const generaMutation = useGeneraTurnoPdc();
-  const depotsQuery = useDepots();
-  // Sprint 7.9 MR η.1 — suggerimenti automatici top-3 quando il dialog
-  // è aperto. Cache 5 min: non rifa la simulazione se l'utente riapre
-  // il dialog sullo stesso giro.
-  const suggerimentiQuery = useSuggerisciDepositi(giroId, open, 3);
-
-  const depotOptions = useMemo(
-    () =>
-      (depotsQuery.data ?? [])
-        .slice()
-        .sort((a, b) => a.display_name.localeCompare(b.display_name, "it")),
-    [depotsQuery.data],
-  );
 
   const handleClose = (next: boolean) => {
     if (!next) {
       setError(null);
       setNeedsForce(false);
       setResults(null);
-      setDepositoPdcId("");
     }
     onOpenChange(next);
   };
@@ -86,13 +66,13 @@ export function GeneraTurnoPdcDialog({
   const submit = async (forceFlag: boolean) => {
     setError(null);
     try {
+      // Sprint 7.10 MR α.2: niente più deposito_pdc_id a livello giro.
+      // Il backend multi-turno sceglie il deposito ottimale per ogni
+      // segmento DP via heuristic post-DP. Il param è ancora accettato
+      // dall'API per backward compat ma viene ignorato.
       const r = await generaMutation.mutateAsync({
         giroId,
-        params: {
-          force: forceFlag,
-          deposito_pdc_id:
-            depositoPdcId === "" ? undefined : Number(depositoPdcId),
-        },
+        params: { force: forceFlag },
       });
       setResults(r);
       setNeedsForce(false);
@@ -110,7 +90,6 @@ export function GeneraTurnoPdcDialog({
   const running = generaMutation.isPending;
   const showForm = results === null;
   const showResult = results !== null;
-  const depotChosen = depositoPdcId !== "";
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -118,72 +97,47 @@ export function GeneraTurnoPdcDialog({
         <DialogHeader>
           <DialogTitle>Genera turno PdC</DialogTitle>
           <DialogDescription>
-            Costruisce un turno PdC dai blocchi di questo giro materiale: una
-            giornata PdC per ogni giornata del giro, con presa servizio,
-            accessori, refezione (se &gt;6h), e dormite FR per i pernotti
-            fuori sede.
+            Genera <strong>N turni PdC</strong> autonomi che coprono questo
+            giro materiale. L&apos;algoritmo segmenta ogni giornata-giro in
+            sotto-segmenti entro cap normativi (prestazione 8h30, condotta
+            5h30) e assegna ad ogni segmento il deposito più vicino alla
+            sua tratta.
           </DialogDescription>
         </DialogHeader>
 
         {showForm && (
           <div className="flex flex-col gap-3 text-sm">
-            {/* Sprint 7.9 MR η.1 — suggerimenti automatici top-3 */}
-            <SuggerimentiBlock
-              query={suggerimentiQuery}
-              selectedId={depositoPdcId === "" ? null : Number(depositoPdcId)}
-              onSelect={(id) => setDepositoPdcId(id)}
-            />
-            {/* Sprint 7.9 MR η — selettore deposito PdC target */}
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="genera-pdc-depot"
-                className="flex items-center gap-1.5 text-xs font-semibold text-foreground"
-              >
-                <Building2 className="h-3.5 w-3.5 text-primary" aria-hidden />
-                Deposito PdC che coprirà il turno
-              </label>
-              <select
-                id="genera-pdc-depot"
-                value={depositoPdcId}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setDepositoPdcId(v === "" ? "" : Number(v));
-                }}
-                disabled={running || depotsQuery.isLoading}
-                className="h-9 rounded-md border border-border bg-background px-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-60"
-              >
-                <option value="">— Nessun deposito (legacy: usa sede materiale) —</option>
-                {depotOptions.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.display_name} ({d.codice})
-                  </option>
-                ))}
-              </select>
-              <p className="text-[11px] text-muted-foreground">
-                Quando scegli un deposito, il builder usa la sua stazione
-                principale come residenza del PdC e applica i cap FR
-                normativi (max 1 dormita/settimana, 3 ogni 28 giorni).
-                L&apos;obiettivo è minimizzare i pernotti fuori sede.
-              </p>
+            {/* Sprint 7.10 MR α.2 — il builder è ora multi-turno con DP.
+                L'algoritmo segmenta ogni giornata-giro in N sotto-turni e
+                sceglie autonomamente il deposito ottimale per ognuno.
+                Niente più scelta manuale del singolo deposito a livello
+                giro. */}
+            <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50/70 px-3 py-2.5 text-xs text-emerald-900">
+              <Sparkles
+                className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600"
+                aria-hidden
+              />
+              <div className="flex flex-col gap-0.5">
+                <span className="font-semibold">
+                  Builder multi-turno (Sprint 7.10 α.2)
+                </span>
+                <span className="leading-snug">
+                  L&apos;algoritmo DP segmenta il giro in N turni PdC
+                  autonomi entro cap normativi (prestazione 8h30, condotta
+                  5h30) e assegna a ciascuno il deposito più vicino alla
+                  sua tratta. Niente scelta manuale per giro: il deposito
+                  è per-segmento.
+                </span>
+              </div>
             </div>
-            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              <strong>MVP Sprint 7.2.</strong> Il builder costruisce un turno
-              monolitico per giornata. Il CV intermedio (split per
-              prestazione/condotta) arriva nello Sprint 7.4: aspettati
-              violazioni di prestazione/condotta che evidenziano i punti
-              dove servirà uno scambio PdC.
-            </p>
             {needsForce && error !== null && (
               <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
                 <div className="flex flex-col gap-1">
                   <span>{error}</span>
                   <span>
-                    Cliccando &quot;Sovrascrivi&quot; il vecchio turno PdC
-                    {depotChosen
-                      ? " del deposito selezionato"
-                      : " associato al giro"}{" "}
-                    viene eliminato e ricreato.
+                    Cliccando &quot;Sovrascrivi&quot; tutti i turni PdC
+                    associati a questo giro vengono eliminati e ricreati.
                   </span>
                 </div>
               </div>
@@ -255,28 +209,58 @@ export function GeneraTurnoPdcDialog({
 }
 
 function ResultsCard({ results }: { results: TurnoPdcGenerazioneResponse[] }) {
-  // Sprint 7.5 MR 5: render lista di turni generati. Per A1 strict
-  // (default) la lista ha 1 elemento; con varianti calendario multiple
-  // cresce — ogni turno ha codice `T-{numero_turno}-V{NN}`.
-  // Sprint 7.4 MR 3: la lista può contenere anche turni "ramo split"
-  // (giornate di giro lunghe spezzate in più turni PdC con CV
-  // intermedio).
+  // Sprint 7.10 MR α.2: ogni elemento è un turno PdC autonomo prodotto
+  // dal DP multi-turno. Per giri lunghi/complessi la lista può
+  // contenere 10-20+ turni distinti, ognuno con il suo deposito.
   if (results.length === 0) return null;
-  const nRamiSplit = results.filter((r) => r.is_ramo_split).length;
+  const depositiDistinti = new Set(
+    results
+      .map((r) => r.deposito_pdc_codice)
+      .filter((c): c is string => c !== null),
+  );
+  const nLegacy = results.filter((r) => r.deposito_pdc_codice === null).length;
+  const nFrTotali = results.reduce((s, r) => s + r.n_dormite_fr, 0);
+  const nViolazioniHard = results.reduce(
+    (s, r) => s + r.violazioni.length + r.fr_cap_violazioni.length,
+    0,
+  );
   return (
     <div className="flex flex-col gap-3 text-sm">
       {results.length > 1 && (
-        <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
-          Generati {results.length} turni PdC
-          {nRamiSplit > 0 && (
-            <>
-              , di cui {nRamiSplit} ram{nRamiSplit === 1 ? "o" : "i"} da
-              split CV intermedio (giornate eccedenti i limiti
-              prestazione/condotta divise in più turni)
-            </>
-          )}
-          .
-        </p>
+        <div className="flex flex-col gap-1 rounded-md border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-900">
+          <span className="font-semibold">
+            Generati {results.length} turni PdC autonomi
+          </span>
+          <span>
+            Coperti da {depositiDistinti.size} deposit
+            {depositiDistinti.size === 1 ? "o" : "i"} distint
+            {depositiDistinti.size === 1 ? "o" : "i"}
+            {nLegacy > 0 && (
+              <>
+                {" "}
+                · {nLegacy} segment{nLegacy === 1 ? "o" : "i"} senza
+                deposito (tratta non coperta da CV)
+              </>
+            )}
+            {nFrTotali > 0 && (
+              <>
+                {" "}
+                · {nFrTotali} dormit{nFrTotali === 1 ? "a" : "e"} FR
+                totali
+              </>
+            )}
+            {nViolazioniHard > 0 && (
+              <>
+                {" "}
+                · <span className="text-red-700 font-medium">
+                  {nViolazioniHard} violazion{nViolazioniHard === 1 ? "e" : "i"}
+                  {" "}normativa
+                </span>
+              </>
+            )}
+            .
+          </span>
+        </div>
       )}
       {results.map((r) => (
         <ResultCard key={r.turno_pdc_id} result={r} />
@@ -369,126 +353,7 @@ function formatHM(min: number): string {
   return `${h}h${m.toString().padStart(2, "0")}`;
 }
 
-// =====================================================================
-// Sprint 7.9 MR η.1 — blocco "Suggerimenti automatici"
-// =====================================================================
-
-interface SuggerimentiBlockProps {
-  query: ReturnType<typeof useSuggerisciDepositi>;
-  selectedId: number | null;
-  onSelect: (id: number) => void;
-}
-
-function SuggerimentiBlock({
-  query,
-  selectedId,
-  onSelect,
-}: SuggerimentiBlockProps) {
-  if (query.isLoading) {
-    return (
-      <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
-        <Spinner label="" />
-        <span>
-          Calcolo dei depositi migliori in corso (simulazione builder per
-          ciascun deposito)…
-        </span>
-      </div>
-    );
-  }
-  if (query.isError) {
-    // Non blocca il flusso: l'utente può sempre scegliere manualmente.
-    return (
-      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-        Auto-suggerimento non disponibile. Scegli manualmente il deposito
-        dal selettore qui sotto.
-      </div>
-    );
-  }
-  const top = query.data ?? [];
-  if (top.length === 0) return null;
-  return (
-    <div className="flex flex-col gap-2 rounded-md border border-blue-200 bg-blue-50/50 px-3 py-2.5">
-      <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-900">
-        <Sparkles className="h-3.5 w-3.5" aria-hidden />
-        Suggerimenti automatici (top {top.length} per minor numero di FR)
-      </div>
-      <div className="flex flex-col gap-1.5">
-        {top.map((s, idx) => (
-          <SuggerimentoCard
-            key={s.deposito_pdc_id}
-            sug={s}
-            rank={idx}
-            isSelected={selectedId === s.deposito_pdc_id}
-            onClick={() => onSelect(s.deposito_pdc_id)}
-          />
-        ))}
-      </div>
-      <p className="text-[11px] leading-snug text-blue-900/80">
-        Cliccando uno dei suggerimenti il selettore qui sotto viene
-        impostato automaticamente. Premi poi “Genera” per creare il turno.
-      </p>
-    </div>
-  );
-}
-
-interface SuggerimentoCardProps {
-  sug: DepositoSuggerimentoResponse;
-  rank: number;
-  isSelected: boolean;
-  onClick: () => void;
-}
-
-function SuggerimentoCard({
-  sug,
-  rank,
-  isSelected,
-  onClick,
-}: SuggerimentoCardProps) {
-  const hasCapViolato = sug.n_fr_cap_violazioni > 0;
-  const isFallback = sug.stazione_sede_fallback;
-  const isBest = rank === 0 && !hasCapViolato && !isFallback;
-  const tone = hasCapViolato
-    ? "border-red-300 bg-red-50/70 hover:bg-red-50"
-    : isFallback
-      ? "border-amber-300 bg-amber-50/70 hover:bg-amber-50"
-      : isBest
-        ? "border-emerald-400 bg-emerald-50/70 hover:bg-emerald-50"
-        : "border-blue-200 bg-white hover:bg-blue-50/40";
-  const selectedRing = isSelected ? "ring-2 ring-primary ring-offset-1" : "";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex w-full items-start gap-2.5 rounded-md border px-2.5 py-2 text-left text-xs transition-colors ${tone} ${selectedRing}`}
-    >
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white font-mono text-[11px] font-semibold text-foreground shadow-sm">
-        #{rank + 1}
-      </div>
-      <div className="flex flex-1 flex-col gap-0.5">
-        <div className="flex flex-wrap items-baseline gap-x-2">
-          <span className="font-semibold text-foreground">
-            {sug.deposito_pdc_display}
-          </span>
-          <span className="font-mono text-[10px] text-muted-foreground">
-            {sug.deposito_pdc_codice}
-          </span>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground/80">
-          <span className="inline-flex items-center gap-1">
-            <BedDouble className="h-3 w-3" aria-hidden />
-            {sug.n_dormite_fr} FR
-          </span>
-          <span>{sug.n_giornate} gg</span>
-          <span>{formatHM(sug.prestazione_totale_min)} prest.</span>
-        </div>
-        <div className="text-[11px] italic text-foreground/70">{sug.motivo}</div>
-      </div>
-      {isSelected && (
-        <CheckCircle2
-          className="mt-0.5 h-4 w-4 shrink-0 text-primary"
-          aria-hidden
-        />
-      )}
-    </button>
-  );
-}
+// NB: il blocco "Suggerimenti automatici" del MR η.1 è stato rimosso
+// con MR α.2 perché il builder multi-turno sceglie autonomamente il
+// deposito ottimale per ogni segmento DP. L'hook useSuggerisciDepositi
+// resta disponibile in `useTurniPdc.ts` per usi futuri.
