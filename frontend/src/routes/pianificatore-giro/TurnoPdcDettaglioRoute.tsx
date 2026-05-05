@@ -122,6 +122,7 @@ export function TurnoPdcDettaglioRoute() {
       </Link>
 
       <Header turno={turno} />
+      <DecisioneBuilderBanner turno={turno} />
       <Stats turno={turno} />
 
       {(validazioniCiclo.length > 0 || frGiornate.length > 0) && (
@@ -191,6 +192,158 @@ function Header({ turno }: { turno: TurnoPdcDettaglio }) {
       </p>
     </header>
   );
+}
+
+/**
+ * Sprint 7.10 MR α.8 (entry 162): banner trasparenza decisione
+ * builder. Decisione utente 2026-05-05: *"non capisco cosa tu abbia
+ * fatto"* + *"non si assegna mai a un deposito senza vetture"*.
+ *
+ * Mostra al pianificatore in modo esplicito:
+ * - Vettura PARTENZA (treno + orario) o "Dormita partenza" se manca
+ * - Vettura RIENTRO o "Dormita FR" se manca
+ * - Stato Fuori Turno (FT) con motivo
+ * - Strategia builder (chiusura in casa / partenza con vettura / etc.)
+ */
+function DecisioneBuilderBanner({ turno }: { turno: TurnoPdcDettaglio }) {
+  const meta = turno.generation_metadata_json;
+  const vp = meta.vettura_partenza ?? null;
+  const vr = meta.vettura_rientro ?? null;
+  const isFt = meta.is_fuori_turno === true;
+  const ftMotivo = meta.fuori_turno_motivo;
+
+  // Niente da mostrare se nessuna decisione tracciata (es. turni
+  // legacy generati prima del MR α.8).
+  if (!isFt && vp === null && vr === null) {
+    return null;
+  }
+
+  return (
+    <section
+      className={cn(
+        "flex flex-col gap-2 rounded-lg border px-4 py-3 text-sm",
+        isFt
+          ? "border-amber-300 bg-amber-50/70"
+          : "border-sky-200 bg-sky-50/40",
+      )}
+      aria-label="Decisione del builder PdC"
+    >
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-foreground">
+        {isFt ? "⚠️ Fuori Turno (FT)" : "🛤 Rientro PdC"}
+      </div>
+      {isFt && ftMotivo !== undefined && (
+        <p className="text-xs leading-snug text-amber-900">{ftMotivo}</p>
+      )}
+      {!isFt && (
+        <div className="flex flex-col gap-1.5">
+          <DecisioneRiga
+            label="Partenza"
+            vettura={vp}
+            depotCodice={turno.deposito_pdc_codice}
+            tipoFallback="dormita_partenza"
+          />
+          <DecisioneRiga
+            label="Rientro"
+            vettura={vr}
+            depotCodice={turno.deposito_pdc_codice}
+            tipoFallback="dormita_rientro"
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DecisioneRiga({
+  label,
+  vettura,
+  depotCodice,
+  tipoFallback,
+}: {
+  label: string;
+  vettura:
+    | NonNullable<TurnoPdcDettaglio["generation_metadata_json"]["vettura_partenza"]>
+    | null;
+  depotCodice: string | null;
+  tipoFallback: "dormita_partenza" | "dormita_rientro";
+}) {
+  // Scenario 1: nessuna decisione → "in casa" se depot definito.
+  if (vettura === null) {
+    return (
+      <div className="flex items-baseline gap-2 text-xs">
+        <span className="w-16 shrink-0 font-mono uppercase tracking-wider text-muted-foreground">
+          {label}
+        </span>
+        <span className="text-foreground">
+          🏠 PdC {label === "Partenza" ? "parte" : "chiude"} in casa
+          {depotCodice !== null && (
+            <>
+              {" "}
+              (deposito{" "}
+              <span className="font-mono font-semibold">{depotCodice}</span>)
+            </>
+          )}
+        </span>
+      </div>
+    );
+  }
+  // Scenario 2: vettura trovata → mostra treno.
+  if (vettura.treno_numero !== null) {
+    const orario =
+      vettura.partenza_min !== undefined
+        ? `${formatHHMM(vettura.partenza_min)} → ${
+            vettura.arrivo_min !== undefined ? formatHHMM(vettura.arrivo_min) : "?"
+          }`
+        : "";
+    const isDormita = vettura.motivo?.includes("dormita");
+    return (
+      <div className="flex items-baseline gap-2 text-xs">
+        <span className="w-16 shrink-0 font-mono uppercase tracking-wider text-muted-foreground">
+          {label}
+        </span>
+        <span className="text-foreground">
+          {isDormita ? "🛏 " : "🪑 "}
+          Vettura {vettura.treno_categoria ?? ""} {vettura.treno_numero}
+          {vettura.operatore !== null && vettura.operatore !== undefined && (
+            <span className="text-muted-foreground">
+              {" "}
+              ({vettura.operatore})
+            </span>
+          )}
+          {" "}
+          {vettura.stazione_partenza ?? "?"} → {vettura.stazione_arrivo ?? "?"}
+          {orario !== "" && (
+            <span className="ml-1 font-mono text-muted-foreground">
+              {orario}
+            </span>
+          )}
+          {isDormita && (
+            <span className="ml-1 italic text-muted-foreground">
+              · dormita la sera prima
+            </span>
+          )}
+        </span>
+      </div>
+    );
+  }
+  // Scenario 3: nessuna vettura ma motivo (= dormita o tratta scoperta).
+  return (
+    <div className="flex items-baseline gap-2 text-xs">
+      <span className="w-16 shrink-0 font-mono uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <span className="text-foreground">
+        🛏 {vettura.motivo ?? `${tipoFallback} (dettagli mancanti)`}
+      </span>
+    </div>
+  );
+}
+
+/** HH:MM dall'inizio giornata (per orari assoluti es. "05:30"). */
+function formatHHMM(min: number): string {
+  const hh = Math.floor(min / 60).toString().padStart(2, "0");
+  const mm = (min % 60).toString().padStart(2, "0");
+  return `${hh}:${mm}`;
 }
 
 function Stats({ turno }: { turno: TurnoPdcDettaglio }) {
@@ -851,8 +1004,14 @@ function SimpleBlock({
   const label = bloccoLabel(blocco);
   const isShort = widthPx < 24;
 
-  // PRESA / FINE / PK / SCOMP — eventi "fermi": barra sottile h-3 sulla
-  // mid-line, segnale visivo che non c'è movimento commerciale.
+  // Sprint 7.10 MR α.8 (entry 162): Gantt compatto. Decisione utente
+  // 2026-05-05: *"riduci i px di tutto ciò che non è treno"*. Solo
+  // CONDOTTA / VETTURA mantengono l'h-7=28px del CommercialBlock; tutti
+  // gli altri tipi (REFEZ / ACCp / ACCa / CV / PK / SCOMP / PRESA /
+  // FINE / DORMITA) si rimpiccoliscono.
+
+  // PRESA / FINE / PK / SCOMP — eventi "fermi": barra sottile h-2 sulla
+  // mid-line, segnale visivo discreto.
   const isThin = tipo === "PRESA" || tipo === "FINE" || tipo === "PK" || tipo === "SCOMP";
 
   if (isThin) {
@@ -871,17 +1030,18 @@ function SimpleBlock({
         style={{
           left: `${startPx}px`,
           width: `${widthPx}px`,
-          top: TIMELINE_ROW_HEIGHT_PX / 2 - 5,
-          height: 10,
+          top: TIMELINE_ROW_HEIGHT_PX / 2 - 4,
+          height: 8,
         }}
       />
     );
   }
 
-  // REFEZ / ACC / CV / DORMITA — eventi con durata significativa che
-  // meritano un blocco di altezza media (h-7 = 28px) ma a singola
-  // riga, allineato col centro della timeline.
-  const top = (TIMELINE_ROW_HEIGHT_PX - 28) / 2;
+  // REFEZ / ACC / CV / DORMITA — eventi accessori. Compatti rispetto
+  // a CONDOTTA: h-5 (20px) anziché h-7 (28px), pip di info più piccolo.
+  // Centrale rispetto alla timeline.
+  const SIMPLE_BLOCK_HEIGHT = 20;
+  const top = (TIMELINE_ROW_HEIGHT_PX - SIMPLE_BLOCK_HEIGHT) / 2;
   return (
     <button
       type="button"
@@ -898,7 +1058,7 @@ function SimpleBlock({
         left: `${startPx}px`,
         width: `${widthPx}px`,
         top,
-        height: 28,
+        height: SIMPLE_BLOCK_HEIGHT,
       }}
     >
       {!isShort && (

@@ -104,6 +104,18 @@ const STAZIONI_ACRONIMI: Record<string, string> = {
   VOGHERA: "Vg",
   // Cremona-Brescia
   TREVIGLIO_OVEST: "TvO",
+  // Sprint 7.10 MR α.8 frontend (entry 162): acronimi Piemonte
+  // richiesti dall'utente. La sigla provincia (VC, AL, NO, AT, BI)
+  // è preferita al pattern algoritmico capoluogo+iniziali perché è
+  // immediatamente riconoscibile per il pianificatore.
+  VERCELLI: "VC",
+  ALESSANDRIA: "AL",
+  NOVARA: "NO",
+  ASTI: "AT",
+  BIELLA: "BI",
+  TORINO: "TO",
+  "TORINO PORTA NUOVA": "TOpn",
+  "TORINO PORTA SUSA": "TOps",
   // Sedi materiali (a volte come stazione)
   "MILANO FIORENZA": "FIO",
   "MILANO NOVATE": "NOV",

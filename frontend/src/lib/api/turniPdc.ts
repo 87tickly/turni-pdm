@@ -103,6 +103,23 @@ export interface FrGiornata {
   ore: number;
 }
 
+/**
+ * Sprint 7.10 MR α.8 (entry 162): metadata vettura PARTENZA / RIENTRO
+ * popolato dal builder multi-turno con quality gate via API live arturo.
+ * `treno_numero` null + `motivo` valorizzato = DORMITA o tratta scoperta.
+ */
+export interface VetturaMeta {
+  treno_numero: string | null;
+  treno_categoria?: string;
+  operatore?: string | null;
+  stazione_partenza?: string;
+  stazione_arrivo?: string;
+  partenza_min?: number;
+  arrivo_min?: number;
+  durata_min?: number;
+  motivo?: string;
+}
+
 export interface TurnoPdcDettaglio {
   id: number;
   codice: string;
@@ -123,6 +140,13 @@ export interface TurnoPdcDettaglio {
     deposito_pdc_codice?: string | null;
     deposito_pdc_display?: string | null;
     builder_version?: string;
+    // Sprint 7.10 MR α.8 (entry 160-161): vettura partenza / rientro
+    // + flag fuori turno.
+    vettura_partenza?: VetturaMeta | null;
+    vettura_rientro?: VetturaMeta | null;
+    is_fuori_turno?: boolean;
+    fuori_turno_motivo?: string;
+    builder_strategy?: string;
     [key: string]: unknown;
   };
   giornate: TurnoPdcGiornata[];

@@ -10,6 +10,105 @@
 
 ---
 
+## 2026-05-05 (162) — Sprint 7.10 MR α.8 frontend: banner trasparenza + acronimo VC + Gantt compatto
+
+### Contesto
+
+Frontend complementare al MR α.8/α.8.1 backend (entry 160-161).
+3 fix richiesti dall'utente nello stesso messaggio:
+
+1. *"VE è VERCELLI, rinomina con VC che è la provincia"* → acronimi.
+2. *"Riduci i px di tutto ciò che non è treno"* → Gantt compatto.
+3. UX trasparenza: l'utente deve VEDERE perché il builder ha scelto
+   un certo deposito + se ci sono dormite/vetture (oggi invisibili).
+
+### Modifiche frontend
+
+**`src/lib/stazioni-acronimi.ts`** (Step 4):
+
+- Aggiunti acronimi Piemonte usando la sigla provincia (più
+  riconoscibile del pattern algoritmico): `VERCELLI: "VC"`,
+  `ALESSANDRIA: "AL"`, `NOVARA: "NO"`, `ASTI: "AT"`, `BIELLA: "BI"`,
+  `TORINO: "TO"`, `TORINO PORTA NUOVA: "TOpn"`,
+  `TORINO PORTA SUSA: "TOps"`.
+
+**`src/routes/pianificatore-giro/TurnoPdcDettaglioRoute.tsx`**:
+
+#### Step 5 — Gantt compatto (decisione utente: "non-treno più piccolo")
+
+- `SimpleBlock` blocchi PRESA/FINE/PK/SCOMP (thin):
+  altezza 10px → **8px** + top ricalcolato.
+- `SimpleBlock` blocchi REFEZ/ACC/CV/DORMITA (medio):
+  altezza 28px → **20px** (constanto `SIMPLE_BLOCK_HEIGHT`).
+- `CommercialBlock` (CONDOTTA + VETTURA) **invariato a 28px** —
+  i treni restano protagonisti visivi.
+
+#### Step 3 — Banner trasparenza decisione builder
+
+Nuovo componente `<DecisioneBuilderBanner>` montato fra `<Header>` e
+`<Stats>`. Mostra:
+
+- **Stato Fuori Turno**: se `is_fuori_turno === true`, banner ambra
+  con `⚠️ Fuori Turno (FT)` + `fuori_turno_motivo` esplicito (es.
+  *"tratta_non_coperta_da_vetture: nessun depot ha rientro
+  fattibile..."*).
+- **Rientro PdC**: 2 righe `Partenza` / `Rientro` con icone:
+  - 🏠 *PdC parte/chiude in casa (deposito X)* — niente vettura
+    serve
+  - 🪑 *Vettura REG 2814 (TRENORD) STAZ→DEPOT 19:30 → 20:45* — treno
+    reale trovato
+  - 🛏 *...dormita la sera prima* — quando treno trovato MA è una
+    DORMITA combinata
+  - 🛏 *Motivo testuale* — quando solo dormita senza treno
+
+Il componente legge i campi nuovi `vettura_partenza`/`vettura_rientro`/`is_fuori_turno`/`fuori_turno_motivo`
+del `generation_metadata_json` (esposti dal backend MR α.8).
+
+Componenti aggiuntivi: `<DecisioneRiga>` per riga partenza/rientro,
+`formatHHMM` (helper diverso da `formatHM` esistente che è in formato
+"HhMM").
+
+**`src/lib/api/turniPdc.ts`**:
+
+- Nuova interfaccia `VetturaMeta` per i campi vettura
+  partenza/rientro nel `generation_metadata_json`.
+- `TurnoPdcDettaglio.generation_metadata_json` esteso con:
+  `vettura_partenza?: VetturaMeta | null`,
+  `vettura_rientro?: VetturaMeta | null`,
+  `is_fuori_turno?: boolean`,
+  `fuori_turno_motivo?: string`,
+  `builder_strategy?: string`.
+
+### Verifiche
+
+- ✅ `pnpm tsc -b --noEmit`: clean.
+- ✅ `pnpm test --run`: **52 passed**, 1 skipped, 0 failed.
+- ✅ `pnpm build`: 1778 modules, ~628KB JS.
+
+### Stato
+
+- ✅ Banner trasparenza + acronimi VC + Gantt compatto.
+- ⏳ Deploy frontend Railway.
+
+### Limitazioni note
+
+1. **Turni pre-α.8** non hanno `vettura_partenza`/`vettura_rientro`
+   nei metadata: il banner non si mostra (corretto, evita
+   informazioni vuote). Per averli rigenerare il giro con
+   "Sovrascrivi".
+2. **DORMITA non visualizzata nel Gantt**: il banner la dichiara,
+   ma sul Gantt rimane invisibile (= il primo blocco resta PRESA).
+   MR α.8.bis può materializzarla come blocco DORMITA prima della
+   PRESA.
+
+### Prossimo step
+
+Commit + push + deploy frontend → smoke utente: rigenera giro,
+verifica banner trasparenza + acronimo VC + blocchi non-CONDOTTA
+ridotti nel Gantt.
+
+---
+
 ## 2026-05-05 (161) — Sprint 7.10 MR α.8.1: treno serale come DORMITA-vettura
 
 ### Contesto
