@@ -10,6 +10,68 @@
 
 ---
 
+## 2026-05-05 (161) — Sprint 7.10 MR α.8.1: treno serale come DORMITA-vettura
+
+### Contesto
+
+Chiarimento utente subito dopo il push del MR α.8 (entry 160):
+*"Step 2 vettura INIZIO + DORMITA fallback, puoi anche mettere un
+treno che termina nella località di dormita. Certo non metterlo
+alle 17 ovviamente"*.
+
+Decifrato: nel caso DORMITA partenza, oltre a flaggare
+"il PdC è arrivato la sera prima", il sistema può **proporre un
+treno SERALE del giorno prima** che porti il PdC dal depot alla
+stazione di apertura (dove dorme). Vincolo: niente troppo presto
+(esempio "le 17:00" sarebbe 12h+ di attesa, non realistico).
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_pdc/multi_turno.py`** in
+`_valuta_candidato`:
+
+- Quando la vettura mattutina non si trova (margine non compatibile),
+  prova un **secondo lookup** con finestra 19:00-23:30:
+  ```python
+  vettura_serale = await trova_treno_vettura(
+      stazione_partenza_codice=sede,
+      stazione_arrivo_codice=stazione_apertura,
+      ora_min_partenza=19 * 60,        # non prima delle 19:00
+      max_attesa_min=4 * 60 + 30,       # finestra fino alle 23:30
+      client=live_client,
+  )
+  if vettura_serale is not None:
+      vettura_partenza = vettura_serale
+  # In entrambi i casi → DORMITA partenza = True
+  dormita_partenza = True
+  ```
+- Risultato:
+  - Se trova treno serale → `vettura_partenza` valorizzata + `dormita_partenza=True`
+    (il PdC viaggia la sera prima, dorme la notte, prende servizio
+    la mattina)
+  - Se nessun treno serale → solo `dormita_partenza=True` (modalità
+    "il PdC è già lì" — l'azienda non eroga la vettura, il PdC
+    raggiunge da solo)
+
+### Verifiche
+
+- ✅ `uv run mypy --strict src/colazione/domain/builder_pdc/multi_turno.py`:
+  clean.
+- ✅ `uv run pytest tests/test_multi_turno_dp.py`: **13 passed**
+  (+1 nuovo `test_scegli_depot_dormita_con_treno_serale`).
+
+### Stato
+
+- ✅ Logica treno serale + DORMITA combinati.
+- ⏳ Deploy backend (incluso nel push MR α.8 + α.8.1 in coda).
+
+### Prossimo step
+
+Commit + push (sopra il deploy α.8) → MR α.8 frontend (banner
+trasparenza + acronimo VC + Gantt compatto).
+
+---
+
 ## 2026-05-05 (160) — Sprint 7.10 MR α.8 (backend): T-FT + vettura PARTENZA + DORMITA fallback
 
 ### Contesto

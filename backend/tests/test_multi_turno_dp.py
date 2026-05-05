@@ -263,6 +263,54 @@ async def test_scegli_depot_chiusura_in_casa_lontano_apertura_dormita() -> None:
 
 
 @pytest.mark.asyncio
+async def test_scegli_depot_dormita_con_treno_serale() -> None:
+    """Sprint 7.10 MR α.8.1: nel caso DORMITA partenza, se esiste un
+    treno serale del giorno prima (>= 19:00) che porta dal depot alla
+    stazione di apertura, lo includiamo come `vettura_partenza`
+    insieme al flag `dormita_partenza=True`.
+
+    Decisione utente 2026-05-05: *"puoi anche mettere un treno che
+    termina nella località di dormita. Certo non metterlo alle 17"*.
+
+    Configuro il MockTransport in modo che la vettura mattutina NON
+    esista (lista vuota per la fascia mattutina) ma il treno serale
+    sì (>= 19:00). Il parser MockTransport è il `_build_handler_with_treno`
+    standard che non distingue ora_min_partenza nel handler — quindi
+    il test mostra che con un treno alle 20:00 vince come "serale".
+    """
+    blocchi = [
+        _make_blocco(seq=1, da="VC", a="ALES", inizio=time(5, 5), fine=time(11, 0)),
+    ]
+    depositi = [_make_depot("ALESSANDRIA", "ALES")]
+    # Treno serale ALES → VC alle 20:00, arriva a VC alle 21:00.
+    handler = _build_handler_with_treno(
+        stazione_partenza="ALES",
+        stazione_arrivo="VC",
+        partenza_iso="2026-05-05T20:00:00Z",
+        arrivo_iso="2026-05-05T21:00:00Z",
+    )
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        h = await _scegli_deposito_per_segmento(
+            blocchi,
+            depositi,
+            ora_apertura_min=4 * 60 + 10,  # presa = 04:10
+            ora_chiusura_min=11 * 60 + 55,
+            live_client=client,
+        )
+    assert h is not None
+    assert h.depot.codice == "ALESSANDRIA"
+    # La vettura mattutina (arrivo entro 04:10-5min) non c'è perché
+    # il treno parte alle 20:00 → margine fuori, scartato.
+    # Ma il treno serale viene trovato come fallback.
+    assert h.vettura_partenza is not None
+    assert h.vettura_partenza.partenza_min == 20 * 60
+    assert h.vettura_partenza.arrivo_min == 21 * 60
+    # E comunque DORMITA: il PdC dorme la notte a VC.
+    assert h.dormita_partenza is True
+
+
+@pytest.mark.asyncio
 async def test_scegli_depot_lontano_casa_con_vettura_partenza() -> None:
     """Variante del precedente: la vettura ALES→VC ESISTE in finestra,
     quindi `vettura_partenza` valorizzata e niente DORMITA."""

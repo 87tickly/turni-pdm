@@ -407,38 +407,51 @@ async def _valuta_candidato(
 
     if serve_vettura_partenza:
         assert stazione_apertura is not None
-        # La vettura deve ARRIVARE a stazione_apertura entro:
-        # ora_apertura_min (= inizio_prestazione) meno un buffer
-        # per scendere dal treno e prendere servizio.
-        # Cerco una vettura che parta dalla sede entro le 6h prima
-        # dell'apertura (sliding window ampio per coprire treni mattutini).
-        ora_min_partenza_vettura = (
+        # 1. Vettura mattutina: arriva a stazione_apertura entro
+        # `ora_apertura_min - buffer`, partendo dal depot fino a 6h
+        # prima dell'apertura.
+        ora_min_partenza_mattutina = (
             ora_apertura_min - 6 * 60
         ) % (24 * 60)
         vettura_partenza = await trova_treno_vettura(
             stazione_partenza_codice=sede,
             stazione_arrivo_codice=stazione_apertura,
-            ora_min_partenza=ora_min_partenza_vettura,
+            ora_min_partenza=ora_min_partenza_mattutina,
             max_attesa_min=6 * 60,
             client=live_client,
         )
         if vettura_partenza is not None:
-            # Verifica che il treno arrivi PRIMA dell'apertura
-            # con buffer.
             arrivo_min_vettura = vettura_partenza.arrivo_min
             margine = (ora_apertura_min - arrivo_min_vettura) % (24 * 60)
-            # Se il margine è > 6h (= treno arriva troppo presto) o
-            # troppo piccolo (< buffer) il treno non è utile.
             if (
                 margine < VETTURA_GAP_POST_ARRIVO_MIN
                 or margine > 6 * 60
             ):
                 vettura_partenza = None
+
+        # 2. Sprint 7.10 MR α.8.1 (entry 161 fix): se la vettura
+        # mattutina non c'è, cerca un treno SERALE del giorno prima
+        # che porti il PdC alla stazione di apertura, dove dormirà
+        # (DORMITA + treno serale, non solo dormita "implicita").
+        # Decisione utente 2026-05-05: *"puoi anche mettere un treno
+        # che termina nella località di dormita. Certo non metterlo
+        # alle 17, ovviamente"*.
+        # Finestra: partenza dal depot dalle 19:00 alle 23:30 →
+        # arrivo a destinazione la sera tardi, il PdC dorme lì,
+        # mattina prende servizio.
         if vettura_partenza is None:
-            # Fallback: DORMITA la sera prima vicino alla stazione di
-            # apertura. Decisione utente 2026-05-05: *"se non ci sono
-            # vetture mattutine per raggiungerlo, questa è una
-            # dormita"*.
+            vettura_serale = await trova_treno_vettura(
+                stazione_partenza_codice=sede,
+                stazione_arrivo_codice=stazione_apertura,
+                ora_min_partenza=19 * 60,  # non prima delle 19:00
+                max_attesa_min=4 * 60 + 30,  # finestra fino alle 23:30
+                client=live_client,
+            )
+            if vettura_serale is not None:
+                vettura_partenza = vettura_serale
+            # In entrambi i casi (treno serale trovato o no), c'è
+            # comunque una DORMITA: il PdC è alla stazione di
+            # apertura la sera prima.
             dormita_partenza = True
 
     # Lato RIENTRO: serve vettura chiusura → sede?
