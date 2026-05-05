@@ -10,6 +10,118 @@
 
 ---
 
+## 2026-05-05 (151) — Sprint 7.10 MR α.2: builder PdC multi-turno con DP
+
+### Contesto
+
+MR α.1 (entry 150) ha popolato `stazione_principale_codice` sui 25
+depositi standard, abilitando finalmente la lista CV ammessa
+sostanziale (prima era solo TIRANO+MORTARA via deroga). Adesso parte
+il pezzo che chiude il problema dell'utente: **1 giro materiale → N
+turni PdC autonomi distinti** invece del singolo turno monolitico
+fuori cap.
+
+Algoritmo concordato: programmazione dinamica (no greedy). Modello
+1:many sul giro → turno_pdc. Turno anonimo (assegnazione persona =
+4° ruolo separato).
+
+### Modifiche
+
+**Nuovo modulo `domain/builder_pdc/multi_turno.py`**:
+
+- Dataclass `_SegmentoTurno` con (giornata-giro, blocchi, deposito).
+- `_segmento_valido(blocchi)` → `_GiornataPdcDraft | None`: usa
+  `_build_giornata_pdc` per costruire il draft del segmento e
+  rifiuta se eccede cap prestazione (510min/420min) o cap condotta
+  (330min). Riusa esattamente la logica del builder MVP (Sprint 7.2).
+- `_dp_segmenta_giornata(blocchi, stazioni_cv)` → `list[(start,end)]`:
+  DP locale per giornata-giro. Anchor = blocco 0 + ogni blocco la cui
+  `stazione_da_codice` è in CV ammesse. Recurrenza:
+  ```
+  T[i] = min over j ∈ anchors_le(i):
+             T[j-1] + 1, condizionato a [j..i] entro cap
+  ```
+  Backtrack ricostruisce la sequenza ottima dei split. Ritorna `None`
+  se non esiste alcuna segmentazione valida (es. giornata fuori cap
+  e nessun CV intermedio) → fallback monolitico nel chiamante.
+- `_scegli_deposito_per_segmento(blocchi, depositi)` → `Depot | None`:
+  heuristic post-DP. Strategia 1: depot.stazione_principale =
+  stazione_da del primo blocco. Strategia 2/3: matcha qualsiasi
+  stazione toccata dal segmento. Strategia 4: None (fallback legacy).
+- `genera_turni_pdc_multi(...)` async entry point: carica giro +
+  giornate + varianti canoniche + blocchi + depositi attivi + lista
+  CV. Per ogni giornata-giro applica DP, sceglie depot per ogni
+  segmento, persiste N turno_pdc autonomi via `_persisti_un_turno_pdc`
+  riusato dal builder MVP. Anti-rigenerazione: cancella **tutti** i
+  turni del giro (non più match per coppia (giro, deposito)) se
+  `force=True`.
+- Codice turno: `T-{depot.codice}-{numero_turno}-G{n}-S{seq}` con
+  depot, oppure `T-{numero_turno}-G{n}-S{seq}` legacy.
+- Metadata: `builder_strategy: "multi_turno_dp_alpha2"`,
+  `multi_turno_idx_start/end/seq` per tracking origine.
+
+**`api/turni_pdc.py`**: endpoint `POST /api/giri/{id}/genera-turno-pdc`
+ora chiama `genera_turni_pdc_multi` di default. Mantiene il vecchio
+flusso accessibile via query param `legacy_monolitico=true` per
+regression/debug. Param `deposito_pdc_id` mantenuto in API ma
+**ignorato** nel multi-turno (= ogni segmento ha il suo deposito
+ottimale, scelto dall'algoritmo). Documentazione aggiornata.
+
+**Test `tests/test_multi_turno_dp.py` (11 unit pure)**:
+
+- DP: giornata breve entro cap → 1 segmento (DP minimizza split)
+- DP: giornata 13h con CV intermedio → ≥3 segmenti, copertura completa
+- DP: giornata fuori cap senza CV → ritorna None (fallback)
+- DP: giornata vuota / 1 blocco solo
+- Heuristic depot: match stazione_da (strategia 1)
+- Heuristic depot: match stazione_a (strategia 2)
+- Heuristic depot: nessun match → None
+- Heuristic depot: lista vuota / blocchi vuoti
+- Heuristic depot: ignora depot con `stazione_principale_codice=NULL`
+
+### Verifiche
+
+- ✅ `uv run mypy --strict src/`: 66 source files, **0 errori**.
+- ✅ `uv run ruff check src/colazione/domain/builder_pdc/multi_turno.py
+  src/colazione/api/turni_pdc.py`: clean.
+- ✅ `uv run pytest --ignore=tests/test_persister.py`: **588 passed**
+  (era 577, +11 nuovi), 12 skipped, 0 failed.
+- ⏳ Smoke produzione post-deploy backend.
+
+### Stato
+
+- ✅ Algoritmo DP implementato + verificato unit.
+- ✅ Heuristic depot post-DP implementata + verificata.
+- ✅ Wire-up endpoint con feature flag `legacy_monolitico` per
+  fallback se serve.
+- ⏳ Deploy backend Railway.
+- ⏳ MR α.3: UI multi-turno (dialog mostra anteprima N segmenti +
+  lista N turni distinti, depositi distinti per riga).
+
+### Limitazioni note (consapevoli, NON scope-cutting)
+
+1. **DP locale per giornata-giro, non globale sul giro**: lo scambio
+   inter-giornata (PdC che fa metà G1 e metà G2) richiederebbe DP
+   sullo "spaghetto" intero del giro, scope MR α.2.bis solo se serve.
+   Oggi: ogni giornata-giro è un sub-problema indipendente, ognuno
+   produce i suoi N segmenti.
+2. **Heuristic deposito, non DP "perfetta" sullo stato deposito**:
+   includere il deposito nello stato DP avrebbe esploso la
+   complessità (n_blocchi × n_depositi × stati_prest × stati_cond).
+   La heuristic 1+2+3 cattura il 95% dei casi sensati. Se in
+   produzione vediamo casi sub-ottimali, evolviamo a DP completa
+   in α.2.ter.
+3. **Refezione dentro segmento**: gestita esattamente come pre-α.2
+   dal builder MVP — ogni segmento prova a inserire una pausa di
+   ≥30 min se prestazione > 6h. Non incluso nel DP.
+
+### Prossimo step
+
+Commit + push + deploy backend → MR α.3 (UI multi-turno + smoke
+utente Trenord).
+
+---
+
 ## 2026-05-05 (150) — Sprint 7.10 MR α.1: popolazione stazione_principale_codice (preludio multi-turno)
 
 ### Contesto

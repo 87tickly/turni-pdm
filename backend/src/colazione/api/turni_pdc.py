@@ -36,6 +36,7 @@ from colazione.domain.builder_pdc.builder import (
     GiroVuotoError,
     genera_turno_pdc,
 )
+from colazione.domain.builder_pdc.multi_turno import genera_turni_pdc_multi
 from colazione.domain.builder_pdc.simulazione import (
     DepositoSuggerimento,
     suggerisci_depositi,
@@ -240,32 +241,60 @@ async def genera_turno_pdc_endpoint(
     deposito_pdc_id: int | None = Query(
         default=None,
         description=(
-            "ID del deposito PdC che coprirà il turno. Se valorizzato, "
-            "la stazione di residenza per il calcolo FR è la "
-            "stazione_principale del deposito. Se None mantiene il "
-            "comportamento legacy (sede = stazione del materiale)."
+            "Sprint 7.10 MR α.2: il builder è MULTI-TURNO — produce "
+            "N turni autonomi distinti, ognuno con il suo deposito "
+            "scelto dall'algoritmo (prossimo alla tratta del segmento). "
+            "Il parametro ``deposito_pdc_id`` è MANTENUTO per backward "
+            "compat ma viene IGNORATO nel multi-turno: ogni segmento "
+            "ha il suo deposito ottimale. Per il legacy monolitico "
+            "(MR η/η.1) usa l'header ``X-Builder-Strategy: legacy``."
+        ),
+    ),
+    legacy_monolitico: bool = Query(
+        default=False,
+        description=(
+            "Sprint 7.10 MR α.2: True forza il vecchio builder monolitico "
+            "(1 turno per giornata-giro, eventuale split CV intermedio). "
+            "Default False = nuovo builder multi-turno con DP."
         ),
     ),
     user: CurrentUser = _authz_write_turni,
     session: AsyncSession = Depends(get_session),
 ) -> list[TurnoPdcGenerazioneResponse]:
-    """Sprint 7.5 MR 5 (decisione utente D1): ritorna **lista** di turni
-    PdC, uno per ogni combinazione di varianti calendario delle giornate
-    del giro. Con A1 strict (default oggi) la lista contiene 1 elemento;
-    con varianti multiple aggiunte manualmente la lista cresce.
+    """Sprint 7.10 MR α.2: builder MULTI-TURNO con programmazione dinamica.
 
-    Sprint 7.9 MR η: il parametro ``deposito_pdc_id`` rende il turno
-    "di proprietà" di un deposito PdC, e impone i cap FR (1/sett, 3/28gg).
+    Per ogni giornata-giro del giro materiale, l'algoritmo DP segmenta
+    i blocchi in N sotto-segmenti, ognuno coperto da 1 PdC distinto
+    entro cap normativi (prestazione 510min standard / 420min notturno,
+    condotta 330min). Gli scambi PdC avvengono solo in stazioni CV
+    ammesse. Ogni segmento riceve il deposito ottimale via heuristic
+    post-DP (preferenza al deposito = stazione di partenza).
+
+    Output: ``list[TurnoPdcGenerazioneResponse]`` con N elementi (= N
+    PdC che coprono il giro). Pre-MR α.2 era 1 elemento (= 1 turno
+    monolitico per giornata).
+
+    Per regressione/debug: ``legacy_monolitico=true`` riusa il flusso
+    pre-α.2 (entrato in produzione con MR η/η.1).
     """
     try:
-        results: list[BuilderTurnoPdcResult] = await genera_turno_pdc(
-            session=session,
-            azienda_id=user.azienda_id,
-            giro_id=giro_id,
-            valido_da=valido_da,
-            force=force,
-            deposito_pdc_id=deposito_pdc_id,
-        )
+        if legacy_monolitico:
+            results: list[BuilderTurnoPdcResult] = await genera_turno_pdc(
+                session=session,
+                azienda_id=user.azienda_id,
+                giro_id=giro_id,
+                valido_da=valido_da,
+                force=force,
+                deposito_pdc_id=deposito_pdc_id,
+            )
+        else:
+            results = await genera_turni_pdc_multi(
+                session=session,
+                azienda_id=user.azienda_id,
+                giro_id=giro_id,
+                valido_da=valido_da,
+                force=force,
+            )
     except GiroNonTrovatoError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except DepositoPdcNonTrovatoError as e:
