@@ -44,11 +44,13 @@ from colazione.domain.pipeline import (
     valida_transizione_manutenzione,
     valida_transizione_pdc,
 )
+from colazione.models.corse import CorsaImportRun
 from colazione.models.programmi import (
     BuilderRun,
     ProgrammaMateriale,
     ProgrammaRegolaAssegnazione,
 )
+from colazione.schemas.corse import CorsaImportRunRead
 from colazione.schemas.programmi import (
     ProgrammaMaterialeCreate,
     ProgrammaMaterialeRead,
@@ -56,6 +58,7 @@ from colazione.schemas.programmi import (
     ProgrammaRegolaAssegnazioneCreate,
     ProgrammaRegolaAssegnazioneRead,
     SbloccaProgrammaRequest,
+    VariazionePdERequest,
 )
 from colazione.schemas.security import CurrentUser
 
@@ -824,5 +827,87 @@ async def list_builder_runs(
         .where(BuilderRun.programma_id == p.id, BuilderRun.azienda_id == user.azienda_id)
         .order_by(BuilderRun.eseguito_at.desc())
         .limit(limit)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+# =====================================================================
+# Variazioni PdE (Sprint 8.0 MR 5, entry 170)
+# =====================================================================
+
+
+@router.post(
+    "/{programma_id}/variazioni",
+    response_model=CorsaImportRunRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Registra una variazione del PdE (INTEGRAZIONE/VARIAZIONE_*)",
+)
+async def registra_variazione_pde(
+    programma_id: int,
+    payload: VariazionePdERequest,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> CorsaImportRun:
+    """Registra una ``CorsaImportRun`` di tipo non-BASE collegata al
+    programma.
+
+    Sprint 8.0 MR 5 (entry 170): cattura **i metadati** della variazione
+    (tipo, file sorgente, count). La **logica concreta** di applicazione
+    (cancellare/modificare/aggiungere ``CorsaCommerciale``) è scope MR
+    5.bis. Le variazioni sono ammesse anche post ``MATERIALE_CONFERMATO``
+    perché il PdE Trenord cambia in corso d'anno (interruzioni linee,
+    integrazioni servizi); il freeze del MR 1 si applica alle regole/
+    parametri/giri *del programma*, non al PdE base.
+
+    Auth: ``PIANIFICATORE_GIRO`` (admin bypassa).
+    """
+    p = await _get_programma_or_404(session, programma_id, user.azienda_id)
+    run = CorsaImportRun(
+        source_file=payload.source_file,
+        n_corse=payload.n_corse,
+        n_corse_create=0,
+        n_corse_update=0,
+        azienda_id=p.azienda_id,
+        programma_materiale_id=p.id,
+        tipo=payload.tipo,
+        note=payload.note,
+    )
+    session.add(run)
+    await session.commit()
+    await session.refresh(run)
+    return run
+
+
+@router.get(
+    "/{programma_id}/variazioni",
+    response_model=list[CorsaImportRunRead],
+    summary="Lista variazioni del PdE registrate per il programma",
+)
+async def list_variazioni_pde(
+    programma_id: int,
+    user: CurrentUser = _authz_view,
+    session: AsyncSession = Depends(get_session),
+) -> list[CorsaImportRun]:
+    """Storico delle ``CorsaImportRun`` collegate al programma.
+
+    Include il run BASE (l'import originale, se è stato collegato al
+    programma) + tutte le variazioni successive. Ordinato per
+    ``started_at DESC`` (più recente in cima).
+
+    Visibile a tutti i 4 ruoli pipeline (filter list-route applicato
+    sul programma a monte: 404 se invisibile per ruolo).
+    """
+    p = await _get_programma_or_404(session, programma_id, user.azienda_id)
+    if not _programma_visibile_per_user(p, user):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="programma non trovato"
+        )
+    stmt = (
+        select(CorsaImportRun)
+        .where(
+            CorsaImportRun.programma_materiale_id == p.id,
+            CorsaImportRun.azienda_id == user.azienda_id,
+        )
+        .order_by(CorsaImportRun.started_at.desc())
     )
     return list((await session.execute(stmt)).scalars().all())

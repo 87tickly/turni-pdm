@@ -643,6 +643,82 @@ async def test_genera_turno_pdc_personale_assegnato_409(
     assert res.status_code == 409
 
 
+# =====================================================================
+# Variazioni PdE (Sprint 8.0 MR 5, entry 170)
+# =====================================================================
+
+
+async def test_registra_variazione_pde_ok(client: TestClient) -> None:
+    pid = await _crea_programma_in_stato("var_ok", "MATERIALE_CONFERMATO")
+    res = client.post(
+        f"/api/programmi/{pid}/variazioni",
+        json={
+            "tipo": "VARIAZIONE_INTERRUZIONE",
+            "source_file": "pde_var_int_2026_03.txt",
+            "n_corse": 12,
+            "note": "interruzione linea S5 da 03/2026",
+        },
+        headers=_h(_admin_token(client)),
+    )
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["tipo"] == "VARIAZIONE_INTERRUZIONE"
+    assert body["programma_materiale_id"] == pid
+    assert body["source_file"] == "pde_var_int_2026_03.txt"
+    assert body["n_corse"] == 12
+
+
+async def test_registra_variazione_pde_tipo_base_400(client: TestClient) -> None:
+    """``BASE`` non è ammesso come variazione (è il primo import)."""
+    pid = await _crea_programma_in_stato("var_base", "MATERIALE_CONFERMATO")
+    res = client.post(
+        f"/api/programmi/{pid}/variazioni",
+        json={"tipo": "BASE", "source_file": "x.txt"},
+        headers=_h(_admin_token(client)),
+    )
+    assert res.status_code == 422
+
+
+async def test_list_variazioni_pde(client: TestClient) -> None:
+    pid = await _crea_programma_in_stato("var_list", "MATERIALE_CONFERMATO")
+    # Crea 2 variazioni
+    for tipo in ("INTEGRAZIONE", "VARIAZIONE_ORARIO"):
+        client.post(
+            f"/api/programmi/{pid}/variazioni",
+            json={
+                "tipo": tipo,
+                "source_file": f"pde_{tipo.lower()}.txt",
+                "n_corse": 5,
+            },
+            headers=_h(_admin_token(client)),
+        )
+    res = client.get(
+        f"/api/programmi/{pid}/variazioni", headers=_h(_admin_token(client))
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert len(body) == 2
+    # Ordinato DESC per started_at: la più recente (VARIAZIONE_ORARIO) in cima.
+    assert body[0]["tipo"] == "VARIAZIONE_ORARIO"
+    assert body[1]["tipo"] == "INTEGRAZIONE"
+
+
+async def test_registra_variazione_post_freeze_ok(client: TestClient) -> None:
+    """Le variazioni sono ammesse anche dopo MATERIALE_CONFERMATO
+    (decisione MR 5: il PdE cambia in corso d'anno, scollegato dal
+    freeze regole/giri)."""
+    pid = await _crea_programma_in_stato("var_freezato", "PDC_CONFERMATO")
+    res = client.post(
+        f"/api/programmi/{pid}/variazioni",
+        json={
+            "tipo": "VARIAZIONE_CANCELLAZIONE",
+            "source_file": "pde_canc_2026_06.txt",
+        },
+        headers=_h(_admin_token(client)),
+    )
+    assert res.status_code == 201
+
+
 async def test_sblocca_riapre_modifiche(client: TestClient) -> None:
     """Verifica end-to-end del workflow: conferma → freeze 409 → admin
     sblocca → modifica torna a 200."""

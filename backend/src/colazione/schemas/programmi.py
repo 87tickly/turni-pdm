@@ -359,6 +359,28 @@ class ProgrammaMaterialeUpdate(BaseModel):
 # =====================================================================
 
 
+class VariazionePdERequest(BaseModel):
+    """Body per ``POST /api/programmi/{id}/variazioni`` (Sprint 8.0 MR 5).
+
+    Registra una ``CorsaImportRun`` di tipo non-BASE collegata al
+    programma. La logica concreta di applicazione delle variazioni
+    (cancellare/modificare/aggiungere corse) è scope MR 5.bis: per ora
+    si tracciano solo i metadati per audit trail e timeline.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tipo: Literal[
+        "INTEGRAZIONE",
+        "VARIAZIONE_INTERRUZIONE",
+        "VARIAZIONE_ORARIO",
+        "VARIAZIONE_CANCELLAZIONE",
+    ]
+    source_file: str = Field(min_length=1, max_length=500)
+    n_corse: int = Field(default=0, ge=0)
+    note: str | None = Field(default=None, max_length=1000)
+
+
 class SbloccaProgrammaRequest(BaseModel):
     """Body opzionale per ``POST /programmi/{id}/sblocca`` (admin only).
 

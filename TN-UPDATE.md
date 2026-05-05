@@ -10,6 +10,104 @@
 
 ---
 
+## 2026-05-05 (170) — Sprint 8.0 MR 5: endpoint variazioni PdE (audit-trail metadata)
+
+### Contesto
+
+Apre il versioning multi-import del PdE: il PdE Trenord cambia in
+corso d'anno (interruzioni linee per lavori RFI, integrazioni servizi,
+modifiche orari). MR 0 ha già predisposto lo schema
+``corsa_import_run.tipo`` con i 5 valori
+(``BASE``, ``INTEGRAZIONE``, ``VARIAZIONE_INTERRUZIONE``,
+``VARIAZIONE_ORARIO``, ``VARIAZIONE_CANCELLAZIONE``) +
+``programma_materiale_id`` FK SET NULL. MR 5 espone gli endpoint REST.
+
+**Scope MR 5 = solo metadati**. La logica concreta di applicazione
+delle variazioni alle corse (cancellare/modificare/aggiungere
+``CorsaCommerciale``) è scope **MR 5.bis** (richiede parser PdE
+incrementale + diff con stato corrente).
+
+### Modifiche backend
+
+**`backend/src/colazione/schemas/corse.py`** —
+``CorsaImportRunRead`` esteso con i 2 campi MR 0
+(``programma_materiale_id``, ``tipo``). Senza, la response del POST
+ometteva i campi nuovi e i test li trovavano vuoti.
+
+**`backend/src/colazione/schemas/programmi.py`** — nuovo
+``VariazionePdERequest``:
+
+- ``tipo: Literal["INTEGRAZIONE", "VARIAZIONE_INTERRUZIONE",
+  "VARIAZIONE_ORARIO", "VARIAZIONE_CANCELLAZIONE"]`` (BASE escluso:
+  è il primo import, non una variazione).
+- ``source_file: str`` min 1, max 500 char.
+- ``n_corse: int`` ≥ 0 (default 0).
+- ``note: str | None`` max 1000 char.
+
+**`backend/src/colazione/api/programmi.py`** — 2 endpoint nuovi:
+
+- ``POST /api/programmi/{id}/variazioni`` (auth ``PIANIFICATORE_GIRO``)
+  → 201 + ``CorsaImportRunRead``. Crea una ``CorsaImportRun`` con
+  ``programma_materiale_id`` valorizzato + ``tipo`` ammesso. Niente
+  freeze: le variazioni sono ammesse anche post
+  ``MATERIALE_CONFERMATO``, perché il PdE evolve indipendentemente
+  dalle decisioni del Pianificatore.
+- ``GET /api/programmi/{id}/variazioni`` (auth ``_authz_view`` =
+  4 ruoli pipeline) → ``list[CorsaImportRunRead]`` ordinata per
+  ``started_at DESC``. Filter per visibilità del programma per ruolo
+  applicato (404 se invisibile).
+
+### Modifiche test
+
+**`backend/tests/test_api_programmi_conferma.py`** — 4 nuovi test
+sezione "Variazioni PdE":
+
+- ``test_registra_variazione_pde_ok``: 201 + body con tipo +
+  programma_materiale_id corretti.
+- ``test_registra_variazione_pde_tipo_base_400``: 422 (Pydantic
+  Literal rifiuta ``BASE``).
+- ``test_list_variazioni_pde``: 2 variazioni create → list ordinata
+  DESC per ``started_at``.
+- ``test_registra_variazione_post_freeze_ok``: variazioni ammesse
+  anche con programma in ``PDC_CONFERMATO`` (freeze regole/giri
+  attivo, ma il PdE è scollegato).
+
+### Verifiche
+
+- ✅ ``uv run mypy --strict src/``: 70 file clean.
+- ✅ ``uv run ruff check`` su file MR 5: 0 errori.
+- ✅ ``uv run pytest``: full suite verde.
+
+### Decisioni di scope rinviate
+
+- **MR 5.bis — applicazione variazioni alle corse**: parser PdE
+  incrementale + diff con ``CorsaCommerciale`` esistenti. Per
+  ``VARIAZIONE_INTERRUZIONE``: marcare le corse della linea
+  interrotta come non valide nelle date specificate (probabilmente
+  via ``valido_in_date_json`` esclusioni). Per
+  ``VARIAZIONE_ORARIO``: aggiornare orari esistenti. Per
+  ``VARIAZIONE_CANCELLAZIONE``: rimuovere corse. Per
+  ``INTEGRAZIONE``: aggiungere corse nuove.
+- **UI delle variazioni**: dashboard PIANIFICATORE_GIRO con timeline
+  variazioni del programma (registrate qui, applicate in MR 5.bis).
+- **Auth UI per registrare variazioni**: ad oggi solo via API REST
+  diretta; il bottone UI "Carica variazione" arriva con MR 5.bis.
+
+### Stato
+
+- ✅ Endpoint backend pronti + test verdi.
+- ⏳ Commit + push + deploy backend.
+
+### Prossimo step
+
+MR 6: dashboard pipeline trasversale "chi blocca chi". Vista admin/
+super-user con tabella programmi × stato pipeline, evidenza dei
+programmi bloccati su uno specifico stato + chi è responsabile
+del blocco. Probabilmente sotto il ruolo admin / nuovo ruolo
+``COORDINATORE``.
+
+---
+
 ## 2026-05-05 (169) — Sprint 8.0 MR 4: dashboard Manutenzione (ramo parallelo)
 
 ### Contesto

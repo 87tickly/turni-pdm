@@ -24,6 +24,10 @@ class CorsaImportRunRead(BaseModel):
     started_at: datetime
     completed_at: datetime | None = None
     note: str | None = None
+    # Sprint 8.0 MR 0 (entry 164) + MR 5 (entry 170): legame al programma
+    # + tipo (BASE / INTEGRAZIONE / VARIAZIONE_*).
+    programma_materiale_id: int | None = None
+    tipo: str = "BASE"
 
 
 class CorsaCommercialeRead(BaseModel):
