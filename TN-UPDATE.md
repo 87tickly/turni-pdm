@@ -10,6 +10,69 @@
 
 ---
 
+## 2026-05-05 (139) — Code review completa post-Sprint β2: 10 critici, 15 importanti, 9 minori
+
+### Contesto
+
+Review senior dell'intero repo dopo chiusura Sprint 7.9 β2 (7 sub-MR,
+entries 131–138). Richiesta utente: analisi completa backend + frontend
++ test + migrazioni, confronto puntuale con NORMATIVA-PDC.md, ogni
+finding con `file:riga` e fix concreto. Output: solo file di review
+(niente fix al codice di produzione fino a lettura).
+
+Metodo: lettura diretta di ~60 sorgenti backend, ~20 file test,
+24 migrazioni, ~65 file frontend. Confronto sistematico con
+`docs/NORMATIVA-PDC.md` e `docs/MODELLO-DATI.md`.
+
+### Output
+
+File prodotto: `docs/CODE-REVIEW-2026-05-05.md`
+
+| Categoria | Conteggio |
+|-----------|----------:|
+| **Critici** | 10 |
+| **Importanti** | 15 |
+| **Minori** | 9 |
+
+**Nuovi finding β2** (non presenti nella review 2026-05-01):
+
+- **C7** — `TurnoPdcGiornata.km=0` hardcoded in `builder_pdc/builder.py:820`.
+  Dato sempre nullo in dashboard. Fix: calcola da corse nella giornata.
+- **C8** — `_aggiungi_dormite_fr` (builder.py:866-938) non verifica mai
+  `durata_pernotto >= 360` (normativa §10.5 minimo 6h). Violazione silente.
+- **C9** — `RegolaInvioSosta` completamente ignorata da `sourcing.py`.
+  API CRUD completa (β2-7) ma nessuna integrazione nel builder giro.
+- **C10** — `_prima_data_applicabile` in `thread_proiezione.py:352-370`
+  ritorna solo la prima data del cluster. Il capacity temporale (β2-5)
+  usa date sbagliate per programmi annuali → check sostanzialmente inutile.
+- **I12** — SQL in `capacity_temporale.py:117-130` carica tutti gli eventi
+  senza filtro `tipo_evento` a DB; filtro solo in Python.
+- **I13** — Limiti FR settimanale/mensile (normativa §10.6: max 1/settimana,
+  max 3/28gg) non verificati né tracciati nel builder PdC.
+- **I14** — Thread projection (`thread_proiezione.py:64+`) processa solo
+  `variant_index == 0`; varianti calendariali non proiettate.
+- **I15** — `Stazione.codice` PK senza `azienda_id`: crack multi-tenant
+  (`models/anagrafica.py:43-54`).
+- **I16** — Nessun test per integrazione `RegolaInvioSosta` in sourcing.
+
+**Residui review 2026-05-01**: tutti i 6 critici e 10 degli 11
+importanti sono ancora aperti (unica eccezione: I10 km_media_annua
+fixato in Sprint 7.7 MR 5).
+
+### Stato
+
+Review completa. File in PR separata (solo review, niente fix al codice).
+Nessuna modifica al codice di produzione in questa entry.
+
+### Prossimo step
+
+Utente legge `docs/CODE-REVIEW-2026-05-05.md` e decide priorità fix.
+Candidati più urgenti (violazioni normativa + dati mancanti in
+dashboard): C7 (km=0), C8 (FR riposo minimo), C10 (capacity date),
+C1 (is_notturno boundary), C4 (preriscaldo ACC).
+
+---
+
 ## 2026-05-04 (138) — Sprint 7.9 hotfix β2-5: capacity check AZIENDA-level + smoke completo β2
 
 ### Contesto
