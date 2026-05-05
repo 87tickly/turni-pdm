@@ -244,6 +244,12 @@ class ProgrammaMaterialeRead(BaseModel):
     valido_da: date
     valido_a: date
     stato: str
+    # Sprint 8.0 MR 0 (entry 164): pipeline state machine per la
+    # concatenazione fra ruoli. Validati lato applicazione da
+    # ``StatoPipelinePdc`` / ``StatoManutenzione`` in
+    # ``colazione.domain.pipeline``; lato DB CHECK constraint.
+    stato_pipeline_pdc: str = "PDE_IN_LAVORAZIONE"
+    stato_manutenzione: str = "IN_ATTESA"
     km_max_giornaliero: int | None = None
     km_max_ciclo: int | None = None
     n_giornate_default: int
@@ -346,3 +352,23 @@ class ProgrammaMaterialeUpdate(BaseModel):
     fascia_oraria_tolerance_min: int | None = Field(default=None, ge=0, le=120)
     strict_options_json: StrictOptions | None = None
     stazioni_sosta_extra_json: list[str] | None = None
+
+
+# =====================================================================
+# Pipeline state machine — Sprint 8.0 MR 0 (entry 164)
+# =====================================================================
+
+
+class SbloccaProgrammaRequest(BaseModel):
+    """Body opzionale per ``POST /programmi/{id}/sblocca`` (admin only).
+
+    L'admin può sbloccare un programma facendolo regredire allo stato
+    immediatamente precedente sul ramo specificato. Il motivo è
+    facoltativo ma raccomandato: viene tracciato nei log del backend
+    (decisione MR 0: niente persistenza dedicata, basta il log).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ramo: Literal["pdc", "manutenzione"] = "pdc"
+    motivo: str | None = Field(default=None, max_length=500)

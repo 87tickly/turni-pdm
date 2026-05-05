@@ -60,6 +60,22 @@ class ProgrammaMateriale(Base):
     valido_a: Mapped[date] = mapped_column(Date)
     stato: Mapped[str] = mapped_column(String(20), default="bozza")
 
+    # Sprint 8.0 MR 0 (entry 164, migration 0032): pipeline state machine
+    # per la concatenazione tra ruoli. Validazione applicativa via enum
+    # ``StatoPipelinePdc`` in ``colazione.domain.pipeline``; lato DB
+    # protetto da CHECK constraint ``programma_materiale_stato_pipeline_pdc_check``.
+    stato_pipeline_pdc: Mapped[str] = mapped_column(
+        String(40),
+        default="PDE_IN_LAVORAZIONE",
+        server_default="PDE_IN_LAVORAZIONE",
+    )
+    # Ramo manutenzione, parallelo e indipendente dal ramo PdC. Si attiva
+    # quando ``stato_pipeline_pdc >= MATERIALE_CONFERMATO`` ma non blocca
+    # le transizioni del ramo principale.
+    stato_manutenzione: Mapped[str] = mapped_column(
+        String(40), default="IN_ATTESA", server_default="IN_ATTESA"
+    )
+
     # Parametri globali
     km_max_giornaliero: Mapped[int | None] = mapped_column(Integer)
     # Cap km cumulati sul ciclo intero (NON giornaliero). Quando raggiunto,

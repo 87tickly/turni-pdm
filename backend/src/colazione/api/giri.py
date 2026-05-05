@@ -26,7 +26,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.auth import require_any_role, require_role
@@ -48,6 +48,11 @@ from colazione.domain.builder_giro.risolvi_corsa import (
     ComposizioneNonAmmessaError,
     RegolaAmbiguaError,
 )
+from colazione.domain.pipeline import (
+    programma_visibile_per_ruoli,
+    soglia_pipeline_per_ruoli,
+    stati_pdc_da,
+)
 from colazione.models.anagrafica import (
     MaterialeThread,
     MaterialeThreadEvento,
@@ -55,14 +60,24 @@ from colazione.models.anagrafica import (
 )
 from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
 from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
+from colazione.models.programmi import ProgrammaMateriale
 from colazione.schemas.security import CurrentUser
 
 router = APIRouter(prefix="/api/programmi", tags=["giri"])
 
 _authz = Depends(require_role("PIANIFICATORE_GIRO"))
-# Sprint 7.3 MR 2: lettura giri ammessa anche al PIANIFICATORE_PDC.
-# Le scritture (POST genera-giri) restano protette da `_authz`.
-_authz_read = Depends(require_any_role("PIANIFICATORE_GIRO", "PIANIFICATORE_PDC"))
+# Sprint 8.0 MR 0 (entry 164): lettura giri ammessa ai 4 ruoli pipeline.
+# La visibilità per ``stato_pipeline_pdc`` del programma proprietario è
+# applicata nel body via ``soglia_pipeline_per_ruoli``. Le scritture
+# (POST genera-giri) restano protette da `_authz`.
+_authz_read = Depends(
+    require_any_role(
+        "PIANIFICATORE_GIRO",
+        "PIANIFICATORE_PDC",
+        "GESTIONE_PERSONALE",
+        "MANUTENZIONE",
+    )
+)
 
 
 # =====================================================================
@@ -354,13 +369,34 @@ class GiroMaterialeDettaglioRead(BaseModel):
 )
 async def list_giri_programma(
     programma_id: int,
-    user: CurrentUser = _authz,
+    user: CurrentUser = _authz_read,
     session: AsyncSession = Depends(get_session),
 ) -> list[GiroMaterialeListItem]:
     """Ritorna i giri persistiti per il programma. Filtro per la colonna
     FK ``programma_id`` (introdotta dalla migration 0010, sfrutta
     l'indice ``idx_giro_materiale_programma_id``).
+
+    Sprint 8.0 MR 0 (entry 164): controllo di visibilità per ruolo del
+    programma proprietario. 404 (privacy multi-tenant) se l'utente
+    non ha la soglia pipeline per vederlo.
     """
+    # Check visibilità programma proprietario.
+    stato_pipeline = (
+        await session.execute(
+            select(ProgrammaMateriale.stato_pipeline_pdc).where(
+                ProgrammaMateriale.id == programma_id,
+                ProgrammaMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if stato_pipeline is None or not programma_visibile_per_ruoli(
+        stato_pipeline, user.roles, user.is_admin
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="programma non trovato",
+        )
+
     # Sprint 7.3 fix: usa la colonna esplicita programma_id (migration
     # 0010) invece del cast da generation_metadata_json. Più veloce
     # (indicizzato) e più leggibile.
@@ -439,7 +475,9 @@ async def list_giri_azienda(
     Sprint 7.3 MR 2: alimenta la schermata 4.2
     `/pianificatore-pdc/giri` (vista readonly del 2° ruolo) e può
     essere riusata dal 1° ruolo per drilldown cross-programma.
-    Auth: PIANIFICATORE_GIRO o PIANIFICATORE_PDC (admin bypassa).
+    Sprint 8.0 MR 0 (entry 164): aperta a tutti i 4 ruoli pipeline,
+    con filtraggio per ``stato_pipeline_pdc`` del programma
+    proprietario in base al ruolo dell'utente.
     """
     stmt = select(GiroMateriale).where(GiroMateriale.azienda_id == user.azienda_id)
     if programma_id is not None:
@@ -450,6 +488,18 @@ async def list_giri_azienda(
         stmt = stmt.where(GiroMateriale.tipo_materiale == tipo_materiale)
     if q is not None:
         stmt = stmt.where(GiroMateriale.numero_turno.ilike(f"%{q}%"))
+
+    # Sprint 8.0 MR 0: filtro visibilità per ruolo via JOIN sul
+    # programma proprietario.
+    soglia = soglia_pipeline_per_ruoli(user.roles, user.is_admin)
+    if soglia is not None:
+        stmt = stmt.join(
+            ProgrammaMateriale,
+            ProgrammaMateriale.id == GiroMateriale.programma_id,
+        ).where(
+            ProgrammaMateriale.stato_pipeline_pdc.in_(stati_pdc_da(soglia))
+        )
+
     stmt = stmt.order_by(GiroMateriale.numero_turno).limit(limit).offset(offset)
     rows = (await session.execute(stmt)).scalars().all()
     out: list[GiroMaterialeListItem] = []

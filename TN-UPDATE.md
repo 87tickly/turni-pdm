@@ -10,6 +10,211 @@
 
 ---
 
+## 2026-05-05 (164) — Sprint 8.0 MR 0: pipeline state machine + pulizia DB di prova
+
+### Contesto
+
+Apertura dello Sprint 8.0 (concatenazione fra ruoli del programma).
+Sessione precedente aveva già:
+
+1. eseguito la **pulizia DB Railway** (7.182 righe rimosse: programmi,
+   giri, turni PdC, builder run; PdE Trenord 2025-2026 = 6.795 corse +
+   anagrafica completa preservati come da decisione utente);
+2. scritto la **migration alembic 0032** + 2 script utility
+   (`scripts/baseline_pre_pulizia.py`, `scripts/pulizia_dati_prova.py`);
+3. aggiunto i 2 nuovi campi a `ProgrammaMateriale`
+   (`stato_pipeline_pdc`, `stato_manutenzione`).
+
+Restavano 8 step: ORM `CorsaImportRun`, modulo `domain/pipeline.py`,
+schemas, 6 endpoint conferma + sblocca, filtro list-route, test,
+verifiche, deploy.
+
+### Modello (cosa introduce questo MR)
+
+**Pipeline a 2 rami paralleli**:
+
+```
+PdE → Materiale → PdC → Personale → Vista pubblicata     (vincolante)
+            └→ Manutenzione → Matricole assegnate         (parallelo)
+```
+
+- `programma_materiale.stato_pipeline_pdc`: 8 stati
+  (`PDE_IN_LAVORAZIONE` → ... → `VISTA_PUBBLICATA`).
+- `programma_materiale.stato_manutenzione`: 3 stati
+  (`IN_ATTESA` → `IN_LAVORAZIONE` → `MATRICOLE_ASSEGNATE`).
+- `corsa_import_run.programma_materiale_id` + `tipo` (BASE +
+  4 tipi VARIAZIONE_*) per il versioning multi-import.
+
+Tutti gli stati sono `VARCHAR + CHECK constraint` (non ENUM nativo
+Postgres) per allargamento futuro senza `DROP TYPE`. La matrice
+delle transizioni è **applicativa**, vive in
+`backend/src/colazione/domain/pipeline.py`.
+
+### Modifiche
+
+**`backend/alembic/versions/0032_pipeline_state_machine.py`** (già
+scritto in sessione precedente, applicato oggi al DB locale).
+
+**`backend/src/colazione/models/corse.py`** — aggiunto a
+`CorsaImportRun`: `programma_materiale_id` (FK nullable) + `tipo`
+(server_default=`BASE`).
+
+**`backend/src/colazione/domain/pipeline.py`** (nuovo, 270 righe):
+
+- 3 enum `StrEnum`: `StatoPipelinePdc`, `StatoManutenzione`,
+  `TipoImportRun` (sincronizzati con migration 0032).
+- Matrici `TRANSIZIONI_PDC_AMMESSE` + `TRANSIZIONI_MANUTENZIONE_AMMESSE`
+  (lineari, con eccezione `PDE_CONSOLIDATO → MATERIALE_CONFERMATO`
+  che salta `MATERIALE_GENERATO` per il caso "conferma senza nuovo
+  run del builder").
+- `valida_transizione_pdc/manutenzione()` →
+  `TransizioneNonAmmessaError` (subclass `ValueError`).
+- Helper di ordinamento: `ordinale_pdc`, `stati_pdc_da` (per filter
+  SQL `IN`), `stato_pdc_precedente` (per sblocca).
+- Policy visibilità list-route: `SOGLIE_PIPELINE_PER_RUOLO` +
+  `soglia_pipeline_per_ruoli(roles, is_admin)` +
+  `programma_visibile_per_ruoli(stato_str, roles, is_admin)`.
+  Semantica multi-ruolo "OR funzionale" (`min` ordinale): un utente
+  con `[PIANIFICATORE_PDC, GESTIONE_PERSONALE]` vede da
+  `MATERIALE_CONFERMATO`, perché il ruolo PDC lo abilita lì
+  indipendentemente da Personale. Documentato in dettaglio nel
+  docstring perché Fausto inizialmente proponeva `max`
+  (least-privilege), che però sarebbe contraddittorio: l'utente
+  multi-ruolo vedrebbe MENO di un utente con il solo ruolo PDC.
+
+**`backend/src/colazione/schemas/programmi.py`**:
+
+- `ProgrammaMaterialeRead`: aggiunti `stato_pipeline_pdc` e
+  `stato_manutenzione`.
+- Nuovo `SbloccaProgrammaRequest` (body opzionale per
+  `POST /programmi/{id}/sblocca`): `ramo: "pdc" | "manutenzione"`,
+  `motivo: str | None`.
+
+**`backend/src/colazione/api/programmi.py`** — 6 nuovi endpoint:
+
+- `POST /programmi/{id}/conferma-materiale` (`PIANIFICATORE_GIRO`):
+  `PDE_CONSOLIDATO|MATERIALE_GENERATO → MATERIALE_CONFERMATO`. Side
+  effect: se manutenzione=`IN_ATTESA` → `IN_LAVORAZIONE`.
+- `POST /programmi/{id}/conferma-pdc` (`PIANIFICATORE_PDC`).
+- `POST /programmi/{id}/conferma-personale` (`GESTIONE_PERSONALE`).
+- `POST /programmi/{id}/pubblica-vista-pdc` (`GESTIONE_PERSONALE`).
+- `POST /programmi/{id}/conferma-manutenzione` (`MANUTENZIONE`).
+- `POST /programmi/{id}/sblocca` (admin only): regredisce di **uno
+  step** sul ramo specificato; logger.warning con
+  `id/ramo/nuovo_stato/motivo/admin_username` per audit.
+
+Tutti caricano il programma con **`SELECT ... FOR UPDATE`** (helper
+`_get_programma_or_404(... for_update=True)`) per serializzare
+conferme + sblocca concorrenti — fix da review Fausto.
+
+Le 4 deps di auth dei nuovi ruoli sono estratte a modulo-livello
+(`_authz_pdc`, `_authz_personale`, `_authz_manutenzione`,
+`_authz_admin`) per evitare ruff B008.
+
+**Filtro visibilità list-route** in `api/programmi.py`,
+`api/giri.py`, `api/turni_pdc.py`:
+
+- `list_programmi` + `get_programma`: allargati a 4 ruoli pipeline
+  via nuovo `_authz_view = require_any_role(...)`. 404 (privacy
+  multi-tenant) se programma invisibile per ruolo.
+- `list_giri_programma` + `list_giri_azienda` (cross-programma):
+  filter via JOIN con `programma_materiale.stato_pipeline_pdc IN
+  stati_pdc_da(soglia)`.
+- `list_turni_pdc_azienda`: filter via subquery sui giri visibili
+  (cast `generation_metadata_json["giro_materiale_id"].astext` a
+  `BigInteger.in_(...)`). Effetto collaterale documentato: i turni
+  legacy senza metadata `giro_materiale_id` sono esclusi solo per
+  ruoli con soglia attiva.
+
+### Test (56 nuovi)
+
+**`tests/test_pipeline_state_machine.py`** (38 unit, no DB): enum
+identity, copertura matrici, transizioni lineari + skip + inverse +
+terminale, ordinale + `stati_pdc_da` + precedente, soglia per ruoli
+(admin/PIANIFICATORE_GIRO=None, single-ruolo, multi-ruolo,
+sconosciuto), `programma_visibile_per_ruoli` con stato corrotto.
+
+**`tests/test_api_programmi_conferma.py`** (18 integration, DB
+required): conferma-materiale (4 casi: ok dai 2 stati pre-soglia,
+400 da `IN_LAVORAZIONE`, side effect manutenzione non regressivo);
+conferma-pdc (3: ok admin, 403 PIANIFICATORE_GIRO, 200 ruolo
+dedicato); conferma-manutenzione (2); sblocca (4: pdc regressione,
+400 al primo stato, manutenzione, 403 non-admin); list filter (5:
+PIANIFICATORE_PDC vede solo ≥ MATERIALE_CONFERMATO, admin vede
+tutto, get 404 sotto soglia, get 200 alla soglia,
+GESTIONE_PERSONALE filtra a PDC_CONFERMATO).
+
+Setup test: utenti on-the-fly (`_test_pipeline_pianificatore_pdc`,
+`_test_pipeline_gestione_personale`, `_test_pipeline_manutenzione`)
+creati nel fixture `_module_setup` con cleanup finale; programmi
+seedati direttamente via SQL con stato pipeline impostato a un
+valore intermedio (l'API non espone ancora un set diretto per gli
+stati pipeline — questo è scope dei MR successivi).
+
+### Review Fausto (mcp__grok__ask) — 5 punti
+
+1. **Migration**: PASS.
+2. **Skip `PDE_CONSOLIDATO → MATERIALE_CONFERMATO`**: WARN →
+   migliorata documentazione spiegando il caso d'uso ("conferma
+   senza nuovo run del builder").
+3. **Race condition** (FAIL): aggiunto
+   `with_for_update()` su tutte le 6 route di transizione + sblocca.
+4. **Soglia min vs max** (WARN): mantenuto `min` ma documentata
+   esplicitamente la semantica "OR funzionale" — `max` sarebbe
+   contraddittorio per utenti multi-ruolo.
+5. **Failsafe stato corrotto** (WARN): aggiunto
+   `_logger.warning(...)` quando `programma_visibile_per_ruoli`
+   incontra un valore fuori `StatoPipelinePdc`. Compromesso: niente
+   500 al client (la list non si rompe), ma trace per ops.
+
+### Verifiche
+
+- ✅ `uv run mypy --strict src/`: 69 file clean.
+- ✅ `uv run ruff check` sui file MR 0: 0 errori. Sui 3 errori
+  preesistenti (F401 `func` unused in giri.py, 2× F541 in
+  programmi.py archivia/delete_regola): non toccati, non miei.
+- ✅ `uv run pytest`: **687 passed, 12 skipped, 0 failed** (escludendo
+  2 test preesistenti rotti su `test_persister.py` che falliscono
+  ANCHE su master pulito senza i miei cambi — non regressione MR 0,
+  da indagare separatamente).
+- ✅ Migration 0032 applicata sul DB locale → tutti i 18 nuovi test
+  integration verdi.
+
+### Stato
+
+- ✅ Codice MR 0 pronto (modello + endpoint + filtro + test + review
+  Fausto applicata).
+- ⏳ Commit + push + deploy backend Railway (la migration 0032 si
+  applicherà automaticamente al boot via `alembic upgrade head`).
+- ⏳ Verifica post-deploy via `railway logs --service backend`
+  cercando "Running upgrade ... f0a1b2c3d4e5".
+
+### Decisioni di scope rinviate (non pigrizia, dichiarate)
+
+- **MR 1 (handoff Materiale → PdC)**: freeze read-only delle
+  regole/giri al `MATERIALE_CONFERMATO` (dichiarato come scope MR 1
+  nel briefing) + invalidazione cache list-route giri dipendenti +
+  bottone UI di conferma sul frontend.
+- **Filtro singoli-detail giri/turni-pdc** non applicato in MR 0
+  perché l'unico vettore di reach (lookup per id ottenuto
+  altrove) richiede un join che esula da MR 0; documentato in
+  scope MR 1.
+- **Pianificatore_pdc/overview**: non filtrato per stato pipeline.
+  È un endpoint di KPI aggregati aziendali, non list-route di
+  programmi/giri/turni-pdc. Scope MR 6 (dashboard pipeline
+  trasversale).
+- **Test persister rotti preesistenti** (2:
+  `test_persister_corsa_rientro_9xxxx_se_genera_rientro_sede`,
+  `test_vuoto_testa_genera_corsa_materiale_vuoto_e_blocco`): non
+  causati da MR 0, candidati a un MR di pulizia separato.
+
+### Prossimo step
+
+MR 1: handoff Materiale → PdC (frontend + freeze + invalidazione
+cache + bottoni conferma).
+
+---
+
 ## 2026-05-05 (163) — Sprint 7.10 MR α.8.fix: min-w-0 chain blocca propagazione width Gantt zoom 200%
 
 ### Contesto

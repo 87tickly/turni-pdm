@@ -41,8 +41,14 @@ from colazione.domain.builder_pdc.simulazione import (
     DepositoSuggerimento,
     suggerisci_depositi,
 )
+from colazione.domain.pipeline import (
+    soglia_pipeline_per_ruoli,
+    stati_pdc_da,
+)
 from colazione.models.anagrafica import Depot, Stazione
 from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
+from colazione.models.giri import GiroMateriale
+from colazione.models.programmi import ProgrammaMateriale
 from colazione.models.turni_pdc import TurnoPdc, TurnoPdcBlocco, TurnoPdcGiornata
 from colazione.schemas.security import CurrentUser
 
@@ -50,9 +56,18 @@ router = APIRouter(prefix="/api/giri", tags=["turni-pdc"])
 turni_pdc_router = APIRouter(prefix="/api/turni-pdc", tags=["turni-pdc"])
 
 _authz = Depends(require_role("PIANIFICATORE_GIRO"))
-# Sprint 7.3 MR 2: lettura cross-giro ammessa anche al PIANIFICATORE_PDC
-# (vedi RUOLI-E-DASHBOARD §4.3).
-_authz_read = Depends(require_any_role("PIANIFICATORE_GIRO", "PIANIFICATORE_PDC"))
+# Sprint 8.0 MR 0 (entry 164): lettura turni PdC ammessa ai 4 ruoli
+# pipeline. La visibilità è applicata via filter sul programma
+# proprietario del giro_materiale legato al turno (vedi
+# `list_turni_pdc_azienda`).
+_authz_read = Depends(
+    require_any_role(
+        "PIANIFICATORE_GIRO",
+        "PIANIFICATORE_PDC",
+        "GESTIONE_PERSONALE",
+        "MANUTENZIONE",
+    )
+)
 # Sprint 7.3 MR 3: la generazione/scrittura turni PdC è competenza
 # primaria del PIANIFICATORE_PDC (RUOLI-E-DASHBOARD §4: "Costruisce/modifica
 # turni PdC dai giri"). Il PIANIFICATORE_GIRO mantiene l'accesso per
@@ -539,6 +554,12 @@ async def list_turni_pdc_azienda(
     `/pianificatore-pdc/turni`. La response usa lo stesso shape di
     `GET /api/giri/{id}/turni-pdc` (`TurnoPdcListItem`) per consentire
     il riuso dei componenti UI tabella.
+    Sprint 8.0 MR 0 (entry 164): aperta a tutti i 4 ruoli pipeline,
+    con filtraggio per ``stato_pipeline_pdc`` del programma
+    proprietario del giro associato al turno. Effetto collaterale:
+    i turni "legacy" senza ``giro_materiale_id`` nel metadata sono
+    esclusi per i ruoli con soglia attiva (PIANIFICATORE_PDC, ecc.);
+    restano visibili a PIANIFICATORE_GIRO + admin (no filter).
     """
     stmt = select(TurnoPdc).where(TurnoPdc.azienda_id == user.azienda_id)
     if impianto is not None:
@@ -555,6 +576,29 @@ async def list_turni_pdc_azienda(
         stmt = stmt.where(TurnoPdc.valido_da <= valido_da_max)
     if q is not None:
         stmt = stmt.where(TurnoPdc.codice.ilike(f"%{q}%"))
+
+    # Sprint 8.0 MR 0: filter visibilità via subquery sui giri visibili.
+    soglia = soglia_pipeline_per_ruoli(user.roles, user.is_admin)
+    if soglia is not None:
+        giri_visibili_subq = (
+            select(GiroMateriale.id)
+            .join(
+                ProgrammaMateriale,
+                ProgrammaMateriale.id == GiroMateriale.programma_id,
+            )
+            .where(
+                GiroMateriale.azienda_id == user.azienda_id,
+                ProgrammaMateriale.stato_pipeline_pdc.in_(stati_pdc_da(soglia)),
+            )
+            .scalar_subquery()
+        )
+        stmt = stmt.where(
+            cast(
+                TurnoPdc.generation_metadata_json["giro_materiale_id"].astext,
+                BigInteger,
+            ).in_(giri_visibili_subq)
+        )
+
     stmt = stmt.order_by(TurnoPdc.codice).limit(limit).offset(offset)
     turni = list((await session.execute(stmt)).scalars())
     if not turni:

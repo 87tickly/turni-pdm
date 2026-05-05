@@ -46,6 +46,24 @@ class CorsaImportRun(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     note: Mapped[str | None] = mapped_column(Text)
 
+    # Sprint 8.0 MR 0 (entry 164, migration 0032): pipeline state machine.
+    # ``programma_materiale_id`` è nullable perché i run preesistenti alla
+    # migration non hanno un programma associato e perché i run di tipo
+    # BASE possono essere caricati prima che il pianificatore crei il
+    # programma materiale (la riga di link viene poi UPDATE-ata).
+    # ``tipo`` distingue il primo import dal versioning multi-import
+    # (variazioni). Validato applicativamente da ``TipoImportRun`` in
+    # ``colazione.domain.pipeline``; lato DB CHECK constraint
+    # ``corsa_import_run_tipo_check``.
+    programma_materiale_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("programma_materiale.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    tipo: Mapped[str] = mapped_column(
+        String(40), default="BASE", server_default="BASE"
+    )
+
 
 class CorsaCommerciale(Base):
     __tablename__ = "corsa_commerciale"

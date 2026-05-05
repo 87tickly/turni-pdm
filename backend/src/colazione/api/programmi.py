@@ -19,6 +19,7 @@ non rivelare l'esistenza).
 (l'admin bypassa, vedi `require_role`).
 """
 
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,8 +29,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from colazione.auth import require_role
+from colazione.auth import require_admin, require_any_role, require_role
 from colazione.db import get_session
+from colazione.domain.pipeline import (
+    StatoManutenzione,
+    StatoPipelinePdc,
+    TransizioneNonAmmessaError,
+    programma_visibile_per_ruoli,
+    soglia_pipeline_per_ruoli,
+    stati_pdc_da,
+    stato_manutenzione_precedente,
+    stato_pdc_precedente,
+    valida_transizione_manutenzione,
+    valida_transizione_pdc,
+)
 from colazione.models.programmi import (
     BuilderRun,
     ProgrammaMateriale,
@@ -41,14 +54,47 @@ from colazione.schemas.programmi import (
     ProgrammaMaterialeUpdate,
     ProgrammaRegolaAssegnazioneCreate,
     ProgrammaRegolaAssegnazioneRead,
+    SbloccaProgrammaRequest,
 )
 from colazione.schemas.security import CurrentUser
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/programmi", tags=["programmi"])
 
 
 # Tutti gli endpoint richiedono PIANIFICATORE_GIRO (admin bypassa via require_role).
 _authz = Depends(require_role("PIANIFICATORE_GIRO"))
+
+# Sprint 8.0 MR 0 (entry 164): deps dedicate per gli endpoint pipeline.
+# Estratte a modulo-livello per evitare warning ruff B008 (function call
+# in argument default) e per chiarire il mapping endpoint → ruolo.
+_authz_pdc = Depends(require_role("PIANIFICATORE_PDC"))
+_authz_personale = Depends(require_role("GESTIONE_PERSONALE"))
+_authz_manutenzione = Depends(require_role("MANUTENZIONE"))
+_authz_admin = Depends(require_admin())
+
+# Sprint 8.0 MR 0: list/detail di programmi sono leggibili da tutti i 4
+# ruoli pipeline (PdC, Personale, Manutenzione oltre a Giro Materiale).
+# La visibilità per stato_pipeline_pdc è applicata nel body della route
+# via ``soglia_pipeline_per_ruoli``.
+_authz_view = Depends(
+    require_any_role(
+        "PIANIFICATORE_GIRO",
+        "PIANIFICATORE_PDC",
+        "GESTIONE_PERSONALE",
+        "MANUTENZIONE",
+    )
+)
+
+
+def _programma_visibile_per_user(
+    programma: ProgrammaMateriale, user: CurrentUser
+) -> bool:
+    """Wrapper ORM intorno a :func:`programma_visibile_per_ruoli`."""
+    return programma_visibile_per_ruoli(
+        programma.stato_pipeline_pdc, user.roles, user.is_admin
+    )
 
 
 # =====================================================================
@@ -57,9 +103,22 @@ _authz = Depends(require_role("PIANIFICATORE_GIRO"))
 
 
 async def _get_programma_or_404(
-    session: AsyncSession, programma_id: int, azienda_id: int
+    session: AsyncSession,
+    programma_id: int,
+    azienda_id: int,
+    *,
+    for_update: bool = False,
 ) -> ProgrammaMateriale:
-    """Carica un programma se esiste E appartiene all'azienda corrente."""
+    """Carica un programma se esiste E appartiene all'azienda corrente.
+
+    Sprint 8.0 MR 0 (entry 164): supporto opzionale ``SELECT ... FOR
+    UPDATE`` per le route di transizione di stato. Senza row-lock, due
+    chiamate concorrenti su rami diversi (es. ``sblocca`` + ``conferma-pdc``
+    sullo stesso programma) potrebbero leggere lo stesso snapshot pre-
+    transizione e l'ultima vincere, rendendo invisibile la transizione
+    intermedia. Con ``for_update=True`` la seconda chiamata si serializza
+    sul commit della prima.
+    """
     stmt = (
         select(ProgrammaMateriale)
         .where(
@@ -68,6 +127,8 @@ async def _get_programma_or_404(
         )
         .limit(1)
     )
+    if for_update:
+        stmt = stmt.with_for_update()
     p = (await session.execute(stmt)).scalar_one_or_none()
     if p is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="programma non trovato")
@@ -169,7 +230,7 @@ async def create_programma(
 
 @router.get("", response_model=list[ProgrammaMaterialeRead])
 async def list_programmi(
-    user: CurrentUser = _authz,
+    user: CurrentUser = _authz_view,
     session: AsyncSession = Depends(get_session),
     stato: str | None = Query(default=None, description="filtro per stato"),
 ) -> list[ProgrammaMateriale]:
@@ -177,6 +238,11 @@ async def list_programmi(
 
     Eager-load `created_by` per popolare `created_by_username` nella
     response (entry 88 — schermata 3 design `arturo/03-dettaglio-programma.html`).
+
+    Sprint 8.0 MR 0 (entry 164): filtro per ruolo via
+    :func:`soglia_pipeline_per_ruoli`. PIANIFICATORE_GIRO + admin
+    vedono tutto; gli altri ruoli vedono solo programmi con
+    ``stato_pipeline_pdc >= soglia(ruolo)``.
     """
     stmt = (
         select(ProgrammaMateriale)
@@ -185,6 +251,11 @@ async def list_programmi(
     )
     if stato is not None:
         stmt = stmt.where(ProgrammaMateriale.stato == stato)
+    soglia = soglia_pipeline_per_ruoli(user.roles, user.is_admin)
+    if soglia is not None:
+        stmt = stmt.where(
+            ProgrammaMateriale.stato_pipeline_pdc.in_(stati_pdc_da(soglia))
+        )
     stmt = stmt.order_by(ProgrammaMateriale.valido_da.desc())
     return list((await session.execute(stmt)).scalars().all())
 
@@ -198,10 +269,15 @@ class ProgrammaDettaglioRead(ProgrammaMaterialeRead):
 @router.get("/{programma_id}", response_model=ProgrammaDettaglioRead)
 async def get_programma(
     programma_id: int,
-    user: CurrentUser = _authz,
+    user: CurrentUser = _authz_view,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, object]:
-    """Dettaglio del programma + lista regole (eager loading via 1 query)."""
+    """Dettaglio del programma + lista regole (eager loading via 1 query).
+
+    Sprint 8.0 MR 0: 404 (privacy multi-tenant) anche se il programma
+    esiste ma è invisibile per ruolo (vedi
+    :func:`_programma_visibile_per_user`).
+    """
     stmt = (
         select(ProgrammaMateriale)
         .options(joinedload(ProgrammaMateriale.created_by))
@@ -212,7 +288,7 @@ async def get_programma(
         .limit(1)
     )
     p = (await session.execute(stmt)).scalar_one_or_none()
-    if p is None:
+    if p is None or not _programma_visibile_per_user(p, user):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="programma non trovato")
 
     stmt_regole = (
@@ -311,7 +387,7 @@ async def add_regola(
     if p.stato == "archiviato":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"programma archiviato: regole non modificabili",
+            detail="programma archiviato: regole non modificabili",
         )
 
     composizione = payload.composizione
@@ -348,7 +424,7 @@ async def delete_regola(
     if p.stato == "archiviato":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"programma archiviato: regole non cancellabili",
+            detail="programma archiviato: regole non cancellabili",
         )
 
     stmt = (
@@ -410,6 +486,234 @@ async def archivia_programma(
             detail="programma già archiviato",
         )
     p.stato = "archiviato"
+    p.updated_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(p)
+    return p
+
+
+# =====================================================================
+# Pipeline state machine (Sprint 8.0 MR 0, entry 164)
+# =====================================================================
+#
+# Ogni endpoint sotto è un "trigger" di transizione: niente body
+# obbligatorio (eccetto sblocca, dove l'admin può tracciare un motivo).
+# La validazione applicativa vive in ``colazione.domain.pipeline``;
+# il DB ha CHECK constraint sui valori ammessi.
+#
+# Effetto collaterale documentato di ``conferma-materiale``: se il ramo
+# manutenzione è ancora ``IN_ATTESA`` viene attivato in ``IN_LAVORAZIONE``.
+# Coerente con la spec MR 0: il ramo manutenzione "si attiva quando
+# stato_pipeline_pdc >= MATERIALE_CONFERMATO".
+#
+# Scope rinviato a MR 1: freeze read-only delle regole/giri al
+# ``MATERIALE_CONFERMATO`` e invalidazione cache delle list-route giri
+# dipendenti.
+#
+
+
+async def _transizione_pdc(
+    session: AsyncSession,
+    programma: ProgrammaMateriale,
+    target: StatoPipelinePdc,
+) -> None:
+    """Helper: valida e applica una transizione del ramo PdC.
+
+    Centralizza il pattern parse → valida → assegna usato dai 4
+    endpoint di conferma pipeline (materiale, pdc, personale, vista).
+    Solleva ``HTTPException(400)`` con il messaggio di
+    :class:`TransizioneNonAmmessaError` se la transizione non è ammessa.
+    """
+    corrente = StatoPipelinePdc(programma.stato_pipeline_pdc)
+    try:
+        valida_transizione_pdc(corrente, target)
+    except TransizioneNonAmmessaError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    programma.stato_pipeline_pdc = target.value
+    programma.updated_at = datetime.now(UTC)
+
+
+@router.post(
+    "/{programma_id}/conferma-materiale",
+    response_model=ProgrammaMaterialeRead,
+    summary="Pianificatore Materiale conferma il giro materiale",
+)
+async def conferma_materiale(
+    programma_id: int,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> ProgrammaMateriale:
+    """Transizione ``PDE_CONSOLIDATO`` o ``MATERIALE_GENERATO`` →
+    ``MATERIALE_CONFERMATO``.
+
+    Side effect: se ``stato_manutenzione == IN_ATTESA``, viene portato
+    a ``IN_LAVORAZIONE`` (ramo manutenzione si attiva).
+    """
+    p = await _get_programma_or_404(
+        session, programma_id, user.azienda_id, for_update=True
+    )
+    await _transizione_pdc(session, p, StatoPipelinePdc.MATERIALE_CONFERMATO)
+    if p.stato_manutenzione == StatoManutenzione.IN_ATTESA.value:
+        p.stato_manutenzione = StatoManutenzione.IN_LAVORAZIONE.value
+    await session.commit()
+    await session.refresh(p)
+    return p
+
+
+@router.post(
+    "/{programma_id}/conferma-pdc",
+    response_model=ProgrammaMaterialeRead,
+    summary="Pianificatore PdC conferma i turni PdC",
+)
+async def conferma_pdc(
+    programma_id: int,
+    user: CurrentUser = _authz_pdc,
+    session: AsyncSession = Depends(get_session),
+) -> ProgrammaMateriale:
+    """Transizione ``PDC_GENERATO`` → ``PDC_CONFERMATO``."""
+    p = await _get_programma_or_404(
+        session, programma_id, user.azienda_id, for_update=True
+    )
+    await _transizione_pdc(session, p, StatoPipelinePdc.PDC_CONFERMATO)
+    await session.commit()
+    await session.refresh(p)
+    return p
+
+
+@router.post(
+    "/{programma_id}/conferma-personale",
+    response_model=ProgrammaMaterialeRead,
+    summary="Gestione Personale conferma le assegnazioni dei PdC",
+)
+async def conferma_personale(
+    programma_id: int,
+    user: CurrentUser = _authz_personale,
+    session: AsyncSession = Depends(get_session),
+) -> ProgrammaMateriale:
+    """Transizione ``PDC_CONFERMATO`` → ``PERSONALE_ASSEGNATO``."""
+    p = await _get_programma_or_404(
+        session, programma_id, user.azienda_id, for_update=True
+    )
+    await _transizione_pdc(session, p, StatoPipelinePdc.PERSONALE_ASSEGNATO)
+    await session.commit()
+    await session.refresh(p)
+    return p
+
+
+@router.post(
+    "/{programma_id}/pubblica-vista-pdc",
+    response_model=ProgrammaMaterialeRead,
+    summary="Gestione Personale pubblica la vista PdC al personale finale",
+)
+async def pubblica_vista_pdc(
+    programma_id: int,
+    user: CurrentUser = _authz_personale,
+    session: AsyncSession = Depends(get_session),
+) -> ProgrammaMateriale:
+    """Transizione ``PERSONALE_ASSEGNATO`` → ``VISTA_PUBBLICATA`` (terminale)."""
+    p = await _get_programma_or_404(
+        session, programma_id, user.azienda_id, for_update=True
+    )
+    await _transizione_pdc(session, p, StatoPipelinePdc.VISTA_PUBBLICATA)
+    await session.commit()
+    await session.refresh(p)
+    return p
+
+
+@router.post(
+    "/{programma_id}/conferma-manutenzione",
+    response_model=ProgrammaMaterialeRead,
+    summary="Manutenzione conferma l'assegnazione delle matricole",
+)
+async def conferma_manutenzione(
+    programma_id: int,
+    user: CurrentUser = _authz_manutenzione,
+    session: AsyncSession = Depends(get_session),
+) -> ProgrammaMateriale:
+    """Transizione ramo manutenzione ``IN_LAVORAZIONE`` →
+    ``MATRICOLE_ASSEGNATE`` (terminale del ramo).
+
+    Indipendente dal ramo PdC: non altera ``stato_pipeline_pdc``.
+    """
+    p = await _get_programma_or_404(
+        session, programma_id, user.azienda_id, for_update=True
+    )
+    corrente = StatoManutenzione(p.stato_manutenzione)
+    try:
+        valida_transizione_manutenzione(
+            corrente, StatoManutenzione.MATRICOLE_ASSEGNATE
+        )
+    except TransizioneNonAmmessaError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    p.stato_manutenzione = StatoManutenzione.MATRICOLE_ASSEGNATE.value
+    p.updated_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(p)
+    return p
+
+
+@router.post(
+    "/{programma_id}/sblocca",
+    response_model=ProgrammaMaterialeRead,
+    summary="[admin] Sblocca un programma facendolo regredire allo stato precedente",
+)
+async def sblocca_programma(
+    programma_id: int,
+    payload: SbloccaProgrammaRequest,
+    user: CurrentUser = _authz_admin,
+    session: AsyncSession = Depends(get_session),
+) -> ProgrammaMateriale:
+    """Regressione di **uno step** sul ramo specificato (``pdc`` o
+    ``manutenzione``). Solo admin.
+
+    400 se il ramo è già al primo stato (niente precedente). Il motivo
+    è opzionale ma viene loggato a livello WARNING per audit.
+
+    Race condition mitigata via ``SELECT FOR UPDATE``: una sblocca
+    concorrente ad una conferma viene serializzata.
+    """
+    p = await _get_programma_or_404(
+        session, programma_id, user.azienda_id, for_update=True
+    )
+    if payload.ramo == "pdc":
+        corrente_pdc = StatoPipelinePdc(p.stato_pipeline_pdc)
+        prev_pdc = stato_pdc_precedente(corrente_pdc)
+        if prev_pdc is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"ramo PdC già al primo stato ({corrente_pdc.value}): "
+                    "niente da sbloccare"
+                ),
+            )
+        p.stato_pipeline_pdc = prev_pdc.value
+        nuovo_stato = prev_pdc.value
+    else:
+        corrente_man = StatoManutenzione(p.stato_manutenzione)
+        prev_man = stato_manutenzione_precedente(corrente_man)
+        if prev_man is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"ramo manutenzione già al primo stato "
+                    f"({corrente_man.value}): niente da sbloccare"
+                ),
+            )
+        p.stato_manutenzione = prev_man.value
+        nuovo_stato = prev_man.value
+
+    logger.warning(
+        "sblocca programma id=%s ramo=%s nuovo_stato=%s motivo=%r admin=%s",
+        p.id,
+        payload.ramo,
+        nuovo_stato,
+        payload.motivo,
+        user.username,
+    )
     p.updated_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(p)
