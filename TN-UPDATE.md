@@ -10,6 +10,85 @@
 
 ---
 
+## 2026-05-05 (143) — Sprint 7.9 MR δ.3: soglie label abbassate per acronimi @ 100% + spiegazione "Convogli del turno"
+
+### Contesto
+
+Smoke utente post-deploy MR δ.1+δ.2. Due feedback:
+
+1. **"non hai fatto il 100%"** — al 100% di zoom le label stazione
+   sono assenti sopra ai blocchi. Causa: soglie `showStazioni: widthPx
+   >= 47` e `showOrari: widthPx >= 33` erano dimensionate per nomi
+   pieni troncati ("MILANO PORTA G..."), ma con gli acronimi
+   introdotti in MR δ.1 (es. "MiPG", 4 char, ~24 px) la soglia 47 non
+   serve più. Quindi al 100% i blocchi cortissimi (~33-40 px) restano
+   senza label visibili anche se gli acronimi ci entrerebbero.
+2. **"non capisco il senso del secondo screen"** — la sezione
+   "Convogli del turno (thread L2)" mostra una tabella con N righe
+   "ETR421 / non assegnata / km / min / corse / Apri →" senza
+   spiegare cosa rappresenti. L'utente non capisce che ogni riga è un
+   pezzo fisico che gira in parallelo agli altri per coprire il giro
+   intero.
+
+### Modifiche — `GiroDettaglioRoute.tsx`
+
+**Soglie label abbassate** (in `CommercialeBlocco` e nel branch
+`materiale_vuoto` di `BloccoSegment`):
+
+```diff
+- const showStazioni = widthPx >= 47;
+- const showOrari    = widthPx >= 33;
++ const showStazioni = widthPx >= 30;  // acronimi 2-4 char ci
++ const showOrari    = widthPx >= 25;  //   stanno con margine
+```
+
+Ora gli acronimi (`MiPG`, `Lc`, `So`, `Ti`, ecc.) sono visibili sopra
+ai blocchi anche al 100% di zoom su giri densi. Sotto al 30/25 px
+(blocchi inferiori a ~45 minuti) le label restano nascoste perché
+finirebbero comunque illeggibili anche come acronimi.
+
+**Paragrafo esplicativo nella `ConvogliDelTurnoSection`**:
+
+Sotto la riga "Convogli del turno (thread L2) · N pezzi fisici
+proiettati" un paragrafo `<p>` chiarisce:
+
+> _"I N convogli fisici che servono per coprire questo giro
+> contemporaneamente: ogni riga è un pezzo distinto del materiale, con
+> la sua sequenza di corse (km, minuti, n° corse del singolo pezzo).
+> La matricola effettiva (es. ETR421-007) viene assegnata dal ruolo
+> Manutenzione. 'Apri →' mostra la timeline dettagliata del singolo
+> convoglio."_
+
+Adatta il numero (1 → "Un singolo convoglio fisico", N → "I N convogli
+fisici"). Visibile solo quando ci sono thread (N > 0).
+
+### Verifiche
+
+- ✅ `tsc -b --noEmit`: clean.
+- ✅ `pnpm lint`: 0 errors, 5 warning preesistenti (non miei).
+- ✅ `pnpm test`: 13/13 file, 52 passed + 1 skipped, 0 failed.
+- ✅ `pnpm build`: clean, dimensioni JS invariate (cambi solo in 2
+  punti del CommercialeBlocco/branch vuoto + paragrafo testo).
+
+### Stato
+
+- ✅ Soglie 30/25 px → acronimi visibili @ zoom 100% su giri densi.
+- ✅ Paragrafo esplicativo "Convogli del turno" rende auto-evidente
+  cosa rappresenta la sezione.
+- ⏳ Smoke utente in produzione.
+
+### Prossimo step (richiesto utente: "successivamente, popoliamo i depositi nella sezione pdc")
+
+MR ε: popolare la pagina `DepositiRoute.tsx` del Pianificatore PdC
+con l'anagrafica reale dei depositi PdC (~25 voci Trenord:
+ALESSANDRIA, ARONA, BERGAMO, BRESCIA, ecc.). Il backend ha già il
+modello `DepositoPdc` (vedi `docs/MODELLO-DATI.md`); potrebbe servire
+un seed iniziale + endpoint `GET /api/depositi-pdc` + hook
+`useDepositiPdc` se non già esistenti. Verifica scope-spec all'apertura
+del MR.
+
+---
+
 ## 2026-05-05 (142) — Sprint 7.9 MR δ.2: BloccoSidePanel laterale → Dialog modal full-width + link thread convoglio
 
 ### Contesto

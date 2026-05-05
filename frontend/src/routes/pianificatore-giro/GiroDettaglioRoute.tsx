@@ -276,13 +276,34 @@ function ConvogliDelTurnoSection({ giroId }: { giroId: number }) {
   return (
     <Card id="convogli-del-turno" className="overflow-hidden scroll-mt-4">
       <div className="border-b border-border bg-muted/40 px-4 py-2.5 text-xs">
-        <span className="font-medium uppercase tracking-wide text-foreground">
-          Convogli del turno (thread L2)
-        </span>
-        <span className="ml-3 text-muted-foreground">
-          {threads.length} pezz{threads.length === 1 ? "o" : "i"} fisic
-          {threads.length === 1 ? "o" : "i"} proiettat{threads.length === 1 ? "o" : "i"}
-        </span>
+        <div>
+          <span className="font-medium uppercase tracking-wide text-foreground">
+            Convogli del turno (thread L2)
+          </span>
+          <span className="ml-3 text-muted-foreground">
+            {threads.length} pezz{threads.length === 1 ? "o" : "i"} fisic
+            {threads.length === 1 ? "o" : "i"} proiettat{threads.length === 1 ? "o" : "i"}
+          </span>
+        </div>
+        {/* Sprint 7.9 MR δ.3 (entry 143): paragrafo esplicativo. Decisione
+            utente: "non capisco il senso del secondo screen" — chiarire
+            che ogni riga è un convoglio fisico (pezzo) che gira in
+            parallelo agli altri per coprire il giro intero. */}
+        <p className="mt-1 max-w-3xl text-[11px] leading-snug text-muted-foreground/90">
+          {threads.length > 0 ? (
+            <>
+              {threads.length === 1
+                ? "Un singolo convoglio fisico"
+                : `I ${threads.length} convogli fisici`}{" "}
+              che servono per coprire questo giro contemporaneamente: ogni
+              riga è un pezzo distinto del materiale, con la sua sequenza di
+              corse (km, minuti, n° corse del singolo pezzo). La matricola
+              effettiva (es. ETR421-007) viene assegnata dal ruolo
+              Manutenzione. "Apri →" mostra la timeline dettagliata del
+              singolo convoglio.
+            </>
+          ) : null}
+        </p>
       </div>
       {threads.length === 0 ? (
         <div className="p-6 text-center text-sm text-muted-foreground">
@@ -1103,8 +1124,12 @@ function BloccoSegment({
       blocco.stazione_a_nome ?? blocco.stazione_a_codice,
       isLastOfRow,
     );
-    const showStazioni = widthPx >= 47;
-    const showOrari = widthPx >= 33;
+    // Sprint 7.9 MR δ.3 (entry 143): soglie abbassate ora che le label
+    // intermedie sono acronimi 2-4 char ("MiPG", "Lc"); 30/25 px
+    // bastano a renderizzare leggibilmente. Era 47/33 quando le label
+    // erano nomi pieni troncati (MR γ).
+    const showStazioni = widthPx >= 30;
+    const showOrari = widthPx >= 25;
     return (
       <button
         type="button"
@@ -1319,10 +1344,11 @@ function CommercialeBlocco({
   // adiacenti. Sopra la soglia stampa entrambe (origine|dest) tronche
   // al 50% della width disponibile.
   // Sprint 7.9 MR γ: soglie scalate da scala 60px/h a 40px/h (factor
-  // 2/3): 70→47, 50→33. Mantiene la stessa soglia in MINUTI di durata
-  // (~70 min per stazioni, ~50 min per orari).
-  const showStazioni = widthPx >= 47;
-  const showOrari = widthPx >= 33;
+  // 2/3): 70→47, 50→33. Sprint 7.9 MR δ.3 (entry 143): abbassate
+  // ulteriormente a 30/25 ora che le label intermedie sono acronimi
+  // 2-4 char (vedi `lib/stazioni-acronimi.ts`).
+  const showStazioni = widthPx >= 30;
+  const showOrari = widthPx >= 25;
   return (
     <button
       type="button"
