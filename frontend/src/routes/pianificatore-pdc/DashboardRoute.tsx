@@ -8,15 +8,23 @@ import {
   Building2,
   CheckCircle2,
   ListChecks,
+  Lock,
   Workflow,
 } from "lucide-react";
 
+import { ApiError } from "@/lib/api/client";
+import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { usePianificatorePdcOverview } from "@/hooks/usePianificatorePdc";
+import { useConfermaPdc, useProgrammi } from "@/hooks/useProgrammi";
 import { useTurniPdcAzienda } from "@/hooks/useTurniPdc";
 import { useDepots } from "@/hooks/useAnagrafiche";
+import type {
+  ProgrammaMaterialeRead,
+  StatoPipelinePdc,
+} from "@/lib/api/programmi";
 import { cn } from "@/lib/utils";
 
 /**
@@ -170,6 +178,9 @@ export function PianificatorePdcDashboardRoute() {
 
       {/* BANNER CTA "Cosa fare ora" */}
       <CtaBanner cta={cta} />
+
+      {/* PIPELINE PROGRAMMI (Sprint 8.0 MR 2, entry 167) */}
+      <PipelineProgrammiSection />
 
       {/* 5 KPI grandi (Sprint 7.9 MR η: aggiunto FR) */}
       <section className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
@@ -697,5 +708,143 @@ function FooterShortcut({
         aria-hidden
       />
     </Link>
+  );
+}
+
+// =====================================================================
+// Pipeline programmi (Sprint 8.0 MR 2, entry 167)
+// =====================================================================
+//
+// Sezione che mostra al PIANIFICATORE_PDC i programmi visibili (filter
+// list-route MR 0 = ``>= MATERIALE_CONFERMATO``) raggruppati per stato
+// pipeline. L'azione principale è "Conferma turni PdC" sui programmi
+// in ``PDC_GENERATO`` (transizione → ``PDC_CONFERMATO``, handoff verso
+// GESTIONE_PERSONALE). I programmi ``MATERIALE_CONFERMATO`` ma senza
+// turni generati restano nel widget come "in attesa di generazione".
+
+const PIPELINE_PDC_DASHBOARD_LABEL: Record<StatoPipelinePdc, string> = {
+  PDE_IN_LAVORAZIONE: "PdE in lavorazione",
+  PDE_CONSOLIDATO: "PdE consolidato",
+  MATERIALE_GENERATO: "Materiale generato",
+  MATERIALE_CONFERMATO: "Materiale confermato",
+  PDC_GENERATO: "PdC generato",
+  PDC_CONFERMATO: "PdC confermato",
+  PERSONALE_ASSEGNATO: "Personale assegnato",
+  VISTA_PUBBLICATA: "Vista pubblicata",
+};
+
+const STATI_PIPELINE_VISIBILI_PDC: ReadonlySet<StatoPipelinePdc> = new Set([
+  "MATERIALE_CONFERMATO",
+  "PDC_GENERATO",
+  "PDC_CONFERMATO",
+  "PERSONALE_ASSEGNATO",
+  "VISTA_PUBBLICATA",
+]);
+
+function PipelineProgrammiSection() {
+  const programmiQuery = useProgrammi();
+  const programmi = useMemo(() => {
+    const data = programmiQuery.data;
+    if (!Array.isArray(data)) return [];
+    return data.filter((p) =>
+      STATI_PIPELINE_VISIBILI_PDC.has(p.stato_pipeline_pdc),
+    );
+  }, [programmiQuery.data]);
+
+  if (programmiQuery.isLoading) {
+    return (
+      <Card className="flex items-center justify-center p-4">
+        <Spinner label="Caricamento programmi pipeline…" />
+      </Card>
+    );
+  }
+  if (programmiQuery.isError) {
+    return (
+      <Card className="border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
+        Impossibile caricare i programmi pipeline.
+      </Card>
+    );
+  }
+  if (programmi.length === 0) {
+    return (
+      <Card className="border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+        Nessun programma confermato in pipeline. Aspetta che il
+        Pianificatore Materiale confermi un programma.
+      </Card>
+    );
+  }
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">
+        Pipeline programmi
+      </h2>
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        {programmi.map((p) => (
+          <PipelineProgrammaCard key={p.id} programma={p} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PipelineProgrammaCard({
+  programma,
+}: {
+  programma: ProgrammaMaterialeRead;
+}) {
+  const stato = programma.stato_pipeline_pdc;
+  const confermaMutation = useConfermaPdc();
+  const isPdcGenerato = stato === "PDC_GENERATO";
+  const isFreezato = stato === "PDC_CONFERMATO" || stato === "PERSONALE_ASSEGNATO" || stato === "VISTA_PUBBLICATA";
+
+  return (
+    <Card
+      className={cn(
+        "flex items-center justify-between gap-3 p-3",
+        isPdcGenerato && "border-blue-300 bg-blue-50",
+        isFreezato && "border-amber-300 bg-amber-50",
+      )}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold truncate text-foreground">
+            {programma.nome}
+          </span>
+          {isFreezato ? (
+            <Lock className="h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden />
+          ) : null}
+        </div>
+        <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+          {PIPELINE_PDC_DASHBOARD_LABEL[stato]}
+        </div>
+      </div>
+      {isPdcGenerato ? (
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={confermaMutation.isPending}
+          onClick={() => {
+            if (
+              !window.confirm(
+                `Confermare i turni PdC del programma "${programma.nome}"?\n` +
+                  "Dopo la conferma i turni saranno read-only e il programma " +
+                  "sarà pronto per l'assegnazione delle persone.",
+              )
+            ) {
+              return;
+            }
+            confermaMutation.mutate(programma.id, {
+              onError: (err) => {
+                const msg = err instanceof ApiError ? err.message : err.message;
+                window.alert(`Conferma fallita: ${msg}`);
+              },
+            });
+          }}
+        >
+          <CheckCircle2 className="mr-2 h-4 w-4" aria-hidden /> Conferma turni
+        </Button>
+      ) : null}
+    </Card>
   );
 }

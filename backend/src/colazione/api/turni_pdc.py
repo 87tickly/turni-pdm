@@ -20,7 +20,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import BigInteger, cast, func, select
+from sqlalchemy import BigInteger, cast, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.auth import require_any_role, require_role
@@ -42,6 +42,8 @@ from colazione.domain.builder_pdc.simulazione import (
     suggerisci_depositi,
 )
 from colazione.domain.pipeline import (
+    StatoPipelinePdc,
+    pdc_freezato,
     soglia_pipeline_per_ruoli,
     stati_pdc_da,
 )
@@ -291,7 +293,51 @@ async def genera_turno_pdc_endpoint(
 
     Per regressione/debug: ``legacy_monolitico=true`` riusa il flusso
     pre-α.2 (entrato in produzione con MR η/η.1).
+
+    Sprint 8.0 MR 2 (entry 167):
+
+    - **Freeze**: 409 se ``stato_pipeline_pdc >= PDC_CONFERMATO``
+      (handoff verso GESTIONE_PERSONALE già completato; turni
+      consolidati). Per rigenerare, l'admin deve sbloccare via
+      ``POST /api/programmi/{id}/sblocca``.
+    - **Side effect**: dopo la generazione con successo, se il
+      programma proprietario è in ``MATERIALE_CONFERMATO``, viene
+      portato a ``PDC_GENERATO`` (la dashboard PIANIFICATORE_PDC
+      mostra così quali programmi hanno turni da confermare).
     """
+    # Pre-check freeze PdC + lookup programma_id (per side effect post-build).
+    prog_row = (
+        await session.execute(
+            select(
+                GiroMateriale.programma_id,
+                ProgrammaMateriale.stato_pipeline_pdc,
+            )
+            .join(
+                ProgrammaMateriale,
+                ProgrammaMateriale.id == GiroMateriale.programma_id,
+            )
+            .where(
+                GiroMateriale.id == giro_id,
+                GiroMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).first()
+    if prog_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"giro_materiale {giro_id} non trovato",
+        )
+    programma_id, stato_pre = prog_row
+    if pdc_freezato(stato_pre):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"programma in stato pipeline {stato_pre!r} "
+                "(>= PDC_CONFERMATO): turni PdC read-only. Per rigenerare "
+                "richiedi a un admin POST /api/programmi/{id}/sblocca."
+            ),
+        )
+
     try:
         if legacy_monolitico:
             results: list[BuilderTurnoPdcResult] = await genera_turno_pdc(
@@ -318,6 +364,33 @@ async def genera_turno_pdc_endpoint(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)) from e
     except GiriEsistentiError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+
+    # Sprint 8.0 MR 2 (entry 167): side effect MATERIALE_CONFERMATO →
+    # PDC_GENERATO al primo turno generato. Idempotente: se è già a
+    # PDC_GENERATO o oltre, non si fa nulla. La transizione
+    # PDC_GENERATO → PDC_CONFERMATO resta esplicita via
+    # ``POST /api/programmi/{id}/conferma-pdc``.
+    #
+    # Race fix (review Fausto MR 2): ri-leggiamo lo stato con FOR UPDATE
+    # per rispettare un eventuale sblocca admin concorrente. Se nel
+    # frattempo lo stato è stato regredito (es. da MATERIALE_CONFERMATO
+    # a MATERIALE_GENERATO via sblocca), NON forziamo PDC_GENERATO —
+    # la decisione admin prevale sul side effect del builder.
+    if results:
+        stato_post = (
+            await session.execute(
+                select(ProgrammaMateriale.stato_pipeline_pdc)
+                .where(ProgrammaMateriale.id == programma_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if stato_post == StatoPipelinePdc.MATERIALE_CONFERMATO.value:
+            await session.execute(
+                update(ProgrammaMateriale)
+                .where(ProgrammaMateriale.id == programma_id)
+                .values(stato_pipeline_pdc=StatoPipelinePdc.PDC_GENERATO.value)
+            )
+        await session.commit()  # rilascia il FOR UPDATE in entrambi i rami
 
     return [
         TurnoPdcGenerazioneResponse(

@@ -1,15 +1,28 @@
 import { useMemo } from "react";
 import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, ChevronRight, Plus, Upload } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronRight,
+  Plus,
+  Upload,
+  Workflow,
+} from "lucide-react";
 
+import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { useAuth } from "@/lib/auth/AuthContext";
 import {
   useGestionePersonaleKpi,
   useGestionePersonaleKpiDepositi,
 } from "@/hooks/useGestionePersonale";
+import { useProgrammi } from "@/hooks/useProgrammi";
 import type { GestionePersonaleKpiPerDepositoRead } from "@/lib/api/gestione-personale";
+import type {
+  ProgrammaMaterialeRead,
+  StatoPipelinePdc,
+} from "@/lib/api/programmi";
 import { CoverageBand } from "@/routes/gestione-personale/_shared/CoverageBand";
 import { EditorialHead, EditorialNum } from "@/routes/gestione-personale/_shared/EditorialHead";
 import { useGestionePersonale } from "@/routes/gestione-personale/_shared/GestionePersonaleContext";
@@ -111,6 +124,9 @@ export function GestionePersonaleDashboardRoute() {
           </>
         }
       />
+
+      {/* PIPELINE PROGRAMMI (Sprint 8.0 MR 2, entry 167) */}
+      <PipelineProgrammiSection />
 
       {/* KPI STRIPE — orizzontale, monospaziata, una sola riga. */}
       <div
@@ -494,4 +510,101 @@ function DepositiRow({
       </td>
     </tr>
   );
+}
+
+// =====================================================================
+// Pipeline programmi — vista GESTIONE_PERSONALE (Sprint 8.0 MR 2)
+// =====================================================================
+//
+// Lista programmi visibili a GESTIONE_PERSONALE (filter list-route MR 0
+// = ``>= PDC_CONFERMATO``). Per scope MR 2 è una vista informativa:
+// l'azione "Conferma assegnazioni personale" entrerà nel flusso UI in
+// MR 2.bis (algoritmo assegnazione + delta% mancanze) o MR 3.
+
+const PIPELINE_PERSONALE_LABEL: Record<StatoPipelinePdc, string> = {
+  PDE_IN_LAVORAZIONE: "PdE in lavorazione",
+  PDE_CONSOLIDATO: "PdE consolidato",
+  MATERIALE_GENERATO: "Materiale generato",
+  MATERIALE_CONFERMATO: "Materiale confermato",
+  PDC_GENERATO: "PdC generato",
+  PDC_CONFERMATO: "PdC confermato — pronto per assegnazione",
+  PERSONALE_ASSEGNATO: "Personale assegnato",
+  VISTA_PUBBLICATA: "Vista pubblicata al personale",
+};
+
+function PipelineProgrammiSection() {
+  const programmiQuery = useProgrammi();
+  const programmi = useMemo(() => {
+    const data = programmiQuery.data;
+    return Array.isArray(data) ? data : [];
+  }, [programmiQuery.data]);
+
+  if (programmiQuery.isLoading) {
+    return (
+      <Card className="flex items-center justify-center p-3">
+        <Spinner label="Caricamento programmi…" />
+      </Card>
+    );
+  }
+  if (programmi.length === 0) {
+    return (
+      <Card className="border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+        Nessun programma con turni PdC confermati. Aspetta che il
+        Pianificatore PdC confermi i turni di un programma.
+      </Card>
+    );
+  }
+
+  return (
+    <section className="flex flex-col gap-2">
+      <div className="flex items-baseline gap-2">
+        <Workflow className="h-4 w-4 text-primary" aria-hidden />
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">
+          Pipeline programmi
+        </h2>
+        <span className="text-xs text-muted-foreground">
+          {programmi.length} programmi pronti per assegnazione personale
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        {programmi.map((p) => (
+          <PersonalePipelineCard key={p.id} programma={p} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PersonalePipelineCard({
+  programma,
+}: {
+  programma: ProgrammaMaterialeRead;
+}) {
+  const stato = programma.stato_pipeline_pdc;
+  const isPubblicato = stato === "VISTA_PUBBLICATA";
+  return (
+    <Card
+      className={cnGp(
+        "flex items-center justify-between gap-3 p-3",
+        stato === "PDC_CONFERMATO" && "border-blue-300 bg-blue-50",
+        isPubblicato && "border-emerald-300 bg-emerald-50",
+      )}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-semibold truncate text-foreground">
+          {programma.nome}
+        </div>
+        <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+          {PIPELINE_PERSONALE_LABEL[stato]}
+        </div>
+      </div>
+      {isPubblicato ? (
+        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+      ) : null}
+    </Card>
+  );
+}
+
+function cnGp(...classes: Array<string | false | undefined | null>): string {
+  return classes.filter(Boolean).join(" ");
 }

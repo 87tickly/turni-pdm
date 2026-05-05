@@ -573,6 +573,76 @@ async def test_genera_giri_post_freeze_409(client: TestClient) -> None:
     assert "MATERIALE_CONFERMATO" in res.json()["detail"]
 
 
+async def _crea_giro_minimo(programma_id: int, codice: str) -> int:
+    """INSERT diretto di un giro materiale skeleton, agganciato a
+    ``programma_id``. Usato dai test freeze-PdC per avere un
+    ``giro_id`` valido senza dover seed-are corse/giornate/blocchi
+    (il pre-check di freeze non li tocca). ``localita_manutenzione_partenza_id``
+    è obbligatorio: prendiamo la prima località dell'azienda.
+    """
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text(
+                    "INSERT INTO giro_materiale "
+                    "(azienda_id, programma_id, numero_turno, tipo_materiale, "
+                    "materiale_tipo_codice, numero_giornate, stato, "
+                    "localita_manutenzione_partenza_id, "
+                    "localita_manutenzione_arrivo_id, generation_metadata_json) "
+                    "SELECT pm.azienda_id, :pid, CAST(:codice AS VARCHAR), "
+                    "  'TEST', NULL, 1, 'bozza', "
+                    "  (SELECT id FROM localita_manutenzione "
+                    "   WHERE azienda_id = pm.azienda_id LIMIT 1), "
+                    "  (SELECT id FROM localita_manutenzione "
+                    "   WHERE azienda_id = pm.azienda_id LIMIT 1), "
+                    "  '{}'::jsonb "
+                    "FROM programma_materiale pm WHERE pm.id = :pid "
+                    "RETURNING id"
+                ),
+                {"pid": programma_id, "codice": codice},
+            )
+        ).first()
+        assert row is not None
+        return int(row[0])
+
+
+async def test_genera_turno_pdc_pdc_confermato_409(client: TestClient) -> None:
+    """Sprint 8.0 MR 2: freeze su POST /api/giri/{id}/genera-turno-pdc
+    quando programma >= PDC_CONFERMATO."""
+    pid = await _crea_programma_in_stato("freeze_pdc_post", "PDC_CONFERMATO")
+    giro_id = await _crea_giro_minimo(pid, "G-FRZ-PDC-001")
+    res = client.post(
+        f"/api/giri/{giro_id}/genera-turno-pdc",
+        headers=_h(_admin_token(client)),
+    )
+    assert res.status_code == 409, res.text
+    assert "PDC_CONFERMATO" in res.json()["detail"]
+
+
+async def test_genera_turno_pdc_giro_inesistente_404(client: TestClient) -> None:
+    """Pre-check freeze ritorna 404 se ``giro_id`` non esiste."""
+    res = client.post(
+        "/api/giri/999999/genera-turno-pdc",
+        headers=_h(_admin_token(client)),
+    )
+    assert res.status_code == 404
+
+
+async def test_genera_turno_pdc_personale_assegnato_409(
+    client: TestClient,
+) -> None:
+    """Freeze attivo anche oltre la soglia (PERSONALE_ASSEGNATO)."""
+    pid = await _crea_programma_in_stato(
+        "freeze_pdc_pers", "PERSONALE_ASSEGNATO"
+    )
+    giro_id = await _crea_giro_minimo(pid, "G-FRZ-PDC-002")
+    res = client.post(
+        f"/api/giri/{giro_id}/genera-turno-pdc",
+        headers=_h(_admin_token(client)),
+    )
+    assert res.status_code == 409
+
+
 async def test_sblocca_riapre_modifiche(client: TestClient) -> None:
     """Verifica end-to-end del workflow: conferma → freeze 409 → admin
     sblocca → modifica torna a 200."""

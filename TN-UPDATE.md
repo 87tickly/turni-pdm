@@ -10,6 +10,143 @@
 
 ---
 
+## 2026-05-05 (167) — Sprint 8.0 MR 2: handoff PdC → Personale (freeze + dashboard PdC + dashboard Personale)
+
+### Contesto
+
+MR 2 chiude il secondo handoff: il PIANIFICATORE_PDC genera/conferma
+i turni, oltre quel punto i turni diventano read-only e il programma
+si rende visibile a GESTIONE_PERSONALE (filtro list-route già in MR 0).
+
+### Modifiche backend
+
+**`backend/src/colazione/domain/pipeline.py`** — nuova helper
+``pdc_freezato(stato_pipeline_pdc) -> bool``: ``True`` se ``stato >=
+PDC_CONFERMATO``. Stesso failsafe (logger.warning + ``False`` su
+valore fuori enum) di ``materiale_freezato``.
+
+**`backend/src/colazione/api/turni_pdc.py`** —
+``POST /api/giri/{giro_id}/genera-turno-pdc``:
+
+- **Pre-check** prima di chiamare il builder: SELECT joinato
+  ``GiroMateriale ⨝ ProgrammaMateriale`` per ottenere
+  ``programma_id`` + ``stato_pipeline_pdc`` in un'unica query.
+  ``404`` se giro non esiste, ``409`` se ``pdc_freezato`` (turni
+  consolidati, handoff verso Personale completato).
+- **Side effect**: dopo la generazione con successo, se il programma
+  proprietario è in ``MATERIALE_CONFERMATO`` viene portato a
+  ``PDC_GENERATO``. Race fix da review Fausto: ri-letto lo stato
+  con ``with_for_update()`` immediatamente prima dell'UPDATE,
+  rispetta eventuali ``POST /sblocca`` admin concorrenti — se lo
+  stato è stato regredito nel frattempo, niente forced
+  ``PDC_GENERATO``.
+- Idempotente: se già ``PDC_GENERATO`` o oltre, side effect skip.
+
+### Modifiche test backend
+
+**`backend/tests/test_api_programmi_conferma.py`** — 3 nuovi test
+(sezione "Freeze read-only post PDC_CONFERMATO"):
+
+- ``test_genera_turno_pdc_pdc_confermato_409``
+- ``test_genera_turno_pdc_giro_inesistente_404``
+- ``test_genera_turno_pdc_personale_assegnato_409`` (sanity)
+
+Helper ``_crea_giro_minimo(programma_id, codice)`` che inserisce un
+``GiroMateriale`` skeleton (con FK obbligatorie ``localita_manutenzione_*``
+prese dalla prima località dell'azienda); evita di seedare
+giornate/blocchi che il pre-check non tocca.
+
+### Modifiche frontend
+
+**`frontend/src/routes/pianificatore-pdc/DashboardRoute.tsx`** —
+nuova sezione ``<PipelineProgrammiSection>`` montata sotto il banner
+CTA: lista programmi visibili al PIANIFICATORE_PDC (filter list-route
+già MR 0) raggruppati per stato pipeline.
+
+- Card per ogni programma con badge stato + nome.
+- Bottone **"Conferma turni"** per programmi in ``PDC_GENERATO``
+  (chiama ``POST /conferma-pdc`` via ``useConfermaPdc``).
+- Card border amber + lock icon per programmi ``>= PDC_CONFERMATO``
+  (read-only, già passati al Personale).
+- Empty state se nessun programma in pipeline.
+
+**`frontend/src/routes/gestione-personale/DashboardRoute.tsx`** —
+nuova sezione ``<PipelineProgrammiSection>`` (omonima ma scope
+diverso) montata sotto l'EditorialHead: lista programmi
+``>= PDC_CONFERMATO`` (filter MR 0 per ruolo GESTIONE_PERSONALE).
+
+- Card informative (no azioni in MR 2 — l'azione "Conferma
+  assegnazioni personale" entra in MR 2.bis o MR 3 con l'algoritmo
+  di assegnazione).
+- Card border emerald per programmi ``VISTA_PUBBLICATA`` (workflow
+  completato).
+- Empty state se nessun programma confermato.
+
+Entrambi i widget usano ``Array.isArray`` defensive sul payload
+``useProgrammi.data`` (per non rompere render in test environment
+dove la fetch non è mockata).
+
+### Modifiche test frontend
+
+**`DashboardRoute.test.tsx` (PIANIFICATORE_PDC)** — il
+``beforeEach`` ora wrappa ``fetchSpy``: ``/api/programmi`` ritorna
+sempre ``[]`` (la nuova fetch del widget Pipeline non veniva mockata
+e rompeva i 3 test esistenti). Niente cambi alla logica dei test.
+
+### Review Fausto (mcp__grok__ask) — 5 punti
+
+1. Race side effect concorrente (giri diversi stesso programma):
+   PASS, idempotente (entrambi scrivono ``PDC_GENERATO``).
+2. **Race con sblocca admin** (FAIL): A genera turni, B sblocca
+   → A scriverebbe ``PDC_GENERATO`` annullando lo sblocca → fix
+   applicato con ``with_for_update()`` + ri-lettura stato_post.
+3. Side effect solo da ``MATERIALE_CONFERMATO`` (WARN): voluto;
+   semantica precisa "primo turno generato dopo conferma".
+4. Pre-check senza FOR UPDATE: PASS, sblocca admin raro, tradeoff
+   ok per MR 2.
+5. 404 ridondanti (pre-check + ``GiroNonTrovatoError``): PASS,
+   defense in depth.
+
+### Verifiche
+
+- ✅ ``uv run mypy --strict src/``: 69 file clean.
+- ✅ ``uv run ruff check`` sui file MR 2: 0 errori.
+- ✅ ``uv run pytest``: full suite 689 passed (3 nuovi MR 2 verdi).
+- ✅ ``pnpm tsc -b --noEmit``: clean.
+- ✅ ``pnpm test --run``: 52 passed | 1 skipped.
+- ✅ Smoke locale: pagina ``/login`` carica, niente errori console.
+
+### Stato
+
+- ✅ Codice MR 2 pronto (freeze backend + 2 widget pipeline + side
+  effect race-safe).
+- ⏳ Commit + push + deploy backend + frontend Railway.
+- ⏳ Smoke production: dal PIANIFICATORE_PDC vedere widget "Pipeline
+  programmi" con bottone "Conferma turni" sui programmi
+  ``PDC_GENERATO``; dal GESTIONE_PERSONALE vedere lista programmi
+  pronti per assegnazione.
+
+### Decisioni di scope rinviate
+
+- **Algoritmo assegnazione persone + delta% mancanze**: scope
+  MR 2.bis o MR 3. Richiede modello ``persona_assegnazione``
+  + algoritmo di matching anagrafica/turno + UI dedicata.
+- **Bottone "Conferma assegnazioni personale"** sulla dashboard
+  Gestione Personale: rinviato a MR 2.bis (presuppone l'algoritmo
+  assegnazione).
+- **Banner pipeline anche sulle altre route PdC** (giri, turni,
+  dettaglio): MR 2 ha messo solo dashboard. Se serve drilldown,
+  scope MR successivo.
+
+### Prossimo step
+
+MR 3: vista PdC finale (route ``/pdc/mio-turno``) — il personale di
+macchina vede il proprio turno PdC pubblicato (programmi in
+``VISTA_PUBBLICATA``). Componente Gantt readonly + filtro per
+matricola persona loggata.
+
+---
+
 ## 2026-05-05 (165) — Pulizia: fix 2 test persister stale post MR β2-2
 
 ### Contesto

@@ -304,6 +304,29 @@ def materiale_freezato(stato_pipeline_pdc: str) -> bool:
     return ordinale_pdc(stato) >= ordinale_pdc(StatoPipelinePdc.MATERIALE_CONFERMATO)
 
 
+def pdc_freezato(stato_pipeline_pdc: str) -> bool:
+    """``True`` se lo stato pipeline congela i turni PdC.
+
+    Sprint 8.0 MR 2: oltre la soglia ``PDC_CONFERMATO`` i turni PdC sono
+    consolidati e il programma è in handoff verso GESTIONE_PERSONALE.
+    Le scritture (POST genera-turno-pdc, ecc.) sono bloccate finché un
+    admin non chiama ``POST /programmi/{id}/sblocca`` (regressione a
+    ``PDC_GENERATO``).
+
+    Difensivo: stato fuori enum → ``False`` (= libero); il CHECK
+    constraint DB dovrebbe comunque impedirlo.
+    """
+    try:
+        stato = StatoPipelinePdc(stato_pipeline_pdc)
+    except ValueError:
+        _logger.warning(
+            "stato_pipeline_pdc fuori enum (%r): pdc_freezato NON applicato.",
+            stato_pipeline_pdc,
+        )
+        return False
+    return ordinale_pdc(stato) >= ordinale_pdc(StatoPipelinePdc.PDC_CONFERMATO)
+
+
 def programma_visibile_per_ruoli(
     stato_pipeline_pdc: str, roles: list[str], is_admin: bool
 ) -> bool:

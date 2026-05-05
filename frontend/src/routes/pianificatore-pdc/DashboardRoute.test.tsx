@@ -50,7 +50,19 @@ describe("PianificatorePdcDashboardRoute", () => {
 
   beforeEach(() => {
     fetchSpy = vi.fn();
-    vi.spyOn(globalThis, "fetch").mockImplementation(fetchSpy);
+    // Sprint 8.0 MR 2 (entry 167): la dashboard ora fa una fetch
+    // addizionale a `/api/programmi` per il widget pipeline. I test
+    // esistenti mockano solo la prima fetch (overview); con la nuova
+    // fetch sarebbero default-undefined → render-error. Wrappiamo
+    // ``fetchSpy`` con default sicuri: ``/api/programmi`` → ``[]``,
+    // altri URL fallback al mockResolvedValueOnce / a 200 vuoto.
+    vi.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes("/api/programmi") && !url.includes("last-run")) {
+        return jsonResponse([]);
+      }
+      return fetchSpy(input, init);
+    }) as typeof fetch);
   });
 
   afterEach(() => {
