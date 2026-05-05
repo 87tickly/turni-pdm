@@ -660,8 +660,10 @@ function GanttSection({
   return (
     <GanttScaleContext.Provider value={scale}>
       <Card className={cn("overflow-hidden", selectedBlocco !== null && "gantt-selecting")}>
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-2.5 text-xs">
+        {/* Toolbar — sticky così resta visibile (zoom + bottoni scroll)
+            anche quando l'utente scrolla la pagina principale per leggere
+            il Gantt esteso. */}
+        <div className="sticky top-0 z-40 flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/95 px-4 py-2.5 text-xs backdrop-blur-sm">
           <div className="flex items-center gap-3 text-muted-foreground">
             <span className="font-medium uppercase tracking-wide text-foreground">Gantt giro</span>
             <span className="text-border">·</span>
@@ -705,11 +707,14 @@ function GanttSection({
 
         {/* Scroll wrapper — overflow-x esplicito + scrollbar sempre visibile
             anche su macOS (Chrome/Safari nascondono la barra di default,
-            l'utente non si accorge di poter scrollare). */}
+            l'utente non si accorge di poter scrollare). Sprint 7.9 MR δ.5
+            (entry 145): rimosso `maxHeight: 700px` che causava scroll-y
+            interno → la scrollbar-x finiva in fondo ai 700px e non era
+            visibile. Ora lo scroll-y è a livello pagina (main overflow-auto)
+            e la scrollbar-x sta subito sotto il Gantt. */}
         <div
           ref={scrollWrapperRef}
-          className="gantt-scroll relative overflow-x-auto overflow-y-auto"
-          style={{ maxHeight: "700px" }}
+          className="gantt-scroll relative overflow-x-auto pb-1"
         >
           <div className="relative" style={{ width: `${innerWidth}px` }}>
             {/* Sticky header X axis */}

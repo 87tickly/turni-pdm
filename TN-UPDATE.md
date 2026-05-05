@@ -10,6 +10,96 @@
 
 ---
 
+## 2026-05-05 (146) — Sprint 7.9 MR δ.5: toolbar Gantt sticky + maxHeight 700px rimosso (vero fix scroll)
+
+### Contesto
+
+Smoke utente post-deploy MR δ.4: "lo scroll continua a non funzionare,
+la pagina è tagliata". Verifica via curl che il bundle online
+contenesse le stringhe `gantt-scroll` e "Scorri Gantt" → confermato
+deploy applicato. Ma l'utente continuava a vedere solo 4 giornate di
+6 + i ticks 04→19 (mancano 20-03) + il blocco "Mi" troncato sul
+bordo destro.
+
+Diagnosi reale: il `maxHeight: 700px` sul scrollWrapper Gantt creava
+**uno scroll-y INTERNO** dentro al Gantt → la **scrollbar-x finiva in
+fondo a quei 700px** (sotto la 4ª giornata visibile, dopo che lo
+scroll-y interno aveva nascosto le righe 5-6). L'utente non la vedeva
+mai, perché era posizionata in un'area scrollabile che lui non
+visitava. Idem la toolbar Gantt (con toggle zoom + bottoni ← → del MR
+δ.4) era posizionata in cima al Card → quando l'utente scrollava la
+pagina principale per arrivare a leggere il Gantt, la toolbar era
+**fuori viewport sopra** e i bottoni non erano raggiungibili.
+
+### Modifiche — `GiroDettaglioRoute.tsx`
+
+**Toolbar sticky**:
+
+```diff
+- <div className="flex flex-wrap items-center justify-between gap-3 border-b
+-      border-border bg-muted/40 px-4 py-2.5 text-xs">
++ <div className="sticky top-0 z-40 flex flex-wrap items-center justify-between
++      gap-3 border-b border-border bg-muted/95 px-4 py-2.5 text-xs
++      backdrop-blur-sm">
+```
+
+`sticky top-0 z-40` rispetto allo scroller più vicino (= `<main
+overflow-auto>` dell'AppLayout). `bg-muted/95 backdrop-blur-sm` perché
+mentre l'utente scorre la pagina sotto la toolbar, il content (blocchi
+Gantt) non deve traspare in modo confuso. La toolbar resta sempre in
+cima del Gantt visibile → toggle zoom e bottoni ← → sempre
+raggiungibili.
+
+**`maxHeight: 700px` rimosso**:
+
+```diff
+- <div className="gantt-scroll relative overflow-x-auto overflow-y-auto"
+-      style={{ maxHeight: "700px" }}>
++ <div className="gantt-scroll relative overflow-x-auto pb-1">
+```
+
+Lo scroll-y va a livello pagina (`<main overflow-auto>` lo fa già).
+Lo scrollWrapper ha solo `overflow-x-auto` → la scrollbar orizzontale
+è **direttamente sotto le righe Gantt visibili**, non più "sepolta"
+in fondo a 700px interni. `pb-1` aggiunge un piccolo respiro tra
+l'ultima riga e la scrollbar.
+
+### Verifiche
+
+- ✅ `tsc -b --noEmit`: clean.
+- ✅ `pnpm test`: 13/13 file, 52 passed + 1 skipped, 0 failed.
+- ✅ `pnpm build`: clean.
+- ✅ `curl` su frontend production conferma che il MR δ.4 era
+  deployato prima di questo MR (bundle conteneva `gantt-scroll` +
+  "Scorri Gantt"); il problema era nella progettazione del layout,
+  non nel deploy mancato.
+
+### Stato
+
+- ✅ Toolbar Gantt sticky: zoom + bottoni ← → sempre visibili anche
+  scrollando la pagina principale.
+- ✅ maxHeight rimosso: scrollbar-x subito sotto al Gantt, scroll-y a
+  livello pagina come per le altre sezioni della route.
+- ⏳ Smoke utente: serve hard refresh (Cmd+Shift+R) per superare la
+  cache del bundle precedente (MR δ.4).
+
+### Limitazioni residue
+
+Su giri molto grandi (>10 giornate), il Gantt occupa tutta la verticale
+della pagina e il pianificatore deve scrollare il `<main>`. Accettabile:
+è il comportamento standard delle altre sezioni (DateApplicazioneSection,
+ConvogliDelTurnoSection).
+
+### Prossimo step
+
+Smoke utente post-hard-refresh. Se ok → MR ε popolazione depositi PdC
+per azienda #2 (richiesta utente: "popoliamo i depositi nella sezione
+PdC", confermato che l'utente è in azienda #2 e il seed
+`0002_seed_trenord` popola depositi solo per azienda Trenord =
+azienda_id 1).
+
+---
+
 ## 2026-05-05 (145) — Sprint 7.9 MR ζ: Gestione Personale (4° ruolo) — backend + 7 schermate frontend popolate
 
 ### Contesto
