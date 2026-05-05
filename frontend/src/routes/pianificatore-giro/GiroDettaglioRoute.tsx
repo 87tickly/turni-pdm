@@ -7,10 +7,15 @@ import {
   useState,
 } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AlertCircle, ArrowLeft, FileDown, Users, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, FileDown, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/Dialog";
 import {
   Popover,
   PopoverContent,
@@ -179,7 +184,6 @@ export function GiroDettaglioRoute() {
   const giro = query.data;
   const meta = giro.generation_metadata_json as Record<string, unknown>;
   const programmaId = typeof meta.programma_id === "number" ? meta.programma_id : null;
-  const showSide = selectedBlocco !== null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -196,10 +200,8 @@ export function GiroDettaglioRoute() {
 
       <HeroSection giro={giro} onGeneraPdc={() => setPdcDialogOpen(true)} />
 
-      <section
-        className={cn("grid grid-cols-1 gap-4", showSide ? "lg:grid-cols-12" : "lg:grid-cols-1")}
-      >
-        <div className={cn("flex flex-col gap-4", showSide && "lg:col-span-8")}>
+      <section className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4">
           <GanttSection
             giro={giro}
             selectedBlocco={selectedBlocco}
@@ -234,18 +236,14 @@ export function GiroDettaglioRoute() {
             }}
           />
         </div>
-
-        {showSide && selectedBlocco !== null && (
-          <aside className="self-start lg:col-span-4">
-            <BloccoSidePanel
-              blocco={selectedBlocco}
-              giro={giro}
-              activeVariantByGiornata={activeVariantByGiornata}
-              onClose={() => setSelectedBlocco(null)}
-            />
-          </aside>
-        )}
       </section>
+
+      <BloccoDialog
+        blocco={selectedBlocco}
+        giro={giro}
+        activeVariantByGiornata={activeVariantByGiornata}
+        onClose={() => setSelectedBlocco(null)}
+      />
 
       <DateApplicazioneSection giro={giro} />
 
@@ -276,7 +274,7 @@ function ConvogliDelTurnoSection({ giroId }: { giroId: number }) {
   if (query.isError) return null;
   const threads = query.data ?? [];
   return (
-    <Card className="overflow-hidden">
+    <Card id="convogli-del-turno" className="overflow-hidden scroll-mt-4">
       <div className="border-b border-border bg-muted/40 px-4 py-2.5 text-xs">
         <span className="font-medium uppercase tracking-wide text-foreground">
           Convogli del turno (thread L2)
@@ -1519,6 +1517,8 @@ interface EventoComposizione {
   destDescrizione: string | null;
   /** Sprint 7.9 MR β2-3: True se il sourcing ha violato la dotazione. */
   capacityWarning: boolean;
+  /** Sprint 7.9 MR δ.2 (entry 142): id thread L2 collegato all'evento, se popolato. */
+  materialeThreadId: number | null;
 }
 
 /**
@@ -1554,6 +1554,10 @@ function extractEventiComposizione(variante: GiroVariante): EventoComposizione[]
         ? (meta.dest_descrizione as string)
         : null;
     const capWarn = meta.capacity_warning === true;
+    const threadId =
+      typeof meta.materiale_thread_id === "number"
+        ? (meta.materiale_thread_id as number)
+        : null;
     out.push({
       oraMin: min,
       tipo: b.tipo_blocco,
@@ -1563,6 +1567,7 @@ function extractEventiComposizione(variante: GiroVariante): EventoComposizione[]
       sourceDescrizione: sourceDescr,
       destDescrizione: destDescr,
       capacityWarning: capWarn,
+      materialeThreadId: threadId,
     });
   }
   return out;
@@ -1650,6 +1655,21 @@ function EventoCompMarker({ evento }: { evento: EventoComposizione }) {
             ? "Pezzo che entra nel turno (composizione cresce)."
             : "Pezzo che esce dal turno (composizione cala)."}
         </div>
+        {evento.materialeThreadId !== null ? (
+          <Link
+            to={`/pianificatore-giro/thread/${evento.materialeThreadId}`}
+            className="mt-3 block rounded border border-primary/40 bg-primary/5 px-2 py-1.5 text-center text-[11px] font-medium text-primary hover:bg-primary/10"
+          >
+            Apri thread del convoglio →
+          </Link>
+        ) : (
+          <a
+            href="#convogli-del-turno"
+            className="mt-3 block rounded border border-border bg-muted/40 px-2 py-1.5 text-center text-[11px] font-medium text-muted-foreground hover:bg-muted"
+          >
+            Vedi convogli del turno ↓
+          </a>
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -1899,19 +1919,54 @@ function Legenda() {
 }
 
 // =====================================================================
-// Side panel — dettaglio blocco selezionato (redesign v3)
+// Sprint 7.9 MR δ.2 (entry 142): Dialog modal "Dettaglio blocco /
+// turno". Sostituisce il SidePanel laterale (lg:col-span-4) per
+// rispondere al feedback utente "non hai messo la possibilità di
+// aprire un pop up per aprire il turno in una pagina tutta sua e
+// dedicata". Il dialog è centrato, full-width main libero per il
+// Gantt, e include link al thread del convoglio + ai convogli del
+// turno (sezione esistente sotto la pagina).
 // =====================================================================
 
-function BloccoSidePanel({
+function BloccoDialog({
   blocco,
   giro,
   activeVariantByGiornata,
   onClose,
 }: {
-  blocco: GiroBlocco;
+  blocco: GiroBlocco | null;
   giro: GiroDettaglio;
   activeVariantByGiornata: Record<number, number>;
   onClose: () => void;
+}) {
+  return (
+    <Dialog
+      open={blocco !== null}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent className="max-w-2xl">
+        {blocco !== null && (
+          <BloccoDialogBody
+            blocco={blocco}
+            giro={giro}
+            activeVariantByGiornata={activeVariantByGiornata}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function BloccoDialogBody({
+  blocco,
+  giro,
+  activeVariantByGiornata,
+}: {
+  blocco: GiroBlocco;
+  giro: GiroDettaglio;
+  activeVariantByGiornata: Record<number, number>;
 }) {
   const tipoLabel = tipoBloccoLabel(blocco.tipo_blocco);
   const direction = inferDirection(blocco);
@@ -1943,24 +1998,22 @@ function BloccoSidePanel({
     return null;
   }, [giro, blocco.id, activeVariantByGiornata]);
 
-  return (
-    <Card className="overflow-hidden">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-          Dettaglio blocco
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Chiudi pannello"
-          title="Chiudi pannello"
-          className="text-muted-foreground hover:text-foreground"
-        >
-          <X className="h-4 w-4" aria-hidden />
-        </button>
-      </div>
+  // Sprint 7.9 MR δ.2: estraggo materiale_thread_id dal metadata se
+  // presente (popolato dal builder MR β2-4 sui blocchi che attraversano
+  // un thread fisico). Quando c'è, il dialog mostra link diretto alla
+  // pagina /pianificatore-giro/thread/{id}.
+  const meta = blocco.metadata_json ?? {};
+  const threadId =
+    typeof meta.materiale_thread_id === "number"
+      ? (meta.materiale_thread_id as number)
+      : null;
 
-      <div className="p-5">
+  return (
+    <>
+      <DialogTitle className="sr-only">
+        Dettaglio blocco {blocco.numero_treno ?? "—"}
+      </DialogTitle>
+      <div>
         <div className="mb-1 flex items-center gap-2">
           <span
             className={cn(
@@ -2014,7 +2067,7 @@ function BloccoSidePanel({
           </div>
         </div>
 
-        {/* KPI mini: durata + tipo + sequenza */}
+        {/* KPI mini: durata + direzione + tipo */}
         <div className="mt-5 grid grid-cols-3 gap-2 border-b border-border pb-4">
           <KpiPanel label="Durata" value={durata} />
           <KpiPanel
@@ -2046,15 +2099,33 @@ function BloccoSidePanel({
           </div>
         )}
 
-        <p className="mt-4 text-center text-[10px] text-muted-foreground">
-          Premi{" "}
-          <kbd className="rounded border border-border bg-muted px-1 py-0.5 font-mono text-[10px]">
-            Esc
-          </kbd>{" "}
-          o ✕ per deselezionare.
-        </p>
+        {/* Link "pagina dedicata" */}
+        <div className="mt-5 flex flex-col gap-2">
+          {threadId !== null && (
+            <Link
+              to={`/pianificatore-giro/thread/${threadId}`}
+              className="inline-flex items-center justify-center rounded border border-primary/40 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10"
+            >
+              Apri thread del convoglio →
+            </Link>
+          )}
+          <a
+            href="#convogli-del-turno"
+            onClick={() => {
+              // Chiudi il dialog dopo lo scroll per non oscurare la sezione.
+              setTimeout(() => {
+                document
+                  .getElementById("convogli-del-turno")
+                  ?.scrollIntoView({ behavior: "smooth" });
+              }, 50);
+            }}
+            className="inline-flex items-center justify-center rounded border border-border bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted"
+          >
+            Vedi convogli del turno ↓
+          </a>
+        </div>
       </div>
-    </Card>
+    </>
   );
 }
 

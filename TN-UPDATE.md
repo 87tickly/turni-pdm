@@ -10,6 +10,110 @@
 
 ---
 
+## 2026-05-05 (142) — Sprint 7.9 MR δ.2: BloccoSidePanel laterale → Dialog modal full-width + link thread convoglio
+
+### Contesto
+
+Risposta utente al chiarimento C posto in entry 141: "marker proviamo
+con entrambi" → cliccando sia un blocco commerciale (corsa rossa) sia
+un marker EventoComposizione (`+/-N`) si vuole aprire un popup/dialog
+con dettaglio + link "pagina dedicata". Inoltre utente: "oversize va
+sempre bene" → niente split prudenziale, accorpo tutto qui.
+
+### Modifiche — `GiroDettaglioRoute.tsx`
+
+**Refactor `BloccoSidePanel` → `BloccoDialog`** (~+80 righe, ~-15
+nette grazie al wrapper Radix che porta gratis X di chiusura, Esc,
+focus trap, click-outside):
+
+- Nuovo `BloccoDialog` riceve `blocco: GiroBlocco | null` e wrappa
+  `BloccoDialogBody` (la vecchia logica del SidePanel) in
+  `<Dialog open onOpenChange>` Radix tramite il wrapper UI esistente
+  `components/ui/Dialog.tsx`.
+- Il pannello laterale a 4/12 col è eliminato: `<section>` torna a
+  layout `flex flex-col gap-4` single-col, il main Gantt ha sempre
+  full-width (niente più squeeze a 8/12 quando si seleziona un
+  blocco).
+- Aggiunto `<DialogTitle className="sr-only">` per a11y (Radix loggava
+  warning altrimenti).
+- Rimosso import `X` di lucide (era usato solo dal close button del
+  vecchio SidePanel; ora la X la fornisce `DialogContent` standard).
+
+**Link "Apri thread del convoglio"** dal Dialog corsa commerciale:
+
+- Estrazione `materiale_thread_id` da `metadata_json` del blocco
+  (popolato dal builder MR β2-4 sui blocchi che attraversano un
+  thread fisico L2).
+- Se presente → bottone outline-primary "Apri thread del convoglio →"
+  → naviga a `/pianificatore-giro/thread/{id}` (route esistente da
+  MR β2-6).
+- Sempre presente → bottone outline-muted "Vedi convogli del turno ↓"
+  → scroll alla sezione `ConvogliDelTurnoSection` (già nella stessa
+  pagina) con `scrollIntoView({ behavior: "smooth" })` dopo la
+  chiusura del dialog.
+
+**Link thread anche dal Popover marker EventoComposizione**:
+
+- `EventoComposizione` interface ora include `materialeThreadId:
+  number | null`.
+- `extractEventiComposizione` legge `meta.materiale_thread_id` se è
+  number.
+- Il `PopoverContent` del marker termina con:
+  - `<Link>` "Apri thread del convoglio →" se `materialeThreadId !==
+    null` (stessa route del dialog corsa).
+  - Fallback `<a href="#convogli-del-turno">` "Vedi convogli del
+    turno ↓" se thread non collegato.
+
+**Anchor scroll**:
+
+- `ConvogliDelTurnoSection` <Card> ora ha `id="convogli-del-turno"`
+  + classe `scroll-mt-4` per spaziatura visiva quando l'ancora
+  scatta lo scroll.
+
+### Verifiche
+
+- ✅ `tsc -b --noEmit`: clean.
+- ✅ `pnpm lint`: 0 errors, 5 warning preesistenti (non miei).
+- ✅ `pnpm test`: 13/13 file, 52 passed + 1 skipped, 0 failed.
+- ✅ `pnpm build`: 1762 modules, 568KB JS / 159KB gzipped (+1KB vs
+  MR δ.1 per il refactor SidePanel→Dialog).
+
+### Stato
+
+- ✅ Dialog modal centrato sostituisce SidePanel laterale (Gantt
+  ora full-width sempre).
+- ✅ Link "Apri thread del convoglio" dal dialog corsa quando il
+  blocco ha `materiale_thread_id` nei metadata.
+- ✅ Link "Apri thread del convoglio" dal Popover marker
+  EventoComposizione quando l'evento è collegato a thread; fallback
+  link a sezione "Convogli del turno" altrimenti.
+- ⏳ Smoke utente in produzione (giro 128, click su blocco rosso →
+  dialog; click su marker `+/-N` → popover; verifica link thread se
+  presente).
+
+### Limitazioni residue
+
+1. **`materiale_thread_id` nei metadata richiede builder MR β2-4+**:
+   blocchi/eventi creati da run builder pre-β2-4 non hanno il campo,
+   quindi mostrano solo il fallback "Vedi convogli del turno". Da
+   testare con un giro post-β2-4 (es. giro 80 dell'entry 139).
+2. **"Pagina dedicata della corsa commerciale"** (es. visualizzatore
+   completo del treno 24853 con stazioni intermedie e capability di
+   modifica) non implementata. Per ora il dialog mostra origine→
+   destinazione + KPI; la "pagina dedicata" è il thread del materiale
+   (= il pezzo fisico che fa la corsa), non la corsa di per sé.
+   L'utente ha approvato implicitamente questa interpretazione con
+   "marker proviamo con entrambi" — diversamente è MR successivo.
+
+### Prossimo step
+
+Smoke utente. Se funziona, gli altri 3 micro-bug rilevati nello
+screenshot iniziale (NotteRow `23 24` → `23:24`, etichetta giornata
+"G1 SPECIFICA" duplicata, marker label sgancio in altre zone) restano
+backlog per quando l'utente ce li riporta come blocker.
+
+---
+
 ## 2026-05-05 (141) — Sprint 7.9 MR δ.1: acronimi stazioni + fit-to-container @ 75% + Popover marker EventoComposizione
 
 ### Contesto
