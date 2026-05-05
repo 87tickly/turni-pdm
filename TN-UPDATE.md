@@ -10,6 +10,94 @@
 
 ---
 
+## 2026-05-05 (169) — Sprint 8.0 MR 4: dashboard Manutenzione (ramo parallelo)
+
+### Contesto
+
+Apre il **6° ruolo** dell'ecosistema (``MANUTENZIONE``): vede i
+programmi confermati dal Pianificatore Giro Materiale, segue lo
+stato del ramo Manutenzione (``IN_ATTESA`` → ``IN_LAVORAZIONE`` →
+``MATRICOLE_ASSEGNATE``) e conferma l'assegnazione delle matricole
+fisiche ai materiali del programma.
+
+Ramo **parallelo e indipendente** dal ramo PdC: la
+``conferma-manutenzione`` non blocca/influenza le transizioni del
+ramo principale (vedi entry 164 MR 0 + side effect MR 1 che
+attiva ``IN_ATTESA → IN_LAVORAZIONE`` quando il pianificatore
+conferma il materiale).
+
+### Modifiche frontend
+
+**`frontend/src/routes/manutenzione/DashboardRoute.tsx`** (nuovo,
+~180 righe):
+
+- Layout dedicato per il ruolo MANUTENZIONE.
+- Widget ``<PipelineSection>``: lista programmi visibili (filter
+  list-route MR 0 = ``stato_pipeline_pdc >= MATERIALE_CONFERMATO``).
+- Card per programma con badge stato Manutenzione + bottone
+  **"Conferma matricole"** (chiama ``POST /api/programmi/{id}/conferma-manutenzione``)
+  visibile solo quando ``stato_manutenzione == IN_LAVORAZIONE``.
+- Empty state se nessun programma in pipeline.
+- Card border emerald + check icon per programmi
+  ``MATRICOLE_ASSEGNATE``.
+- Card lock icon per ``IN_ATTESA`` (non ancora attivati: il
+  Pianificatore Giro non ha ancora confermato il materiale).
+
+**`frontend/src/routes/AppRoutes.tsx`**:
+
+- Import ``ManutenzioneDashboardRoute`` + costante
+  ``ROLE_MANUTENZIONE = "MANUTENZIONE"``.
+- Nuovo block route protetto ``/manutenzione/dashboard`` con
+  ``ProtectedRoute requiredRole={ROLE_MANUTENZIONE}``.
+
+### Backend
+
+Nessuna modifica backend per MR 4: l'endpoint
+``POST /api/programmi/{id}/conferma-manutenzione`` esiste già da MR 0
+(entry 164) con auth ``require_role("MANUTENZIONE")``. Il filter
+list-route per ``MANUTENZIONE`` è anch'esso da MR 0 (soglia
+``MATERIALE_CONFERMATO``, vedi ``SOGLIE_PIPELINE_PER_RUOLO`` in
+``domain/pipeline.py``).
+
+### Verifiche
+
+- ✅ ``pnpm tsc -b --noEmit``: clean.
+- ✅ ``pnpm test --run``: 52 passed | 1 skipped.
+
+### Decisioni di scope rinviate (algoritmo matricole)
+
+**MR 4.bis — algoritmo assegnazione matricole** (rinviato):
+
+- Modello ``materiale_thread`` + ``matricola`` esiste già da entry 88
+  con schema ``{TIPO}-{NNN}`` per matricola (es. ``ALe711-042``,
+  ``ETR526-007``).
+- Algoritmo: per ogni giro materiale di un programma confermato,
+  assegna N matricole del tipo richiesto (rispetto della dotazione
+  flotta per tipo, vedi memoria ``project_dotazione_trenord``).
+- UI: drilldown per programma → lista giri + matricole assegnate +
+  bottone "auto-assegna" / "manuale".
+
+Per oggi MR 4 chiude il **handoff procedurale** (PIANIFICATORE_GIRO
+conferma → MANUTENZIONE vede + conferma matricole assegnate). La
+**logica concreta** di assegnazione matricola → giro è scope MR 4.bis.
+
+### Stato
+
+- ✅ Codice MR 4 frontend pronto.
+- ⏳ Commit + push + deploy frontend Railway.
+- ⏳ Smoke production: utente con ruolo ``MANUTENZIONE`` vede la
+  nuova route con i programmi pipeline + bottone Conferma matricole
+  sui programmi in IN_LAVORAZIONE.
+
+### Prossimo step
+
+MR 5: endpoint variazioni PdE (interruzione, integrazione, ecc.).
+Backend-only: nuovi endpoint ``POST /api/corse/import``con
+``tipo=VARIAZIONE_*`` (TipoImportRun già definito da MR 0). Logica
+di applicazione delle variazioni alle corse esistenti.
+
+---
+
 ## 2026-05-05 (168) — Sprint 8.0 MR 3: vista PdC finale (`/personale-pdc/mio-turno`)
 
 ### Contesto
