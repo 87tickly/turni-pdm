@@ -49,6 +49,19 @@ class Settings(BaseSettings):
     # --- Multi-tenant default ---
     default_azienda: str = "trenord"
 
+    # --- Sprint 7.10 MR α.5: API live arturo (vetture passive) ---
+    live_arturo_api_url: str = Field(
+        default="https://arturo-production.up.railway.app",
+        description=(
+            "Base URL per l'API live di ARTURO (project Railway "
+            "ARTURO-live, service arturo). Esposta senza auth in MR α.5."
+        ),
+    )
+    live_arturo_timeout_sec: float = Field(
+        default=5.0,
+        description="Timeout per chiamata HTTP a live.arturo (sec).",
+    )
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]

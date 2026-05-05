@@ -10,6 +10,128 @@
 
 ---
 
+## 2026-05-05 (156) — Sprint 7.10 MR α.5: vetture passive con API live arturo
+
+### Contesto
+
+Decisione utente 2026-05-05: *"mancano i rientri in vettura. Puoi
+usare API di live.arturo.travel che dovresti già avere"*. Verificato
+con Railway CLI: il progetto `ARTURO-live` ha service `arturo`
+esposto sotto `https://arturo-production.up.railway.app` con
+OpenAPI completa (117 endpoint, no auth richiesta).
+
+Endpoint utili scoperti via probe diretto:
+- `GET /api/cerca/stazione?q=lecco` → `[{"nome":"LECCO","id":"S01520"}]`
+- `GET /api/partenze/{stazione_id}` → array treni con `numero`,
+  `categoria`, `operatore`, `destinazione`, `fermate[]` con
+  `programmato_partenza/arrivo` (ISO timestamp).
+
+Buona notizia: il `stazione_id` di live.arturo coincide con il
+`stazione.codice` di COLAZIONE (entrambi RFI). Niente mapping
+intermedio richiesto.
+
+### Modifiche
+
+**Nuovo modulo `backend/src/colazione/integrations/`**:
+
+- `cerca_stazione(nome)` — fallback per cercare stazione per nome.
+- `trova_treno_vettura(stazione_partenza, stazione_arrivo, ora_min,
+  max_attesa_min=120)` — chiama `/api/partenze/{id}`, filtra
+  candidati (passa per arrivo dopo partenza, attesa entro max),
+  sceglie quello con partenza_min minore.
+- `_estrai_candidato` (pure) — parser singola entry response.
+- `_hhmm_to_min` (pure) — converte ISO/HH:MM in minuti.
+- **Robustezza**: timeout 5s, errori HTTP/JSON → `None` + log
+  warning, MAI propagare eccezione al builder.
+
+**`backend/src/colazione/config.py`**:
+
+- `live_arturo_api_url` (default
+  `https://arturo-production.up.railway.app`) e
+  `live_arturo_timeout_sec` (default 5.0).
+
+**`backend/src/colazione/domain/builder_pdc/multi_turno.py`**:
+
+- Nuovo helper `_aggiungi_vettura_rientro(draft, depot, client) →
+  (draft_aggiornato, treno|None)`. Logica:
+  1. Se l'ultima giornata chiude in `depot.stazione_principale_codice`
+     → niente vettura serve.
+  2. Altrimenti chiama `trova_treno_vettura` con
+     `ora_fine_servizio + buffer 5min`.
+  3. Se trovato → aggiunge blocco `VETTURA` al draft, aggiorna
+     `fine_prestazione` all'arrivo treno, ricalcola `prestazione_min`
+     gestendo wrap-mezzanotte. Se nuova prestazione > cap aggiunge
+     violazione `prestazione_max:N>cap(con_vettura_rientro)` ma non
+     rifiuta la vettura — meglio rientro reale fuori-cap che PdC
+     senza rientro.
+  4. Se NON trovato → draft invariato; metadata flagga
+     `motivo: "vettura_non_trovata, FR consigliato"`.
+- Integrazione in `_persisti_segmenti`: per ogni TurnoPdc accorpato
+  per deposito, chiama `_aggiungi_vettura_rientro` sull'**ultima
+  giornata del ciclo** (= dove il PdC chiude prima del riposo).
+  Client `httpx.AsyncClient` condiviso per tutti i depositi del
+  giro.
+- Costanti: `VETTURA_GAP_PRE_MIN=5`, `VETTURA_ATTESA_MAX_MIN=120`.
+- Metadata: `vettura_rientro` con campi treno o motivo del fallimento.
+- `builder_strategy: "multi_turno_dp_alpha5"`.
+
+**Test `tests/test_live_arturo_client.py`** (16 unit pure):
+
+- `_hhmm_to_min`: ISO con Z/offset, HH:MM, HH:MM:SS, None,
+  malformato.
+- `_estrai_candidato`: trovato, attesa oltre max, arrivo non
+  servito, arrivo prima di partenza, fermate vuote.
+- `trova_treno_vettura` con `httpx.MockTransport`: sceglie partenza
+  più imminente, lista vuota, API 500, JSON malformato, arrivo
+  non servito.
+- `TrenoVettura` frozen.
+
+### Verifiche
+
+- ✅ `uv run mypy --strict src/`: 68 source files, **0 errori**.
+- ✅ `uv run ruff check src/colazione/integrations/
+  src/colazione/domain/builder_pdc/ src/colazione/config.py`: clean.
+- ✅ `uv run pytest --ignore=tests/test_persister.py`: **610 passed**
+  (+16), 12 skipped, 0 failed.
+- ⏳ Smoke utente post-deploy.
+
+NB: ruff full src/ mostra 18 errori in file PRE-ESISTENTI
+(builder_giro/* e api/*) — non miei. Cleanup separato MR
+successivo se serve.
+
+### Stato
+
+- ✅ Client live arturo + integrazione builder.
+- ✅ Test unit completi.
+- ⏳ Deploy backend Railway.
+
+### Limitazioni dichiarate
+
+1. **Solo ultima giornata del ciclo**: il rientro in vettura viene
+   aggiunto SOLO sull'ultima giornata del TurnoPdc-deposito (= dove
+   il PdC chiude prima del riposo settimanale). Tra giornate
+   intermedie del ciclo il PdC fa di solito la notte in stazione
+   (= non torna a casa ogni giorno).
+2. **No cache**: ogni chiamata genera 1-3 round-trip API. Per ora
+   ok perché generazione turno non è interattiva. Cache redis se
+   diventa frequente.
+3. **No filtro categoria**: vettura è qualsiasi treno passante
+   (REG, IC, EC). Per la pratica Trenord il PdC viaggia su
+   Regional/Suburbano; un MR successivo potrebbe filtrare per
+   `operatore=TRENORD` o categoria.
+
+### Prossimo step
+
+Commit + push + deploy backend → smoke utente: dopo rigenerazione
+del turno, l'ultima giornata di ogni TurnoPdc-deposito deve avere
+un blocco `VETTURA` con codice treno reale (es. "REG 2814 TRENORD"
+da stazione di chiusura al deposito). Se nessun passante in
+finestra: `motivo: "vettura_non_trovata"` nei metadata.
+
+Poi MR α.6 (fill multi-giro) e α.7 (redesign Gantt).
+
+---
+
 ## 2026-05-05 (155) — Sprint 7.10 MR β.1: editorial redesign Gestione Personale (5 schermate + drilldown overlay + ⌘K + tweaks)
 
 ### Contesto

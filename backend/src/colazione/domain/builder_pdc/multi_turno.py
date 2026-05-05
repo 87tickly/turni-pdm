@@ -45,12 +45,15 @@ di ogni giornata-giro.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from colazione.config import get_settings
 from colazione.domain.builder_pdc.builder import (
     CONDOTTA_MAX_MIN,
     PRESTAZIONE_MAX_NOTTURNO,
@@ -59,11 +62,18 @@ from colazione.domain.builder_pdc.builder import (
     DepositoPdcNonTrovatoError,
     GiroNonTrovatoError,
     GiroVuotoError,
+    _BloccoPdcDraft,
     _build_giornata_pdc,
+    _from_min,
     _GiornataPdcDraft,
     _persisti_un_turno_pdc,
+    _t,
 )
 from colazione.domain.builder_pdc.split_cv import lista_stazioni_cv_ammesse
+from colazione.integrations.live_arturo import (
+    TrenoVettura,
+    trova_treno_vettura,
+)
 from colazione.models.anagrafica import Depot
 from colazione.models.giri import (
     GiroBlocco,
@@ -73,10 +83,22 @@ from colazione.models.giri import (
 )
 from colazione.models.turni_pdc import TurnoPdc
 
+logger = logging.getLogger(__name__)
+
 # Penalty enorme per soluzioni invalide nel DP (cap superato senza
 # alternative). Usato come "infinito" — un singolo step di violazione
 # ha più peso di un'intera giornata coperta da turni puliti.
 _INVALIDO = 10**9
+
+# Sprint 7.10 MR α.5: gap minimo dopo ACCa prima che il PdC possa
+# salire sulla vettura. 5 min di "buffer" per uscire dal mezzo,
+# raggiungere il binario, salire come passeggero. Configurabile in
+# futuro via Settings se serve.
+VETTURA_GAP_PRE_MIN = 5
+# Attesa massima accettabile fra ora_fine_servizio e partenza vettura.
+# Sopra questo valore il PdC sta troppo "fermo" e il rientro non è
+# competitivo (= meglio FR).
+VETTURA_ATTESA_MAX_MIN = 120
 
 
 @dataclass
@@ -434,6 +456,113 @@ async def genera_turni_pdc_multi(
     return risultati
 
 
+async def _aggiungi_vettura_rientro(
+    *,
+    draft: _GiornataPdcDraft,
+    depot: Depot,
+    client: httpx.AsyncClient,
+) -> tuple[_GiornataPdcDraft, TrenoVettura | None]:
+    """Sprint 7.10 MR α.5: estende l'ultima giornata del turno con un
+    blocco VETTURA per riportare il PdC al deposito.
+
+    Algoritmo:
+    1. Se ``draft.stazione_fine == depot.stazione_principale_codice``
+       → niente vettura serve (PdC chiude in casa). Ritorna
+       ``(draft, None)``.
+    2. Altrimenti, chiama ``trova_treno_vettura(stazione_fine,
+       depot.stazione_principale, ora_fine + buffer)``.
+    3. Se trovato un treno → aggiunge un blocco ``VETTURA`` al
+       ``draft.blocchi`` (dopo il blocco FINE), aggiorna
+       ``fine_prestazione`` all'arrivo della vettura, e
+       ``prestazione_min += vettura.durata_min + (attesa)``.
+    4. Se NON trovato (API down, nessun passante in finestra,
+       depot senza stazione popolata) → ritorna ``(draft, None)``.
+       Il chiamante può marcarlo come "vettura mancante" nei
+       metadata per visibilità del problema.
+
+    NB sul cap prestazione: l'aggiunta della vettura può portare la
+    prestazione totale OLTRE il cap normativo (510min std). In tal
+    caso aggiunge un'entry alle ``violazioni`` del draft anziché
+    rifiutare la vettura — meglio mostrare al pianificatore un
+    rientro reale fuori-cap che lasciare il PdC senza rientro.
+    """
+    if depot.stazione_principale_codice is None:
+        return draft, None
+    if draft.stazione_fine == depot.stazione_principale_codice:
+        # Già a casa, no vettura.
+        return draft, None
+    if draft.stazione_fine is None:
+        return draft, None
+
+    ora_fine_min = _t(draft.fine_prestazione)
+    treno = await trova_treno_vettura(
+        stazione_partenza_codice=draft.stazione_fine,
+        stazione_arrivo_codice=depot.stazione_principale_codice,
+        ora_min_partenza=ora_fine_min + VETTURA_GAP_PRE_MIN,
+        max_attesa_min=VETTURA_ATTESA_MAX_MIN,
+        client=client,
+    )
+    if treno is None:
+        return draft, None
+
+    # Costruisci il blocco VETTURA. La sequenza delle stazioni nel
+    # blocco è (stazione_chiusura_PdC → deposito), il PdC viaggia
+    # come passeggero.
+    blocco_vettura = _BloccoPdcDraft(
+        seq=draft.blocchi[-1].seq + 1 if draft.blocchi else 1,
+        tipo_evento="VETTURA",
+        ora_inizio=_from_min(treno.partenza_min),
+        ora_fine=_from_min(treno.arrivo_min),
+        durata_min=treno.durata_min,
+        stazione_da_codice=treno.stazione_partenza_codice,
+        stazione_a_codice=treno.stazione_arrivo_codice,
+        accessori_note=(
+            f"Rientro deposito {depot.codice}: treno {treno.categoria} "
+            f"{treno.numero} ({treno.operatore or '—'})"
+        ),
+    )
+    nuovi_blocchi = list(draft.blocchi) + [blocco_vettura]
+
+    # Aggiorna prestazione e fine_prestazione del draft.
+    # Prestazione = (treno.arrivo_min - inizio_prestazione) gestendo
+    # wrap-mezzanotte. Approssimazione: se arrivo > inizio, ok; se
+    # arrivo < inizio (cross-mezzanotte) aggiungi 24h.
+    inizio_prest_min = _t(draft.inizio_prestazione)
+    nuova_fine_min = treno.arrivo_min
+    if nuova_fine_min < inizio_prest_min:
+        nuova_prest = (24 * 60 - inizio_prest_min) + nuova_fine_min
+    else:
+        nuova_prest = nuova_fine_min - inizio_prest_min
+
+    nuove_violazioni = list(draft.violazioni)
+    cap_prest = (
+        PRESTAZIONE_MAX_NOTTURNO if draft.is_notturno else PRESTAZIONE_MAX_STANDARD
+    )
+    if nuova_prest > cap_prest and not any(
+        v.startswith("prestazione_max") for v in nuove_violazioni
+    ):
+        nuove_violazioni.append(
+            f"prestazione_max:{nuova_prest}>{cap_prest}min(con_vettura_rientro)"
+        )
+
+    nuovo_draft = _GiornataPdcDraft(
+        numero_giornata=draft.numero_giornata,
+        variante_calendario=draft.variante_calendario,
+        blocchi=nuovi_blocchi,
+        stazione_inizio=draft.stazione_inizio,
+        # La stazione di chiusura ora è il deposito.
+        stazione_fine=depot.stazione_principale_codice,
+        inizio_prestazione=draft.inizio_prestazione,
+        fine_prestazione=_from_min(treno.arrivo_min),
+        prestazione_min=nuova_prest,
+        condotta_min=draft.condotta_min,  # vettura non è condotta
+        refezione_min=draft.refezione_min,
+        is_notturno=draft.is_notturno,
+        violazioni=nuove_violazioni,
+    )
+    return nuovo_draft, treno
+
+
 async def _prossimo_progressivo_per_deposito(
     session: AsyncSession,
     azienda_id: int,
@@ -509,6 +638,13 @@ async def _persisti_segmenti(
 
     risultati: list[BuilderTurnoPdcResult] = []
 
+    # Sprint 7.10 MR α.5: client httpx condiviso per le chiamate live
+    # arturo (vettura passiva). Riusarne UNO per tutto il giro
+    # ammortizza la connessione TLS sui ~3-5 depositi tipici. Chiusura
+    # garantita nel `finally` in fondo.
+    settings = get_settings()
+    live_client = httpx.AsyncClient(timeout=settings.live_arturo_timeout_sec)
+
     # 2. Per ogni deposito, persisti 1 TurnoPdc aggregando le sue
     #    giornate. Per `None` (legacy) faccio 1 turno per segmento
     #    per visibilità del problema "tratta scoperta".
@@ -570,6 +706,48 @@ async def _persisti_segmenti(
                 }
             )
 
+        # Sprint 7.10 MR α.5: VETTURA passiva sull'ultima giornata del
+        # ciclo (= dove il PdC chiude prima del riposo settimanale). Se
+        # l'ultima giornata chiude in stazione ≠ deposito, prova a
+        # cercare un treno passante via API live arturo. Aggiunge un
+        # blocco VETTURA al draft, oppure flagga "vettura non trovata"
+        # nei metadata se non c'è alcun passante in finestra.
+        vettura_meta: dict[str, object] | None = None
+        if drafts_finali:
+            ultimo_idx = len(drafts_finali) - 1
+            ultimo_draft = drafts_finali[ultimo_idx]
+            ultimo_aggiornato, treno = await _aggiungi_vettura_rientro(
+                draft=ultimo_draft,
+                depot=depot,
+                client=live_client,
+            )
+            drafts_finali[ultimo_idx] = ultimo_aggiornato
+            if treno is not None:
+                vettura_meta = {
+                    "treno_numero": treno.numero,
+                    "treno_categoria": treno.categoria,
+                    "operatore": treno.operatore,
+                    "stazione_partenza": treno.stazione_partenza_codice,
+                    "stazione_arrivo": treno.stazione_arrivo_codice,
+                    "partenza_min": treno.partenza_min,
+                    "arrivo_min": treno.arrivo_min,
+                    "durata_min": treno.durata_min,
+                }
+            elif (
+                ultimo_draft.stazione_fine != depot.stazione_principale_codice
+                and depot.stazione_principale_codice is not None
+            ):
+                # PdC chiude lontano, ma nessun passante trovato.
+                vettura_meta = {
+                    "treno_numero": None,
+                    "stazione_partenza": ultimo_draft.stazione_fine,
+                    "stazione_arrivo": depot.stazione_principale_codice,
+                    "motivo": (
+                        "vettura_non_trovata: nessun treno passante in "
+                        f"finestra {VETTURA_ATTESA_MAX_MIN}min, FR consigliato"
+                    ),
+                }
+
         stazione_sede = (
             depot.stazione_principale_codice
             if depot.stazione_principale_codice is not None
@@ -591,12 +769,16 @@ async def _persisti_segmenti(
                 "fr_cap_violazioni": [],
                 "multi_turno_progressivo": nnn,
                 "multi_turno_giornate": meta_giornate,
-                "builder_strategy": "multi_turno_dp_alpha4",
+                "vettura_rientro": vettura_meta,
+                "builder_strategy": "multi_turno_dp_alpha5",
             },
             depot_target=depot,
             violazioni_ciclo_extra=[],
         )
         risultati.append(risultato)
+
+    # Chiudi il client live arturo (chiamato per tutti i depositi).
+    await live_client.aclose()
 
     return risultati
 
