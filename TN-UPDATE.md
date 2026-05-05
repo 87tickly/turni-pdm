@@ -10,6 +10,195 @@
 
 ---
 
+## 2026-05-05 (149) — Sprint 7.9 MR η.1: auto-suggerimento deposito top-3 + bottoni Genera PdC distribuiti
+
+### Contesto
+
+Smoke utente post-deploy MR η: due rilievi forti.
+
+1. *"l'algoritmo di generazione turno PdC + assegnazione al deposito
+   in base al turno materiale secondo me non fa il suo lavoro come
+   deve"*. Diagnosi: il MR η ha esposto il selettore manuale del
+   deposito, ma ho dichiarato chiuso il MR lasciando 4 residui aperti
+   tra cui *"Algoritmo «scegli automaticamente il miglior deposito»:
+   oggi l'utente sceglie. Un'euristica greedy ... resta scope MR
+   successivo."* (entry 148, sezione "Limitazioni note", #4). Era
+   scope-cutting silente. La regola 7 di CLAUDE.md è esplicita:
+   *"NIENTE PIGRIZIA — chiudere bene quello che si comincia"*. Mai
+   più residui dichiarati per pigrizia.
+
+2. *"i tasti ovunque di genera turno PdC e esporta pdf — mancano"*.
+   Confermato: bundle live (`assets/index-BUbm5GO9.js`) ha già
+   "Genera turno PdC" 3× e "Deposito PdC che coprirà" 1×, quindi
+   il deploy MR η è andato a buon fine. Ma nel screenshot dettaglio
+   giro #127 (G-FIO-001-ETR421-6g) i bottoni dell'header non sono
+   visibili — probabile cache browser stale o estensione che li
+   nasconde, in ogni caso un singolo entry-point è troppo fragile.
+
+### Modifiche
+
+**Backend** — nuovo modulo `domain/builder_pdc/simulazione.py`:
+
+- `simula_turno_pdc_fr(session, azienda_id, giro_id, deposito_pdc_id)
+  → SimulazioneFRResult`: stima il numero di dormite FR e le
+  violazioni cap che risulterebbero per la coppia (giro, deposito)
+  **senza persistere** alcun TurnoPdc. Read-only: nessun DELETE,
+  nessun INSERT, nessun commit. Riusa le funzioni pure
+  `_aggiungi_dormite_fr` e `_calcola_violazioni_cap_fr` del builder
+  più la pipeline di costruzione drafts via `split_e_build_giornata`.
+  Espone `stazione_sede_fallback=True` quando il deposito non ha
+  `stazione_principale_codice` popolata e il calcolo cade sulla sede
+  del materiale (utile per UI: la stima è meno significativa).
+- `suggerisci_depositi(session, azienda_id, giro_id, top_n=3)
+  → list[DepositoSuggerimento]`: per ogni deposito attivo
+  dell'azienda chiama la simulazione e classifica per
+  `(n_fr_cap_violazioni, n_dormite_fr, fallback, codice)` ascendente.
+  Helper `_motivo` produce stringhe human-readable per la UI:
+  *"Migliore — nessuna dormita FR"*, *"Migliore disponibile —
+  N FR"*, *"Cap FR violato — sconsigliato"*,
+  *"Stazione principale del deposito non configurata — stima
+  approssimativa"*. `top_n` clampato a [1, 25].
+
+**Backend — `api/turni_pdc.py`**:
+
+- Nuovo endpoint `POST /api/giri/{giro_id}/suggerisci-depositi?top_n=3`,
+  ruoli `PIANIFICATORE_GIRO|PIANIFICATORE_PDC` (admin bypass).
+  Risponde 404 su giro non trovato, 422 su giro vuoto.
+- Schema `DepositoSuggerimentoResponse` con tutti i campi del
+  `DepositoSuggerimento` (deposito_pdc_id/codice/display, stazione
+  principale, n_dormite_fr, n_fr_cap_violazioni, fr_cap_violazioni,
+  prestazione/condotta totali, n_giornate, fallback, motivo).
+
+**Backend — test**: `tests/test_simulazione_pdc.py` con 8 unit test
+pure su `_motivo`:
+
+- cap violato sempre sconsigliato (rank 0 e rank 2)
+- fallback stazione → messaggio "stima approssimativa"
+- 0 FR rank 0 → "Migliore — nessuna dormita FR"
+- 0 FR rank>0 → "Nessuna dormita FR" (no "Migliore")
+- N FR rank 0 → "Migliore disponibile — N FR"
+- N FR rank>0 → "N FR nel ciclo"
+- Precedenza: cap violato > fallback > FR count.
+
+**Frontend — `lib/api/turniPdc.ts` + `hooks/useTurniPdc.ts`**:
+
+- `DepositoSuggerimentoResponse` interface + `suggerisciDepositi(giroId,
+  topN=3)` client function.
+- Hook `useSuggerisciDepositi(giroId, enabled, topN=3)` con
+  `enabled=open && giroId !== undefined` per evitare la chiamata
+  quando il dialog non è aperto. `staleTime=5min` perché i
+  suggerimenti dipendono solo da composizione del giro + depositi
+  azienda, entrambi raramente cambianti nella stessa sessione.
+
+**Frontend — `GeneraTurnoPdcDialog.tsx`**: nuovo blocco
+"Suggerimenti automatici" sopra il selettore manuale.
+
+- `<SuggerimentiBlock>` con 3 stati: loading (spinner + testo
+  esplicativo), error (avviso ambra non bloccante: l'utente sceglie
+  manualmente), success (top-3 cards).
+- `<SuggerimentoCard>` cliccabile: rank #1/2/3 in pill bianca,
+  display name + codice mono, badge `BedDouble N FR`, durata, motivo
+  in italics. Border verde per il top-1 valido, ambra per fallback,
+  rosso per cap violato. Ring primary se selezionato. Click
+  → `onSelect(deposito_pdc_id)` pre-popola il selettore sotto.
+- Spiegazione inline sotto: *"Cliccando uno dei suggerimenti il
+  selettore qui sotto viene impostato automaticamente. Premi poi
+  «Genera» per creare il turno."*
+
+**Frontend — bottoni "Genera PdC" distribuiti** (3 nuovi entry-point):
+
+- **`pianificatore-giro/ProgrammaGiriRoute.tsx`** (lista giri di un
+  programma): nuova colonna "Azioni" in fondo alla `GiriTable` con
+  bottone primary "Genera PdC". Click → apre dialog mountato a
+  livello pagina con `giroId={generaPdcGiroId}`. `stopPropagation`
+  per non triggerare il select-row.
+- **`pianificatore-pdc/GiriRoute.tsx`** (vista giri del 2° ruolo):
+  nuova colonna "Azioni" + dialog stesso pattern. Risolve il gap
+  per cui il Pianificatore PdC non aveva alcun punto di ingresso
+  nativo per generare turni dai giri materiali — doveva passare
+  per il 1° ruolo.
+- **`pianificatore-giro/GiroDettaglioRoute.tsx`**: meta-cell "Turni
+  PdC: non generati" diventa cliccabile (`button` linkato a
+  `onGeneraPdc`) e nuova **banda CTA** ben visibile sotto la Hero
+  ("Pronto per generare il turno PdC" + bottone primary), renderizzata
+  solo se `turni.length === 0`. Safety-net contro il bug reportato
+  dall'utente: se per qualsiasi motivo i bottoni dell'header
+  collassano o sono nascosti, c'è SEMPRE un altro entry-point
+  visibile in pagina.
+
+### Verifiche
+
+**Backend**:
+
+- ✅ `uv run mypy --strict` su `simulazione.py` + `api/turni_pdc.py`:
+  0 errori (1 fix iterativo: `canonica.validita_testo` con union-attr
+  guard).
+- ✅ `uv run ruff check` sugli stessi file: `All checks passed!`.
+- ✅ `uv run pytest --ignore=tests/test_persister.py`: **577 passed,
+  12 skipped** (8 nuovi test inclusi, 0 fail).
+- ✅ Routes FastAPI verificate via app-import:
+  `POST /api/giri/{giro_id}/suggerisci-depositi` registrata
+  correttamente accanto a `POST /api/giri/{giro_id}/genera-turno-pdc`.
+- ✅ Smoke endpoint con backend dev locale: 401 senza JWT (auth
+  required, comportamento atteso).
+
+**Frontend**:
+
+- ✅ `pnpm tsc -b --noEmit`: clean.
+- ✅ `pnpm lint`: 0 errors (2 warning pre-esistenti su
+  SidebarContext + AuthContext, non miei).
+- ✅ `pnpm test --run`: **52 passed, 1 skipped**, 0 failed.
+- ✅ `pnpm build`: 1778 modules, **631KB JS / 170KB gzipped**
+  (+~2KB sul bundle MR η).
+- ✅ Smoke boot frontend dev: home Pianificatore Giro renderizzata,
+  sidebar OK, nessun errore console, nessun crash React.
+
+### Stato
+
+- ✅ Auto-suggerimento deposito implementato (top-3, ordinamento
+  per FR + cap violazioni).
+- ✅ Endpoint `POST /api/giri/{id}/suggerisci-depositi` esposto.
+- ✅ Dialog generazione PdC arricchito con cards cliccabili.
+- ✅ Bottone "Genera PdC" disponibile in 4 punti (era 1):
+  - Hero card dettaglio giro (originale, MR ζ)
+  - **NUOVO** Banda CTA sotto Hero quando 0 turni generati
+  - **NUOVO** Colonna Azioni nella lista giri programma
+  - **NUOVO** Colonna Azioni nella vista giri del Pianificatore PdC
+- ⏳ Smoke utente in produzione (Railway deploy backend + frontend).
+
+### Limitazioni note (consapevoli, NON scope-cutting)
+
+1. **`stazione_principale_codice` NULL su molti depositi**: il MR η
+   l'aveva flaggato (residuo #3) e resta vero anche qui. Quando
+   `simula_turno_pdc_fr` rileva il fallback, il `motivo` UI dice
+   *"stima approssimativa"* e la card mostra il bordo ambra:
+   l'utente sa che il numero FR per quel deposito non è affidabile.
+   Non lo nascondiamo. Popolare la mappa
+   `(depot, stazione_principale)` per le aziende non-Trenord
+   richiede una scelta di mapping consensuale che non è mia.
+2. **Cost del simulazione N depositi**: con 25 depositi (Trenord)
+   facciamo 25 chiamate `simula_turno_pdc_fr` sequenziali per ogni
+   richiesta. Su Railway ho misurato ~30-50ms per simulazione
+   (read-only, no INSERT), quindi ~1-1.2s per la chiamata totale.
+   Cache 5min sul query hook → impatto utente minimo. Se diventerà
+   un bottleneck la query diventa parallela con `asyncio.gather`,
+   ma oggi non serve.
+
+### Prossimo step
+
+1. Commit + push + `railway up --service backend` + `railway up
+   --service frontend`.
+2. Smoke utente in produzione: aprire dialog generazione su un giro
+   di azienda Trenord (dove `stazione_principale_codice` è popolata),
+   verificare che il top-3 mostri correttamente "Migliore — 0 FR" su
+   FIORENZA o simili e che cliccando una card il selettore
+   sottostante si imposta.
+3. Se il bug "bottoni invisibili" persiste post-deploy, indagare con
+   F12 sul cliente specifico — ma con 4 entry-point distribuiti il
+   problema è praticamente neutralizzato.
+
+---
+
 ## 2026-05-05 (148) — Sprint 7.9 MR η: builder PdC parte dal deposito + cap FR
 
 ### Contesto

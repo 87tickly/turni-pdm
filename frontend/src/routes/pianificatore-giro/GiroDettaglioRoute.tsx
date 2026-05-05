@@ -487,10 +487,47 @@ function HeroSection({
               {turni.length} generat{turni.length === 1 ? "o" : "i"} →
             </Link>
           ) : (
-            <span className="text-muted-foreground">non generati</span>
+            // Sprint 7.9 MR η.1 — entry-point ridondante: oltre al
+            // bottone "Genera turno PdC" nell'header card, rendo
+            // cliccabile anche questa meta-cell. Difesa contro estensioni
+            // browser / regole CSS site-wide che a volte nascondono i
+            // button primary nell'header.
+            <button
+              type="button"
+              onClick={onGeneraPdc}
+              className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
+              title="Genera turno PdC da questo giro materiale"
+            >
+              non generati · genera ora →
+            </button>
           )}
         </MetaItem>
       </div>
+
+      {/* Sprint 7.9 MR η.1 — banda CTA "Genera turno PdC" sotto la
+          Hero. È RIDONDANTE rispetto al bottone primary in alto a
+          destra ma serve come safety-net se l'header collassa per
+          qualche motivo (vedi screenshot smoke 2026-05-05) o se
+          l'utente non lo vede subito. Non viene renderizzata se
+          esistono già turni PdC: l'utente li ha, vede solo il link
+          "N generati →" sopra. */}
+      {turni.length === 0 && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-primary/30 bg-primary/[0.04] px-4 py-3">
+          <div className="flex flex-col gap-0.5 text-sm">
+            <span className="font-semibold text-foreground">
+              Pronto per generare il turno PdC
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Il builder propone automaticamente i 3 depositi PdC che
+              minimizzano i pernotti fuori sede. Cliccando sotto si apre
+              il dialog di generazione.
+            </span>
+          </div>
+          <Button variant="primary" size="md" onClick={onGeneraPdc}>
+            <Users className="mr-2 h-4 w-4" aria-hidden /> Genera turno PdC
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }

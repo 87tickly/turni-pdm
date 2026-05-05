@@ -1,6 +1,12 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, BedDouble, Building2, CheckCircle2 } from "lucide-react";
+import {
+  AlertTriangle,
+  BedDouble,
+  Building2,
+  CheckCircle2,
+  Sparkles,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import {
@@ -13,9 +19,12 @@ import {
 } from "@/components/ui/Dialog";
 import { Spinner } from "@/components/ui/Spinner";
 import { useDepots } from "@/hooks/useAnagrafiche";
-import { useGeneraTurnoPdc } from "@/hooks/useTurniPdc";
+import { useGeneraTurnoPdc, useSuggerisciDepositi } from "@/hooks/useTurniPdc";
 import { ApiError } from "@/lib/api/client";
-import type { TurnoPdcGenerazioneResponse } from "@/lib/api/turniPdc";
+import type {
+  DepositoSuggerimentoResponse,
+  TurnoPdcGenerazioneResponse,
+} from "@/lib/api/turniPdc";
 
 interface GeneraTurnoPdcDialogProps {
   giroId: number;
@@ -51,6 +60,10 @@ export function GeneraTurnoPdcDialog({
 
   const generaMutation = useGeneraTurnoPdc();
   const depotsQuery = useDepots();
+  // Sprint 7.9 MR η.1 — suggerimenti automatici top-3 quando il dialog
+  // è aperto. Cache 5 min: non rifa la simulazione se l'utente riapre
+  // il dialog sullo stesso giro.
+  const suggerimentiQuery = useSuggerisciDepositi(giroId, open, 3);
 
   const depotOptions = useMemo(
     () =>
@@ -114,6 +127,12 @@ export function GeneraTurnoPdcDialog({
 
         {showForm && (
           <div className="flex flex-col gap-3 text-sm">
+            {/* Sprint 7.9 MR η.1 — suggerimenti automatici top-3 */}
+            <SuggerimentiBlock
+              query={suggerimentiQuery}
+              selectedId={depositoPdcId === "" ? null : Number(depositoPdcId)}
+              onSelect={(id) => setDepositoPdcId(id)}
+            />
             {/* Sprint 7.9 MR η — selettore deposito PdC target */}
             <div className="flex flex-col gap-1.5">
               <label
@@ -348,4 +367,128 @@ function formatHM(min: number): string {
   const h = Math.floor(min / 60);
   const m = min % 60;
   return `${h}h${m.toString().padStart(2, "0")}`;
+}
+
+// =====================================================================
+// Sprint 7.9 MR η.1 — blocco "Suggerimenti automatici"
+// =====================================================================
+
+interface SuggerimentiBlockProps {
+  query: ReturnType<typeof useSuggerisciDepositi>;
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+}
+
+function SuggerimentiBlock({
+  query,
+  selectedId,
+  onSelect,
+}: SuggerimentiBlockProps) {
+  if (query.isLoading) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+        <Spinner label="" />
+        <span>
+          Calcolo dei depositi migliori in corso (simulazione builder per
+          ciascun deposito)…
+        </span>
+      </div>
+    );
+  }
+  if (query.isError) {
+    // Non blocca il flusso: l'utente può sempre scegliere manualmente.
+    return (
+      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        Auto-suggerimento non disponibile. Scegli manualmente il deposito
+        dal selettore qui sotto.
+      </div>
+    );
+  }
+  const top = query.data ?? [];
+  if (top.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-blue-200 bg-blue-50/50 px-3 py-2.5">
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-900">
+        <Sparkles className="h-3.5 w-3.5" aria-hidden />
+        Suggerimenti automatici (top {top.length} per minor numero di FR)
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {top.map((s, idx) => (
+          <SuggerimentoCard
+            key={s.deposito_pdc_id}
+            sug={s}
+            rank={idx}
+            isSelected={selectedId === s.deposito_pdc_id}
+            onClick={() => onSelect(s.deposito_pdc_id)}
+          />
+        ))}
+      </div>
+      <p className="text-[11px] leading-snug text-blue-900/80">
+        Cliccando uno dei suggerimenti il selettore qui sotto viene
+        impostato automaticamente. Premi poi “Genera” per creare il turno.
+      </p>
+    </div>
+  );
+}
+
+interface SuggerimentoCardProps {
+  sug: DepositoSuggerimentoResponse;
+  rank: number;
+  isSelected: boolean;
+  onClick: () => void;
+}
+
+function SuggerimentoCard({
+  sug,
+  rank,
+  isSelected,
+  onClick,
+}: SuggerimentoCardProps) {
+  const hasCapViolato = sug.n_fr_cap_violazioni > 0;
+  const isFallback = sug.stazione_sede_fallback;
+  const isBest = rank === 0 && !hasCapViolato && !isFallback;
+  const tone = hasCapViolato
+    ? "border-red-300 bg-red-50/70 hover:bg-red-50"
+    : isFallback
+      ? "border-amber-300 bg-amber-50/70 hover:bg-amber-50"
+      : isBest
+        ? "border-emerald-400 bg-emerald-50/70 hover:bg-emerald-50"
+        : "border-blue-200 bg-white hover:bg-blue-50/40";
+  const selectedRing = isSelected ? "ring-2 ring-primary ring-offset-1" : "";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-start gap-2.5 rounded-md border px-2.5 py-2 text-left text-xs transition-colors ${tone} ${selectedRing}`}
+    >
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white font-mono text-[11px] font-semibold text-foreground shadow-sm">
+        #{rank + 1}
+      </div>
+      <div className="flex flex-1 flex-col gap-0.5">
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          <span className="font-semibold text-foreground">
+            {sug.deposito_pdc_display}
+          </span>
+          <span className="font-mono text-[10px] text-muted-foreground">
+            {sug.deposito_pdc_codice}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-foreground/80">
+          <span className="inline-flex items-center gap-1">
+            <BedDouble className="h-3 w-3" aria-hidden />
+            {sug.n_dormite_fr} FR
+          </span>
+          <span>{sug.n_giornate} gg</span>
+          <span>{formatHM(sug.prestazione_totale_min)} prest.</span>
+        </div>
+        <div className="text-[11px] italic text-foreground/70">{sug.motivo}</div>
+      </div>
+      {isSelected && (
+        <CheckCircle2
+          className="mt-0.5 h-4 w-4 shrink-0 text-primary"
+          aria-hidden
+        />
+      )}
+    </button>
+  );
 }

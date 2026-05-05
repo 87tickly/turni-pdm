@@ -1,6 +1,13 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertCircle, ArrowLeft, ArrowRight, Search, X } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  ArrowRight,
+  Search,
+  Users,
+  X,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -16,6 +23,7 @@ import type {
 } from "@/lib/api/giri";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdcDialog";
 
 /**
  * Schermata 4 — Lista giri generati di un programma.
@@ -50,6 +58,9 @@ export function ProgrammaGiriRoute() {
   const [filters, setFilters] = useState<FiltersState>(EMPTY_FILTERS);
   const [selectedGiroId, setSelectedGiroId] = useState<number | null>(null);
   const [previewOpen, setPreviewOpen] = useState(true);
+  // Sprint 7.9 MR η.1 — dialog generazione PdC mountato a livello
+  // pagina, attivato dalla riga giro corrispondente.
+  const [generaPdcGiroId, setGeneraPdcGiroId] = useState<number | null>(null);
 
   const giri = useMemo(() => giriQuery.data ?? [], [giriQuery.data]);
 
@@ -163,6 +174,7 @@ export function ProgrammaGiriRoute() {
                     setPreviewOpen(true);
                   }}
                   onOpenFull={(id) => navigate(`/pianificatore-giro/giri/${id}`)}
+                  onGeneraPdc={(id) => setGeneraPdcGiroId(id)}
                 />
               )}
             </div>
@@ -191,6 +203,19 @@ export function ProgrammaGiriRoute() {
             )}
           </section>
         </>
+      )}
+
+      {/* Sprint 7.9 MR η.1 — dialog generazione PdC accessibile da ogni
+          riga della lista giri. Il flusso è autocontained: l'utente
+          sceglie il deposito (auto-suggerito) e clicca Genera. */}
+      {generaPdcGiroId !== null && (
+        <GeneraTurnoPdcDialog
+          giroId={generaPdcGiroId}
+          open
+          onOpenChange={(o) => {
+            if (!o) setGeneraPdcGiroId(null);
+          }}
+        />
       )}
     </div>
   );
@@ -527,11 +552,13 @@ function GiriTable({
   selectedId,
   onSelect,
   onOpenFull,
+  onGeneraPdc,
 }: {
   giri: GiroListItem[];
   selectedId: number | null;
   onSelect: (id: number) => void;
   onOpenFull: (id: number) => void;
+  onGeneraPdc: (id: number) => void;
 }) {
   return (
     <table className="w-full text-sm">
@@ -546,6 +573,8 @@ function GiriTable({
           <th className="px-3 py-2.5 text-right font-medium">km/anno</th>
           <th className="px-3 py-2.5 text-left font-medium">Chiusura</th>
           <th className="px-3 py-2.5 text-left font-medium">Creato</th>
+          {/* Sprint 7.9 MR η.1 — colonna azioni */}
+          <th className="px-3 py-2.5 text-right font-medium">Azioni</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-border">
@@ -556,6 +585,7 @@ function GiriTable({
             selected={g.id === selectedId}
             onSelect={() => onSelect(g.id)}
             onOpenFull={() => onOpenFull(g.id)}
+            onGeneraPdc={() => onGeneraPdc(g.id)}
           />
         ))}
       </tbody>
@@ -568,11 +598,13 @@ function GiroRow({
   selected,
   onSelect,
   onOpenFull,
+  onGeneraPdc,
 }: {
   giro: GiroListItem;
   selected: boolean;
   onSelect: () => void;
   onOpenFull: () => void;
+  onGeneraPdc: () => void;
 }) {
   const sede = parseSede(giro.numero_turno) ?? "—";
   const matCode = giro.materiale_tipo_codice ?? giro.tipo_materiale;
@@ -611,6 +643,19 @@ function GiroRow({
         <ChiusuraTag motivo={giro.motivo_chiusura} chiuso={giro.chiuso} />
       </td>
       <td className="px-3 py-2.5 text-xs text-muted-foreground">{relativeShort(giro.created_at)}</td>
+      <td className="px-3 py-2.5 text-right">
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            onGeneraPdc();
+          }}
+          title="Genera turno PdC da questo giro materiale"
+        >
+          <Users className="mr-1.5 h-3.5 w-3.5" aria-hidden /> Genera PdC
+        </Button>
+      </td>
     </tr>
   );
 }

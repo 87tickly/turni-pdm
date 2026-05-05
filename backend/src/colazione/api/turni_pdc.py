@@ -36,6 +36,10 @@ from colazione.domain.builder_pdc.builder import (
     GiroVuotoError,
     genera_turno_pdc,
 )
+from colazione.domain.builder_pdc.simulazione import (
+    DepositoSuggerimento,
+    suggerisci_depositi,
+)
 from colazione.models.anagrafica import Depot, Stazione
 from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
 from colazione.models.turni_pdc import TurnoPdc, TurnoPdcBlocco, TurnoPdcGiornata
@@ -115,6 +119,27 @@ class TurnoPdcListItem(BaseModel):
     deposito_pdc_codice: str | None = None
     deposito_pdc_display: str | None = None
     n_fr_cap_violazioni: int = 0
+
+
+class DepositoSuggerimentoResponse(BaseModel):
+    """Sprint 7.9 MR η.1 — suggerimento auto deposito.
+
+    Risposta dell'endpoint ``POST /api/giri/{id}/suggerisci-depositi``:
+    una voce per ogni deposito del top-N, ordinato per FR crescenti.
+    """
+
+    deposito_pdc_id: int
+    deposito_pdc_codice: str
+    deposito_pdc_display: str
+    stazione_principale_codice: str | None
+    n_dormite_fr: int
+    n_fr_cap_violazioni: int
+    fr_cap_violazioni: list[str]
+    prestazione_totale_min: int
+    condotta_totale_min: int
+    n_giornate: int
+    stazione_sede_fallback: bool
+    motivo: str
 
 
 class TurnoPdcBloccoRead(BaseModel):
@@ -269,6 +294,72 @@ async def genera_turno_pdc_endpoint(
             fr_cap_violazioni=r.fr_cap_violazioni,
         )
         for r in results
+    ]
+
+
+# =====================================================================
+# POST /api/giri/{giro_id}/suggerisci-depositi  (Sprint 7.9 MR η.1)
+# =====================================================================
+
+
+@router.post(
+    "/{giro_id}/suggerisci-depositi",
+    response_model=list[DepositoSuggerimentoResponse],
+    summary="Suggerisce top-N depositi PdC che minimizzano i FR per il giro",
+)
+async def suggerisci_depositi_endpoint(
+    giro_id: int,
+    top_n: int = Query(
+        default=3,
+        ge=1,
+        le=25,
+        description="Numero massimo di suggerimenti (1-25, default 3).",
+    ),
+    user: CurrentUser = _authz_write_turni,
+    session: AsyncSession = Depends(get_session),
+) -> list[DepositoSuggerimentoResponse]:
+    """Auto-suggerimento deposito per la generazione turno PdC.
+
+    Per ogni deposito attivo dell'azienda simula (read-only) il builder
+    PdC e calcola il numero di dormite FR + violazioni cap. Ritorna i
+    top-N ordinati per (cap violazioni asc, FR asc, fallback asc, codice asc).
+
+    Idempotente: nessuna scrittura su DB. Pensato per essere chiamato
+    quando il dialog "Genera turno PdC" si apre, così l'utente vede
+    direttamente i 3 depositi più promettenti già pre-classificati.
+    """
+    try:
+        suggerimenti: list[DepositoSuggerimento] = await suggerisci_depositi(
+            session=session,
+            azienda_id=user.azienda_id,
+            giro_id=giro_id,
+            top_n=top_n,
+        )
+    except GiroNonTrovatoError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(e)
+        ) from e
+    except GiroVuotoError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
+        ) from e
+
+    return [
+        DepositoSuggerimentoResponse(
+            deposito_pdc_id=s.deposito_pdc_id,
+            deposito_pdc_codice=s.deposito_pdc_codice,
+            deposito_pdc_display=s.deposito_pdc_display,
+            stazione_principale_codice=s.stazione_principale_codice,
+            n_dormite_fr=s.n_dormite_fr,
+            n_fr_cap_violazioni=s.n_fr_cap_violazioni,
+            fr_cap_violazioni=s.fr_cap_violazioni,
+            prestazione_totale_min=s.prestazione_totale_min,
+            condotta_totale_min=s.condotta_totale_min,
+            n_giornate=s.n_giornate,
+            stazione_sede_fallback=s.stazione_sede_fallback,
+            motivo=s.motivo,
+        )
+        for s in suggerimenti
     ]
 
 

@@ -11,6 +11,8 @@ import {
   getTurnoPdcDettaglio,
   listTurniPdcAzienda,
   listTurniPdcGiro,
+  suggerisciDepositi,
+  type DepositoSuggerimentoResponse,
   type GeneraTurnoPdcParams,
   type ListTurniPdcAziendaParams,
   type TurnoPdcDettaglio,
@@ -62,6 +64,36 @@ export function useTurniPdcAzienda(
 interface GeneraTurnoPdcArgs {
   giroId: number;
   params?: GeneraTurnoPdcParams;
+}
+
+/**
+ * Sprint 7.9 MR η.1 — auto-suggerimento deposito PdC.
+ *
+ * Idempotente sul backend: nessun TurnoPdc viene creato. Lo invochiamo
+ * quando il dialog di generazione si apre, così l'utente vede i top-3
+ * depositi pre-classificati per minimizzare i FR.
+ *
+ * `enabled=false` di default per evitare la chiamata se il dialog non
+ * è ancora aperto: il chiamante setta `enabled=open && giroId !== undefined`.
+ */
+export function useSuggerisciDepositi(
+  giroId: number | undefined,
+  enabled: boolean,
+  topN: number = 3,
+): UseQueryResult<DepositoSuggerimentoResponse[]> {
+  return useQuery({
+    queryKey: [...TURNI_PDC_KEY, "suggerisci-depositi", giroId, topN],
+    queryFn: () => {
+      if (giroId === undefined) throw new Error("giroId mancante");
+      return suggerisciDepositi(giroId, topN);
+    },
+    enabled: enabled && giroId !== undefined,
+    // I suggerimenti dipendono solo dalla composizione del giro e dai
+    // depositi dell'azienda; entrambi cambiano raramente nella stessa
+    // sessione. Cache 5 min per non rifare la simulazione ogni volta
+    // che riapri il dialog.
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 export function useGeneraTurnoPdc(): UseMutationResult<

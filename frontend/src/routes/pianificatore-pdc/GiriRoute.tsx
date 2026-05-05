@@ -1,6 +1,12 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertCircle, ArrowRight, Download, RotateCcw } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowRight,
+  Download,
+  RotateCcw,
+  Users,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -10,6 +16,7 @@ import { ApiError } from "@/lib/api/client";
 import type { GiroListItem } from "@/lib/api/giri";
 import { formatDateIt, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdcDialog";
 
 const PAGE_SIZE = 50;
 
@@ -32,6 +39,9 @@ export function PianificatorePdcGiriRoute() {
   const [searchInput, setSearchInput] = useState("");
   const [statoFilter, setStatoFilter] = useState<string>("");
   const [debouncedQ, setDebouncedQ] = useState("");
+  // Sprint 7.9 MR η.1 — dialog generazione turno PdC accessibile dal
+  // ruolo Pianificatore PdC senza dover passare per il 1° ruolo.
+  const [generaPdcGiroId, setGeneraPdcGiroId] = useState<number | null>(null);
   const navigate = useNavigate();
 
   const giriQuery = useGiriAzienda({
@@ -185,6 +195,10 @@ export function PianificatorePdcGiriRoute() {
                     <th className="w-24 px-3 py-2 text-right font-semibold">km/anno</th>
                     <th className="w-28 px-3 py-2 text-left font-semibold">Stato</th>
                     <th className="w-28 px-3 py-2 text-left font-semibold">Creato</th>
+                    {/* Sprint 7.9 MR η.1 — colonna azioni: Genera PdC */}
+                    <th className="w-32 px-3 py-2 text-right font-semibold">
+                      Azioni
+                    </th>
                     <th className="w-8 px-3 py-2" aria-hidden />
                   </tr>
                   {/* Riga 2 — filtri inline */}
@@ -225,13 +239,14 @@ export function PianificatorePdcGiriRoute() {
                       <FilterCellPlaceholder placeholder="Qualsiasi" />
                     </th>
                     <th className="px-2 py-1.5" />
+                    <th className="px-2 py-1.5" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
                   {data.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={10}
+                        colSpan={11}
                         className="px-3 py-8 text-center text-sm text-muted-foreground"
                       >
                         Nessun giro corrisponde ai filtri attivi.
@@ -243,6 +258,7 @@ export function PianificatorePdcGiriRoute() {
                         key={g.id}
                         g={g}
                         onOpen={() => navigate(`/pianificatore-giro/giri/${g.id}`)}
+                        onGeneraPdc={() => setGeneraPdcGiroId(g.id)}
                       />
                     ))
                   )}
@@ -256,6 +272,18 @@ export function PianificatorePdcGiriRoute() {
           </div>
         </section>
       ) : null}
+
+      {/* Sprint 7.9 MR η.1 — dialog generazione PdC accessibile dalla
+          vista giri del 2° ruolo (Pianificatore PdC). */}
+      {generaPdcGiroId !== null && (
+        <GeneraTurnoPdcDialog
+          giroId={generaPdcGiroId}
+          open
+          onOpenChange={(o) => {
+            if (!o) setGeneraPdcGiroId(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -282,7 +310,15 @@ function FilterCellPlaceholder({ placeholder }: { placeholder: string }) {
   );
 }
 
-function GiroRow({ g, onOpen }: { g: GiroListItem; onOpen: () => void }) {
+function GiroRow({
+  g,
+  onOpen,
+  onGeneraPdc,
+}: {
+  g: GiroListItem;
+  onOpen: () => void;
+  onGeneraPdc: () => void;
+}) {
   return (
     <tr
       className="cursor-pointer hover:bg-primary/[0.03]"
@@ -313,6 +349,22 @@ function GiroRow({ g, onOpen }: { g: GiroListItem; onOpen: () => void }) {
       </td>
       <td className="px-3 py-2.5 text-xs text-muted-foreground">
         {formatDateIt(g.created_at)}
+      </td>
+      <td className="px-3 py-2.5 text-right">
+        {/* Sprint 7.9 MR η.1 — punto di ingresso "Genera PdC" dal ruolo
+            Pianificatore PdC. stopPropagation evita la navigazione di
+            riga (onOpen). */}
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            onGeneraPdc();
+          }}
+          title="Genera turno PdC da questo giro"
+        >
+          <Users className="mr-1.5 h-3.5 w-3.5" aria-hidden /> Genera PdC
+        </Button>
       </td>
       <td className="px-3 py-2.5 text-right">
         <ArrowRight

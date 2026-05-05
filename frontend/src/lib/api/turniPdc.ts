@@ -175,6 +175,39 @@ export async function listTurniPdcGiro(giroId: number): Promise<TurnoPdcListItem
   return apiJson<TurnoPdcListItem[]>(`/api/giri/${giroId}/turni-pdc`, { method: "GET" });
 }
 
+// =====================================================================
+// Sprint 7.9 MR η.1 — auto-suggerimento deposito PdC per giro
+// =====================================================================
+
+export interface DepositoSuggerimentoResponse {
+  deposito_pdc_id: number;
+  deposito_pdc_codice: string;
+  deposito_pdc_display: string;
+  stazione_principale_codice: string | null;
+  n_dormite_fr: number;
+  n_fr_cap_violazioni: number;
+  fr_cap_violazioni: string[];
+  prestazione_totale_min: number;
+  condotta_totale_min: number;
+  n_giornate: number;
+  stazione_sede_fallback: boolean;
+  motivo: string;
+}
+
+/**
+ * Calcola il top-N depositi PdC che minimizzano i FR per il giro.
+ * Read-only sul backend (nessun TurnoPdc creato). Idempotente.
+ */
+export async function suggerisciDepositi(
+  giroId: number,
+  topN: number = 3,
+): Promise<DepositoSuggerimentoResponse[]> {
+  return apiJson<DepositoSuggerimentoResponse[]>(
+    `/api/giri/${giroId}/suggerisci-depositi?top_n=${topN}`,
+    { method: "POST" },
+  );
+}
+
 export async function getTurnoPdcDettaglio(turnoId: number): Promise<TurnoPdcDettaglio> {
   return apiJson<TurnoPdcDettaglio>(`/api/turni-pdc/${turnoId}`, { method: "GET" });
 }
