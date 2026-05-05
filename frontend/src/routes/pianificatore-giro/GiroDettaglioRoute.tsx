@@ -1,6 +1,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -13,6 +14,8 @@ import {
   ChevronLeft,
   ChevronRight,
   FileDown,
+  Maximize2,
+  Minimize2,
   Users,
 } from "lucide-react";
 
@@ -654,6 +657,28 @@ function GanttSection({
     persistZoom(z);
   };
 
+  // Sprint 7.10 MR α.8 (2026-05-05): vista fullscreen del Gantt giro
+  // materiale. Decisione utente "non si vede tutto il turno, viene
+  // tagliato ai lati" — il Gantt incastrato fra HeroSection e
+  // ConvogliDelTurnoSection ha poco respiro verticale e la sidebar
+  // toglie 240+ px in orizzontale. Il fullscreen lo rende
+  // protagonista della viewport, mantenendo zoom + scroll + click
+  // blocco (BloccoDialog si apre sopra il fullscreen).
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFullscreen(false);
+    };
+    window.addEventListener("keydown", handler);
+    const orig = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", handler);
+      document.body.style.overflow = orig;
+    };
+  }, [isFullscreen]);
+
   // Sprint 7.9 MR δ.1 (entry 141): a zoom < 100% la timeline si stira
   // per riempire la viewport disponibile (decisione utente: "al 75% non
   // si riempie la pagina con sidebar chiusa"). A zoom ≥ 100% mantieni
@@ -696,21 +721,44 @@ function GanttSection({
 
   return (
     <GanttScaleContext.Provider value={scale}>
-      <Card className={cn("overflow-hidden", selectedBlocco !== null && "gantt-selecting")}>
+      {isFullscreen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+          onClick={() => setIsFullscreen(false)}
+          aria-hidden
+        />
+      )}
+      <Card
+        className={cn(
+          "overflow-hidden",
+          selectedBlocco !== null && "gantt-selecting",
+          // Sprint 7.10 MR α.8: in fullscreen il Card occupa la
+          // viewport (inset-2 = 8px da ogni bordo) e diventa flex-col
+          // così lo scroll wrapper sotto può prendersi tutto lo
+          // spazio verticale residuo (flex-1 min-h-0).
+          isFullscreen && "fixed inset-2 z-50 flex flex-col shadow-2xl",
+        )}
+      >
         {/* Toolbar — sticky così resta visibile (zoom + bottoni scroll)
             anche quando l'utente scrolla la pagina principale per leggere
             il Gantt esteso. */}
         <div className="sticky top-0 z-40 flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/95 px-4 py-2.5 text-xs backdrop-blur-sm">
-          <div className="flex items-center gap-3 text-muted-foreground">
+          {/* Sezione sinistra: titolo + meta. `min-w-0` permette il
+              truncate sulla label lunga; senza, il flex-wrap non si
+              attiva mai e la sezione destra finisce fuori viewport. */}
+          <div className="flex min-w-0 items-center gap-3 text-muted-foreground">
             <span className="font-medium uppercase tracking-wide text-foreground">Gantt giro</span>
             <span className="text-border">·</span>
-            <span>
+            <span className="truncate">
               {giro.giornate.length} giornat{giro.giornate.length === 1 ? "a" : "e"} ·{" "}
               {stats.nVariantiTotale} variant{stats.nVariantiTotale === 1 ? "e" : "i"} calendarial
               {stats.nVariantiTotale === 1 ? "e" : "i"}
             </span>
           </div>
-          <div className="flex items-center gap-3 text-muted-foreground/80">
+          {/* Sezione destra: zoom + scroll + fullscreen. `shrink-0`
+              così questi controlli restano sempre visibili anche
+              quando la sezione sinistra è larga. */}
+          <div className="flex shrink-0 items-center gap-3 text-muted-foreground/80">
             {hasOverflow && (
               <div className="inline-flex items-center gap-1">
                 <button
@@ -739,6 +787,20 @@ function GanttSection({
             <span className="tabular-nums">
               1h = {Math.round(scale.pxPerHour)}px
             </span>
+            <span className="text-border">·</span>
+            <button
+              type="button"
+              onClick={() => setIsFullscreen((v) => !v)}
+              aria-label={isFullscreen ? "Riduci Gantt" : "Espandi Gantt a tutta pagina"}
+              title={isFullscreen ? "Riduci Gantt (Esc)" : "Espandi Gantt a tutta pagina"}
+              className="rounded border border-border bg-white p-1 text-muted-foreground hover:bg-muted"
+            >
+              {isFullscreen ? (
+                <Minimize2 className="h-3.5 w-3.5" aria-hidden />
+              ) : (
+                <Maximize2 className="h-3.5 w-3.5" aria-hidden />
+              )}
+            </button>
           </div>
         </div>
 
@@ -751,7 +813,13 @@ function GanttSection({
             e la scrollbar-x sta subito sotto il Gantt. */}
         <div
           ref={scrollWrapperRef}
-          className="gantt-scroll relative overflow-x-auto pb-1"
+          className={cn(
+            "gantt-scroll relative overflow-x-auto pb-1",
+            // In fullscreen il wrapper deve prendersi tutto lo spazio
+            // verticale del Card (Card è flex-col) e abilitare lo
+            // scroll-y interno: senza min-h-0 il flex-1 collassa.
+            isFullscreen && "flex-1 min-h-0 overflow-y-auto",
+          )}
         >
           <div className="relative" style={{ width: `${innerWidth}px` }}>
             {/* Sticky header X axis */}

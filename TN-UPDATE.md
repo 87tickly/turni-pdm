@@ -10,6 +10,124 @@
 
 ---
 
+## 2026-05-05 (159) — Sprint 7.10 MR α.8: vista fullscreen Gantt giro materiale + hardening visibilità toolbar
+
+### Contesto
+
+Smoke utente post-deploy MR α.7: feedback secco — *"non esce più la
+possibilità delle % di vista, non si vede tutto il turno viene
+tagliato ai lati. ti avevo chiesto di poter anche creare un pop up
+per aprire solo il turno"*.
+
+Diagnosi (regola 1 METODO, prima di proporre):
+
+1. **`ZoomToggle` 75/100/150/200% non rimosso dal codice**:
+   `GiroDettaglioRoute.tsx:737`, definito a `:800`, persistenza in
+   `localStorage["colazione.gantt-giro.zoom"]`. Lo screenshot mostra
+   però la metà destra della toolbar visivamente vuota (mancano
+   ZoomToggle, "1h = 40px", bottoni ← →). Causa: la toolbar è
+   `flex flex-wrap justify-between` (riga 703) — con sidebar aperta
+   o viewport stretto, la sezione sinistra si espande senza limite
+   e spinge la sezione destra a un'altra riga (o fuori vista se
+   `overflow-hidden` del Card la copre). Senza `min-w-0` sulla
+   sezione sinistra il flex-wrap si attiva tardi e la destra
+   scompare.
+
+2. **Pop-up dedicato del turno**: richiesta utente passata mai
+   onorata. Niente residuo dichiarato in TN-UPDATE — è una
+   mancanza, non una scelta. Il `BloccoDialog` (MR δ.2) è il
+   dettaglio del singolo blocco, non una vista fullscreen del
+   giro intero.
+
+### Modifiche
+
+**`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`**:
+
+1. **Vista fullscreen del Gantt** (richiesta utente):
+   - State `isFullscreen` interno a `GanttSection`.
+   - Bottone toggle in toolbar destra (icone `Maximize2` /
+     `Minimize2` da lucide-react), accanto al display "1h = Xpx".
+   - In modalità fullscreen il `Card` diventa
+     `fixed inset-2 z-50 flex flex-col shadow-2xl`: occupa la
+     viewport con 8px di margine, niente HeroSection /
+     ConvogliDelTurnoSection / DateApplicazioneSection visibili.
+   - Backdrop esterno `fixed inset-0 z-40 bg-black/60
+     backdrop-blur-sm` cliccabile per chiudere.
+   - Listener tasto `Escape` per chiudere; body scroll lock
+     (`document.body.style.overflow = "hidden"`) per evitare
+     doppio scroll mentre si naviga il Gantt esteso. Cleanup in
+     return dell'effect.
+   - Lo scroll wrapper interno (`scrollWrapperRef`) in modalità
+     fullscreen prende `flex-1 min-h-0 overflow-y-auto` così riempie
+     lo spazio verticale residuo del Card flex-col.
+   - Il `BloccoDialog` (selezione blocco rosso) continua a
+     funzionare sopra il fullscreen perché Radix Portal lo monta
+     fuori dal Card a z-index maggiore.
+
+2. **Hardening visibilità toolbar** (causa root della
+   regressione percepita):
+   - Sezione sinistra: `flex min-w-0 items-center` + `truncate`
+     sulla label "N giornate · M varianti calendariali". Senza
+     `min-w-0` un figlio flex con testo non comprime mai sotto la
+     content-width naturale, quindi su sidebar aperta la sinistra
+     occupava tutto lo spazio e spingeva la destra a wrappare /
+     scomparire.
+   - Sezione destra: `flex shrink-0 items-center` — i controlli
+     critici (zoom, scroll, fullscreen) restano sempre montati
+     visibili, mai compressi.
+   - Layout toolbar invariato a `flex-wrap`: su mobile / tablet
+     molto stretto la destra può andare comunque a capo, ma in
+     desktop a 1280+ resta sempre sulla stessa riga.
+
+### Verifiche
+
+- ✅ `pnpm tsc -b --noEmit`: clean.
+- ✅ `pnpm test --run`: **52 passed**, 1 skipped, 0 failed.
+- ✅ `pnpm build`: 1786 modules, bundle ~660KB / ~180KB gz
+  (+1KB rispetto a MR α.7 per icone Maximize2/Minimize2 +
+  effect fullscreen).
+- ⚠️ Smoke browser preview locale **non eseguito**: il dev server
+  punta a `localhost:8000` (no backend locale up) e il backend
+  Railway production ha `CORS_ALLOW_ORIGINS` limitato all'host
+  production. Setup full-stack locale richiederebbe Postgres in
+  Docker + alembic + seed → fuori scope per uno smoke UI. Il
+  cambiamento è solo CSS / markup / state interno (no nuove fetch,
+  no nuova logica DB), e lo static analysis è verde. Smoke
+  funzionale → direttamente sulla production post-deploy.
+
+### Stato
+
+- ✅ Vista fullscreen implementata (Esc, click backdrop, bottone
+  toggle).
+- ✅ Toolbar resa robusta con `min-w-0` + `shrink-0`.
+- ⏳ Deploy frontend Railway.
+- ⏳ Smoke utente post-deploy: aprire `/pianificatore-giro/giri/<ID>`,
+  verificare che la toolbar destra (ZoomToggle + "1h = Xpx" +
+  Maximize2) sia visibile, cliccare l'icona espandi e verificare
+  che il Gantt occupi la viewport con scroll fluido in entrambe le
+  direzioni.
+
+### Limitazioni dichiarate (rinviate)
+
+1. **Niente focus-trap nel fullscreen**: in modalità espansa la
+   tabulazione può ancora portare il focus su elementi del DOM
+   sotto al Card. Per accessibilità rigorosa servirebbe un
+   `<FocusScope>` di Radix o un rolling-tab manuale. Non
+   bloccante: l'utente principale del Gantt usa mouse + Esc.
+   MR α.8.bis se serve hardening accessibility.
+2. **Nessun deep-link al fullscreen**: ricaricando la pagina si
+   perde lo stato `isFullscreen`. Se diventa abituale,
+   persistere su `localStorage` o query param `?expand=1`.
+
+### Prossimo step
+
+Commit + push + deploy frontend Railway → smoke utente sulla
+produzione (URL `frontend-production-8271.up.railway.app`).
+
+Poi MR α.6 (fill multi-giro) come da roadmap MR α.7.
+
+---
+
 ## 2026-05-05 (158) — Sprint 7.10 MR α.7: redesign Gantt turno PdC (asse default + icona vettura + badge giornata + tooltip)
 
 ### Contesto
