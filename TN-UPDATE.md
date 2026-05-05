@@ -10,6 +10,99 @@
 
 ---
 
+## 2026-05-05 (165) — Pulizia: fix 2 test persister stale post MR β2-2
+
+### Contesto
+
+L'entry 164 chiudeva lo Sprint 8.0 MR 0 segnalando 2 test rotti
+preesistenti su `backend/tests/test_persister.py` (falliscono anche
+su master pulito senza i cambi MR 0):
+
+1. `test_persister_corsa_rientro_9xxxx_se_genera_rientro_sede`
+2. `test_vuoto_testa_genera_corsa_materiale_vuoto_e_blocco`
+
+Test stale rispetto allo Sprint 7.9 MR β2-2 (commit 886b89d,
+entry 128, decisione utente 2026-05-04): la numerazione dei vuoti
+era passata da `V-{numero_turno}-{NNN}` (sequenza opaca) a
+`9{numero_treno_commerciale}` (parlante, riconducibile al treno di
+confine). Memoria utente di riferimento: `project_rientro_sede_9XXXX`.
+
+Riproduzione fallimenti (output esatto del persister):
+
+- Test 1: `assert '9TEST_002' == 'V-G-FIO-002-000'` →
+  persister produce `9TEST_002` (= "9" + numero treno commerciale
+  della prima corsa); il test si aspettava ancora il vecchio
+  pattern legacy.
+- Test 2: regex SQL `WHERE numero_treno_vuoto ~ '^9[0-9]{4}$'` non
+  matcha mai → `cmv is None`. Il numero treno usato dal test
+  (`TEST_R9_001`) produce `9TEST_R9_001` (12 char con underscore),
+  che non rientra nel pattern "9 + 4 cifre" del regex.
+
+Diagnosi: il **codice è corretto** e allineato a MR β2-2; sono i
+test a essere desincronizzati. Nessun cambio del codice di dominio.
+
+### Modifiche
+
+**`backend/tests/test_persister.py`**:
+
+- Docstring header (riga 17): aggiornato il riferimento al pattern
+  `numero_treno_vuoto` indicando il nuovo formato parlante
+  `9{numero_treno_commerciale}` come canonico (Sprint 7.9 MR β2-2),
+  con il `V-{numero_turno}-{NNN}` retrocesso a fallback legacy.
+- Test 1 (`test_vuoto_testa_genera_corsa_materiale_vuoto_e_blocco`,
+  riga 477): assert allineato al nuovo pattern, `9TEST_002`. Setup
+  invariato (numero treno della corsa resta `TEST_002`).
+- Test 2 (`test_persister_corsa_rientro_9xxxx_se_genera_rientro_sede`,
+  riga 1101+): tre cambi:
+  1. numero treno della corsa: `TEST_R9_001` → `2811` (numero treno
+     Trenord di confine canonico, esempio della memoria utente
+     `project_rientro_sede_9XXXX`: 2811 → 92811);
+  2. assert puntuale `cmv.numero_treno_vuoto == "92811"` invece del
+     regex SQL `~ '^9[0-9]{4}$'` (che era troppo restrittivo:
+     assumeva sempre 4 cifre dopo il "9", ma il pattern reale è
+     "9 + qualunque numero treno commerciale");
+  3. SELECT filtrato per `giro_materiale_id == gm_id` invece di
+     `ORDER BY id DESC LIMIT 1`: più robusto, non dipende dall'ordine
+     di inserimento cross-test.
+
+  Cleanup fixture invariato: la corsa `2811` viene comunque
+  cancellata dalla `_wipe_test_data` perché origine/destinazione
+  iniziano con `S99%` (clausola OR già esistente alla riga 117-124).
+
+**`backend/src/colazione/models/corse.py`** (riga 152): aggiornato
+il commento sul perché `CorsaMaterialeVuoto.numero_treno_vuoto` è
+`String(40)`. Ora cita esplicitamente entrambi i pattern (legacy
+fallback `V-{numero_turno}-{NNN}` + parlante MR β2-2
+`9{numero_treno_commerciale}` con esempio `92811`). Solo commento,
+nessun cambio di schema o behaviour.
+
+### Verifiche
+
+- ✅ `uv run pytest tests/test_persister.py::test_vuoto_testa... tests/test_persister.py::test_persister_corsa_rientro_9xxxx...`:
+  **2 passed in 1.21s** (prima: 2 failed).
+- ✅ `uv run pytest`: **689 passed, 12 skipped, 0 failed**
+  (era 687 + 2 rotti su 689; ora 689 verdi su 689).
+- ✅ `uv run mypy --strict src/`: 69 file clean.
+- ✅ `uv run ruff check tests/test_persister.py src/colazione/models/corse.py`:
+  All checks passed.
+
+### Stato
+
+- ✅ Test stale fissati, suite completamente verde.
+- ⏳ Commit + push + deploy backend Railway. Nessuna migration nuova
+  (modifica solo a test + commento ORM); il deploy è di sicurezza
+  per allineare il container alla `master` aggiornata, ma non
+  cambia behaviour runtime.
+
+### Prossimo step
+
+Sprint 8.0 MR 1: handoff Materiale → PdC (frontend + freeze
+read-only delle regole/giri al `MATERIALE_CONFERMATO` +
+invalidazione cache list-route giri dipendenti + bottoni UI di
+conferma).
+
+---
+
 ## 2026-05-05 (164) — Sprint 8.0 MR 0: pipeline state machine + pulizia DB di prova
 
 ### Contesto

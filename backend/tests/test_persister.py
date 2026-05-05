@@ -14,7 +14,10 @@ Coverage:
 - Eventi composizione (aggancio + sgancio).
 - Lista vuota → ``[]`` ritornato.
 - Località non trovata → ``LocalitaNonTrovataError``.
-- ``numero_treno_vuoto`` formato ``V-{numero_turno}-{NNN}``.
+- ``numero_treno_vuoto`` formato ``9{numero_treno_commerciale}`` (Sprint
+  7.9 MR β2-2, decisione utente 2026-05-04). Fallback legacy
+  ``V-{numero_turno}-{NNN}`` solo se il treno commerciale ancora non è
+  disponibile.
 - ``generation_metadata_json`` popolato (versione, motivo, ecc.).
 - ``GiroGiornata.dates_apply_json`` popolato con la data della giornata
   (Sprint 7.7 MR 3: i campi di validità sono saliti su GiroGiornata,
@@ -474,7 +477,9 @@ async def test_vuoto_testa_genera_corsa_materiale_vuoto_e_blocco(
             .all()
         )
         assert len(cmvs) == 1
-        assert cmvs[0].numero_treno_vuoto == "V-G-FIO-002-000"
+        # Sprint 7.9 MR β2-2: pattern parlante "9{primo_treno_commerciale}".
+        # Il primo (ed unico) treno della variante è "TEST_002" → "9TEST_002".
+        assert cmvs[0].numero_treno_vuoto == "9TEST_002"
         assert cmvs[0].codice_origine == "S99001"
         assert cmvs[0].codice_destinazione == "S99005"
         assert cmvs[0].origine == "generato_da_giro_materiale"
@@ -1099,12 +1104,19 @@ async def test_persister_popola_km_media_annua(azienda_id: int) -> None:
 
 
 async def test_persister_corsa_rientro_9xxxx_se_genera_rientro_sede(azienda_id: int) -> None:
-    """Sprint 5.6 Feature 4: con genera_rientro_sede=True e ultima dest !=
-    stazione_collegata sede, viene creato un blocco materiale_vuoto 9NNNN."""
+    """Sprint 5.6 Feature 4 + Sprint 7.9 MR β2-2: con
+    ``genera_rientro_sede=True`` e ultima dest != stazione_collegata sede,
+    viene creato un blocco materiale_vuoto con numero treno parlante
+    ``9{ultimo_treno_commerciale}`` (decisione utente 2026-05-04).
+    """
     await _crea_stazione("S99001", azienda_id)  # sede
     await _crea_stazione("S99002", azienda_id)  # whitelist
     await _crea_localita("TEST_LOC_FIO", "S99001", azienda_id)
-    c1 = await _crea_corsa("TEST_R9_001", "S99002", "S99002", (8, 0), (9, 0), azienda_id)
+    # Sprint 7.9 MR β2-2: il numero treno virtuale del rientro è
+    # ``9{numero_treno_commerciale_di_confine}``. Uso un numero realistico
+    # Trenord (es. 2811 → 92811) per documentare il pattern atteso in
+    # produzione (memoria ``project_rientro_sede_9XXXX``).
+    c1 = await _crea_corsa("2811", "S99002", "S99002", (8, 0), (9, 0), azienda_id)
 
     async with session_scope() as session:
         c1_orm = (
@@ -1118,7 +1130,7 @@ async def test_persister_corsa_rientro_9xxxx_se_genera_rientro_sede(azienda_id: 
         )
         # Forzo motivo='naturale' (Sprint 5.6: chiusura ideale completa)
         giro = dataclasses.replace(giro, motivo_chiusura="naturale")
-        await persisti_giri(
+        ids = await persisti_giri(
             [
                 GiroDaPersistere(
                     numero_turno="G-TST-R9",
@@ -1136,23 +1148,27 @@ async def test_persister_corsa_rientro_9xxxx_se_genera_rientro_sede(azienda_id: 
             prog_id,
             azienda_id,
         )
+        gm_id = ids[0]
         await session.commit()
 
     async with session_scope() as session:
-        # Verifica creato un CorsaMaterialeVuoto con prefix '9'
-        cmv = (
-            await session.execute(
-                text(
-                    "SELECT numero_treno_vuoto, codice_origine, codice_destinazione "
-                    "FROM corsa_materiale_vuoto "
-                    "WHERE numero_treno_vuoto ~ '^9[0-9]{4}$' "
-                    "ORDER BY id DESC LIMIT 1"
+        # Sprint 7.9 MR β2-2: il rientro è l'unico CMV del giro
+        # (no vuoto_testa/coda nel setup). Filtro per giro_materiale_id
+        # per non dipendere dall'ordine inserimento cross-test.
+        cmvs = (
+            (
+                await session.execute(
+                    select(CorsaMaterialeVuoto).where(
+                        CorsaMaterialeVuoto.giro_materiale_id == gm_id
+                    )
                 )
             )
-        ).first()
-        assert cmv is not None
-        assert cmv.numero_treno_vuoto.startswith("9")
-        assert len(cmv.numero_treno_vuoto) == 5
+            .scalars()
+            .all()
+        )
+        assert len(cmvs) == 1
+        cmv = cmvs[0]
+        assert cmv.numero_treno_vuoto == "92811"  # 9 + treno commerciale
         assert cmv.codice_origine == "S99002"  # ultima dest
         assert cmv.codice_destinazione == "S99001"  # stazione_collegata sede
 
