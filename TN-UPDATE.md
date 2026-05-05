@@ -10,6 +10,108 @@
 
 ---
 
+## 2026-05-05 (150) — Sprint 7.10 MR α.1: popolazione stazione_principale_codice (preludio multi-turno)
+
+### Contesto
+
+Smoke utente post-deploy MR η.1: il dialog auto-suggerimento funziona,
+ma generando il turno PdC su giro ETR421-6g (FIO) il risultato è
+inaccettabile — screenshot conferma:
+
+- Prestazione totale: **124h53** su 6 giornate (~20h/giornata)
+- Condotta totale: **83h02** (~13h45/giornata, vs cap 5h30)
+- 6/6 giornate violano cap, 12 violazioni hard
+- Sede PdC: `(legacy)` — generato senza deposito
+
+L'utente diagnosi corretta: *"il turno non rispetta la normativa, non
+assegna pezzi di treno ai depositi, fa un singolo turno. Io genero il
+giro materiale? Bene, il generatore in automatico vede dove sono i
+treni, li scorpora per ogni singolo pezzo, e l'algoritmo cerca di
+assegnarli a uno o più depositi sulla base della normativa che
+conosci"*.
+
+Diagnosi tecnica: il MR η/η.1 ha implementato l'aggancio di **un**
+turno monolitico a **un** deposito; lo split CV intermedio (Sprint
+7.4) divide al massimo una **singola giornata** in più rami. Quello
+che serve è strutturalmente diverso: 1 giro → **N turni PdC autonomi
+distinti**, ognuno con il suo deposito, ognuno entro normativa.
+
+Risposta scope concordato con l'utente:
+1. ✅ N turno_pdc per giro (modello dati 1:many)
+2. ✅ Popola `stazione_principale_codice` per i 25 depositi standard
+3. ✅ Programmazione dinamica (ottimo globale)
+4. ✅ Turno anonimo (assegnazione persone resta 4° ruolo)
+
+Apertura **Sprint 7.10 MR α — Builder PdC multi-turno**, diviso in 3
+MR sequenziali. Questo è il primo (α.1) che chiude il prerequisito
+infrastrutturale: senza `stazione_principale_codice` popolata la
+lista CV ammessa è vuota → algoritmo DP non ha punti dove segmentare.
+
+### Modifiche
+
+**`alembic/versions/0030_populate_stazione_principale_codice.py`**
+(revision `d8e9f0a1b2c3`, dopo `b7c8d9e0f1a2` di MR η):
+
+- Mapping pattern-based via `ILIKE` per i 25 codici depositi standard
+  (NORMATIVA-PDC §2.1 + DEPOT_TRENORD di 0028).
+- Per ogni deposito esegue:
+  ```sql
+  UPDATE depot
+  SET stazione_principale_codice = (
+      SELECT s.codice FROM stazione s
+      WHERE s.nome ILIKE '<pattern>'
+      ORDER BY LENGTH(s.nome) ASC
+      LIMIT 1
+  )
+  WHERE codice = '<depot_codice>'
+    AND stazione_principale_codice IS NULL
+    AND EXISTS (SELECT 1 FROM stazione s WHERE s.nome ILIKE '<pattern>')
+  ```
+- ORDER BY length asc preferisce match brevi (es. *MILANO P.
+  GARIBALDI* vince su *MILANO PORTA GARIBALDI SOTTERRANEA*).
+- Casi non banali risolti:
+  - `FIORENZA` → `%CERTOSA%` (è un deposito materiale, la stazione
+    di superficie è MILANO CERTOSA — vecchia decisione MR2,
+    `IMPMAN_MILANO_FIORENZA.stazione_collegata_codice`).
+  - `GARIBALDI_ALE` / `_CADETTI` / `_TE` → tutti `%GARIBALDI%`
+    (sub-aree fisiche dello stesso piazzale commerciale).
+  - `GRECO_TE` / `_S9` → `%GRECO%PIRELLI%`.
+- Multi-azienda safe: aggiorna TUTTI i depositi con quel codice in
+  QUALSIASI azienda, ma solo se attualmente NULL. **Idempotente**.
+- Se una stazione non esiste nel DB di quell'azienda, l'EXISTS
+  fallisce e l'UPDATE non scatta — depot resta NULL, comportamento
+  safe.
+
+`downgrade()` reset NULL sui 25 codici noti.
+
+### Verifiche
+
+- ✅ `uv run mypy --strict alembic/versions/0030_*.py`: 0 errori.
+- ✅ `uv run python -m alembic heads`: 1 head (`d8e9f0a1b2c3`),
+  niente branch.
+- ⏳ Verifica post-deploy backend: query DB Railway prod conferma
+  che almeno N depositi hanno `stazione_principale_codice` popolato
+  (per Trenord ne attendo 23+/25; per azienda #2 dipende dal seed
+  stazioni). Lo verifico via curl all'endpoint `/api/depots` post
+  deploy.
+
+### Stato
+
+- ✅ Migration scritta + verificata staticamente.
+- ⏳ Deploy backend Railway → `alembic upgrade head` al boot.
+- ⏳ Smoke produzione + verifica copertura mapping.
+
+### Prossimo step
+
+MR α.2 (algoritmo multi-turno con DP) parte appena MR α.1 è in
+produzione e la copertura mapping è verificata. Niente residui:
+se qualche depot resta senza stazione popolata (perché la sua
+stazione non esiste nel seed di quell'azienda), lo flagghiamo
+nell'output del builder come *"deposito senza stazione di
+residenza — non utilizzabile come scambio CV"*, non lo nascondiamo.
+
+---
+
 ## 2026-05-05 (149) — Sprint 7.9 MR η.1: auto-suggerimento deposito top-3 + bottoni Genera PdC distribuiti
 
 ### Contesto
