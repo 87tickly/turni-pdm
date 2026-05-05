@@ -10,6 +10,203 @@
 
 ---
 
+## 2026-05-05 (155) — Sprint 7.10 MR β.1: editorial redesign Gestione Personale (5 schermate + drilldown overlay + ⌘K + tweaks)
+
+### Contesto
+
+Implementazione integrale del bundle design `arturo/redesign-pdc.html`
+prodotto in Claude Design (handoff 2026-05-05). Nonostante il filename,
+il bundle ridisegna le 5 schermate del **4° ruolo Gestione Personale**
+(non del Pianificatore PdC) — già in produzione da Sprint 7.9 MR ζ con
+pattern Card-prison standard. Direzione concordata in chat4: editoriale-
+denso (Linear/Stripe/Cal.com), tabelle protagoniste, no card-prison,
+tipografia forte, KPI compressi a stripe inline.
+
+Scope confermato dall'utente: *"si va bene, basta che integri tutto e
+insieme senza pigrizia"* → tutti i pezzi del prototipo (5 schermate +
+drilldown deposito + drilldown turno + command palette ⌘K + tweaks
+panel coverage simulator + sidebar 5 gruppi).
+
+### Modifiche
+
+**`frontend/src/index.css`** (+813 righe scoped sotto `.gp-page`):
+
+Sistema di token scoped al ruolo (no inquinamento Pianificatore Giro/PdC):
+`--gp-ink/-2/-3/-4/-5` deep-navy ink (no nero), `--gp-line/line-2`,
+`--gp-bg-rule` paper-warm righe zebra, `--gp-ok/warn/bad` semantici, e
+`--gp-cov/-bg/-pct` mutabili per il simulatore tweak.
+
+Classi utility editoriali:
+- **Page head**: `gp-eyebrow` (mono uppercase), `gp-title` (Exo 2 800,
+  38px, letter-spacing -0.025em), `gp-num` (counter mono accanto al
+  titolo), `gp-lede` (subtitle 14px max 64ch).
+- **KPI stripe**: `gp-stripe` orizzontale a 5+ colonne con divider
+  sottili, `gp-stripe-cell` con `gp-stripe-k` (mono uppercase 9.5px) +
+  `gp-stripe-v` (Exo 2 700 26px tabular-nums) + `gp-stripe-meta`. Cella
+  copertura con barra `gp-stripe-cov-bar` + target line a 95%.
+- **Coverage band**: `gp-cov-band` con `gp-cov-segments` grid 25 colonne,
+  `gp-cov-seg.gp-s-{ok,warn,bad}` + summary footer.
+- **Callout**: `gp-callout` con border-left tinto + gradient bg, sostituisce
+  banner giallo classico.
+- **Tabella editoriale**: `gp-tbl` con divider sottili invece di card,
+  `gp-tbl-group` (group rows mono uppercase), `gp-cell-code` (mono blue),
+  `gp-cov-cell` (barra inline + pct).
+- **Tag pills**: `gp-tag.gp-tag-{ok,warn,bad,muted,ink}` mono lowercase
+  con dot prefisso.
+- **Toolbar**: `gp-toolbar` + `gp-toolbar-search` (input piatto senza
+  border) + `gp-select-pill`.
+- **Editorial tabs**: `gp-tabs` + `gp-tab.gp-is-active` (border-bottom blue).
+- **Person row** + **Dep row**: grid card-list con cognome uppercase +
+  matricola mono.
+- **Cal.com vertical** (`gp-cal-vertical`): grid `[84px label]
+  [N person cols]` con `gp-cal-day-cell` (giorno con dow + d + today tag)
+  + `gp-cal-slot` con `gp-cal-pill.gp-{t,f,m,r,a,rest}`.
+- **Drilldown overlay**: `gp-dd-overlay` (laterale, slide-in) +
+  `gp-dd-panel` opaco + `gp-gantt` (180px label + 7 days grid) con
+  `gp-gantt-bar.{gp-pm,gp-f,gp-m,gp-r,gp-rest}` posizionate absolute.
+- **Shift overlay**: `gp-shift-overlay` (modale centrato) con
+  `gp-shift-time` 110px + ticks orari + `gp-shift-seg-trip` (rosso
+  pillola), `gp-shift-seg-prep` (tratteggiata), `gp-shift-seg-pause`
+  (banda con minuti) + `gp-shift-stops` (etichette stazione+orario) +
+  `gp-shift-summary` 4 colonne.
+- **Command palette**: `gp-cmd-overlay` (z=100) + `gp-cmd-panel` 560px +
+  `gp-cmd-input` 16px + `gp-cmd-list` con sezioni ("Vai a", "Azioni",
+  "Filtri rapidi") + `gp-cmd-row` con `gp-kbd` shortcut hint.
+- **Tweaks panel**: `gp-tweaks` flottante bottom-right + radios
+  Attuale/Verde/Giallo/Rosso.
+- **Action buttons**: `gp-action-btn-{line,ink}` per coerenza con design.
+
+**Nuova directory `frontend/src/routes/gestione-personale/_shared/`**
+(7 nuovi componenti):
+
+- `GestionePersonaleContext.tsx` — provider con state cross-route:
+  `coverageTweak`, `drilldownDeposito`, `drilldownTurno`, `paletteOpen`.
+  Esc cascading (turno → deposito → palette), ⌘K/Ctrl+K toggle palette.
+  Ogni override del tweak espone `coverageOverridePct` + `coverageOverrideTone`
+  per i componenti che leggono il dato reale dei KPI.
+- `EditorialHead.tsx` — pattern eyebrow + h1 + lede + actions cluster.
+- `CoverageBand.tsx` — 25 segmenti coverage band con click → drilldown.
+- `CommandPalette.tsx` — ⌘K con 11 comandi (5 navigazione + 3 azioni +
+  3 filtri), arrow nav + Enter, fuzzy filter substring, sezioni.
+- `CoverageTweaksPanel.tsx` — radio group Attuale/Verde/Giallo/Rosso
+  con collassabile `+/—`.
+- `DepositoDrilldownOverlay.tsx` — Gantt 7gg con 3 PdC reali del
+  deposito (`usePersoneByDepot`) + turni T1/T2/T3 mock + ferie reale
+  (banda warm) + violazioni CCNL placeholder. Banner "Preview · dati
+  simulati" che dichiara stato collegamento futuro a `turno_pdc_giornata`.
+- `TurnoDrilldownOverlay.tsx` — Gantt orario "treno style" 04:00→13:00
+  con 5 viaggi MiPG↔Lc rossi pillola + 1 prep tratteggiato + 4 pause
+  con minuti. Tutti i tempi placeholder.
+
+**Nuovo wrapper `frontend/src/routes/gestione-personale/GestionePersonaleLayout.tsx`**:
+
+Layout intermedio sotto `<AppLayout />`. Wrappa l'`<Outlet />` con
+`GestionePersonaleProvider` + mount globale di `<CommandPalette />`,
+`<DepositoDrilldownOverlay />`, `<TurnoDrilldownOverlay />`,
+`<CoverageTweaksPanel />`. Le route GP figlie restano focalizzate sui
+contenuti, niente duplicazione di stato per route.
+
+**Rewrite delle 5 route Gestione Personale**:
+
+- **`DashboardRoute.tsx`** — editorial: page head + KPI stripe a 5
+  celle (Copertura/PdC attivi/In servizio/Ferie/Malattia) + callout
+  reattivo al tone + coverage band 25 segmenti + tabella raggruppata
+  per criticità (sotto target / a target / vuoti) → click row apre
+  drilldown deposito.
+- **`PersoneRoute.tsx`** — toolbar compatta (search + 3 select-pill
+  Deposito/Profilo/Stato) + header riga mono + card-list con
+  cognome+nome+matricola+anni+tag stato. Filtraggio client-side
+  combinato server (search/depot) + client (status).
+- **`DepositiRoute.tsx`** — stripe summary 5 celle (Copertura
+  media/Critici/Warning/A target/PdC totali) + toolbar (search + sort
+  pill Criticità↓/Nome A-Z/PdC↓ + only-under-target toggle) + grouped
+  list per criticità → click row apre drilldown.
+- **`CalendarioRoute.tsx`** — Cal.com verticale: grid `[84px label]
+  [N person cols]`, giorni come righe, persone come colonne. Pill
+  T/F/M/R/A/Rest computate da `useIndisponibilita` + fallback "T"
+  placeholder per i giorni feriali non coperti. Mostra fino a 6 PdC.
+- **`IndisponibilitaRoute.tsx`** — editorial tabs (Tutte/Ferie/
+  Malattia/ROL/Altre) con counter + toggle "Solo in corso oggi" +
+  card-list rows con cognome uppercase + tipo+icona + periodo +
+  giorni + stato approvazione.
+
+**`frontend/src/routes/AppRoutes.tsx`** — wired `GestionePersonaleLayout`
+come Route element intermedio sotto `AppLayout`, sopra le 7 route GP
+(dashboard/persone/persone/:id/depositi/depositi/:codice/calendario/
+indisponibilita).
+
+### Verifiche
+
+- ✅ `pnpm tsc -b --noEmit`: clean (0 errori).
+- ✅ `pnpm build`: 1786 modules, 657KB JS / 64.6KB CSS gz, +30KB JS
+  e +15KB CSS rispetto al baseline (tutto editoriale dovuto: tokens,
+  utility classes, 7 componenti shared, 2 overlay).
+- ✅ `pnpm test --run`: **52 passed, 1 skipped**, 0 failed (nessuna
+  regressione sui test esistenti delle altre route).
+- ✅ **Smoke locale via preview server** (admin/admin12345 vs backend
+  Postgres locale):
+  - Dashboard: KPI stripe 86.7%/75/65/3/2, callout sotto target,
+    coverage band 25 segmenti (10 critici / 0 warn / 15 ok), tabella
+    grouped raggruppata.
+  - Click su riga deposito ALESSANDRIA → overlay laterale "Alessandria
+    3 PdC · 7gg" con 3 righe (ALFIERI, ECO, PAVESE) + 11 turni
+    visibili + 1 violazione CCNL · 11h.
+  - Click su pillola T1 dentro l'overlay → 2° overlay modale "T1 ·
+    Alfieri Vittorio · Alessandria · 8h 00m" con timeline 04→13,
+    5 viaggi rossi (24814, 24825, 24828, 24837, 24846) + 4 pause
+    (42'/44'/12'/44') + summary 4 colonne.
+  - **Esc cascading** verificato: turno → deposito → palette.
+  - **⌘K palette**: 11 righe (Vai a · Azioni · Filtri rapidi) con
+    keyboard nav + fuzzy filter.
+  - **Tweak Verde**: KPI stripe → 96.5% verde, callout → "Copertura
+    ottima — sopra il target" con border-left verde, contatori
+    ricalcolati (15 a target, 0 warning, 10 critici).
+  - Anagrafica: 75 persone con cognome uppercase + matricola mono +
+    deposito blue mono + tag stato.
+  - Depositi: stripe + grouped list (sotto target/a target/vuoti) +
+    coverage bar inline rossa per i critici.
+  - Calendario: select Alessandria → grid 14gg × 3 PdC = 42 slot
+    visibili con T/F/Rest pills, today highlight, weekend grey.
+  - Indisponibilità: 12 voci con tabs filtro (Tutte 12 / Ferie 5 /
+    Malattia 2 / ROL 2 / Altre 3), tutti i tag approvazione visibili.
+  - Console **0 errori, 0 warning** durante navigazione + tutti i
+    drilldown.
+
+### Stato
+
+- ✅ MR β.1 chiuso a livello di codice + smoke locale.
+- ⏳ Deploy Railway frontend in corso post-commit.
+- ⏳ Smoke utente post-deploy: aprire `/gestione-personale/dashboard`
+  in produzione, verificare che le 5 schermate respirino come la
+  preview locale e che i drilldown funzionino sui dati reali Trenord.
+
+### Limitazioni dichiarate (non scope)
+
+- I turni T1/T2/T3 nel drilldown deposito sono **mock**: il data model
+  `turno_pdc_giornata` ha blocchi reali con semantica diversa (CONDOTTA/
+  REFEZ/ACCp/CV vs viaggi MiPG↔Lc del prototipo). Banner "Preview ·
+  dati simulati" lo dichiara. Collegamento ai turni reali = scope
+  futuro (richiede mapping GP→PdC tramite lookup `turno_pdc.deposito_pdc_id`).
+- Le route `/gestione-personale/persone/:id` e
+  `/gestione-personale/depositi/:codice` (dettagli) **non** sono state
+  rifatte in editoriale: design non le copre, restano nel pattern
+  Card-prison originale (consistenza interna del flusso dettaglio).
+- Sidebar lasciata invariata — chat4 conferma `Mantieni com'è`. La
+  versione attuale è già ragionevolmente allineata al brief
+  (`Ruolo attivo` header, 5 gruppi visibili con preview "presto",
+  collapse cross-role).
+- Persona detail e Deposito detail sono già coperti da test esistenti
+  e non rientrano nello scope del redesign.
+
+### Prossimo step
+
+Commit + push + deploy Railway frontend → smoke utente in produzione su
+azienda Trenord (#2). Atteso: dashboard editorial con 25 depositi +
+75 PdC reali, drilldown ALESSANDRIA che mostra i 3 PdC reali del
+deposito (Alfieri Vittorio + 2), tweaks panel funzionante.
+
+---
+
 ## 2026-05-05 (154) — Sprint 7.10 MR α.4: accorpa per deposito + codice nuovo + refezione ai bordi
 
 ### Contesto

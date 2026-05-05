@@ -1,31 +1,83 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Search, Users } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Search, Upload } from "lucide-react";
 
-import { Badge } from "@/components/ui/Badge";
-import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
 import { useDepots } from "@/hooks/useAnagrafiche";
 import { usePersone } from "@/hooks/useGestionePersonale";
-import { cn } from "@/lib/utils";
+import type { PersonaWithDepositoRead } from "@/lib/api/gestione-personale";
+import { EditorialHead, EditorialNum } from "@/routes/gestione-personale/_shared/EditorialHead";
 
 /**
- * Sprint 7.9 MR ζ — Anagrafica PdC (Gestione Personale).
+ * Sprint 7.10 MR β.1 — Anagrafica PdC (Gestione Personale, editorial).
  *
- * Tabella filtrabile con tutte le persone attive dell'azienda corrente,
- * arricchita con il deposito di residenza e il tipo di indisponibilità
- * in corso oggi (badge a destra del nome).
+ * Layout:
+ * 1. Editorial head con conteggio totale + lede ("X in servizio oggi")
+ * 2. Toolbar compatta: search live + select-pill deposito + select-pill
+ *    profilo + select-pill stato
+ * 3. Header riga mono uppercase
+ * 4. Card-list rows: index · cognome+nome+matr · profilo · deposito ·
+ *    anni servizio · tag stato → click va al dettaglio persona
  */
+
+type StatusFilter = "all" | "ok" | "ferie" | "malattia" | "rol" | "altro";
+
+const STATUS_OPTIONS: Array<{ id: StatusFilter; label: string }> = [
+  { id: "all", label: "Tutti gli stati" },
+  { id: "ok", label: "In servizio" },
+  { id: "ferie", label: "In ferie" },
+  { id: "malattia", label: "In malattia" },
+  { id: "rol", label: "ROL" },
+  { id: "altro", label: "Altro" },
+];
+
+function statusOf(p: PersonaWithDepositoRead): StatusFilter {
+  if (p.indisponibilita_oggi === null) return "ok";
+  const t = p.indisponibilita_oggi.toLowerCase();
+  if (t === "ferie") return "ferie";
+  if (t === "malattia") return "malattia";
+  if (t === "rol") return "rol";
+  return "altro";
+}
+
+const STATUS_TAG_CLASS: Record<StatusFilter, string> = {
+  all: "gp-tag-muted",
+  ok: "gp-tag-ok",
+  ferie: "gp-tag-warn",
+  malattia: "gp-tag-bad",
+  rol: "gp-tag-ink",
+  altro: "gp-tag-muted",
+};
+
+const STATUS_LABEL: Record<StatusFilter, string> = {
+  all: "tutti",
+  ok: "in servizio",
+  ferie: "in ferie",
+  malattia: "malattia",
+  rol: "ROL",
+  altro: "altro",
+};
+
 export function GestionePersonalePersoneRoute() {
   const [search, setSearch] = useState("");
   const [depot, setDepot] = useState<string>("");
+  const [profilo, setProfilo] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [openMenu, setOpenMenu] = useState<"depot" | "profilo" | "status" | null>(null);
 
   const persone = usePersone({
     search: search.length > 0 ? search : undefined,
     depot: depot.length > 0 ? depot : undefined,
+    profilo: profilo.length > 0 ? profilo : undefined,
     only_active: true,
   });
   const depotsQuery = useDepots();
+
+  const filtered = useMemo(() => {
+    const list = persone.data ?? [];
+    if (statusFilter === "all") return list;
+    return list.filter((p) => statusOf(p) === statusFilter);
+  }, [persone.data, statusFilter]);
 
   const totale = persone.data?.length ?? 0;
   const inServizio = useMemo(
@@ -33,173 +85,309 @@ export function GestionePersonalePersoneRoute() {
     [persone.data],
   );
 
+  const yearsExperience = (p: PersonaWithDepositoRead): number | null => {
+    if (p.data_assunzione === null) return null;
+    return Math.max(
+      0,
+      Math.floor((Date.now() - new Date(p.data_assunzione).getTime()) / (365.25 * 24 * 3600 * 1000)),
+    );
+  };
+
+  const profileOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of persone.data ?? []) set.add(p.profilo);
+    return Array.from(set).sort();
+  }, [persone.data]);
+
   return (
-    <div className="flex flex-col gap-5">
-      <div className="text-xs text-muted-foreground">
-        <Link to="/gestione-personale/dashboard" className="hover:text-primary">
-          Home
-        </Link>
-        <span className="mx-1 text-muted-foreground/40">/</span>
-        Anagrafica PdC
-      </div>
-
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-primary">
-            <Users className="h-6 w-6 text-primary/70" aria-hidden />
+    <section className="gp-page" onClick={() => setOpenMenu(null)}>
+      <EditorialHead
+        eyebrow="Gestione personale · Anagrafica"
+        title={
+          <>
             Anagrafica PdC
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Personale di macchina dell'azienda. Cerca per nome/cognome/codice
-            dipendente, oppure filtra per deposito di residenza.
-          </p>
-        </div>
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
-            <span>
-              <span className="font-mono tabular-nums text-foreground">{inServizio}</span> in servizio
-            </span>
-          </span>
-          <span className="text-muted-foreground/40">|</span>
-          <span>
-            <span className="font-mono tabular-nums text-foreground">{totale}</span>{" "}
-            {depot.length > 0 || search.length > 0 ? "trovati" : "totali"}
-          </span>
-        </div>
-      </header>
+            <EditorialNum>{totale}</EditorialNum>
+          </>
+        }
+        lede={
+          <>
+            Personale di macchina dell'azienda. Cerca per nome, cognome o matricola; filtra per
+            deposito di residenza o stato di servizio.{" "}
+            <b>{inServizio} in servizio</b> oggi.
+          </>
+        }
+        actions={
+          <>
+            <button type="button" className="gp-action-btn gp-action-btn-line">
+              <Upload className="h-3.5 w-3.5" aria-hidden /> Esporta CSV
+            </button>
+            <button type="button" className="gp-action-btn gp-action-btn-ink">
+              <Plus className="h-3.5 w-3.5" aria-hidden /> Nuovo PdC
+            </button>
+          </>
+        }
+      />
 
-      {/* filtri */}
-      <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[260px]">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <Input
+      <div className="gp-toolbar" onClick={(e) => e.stopPropagation()}>
+        <div className="gp-toolbar-search">
+          <Search className="h-4 w-4 shrink-0" style={{ color: "var(--gp-ink-4)" }} aria-hidden />
+          <input
             type="search"
-            placeholder="Cerca per nome, cognome o matricola…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
+            placeholder="Cerca per cognome, nome o matricola…"
+            aria-label="Cerca persone"
           />
+          <span className="gp-toolbar-kbd">/</span>
         </div>
-        <select
-          value={depot}
-          onChange={(e) => setDepot(e.target.value)}
-          className="h-10 rounded-md border border-input bg-white px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+
+        <PillMenu
+          label={depot.length > 0 ? `Deposito: ${depot}` : "Tutti i depositi"}
+          isOpen={openMenu === "depot"}
+          onToggle={() => setOpenMenu(openMenu === "depot" ? null : "depot")}
         >
-          <option value="">Tutti i depositi</option>
+          <PillMenuItem
+            active={depot === ""}
+            onClick={() => {
+              setDepot("");
+              setOpenMenu(null);
+            }}
+          >
+            Tutti i depositi
+          </PillMenuItem>
           {(depotsQuery.data ?? []).map((d) => (
-            <option key={d.codice} value={d.codice}>
-              {d.codice} · {d.display_name}
-            </option>
+            <PillMenuItem
+              key={d.codice}
+              active={depot === d.codice}
+              onClick={() => {
+                setDepot(d.codice);
+                setOpenMenu(null);
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>{d.codice}</span>{" "}
+              <span style={{ color: "var(--gp-ink-4)" }}>· {d.display_name}</span>
+            </PillMenuItem>
           ))}
-        </select>
+        </PillMenu>
+
+        <PillMenu
+          label={profilo.length > 0 ? `Profilo: ${profilo}` : "Profilo PdC"}
+          isOpen={openMenu === "profilo"}
+          onToggle={() => setOpenMenu(openMenu === "profilo" ? null : "profilo")}
+        >
+          <PillMenuItem
+            active={profilo === ""}
+            onClick={() => {
+              setProfilo("");
+              setOpenMenu(null);
+            }}
+          >
+            Tutti i profili
+          </PillMenuItem>
+          {profileOptions.map((p) => (
+            <PillMenuItem
+              key={p}
+              active={profilo === p}
+              onClick={() => {
+                setProfilo(p);
+                setOpenMenu(null);
+              }}
+            >
+              {p}
+            </PillMenuItem>
+          ))}
+        </PillMenu>
+
+        <PillMenu
+          label={STATUS_OPTIONS.find((s) => s.id === statusFilter)?.label ?? "Stato oggi"}
+          isOpen={openMenu === "status"}
+          onToggle={() => setOpenMenu(openMenu === "status" ? null : "status")}
+        >
+          {STATUS_OPTIONS.map((s) => (
+            <PillMenuItem
+              key={s.id}
+              active={statusFilter === s.id}
+              onClick={() => {
+                setStatusFilter(s.id);
+                setOpenMenu(null);
+              }}
+            >
+              {s.label}
+            </PillMenuItem>
+          ))}
+        </PillMenu>
+      </div>
+
+      {/* Header riga mono. */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "36px 1fr 100px 140px 60px 110px 14px",
+          gap: 16,
+          padding: "14px 0 10px",
+          borderBottom: "1px solid var(--gp-line-2)",
+          fontSize: 9.5,
+          fontWeight: 600,
+          letterSpacing: ".08em",
+          textTransform: "uppercase",
+          color: "var(--gp-ink-4)",
+        }}
+      >
+        <span>#</span>
+        <span>Cognome e nome · Matricola</span>
+        <span>Profilo</span>
+        <span>Deposito</span>
+        <span>Anni</span>
+        <span>Stato oggi</span>
+        <span />
       </div>
 
       {persone.isLoading ? (
-        <div className="flex items-center justify-center rounded-md border border-border bg-white py-16">
-          <Spinner label="Caricamento PdC…" />
+        <div className="flex items-center justify-center py-16">
+          <Spinner label="Caricamento persone…" />
         </div>
       ) : persone.isError ? (
-        <p className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-          Errore caricamento PdC: {persone.error?.message ?? "errore sconosciuto"}
+        <p
+          role="alert"
+          className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"
+        >
+          Errore caricamento persone: {persone.error?.message ?? "errore sconosciuto"}
         </p>
-      ) : (persone.data ?? []).length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed border-border bg-white py-16 text-center">
-          <Users className="h-10 w-10 text-muted-foreground/40" aria-hidden />
-          <h2 className="text-base font-semibold">Nessun PdC trovato</h2>
-          <p className="max-w-md text-sm text-muted-foreground">
-            Nessuna corrispondenza con i filtri impostati.
-          </p>
+      ) : filtered.length === 0 ? (
+        <div
+          style={{
+            padding: "48px 24px",
+            textAlign: "center",
+            color: "var(--gp-ink-4)",
+            fontSize: 13,
+            border: "1px dashed var(--gp-line-2)",
+            borderRadius: 8,
+            marginTop: 16,
+            background: "var(--gp-bg-rule)",
+          }}
+        >
+          Nessuna persona corrisponde ai filtri selezionati.
         </div>
       ) : (
-        <section className="overflow-hidden rounded-lg border border-border bg-white">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/50 text-[10px] uppercase tracking-wider text-muted-foreground">
-                  <th className="w-12 px-3 py-2 text-left font-semibold">#</th>
-                  <th className="w-28 px-3 py-2 text-left font-semibold">Matricola</th>
-                  <th className="px-3 py-2 text-left font-semibold">Cognome e nome</th>
-                  <th className="w-44 px-3 py-2 text-left font-semibold">Deposito</th>
-                  <th className="w-20 px-3 py-2 text-left font-semibold">Profilo</th>
-                  <th className="w-32 px-3 py-2 text-left font-semibold">Stato oggi</th>
-                  <th className="w-8 px-3 py-2" aria-hidden />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {(persone.data ?? []).map((p, i) => (
-                  <tr
-                    key={p.id}
-                    className="transition-colors hover:bg-primary/[0.03]"
-                  >
-                    <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">
-                      {String(i + 1).padStart(2, "0")}
-                    </td>
-                    <td className="px-3 py-2.5 font-mono text-[12px] text-muted-foreground">
-                      {p.codice_dipendente}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <Link
-                        to={`/gestione-personale/persone/${p.id}`}
-                        className="font-medium text-foreground hover:text-primary hover:underline"
-                      >
-                        <span className="uppercase">{p.cognome}</span>{" "}
-                        <span className="text-foreground/80">{p.nome}</span>
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {p.depot_codice !== null ? (
-                        <Link
-                          to={`/gestione-personale/depositi/${encodeURIComponent(p.depot_codice)}`}
-                          className="font-mono text-[12px] text-primary hover:underline"
-                        >
-                          {p.depot_codice}
-                        </Link>
-                      ) : (
-                        <span className="text-muted-foreground/50">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-[12px] text-muted-foreground">
-                      {p.profilo}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <StatoOggiBadge tipo={p.indisponibilita_oggi} />
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <ArrowRight className="h-3 w-3 text-muted-foreground/40" aria-hidden />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <div>
+          {filtered.map((p, i) => {
+            const status = statusOf(p);
+            const ye = yearsExperience(p);
+            return (
+              <Link
+                key={p.id}
+                to={`/gestione-personale/persone/${p.id}`}
+                className="gp-person-row"
+                aria-label={`Apri scheda di ${p.cognome} ${p.nome}`}
+              >
+                <span className="gp-idx">{String(i + 1).padStart(2, "0")}</span>
+                <div>
+                  <span className="gp-person-name">
+                    <span className="gp-surname">{p.cognome}</span> {p.nome}
+                  </span>
+                  <div className="gp-person-meta">matr. {p.codice_dipendente}</div>
+                </div>
+                <span className="gp-person-role">{p.profilo}</span>
+                <span className="gp-person-deposit">
+                  {p.depot_codice ?? "—"}
+                </span>
+                <span className="gp-person-years">{ye !== null ? `${ye}y` : "—"}</span>
+                <span className={`gp-tag ${STATUS_TAG_CLASS[status]}`}>{STATUS_LABEL[status]}</span>
+                <ChevronRight className="h-3.5 w-3.5" style={{ color: "var(--gp-ink-5)" }} aria-hidden />
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+interface PillMenuProps {
+  label: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}
+
+function PillMenu({ label, isOpen, onToggle, children }: PillMenuProps) {
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        type="button"
+        className="gp-select-pill"
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+      >
+        {label}
+        <ChevronDown className="h-3 w-3" aria-hidden />
+      </button>
+      {isOpen && (
+        <div
+          role="menu"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            zIndex: 20,
+            background: "var(--gp-bg-elev)",
+            border: "1px solid var(--gp-line-2)",
+            borderRadius: 6,
+            boxShadow: "0 12px 24px -4px rgba(14,17,22,0.18)",
+            minWidth: 220,
+            maxHeight: 320,
+            overflowY: "auto",
+            padding: 4,
+          }}
+        >
+          {children}
+        </div>
       )}
     </div>
   );
 }
 
-function StatoOggiBadge({ tipo }: { tipo: string | null }) {
-  if (tipo === null) {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-emerald-700">
-        <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
-        in servizio
-      </span>
-    );
-  }
-  const map: Record<string, { label: string; cls: string }> = {
-    ferie: { label: "Ferie", cls: "bg-sky-100 text-sky-800 border-sky-200" },
-    malattia: { label: "Malattia", cls: "bg-red-100 text-red-800 border-red-200" },
-    ROL: { label: "ROL", cls: "bg-violet-100 text-violet-800 border-violet-200" },
-    sciopero: { label: "Sciopero", cls: "bg-amber-100 text-amber-800 border-amber-200" },
-    formazione: { label: "Formazione", cls: "bg-indigo-100 text-indigo-800 border-indigo-200" },
-    congedo: { label: "Congedo", cls: "bg-slate-100 text-slate-800 border-slate-200" },
-  };
-  const entry = map[tipo] ?? { label: tipo, cls: "bg-muted text-muted-foreground border-border" };
+function PillMenuItem({
+  children,
+  active,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active: boolean;
+  onClick: () => void;
+}) {
   return (
-    <Badge variant="outline" className={cn("text-[10px]", entry.cls)}>
-      {entry.label}
-    </Badge>
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      style={{
+        display: "flex",
+        width: "100%",
+        textAlign: "left",
+        padding: "8px 10px",
+        fontSize: 12.5,
+        background: active ? "rgba(0,98,204,0.08)" : "transparent",
+        color: active ? "#0062CC" : "var(--gp-ink-2)",
+        border: 0,
+        borderRadius: 4,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        fontWeight: active ? 600 : 500,
+      }}
+      onMouseEnter={(e) => {
+        if (!active) e.currentTarget.style.background = "var(--gp-bg-rule)";
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.background = "transparent";
+      }}
+    >
+      {children}
+    </button>
   );
 }

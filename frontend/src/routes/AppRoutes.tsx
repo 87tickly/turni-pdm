@@ -18,6 +18,7 @@ import { GestionePersonaleDashboardRoute } from "@/routes/gestione-personale/Das
 import { GestionePersonaleDepositiRoute } from "@/routes/gestione-personale/DepositiRoute";
 import { GestionePersonaleDepositoDettaglioRoute } from "@/routes/gestione-personale/DepositoDettaglioRoute";
 import { GestionePersonaleIndisponibilitaRoute } from "@/routes/gestione-personale/IndisponibilitaRoute";
+import { GestionePersonaleLayout } from "@/routes/gestione-personale/GestionePersonaleLayout";
 import { GestionePersonalePersonaDettaglioRoute } from "@/routes/gestione-personale/PersonaDettaglioRoute";
 import { GestionePersonalePersoneRoute } from "@/routes/gestione-personale/PersoneRoute";
 import { PianificatorePdcDashboardRoute } from "@/routes/pianificatore-pdc/DashboardRoute";
@@ -99,27 +100,32 @@ export function AppRoutes() {
         </Route>
       </Route>
 
-      {/* Dashboard 4 — Gestione Personale (Sprint 7.9 MR ζ) */}
+      {/* Dashboard 4 — Gestione Personale (Sprint 7.9 MR ζ + 7.10 MR β.1 redesign) */}
       <Route element={<ProtectedRoute requiredRole={ROLE_GESTIONE_PERSONALE} />}>
         <Route element={<AppLayout />}>
-          <Route path="/gestione-personale">
-            <Route index element={<Navigate to="/gestione-personale/dashboard" replace />} />
-            <Route path="dashboard" element={<GestionePersonaleDashboardRoute />} />
-            <Route path="persone" element={<GestionePersonalePersoneRoute />} />
-            <Route
-              path="persone/:personaId"
-              element={<GestionePersonalePersonaDettaglioRoute />}
-            />
-            <Route path="depositi" element={<GestionePersonaleDepositiRoute />} />
-            <Route
-              path="depositi/:codice"
-              element={<GestionePersonaleDepositoDettaglioRoute />}
-            />
-            <Route path="calendario" element={<GestionePersonaleCalendarioRoute />} />
-            <Route
-              path="indisponibilita"
-              element={<GestionePersonaleIndisponibilitaRoute />}
-            />
+          {/* Layout intermedio: GestionePersonaleLayout monta provider + overlays
+              + command palette + tweaks panel cross-route. Vedi
+              `frontend/src/routes/gestione-personale/GestionePersonaleLayout.tsx`. */}
+          <Route element={<GestionePersonaleLayout />}>
+            <Route path="/gestione-personale">
+              <Route index element={<Navigate to="/gestione-personale/dashboard" replace />} />
+              <Route path="dashboard" element={<GestionePersonaleDashboardRoute />} />
+              <Route path="persone" element={<GestionePersonalePersoneRoute />} />
+              <Route
+                path="persone/:personaId"
+                element={<GestionePersonalePersonaDettaglioRoute />}
+              />
+              <Route path="depositi" element={<GestionePersonaleDepositiRoute />} />
+              <Route
+                path="depositi/:codice"
+                element={<GestionePersonaleDepositoDettaglioRoute />}
+              />
+              <Route path="calendario" element={<GestionePersonaleCalendarioRoute />} />
+              <Route
+                path="indisponibilita"
+                element={<GestionePersonaleIndisponibilitaRoute />}
+              />
+            </Route>
           </Route>
         </Route>
       </Route>

@@ -1,23 +1,32 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import {
-  CalendarRange,
-  ChevronLeft,
-  ChevronRight,
-  Info,
-} from "lucide-react";
+import type { CSSProperties } from "react";
+import { CalendarRange, ChevronDown, ChevronLeft, ChevronRight, Info } from "lucide-react";
 
-import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { useDepots } from "@/hooks/useAnagrafiche";
 import {
   useIndisponibilita,
   usePersoneByDepot,
 } from "@/hooks/useGestionePersonale";
-import { cn } from "@/lib/utils";
+import { EditorialHead } from "@/routes/gestione-personale/_shared/EditorialHead";
+
+/**
+ * Sprint 7.10 MR β.1 — Calendario assegnazioni (Gestione Personale,
+ * editorial Cal.com vertical).
+ *
+ * Layout:
+ * 1. Editorial head + selector deposito + navigatore date (← 14gg → )
+ * 2. Inline legend (T/F/M/R/A/Riposo)
+ * 3. Grid verticale: col 1 = giorni (etichetta L 05), col 2..4 = persone
+ *
+ * I "T" turno-placeholder vengono mostrati per default sui giorni
+ * lavorativi non coperti da indisponibilità reale; il prefisso ricalca
+ * il design del prototipo.
+ */
 
 const GIORNI_VISTA = 14;
 const WEEKDAY_LABELS = ["L", "M", "M", "G", "V", "S", "D"];
+const WEEKDAY_LABELS_FULL = ["LUN", "MAR", "MER", "GIO", "VEN", "SAB", "DOM"];
 
 function addDays(d: Date, days: number): Date {
   const r = new Date(d);
@@ -34,18 +43,45 @@ function isWeekend(d: Date): boolean {
   return wd === 0 || wd === 6;
 }
 
-/**
- * Sprint 7.9 MR ζ — Calendario assegnazioni Gestione Personale.
- *
- * Vista 14 giorni × persone del deposito selezionato. Le celle mostrano
- * lo stato della persona in quel giorno: turno (placeholder), ferie,
- * malattia, ROL, altro. Le assegnazioni effettive ai turni PdC saranno
- * collegate quando il builder Pianificatore PdC avrà popolato
- * `turno_pdc_giornata` su volume.
- */
+function isSameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+type CellKind = "t" | "f" | "m" | "r" | "a" | "rest";
+
+interface LegendItem {
+  kind: CellKind;
+  letter: string;
+  label: string;
+}
+
+const LEGEND: LegendItem[] = [
+  { kind: "t", letter: "T", label: "Turno (placeholder)" },
+  { kind: "f", letter: "F", label: "Ferie" },
+  { kind: "m", letter: "M", label: "Malattia" },
+  { kind: "r", letter: "R", label: "ROL" },
+  { kind: "a", letter: "A", label: "Altro" },
+  { kind: "rest", letter: "—", label: "Riposo" },
+];
+
+const TIPO_TO_KIND: Record<string, CellKind> = {
+  ferie: "f",
+  malattia: "m",
+  rol: "r",
+  ROL: "r",
+  sciopero: "a",
+  formazione: "a",
+  congedo: "a",
+};
+
 export function GestionePersonaleCalendarioRoute() {
   const depots = useDepots();
   const [depotCodice, setDepotCodice] = useState<string>("");
+  const [depotMenuOpen, setDepotMenuOpen] = useState(false);
   const [startDate, setStartDate] = useState<Date>(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -61,6 +97,12 @@ export function GestionePersonaleCalendarioRoute() {
     () => Array.from({ length: GIORNI_VISTA }, (_, i) => addDays(startDate, i)),
     [startDate],
   );
+
+  const today = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
 
   // Map persona_id → { dataISO → tipo }
   const indispByPersonaDate = useMemo(() => {
@@ -80,224 +122,318 @@ export function GestionePersonaleCalendarioRoute() {
     return m;
   }, [indisp.data]);
 
+  // Mostriamo al più 6 persone per non sovraccaricare la griglia.
+  const personeShown = (persone.data ?? []).slice(0, 6);
+  const cols = personeShown.length;
+
+  const depotSelected = depots.data?.find((d) => d.codice === depotCodice);
+
   return (
-    <div className="flex flex-col gap-5">
-      <div className="text-xs text-muted-foreground">
-        <Link to="/gestione-personale/dashboard" className="hover:text-primary">
-          Home
-        </Link>
-        <span className="mx-1 text-muted-foreground/40">/</span>
-        Calendario
-      </div>
-
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-primary">
-            <CalendarRange className="h-6 w-6 text-primary/70" aria-hidden />
-            Calendario assegnazioni
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Vista a 14 giorni per deposito. Celle: turno (placeholder),
-            ferie, malattia, ROL, altre assenze.
-          </p>
-        </div>
-      </header>
-
-      {/* Filtri & navigazione date */}
-      <div className="flex flex-wrap items-center gap-3">
-        <select
-          value={depotCodice}
-          onChange={(e) => setDepotCodice(e.target.value)}
-          className="h-10 rounded-md border border-input bg-white px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
-        >
-          <option value="">Seleziona un deposito…</option>
-          {(depots.data ?? []).map((d) => (
-            <option key={d.codice} value={d.codice}>
-              {d.codice} · {d.display_name}
-            </option>
-          ))}
-        </select>
-
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setStartDate((d) => addDays(d, -7))}
-            className="grid h-9 w-9 place-items-center rounded-md border border-border bg-white text-muted-foreground transition hover:border-primary/50 hover:text-foreground"
-            aria-label="Settimana precedente"
+    <section
+      className="gp-page"
+      style={{ maxWidth: "none" }}
+      onClick={() => setDepotMenuOpen(false)}
+    >
+      <EditorialHead
+        eyebrow="Gestione personale · Calendario"
+        title="Calendario assegnazioni"
+        lede={
+          <>
+            Vista a {GIORNI_VISTA} giorni per deposito. Ogni colonna è un PdC, ogni riga un giorno. Le
+            celle <span className="gp-cal-pill gp-t" style={{ verticalAlign: "middle" }}>T</span>{" "}
+            sono turni-placeholder: si aggiornano quando il Pianificatore PdC li popola.
+          </>
+        }
+        actions={
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}
+            onClick={(e) => e.stopPropagation()}
           >
-            <ChevronLeft className="h-4 w-4" aria-hidden />
-          </button>
-          <span className="rounded-md border border-border bg-white px-3 py-1.5 text-sm font-medium text-foreground">
-            {giorni[0].toLocaleDateString("it-IT", { day: "2-digit", month: "short" })}{" "}
-            →{" "}
-            {giorni[giorni.length - 1].toLocaleDateString("it-IT", {
-              day: "2-digit",
-              month: "short",
-              year: "numeric",
-            })}
+            <div style={{ position: "relative" }}>
+              <button
+                type="button"
+                className="gp-select-pill"
+                onClick={() => setDepotMenuOpen(!depotMenuOpen)}
+                aria-haspopup="menu"
+                aria-expanded={depotMenuOpen}
+                style={{ height: 36 }}
+              >
+                {depotSelected !== undefined
+                  ? `${depotSelected.display_name} · ${depotSelected.codice}`
+                  : "Seleziona deposito"}
+                <ChevronDown className="h-3 w-3" aria-hidden />
+              </button>
+              {depotMenuOpen && (
+                <div
+                  role="menu"
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 4px)",
+                    right: 0,
+                    zIndex: 20,
+                    background: "var(--gp-bg-elev)",
+                    border: "1px solid var(--gp-line-2)",
+                    borderRadius: 6,
+                    boxShadow: "0 12px 24px -4px rgba(14,17,22,0.18)",
+                    minWidth: 280,
+                    maxHeight: 360,
+                    overflowY: "auto",
+                    padding: 4,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {(depots.data ?? []).map((d) => (
+                    <button
+                      key={d.codice}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setDepotCodice(d.codice);
+                        setDepotMenuOpen(false);
+                      }}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        textAlign: "left",
+                        padding: "8px 10px",
+                        fontSize: 12.5,
+                        background: depotCodice === d.codice ? "rgba(0,98,204,0.08)" : "transparent",
+                        color: depotCodice === d.codice ? "#0062CC" : "var(--gp-ink-2)",
+                        border: 0,
+                        borderRadius: 4,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        fontWeight: depotCodice === d.codice ? 600 : 500,
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>{d.codice}</span>{" "}
+                      <span style={{ color: "var(--gp-ink-4)" }}>· {d.display_name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                border: "1px solid var(--gp-line-2)",
+                borderRadius: 6,
+                padding: 2,
+                background: "var(--gp-bg-elev)",
+                height: 36,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setStartDate((d) => addDays(d, -GIORNI_VISTA))}
+                aria-label="Periodo precedente"
+                style={{
+                  width: 28,
+                  height: 28,
+                  border: 0,
+                  background: "transparent",
+                  cursor: "pointer",
+                  color: "var(--gp-ink-3)",
+                  display: "grid",
+                  placeItems: "center",
+                  borderRadius: 4,
+                }}
+              >
+                <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+              </button>
+              <span
+                style={{
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  padding: "0 10px",
+                  whiteSpace: "nowrap",
+                  fontVariantNumeric: "tabular-nums",
+                  color: "var(--gp-ink)",
+                }}
+              >
+                {giorni[0].toLocaleDateString("it-IT", { day: "2-digit", month: "short" })} →{" "}
+                {giorni[giorni.length - 1].toLocaleDateString("it-IT", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </span>
+              <button
+                type="button"
+                onClick={() => setStartDate((d) => addDays(d, GIORNI_VISTA))}
+                aria-label="Periodo successivo"
+                style={{
+                  width: 28,
+                  height: 28,
+                  border: 0,
+                  background: "transparent",
+                  cursor: "pointer",
+                  color: "var(--gp-ink-3)",
+                  display: "grid",
+                  placeItems: "center",
+                  borderRadius: 4,
+                }}
+              >
+                <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            </div>
+          </div>
+        }
+      />
+
+      {/* Legend inline */}
+      <div
+        style={{
+          display: "flex",
+          gap: 24,
+          padding: "14px 0",
+          borderTop: "1px solid var(--gp-line-2)",
+          borderBottom: "1px solid var(--gp-line)",
+          fontSize: 11,
+          color: "var(--gp-ink-3)",
+          flexWrap: "wrap",
+        }}
+      >
+        {LEGEND.map((l) => (
+          <span key={l.kind} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span className={`gp-cal-pill gp-${l.kind}`}>{l.letter}</span>
+            {l.label}
           </span>
-          <button
-            type="button"
-            onClick={() => setStartDate((d) => addDays(d, 7))}
-            className="grid h-9 w-9 place-items-center rounded-md border border-border bg-white text-muted-foreground transition hover:border-primary/50 hover:text-foreground"
-            aria-label="Settimana successiva"
-          >
-            <ChevronRight className="h-4 w-4" aria-hidden />
-          </button>
-        </div>
+        ))}
+        <span style={{ marginLeft: "auto" }}>
+          {cols} PdC · {GIORNI_VISTA} giorni · {cols * GIORNI_VISTA} celle
+        </span>
       </div>
-
-      {/* Legenda */}
-      <Card className="flex items-start gap-3 p-4">
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/70" aria-hidden />
-        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          <Legend color="bg-emerald-100 border-emerald-300 text-emerald-800" label="Turno (placeholder T)" />
-          <Legend color="bg-sky-100 border-sky-300 text-sky-800" label="Ferie F" />
-          <Legend color="bg-red-100 border-red-300 text-red-800" label="Malattia M" />
-          <Legend color="bg-violet-100 border-violet-300 text-violet-800" label="ROL R" />
-          <Legend color="bg-amber-100 border-amber-300 text-amber-800" label="Altro A" />
-          <Legend color="bg-muted border-border text-muted-foreground" label="Riposo (sab/dom)" />
-        </div>
-      </Card>
 
       {depotCodice.length === 0 ? (
-        <Card className="flex flex-col items-center gap-3 py-12 text-center">
-          <CalendarRange className="h-10 w-10 text-muted-foreground/40" aria-hidden />
-          <h2 className="text-base font-semibold">Seleziona un deposito</h2>
-          <p className="max-w-md text-sm text-muted-foreground">
-            Scegli un deposito dal menu sopra per visualizzare il calendario
-            dei PdC residenti.
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 8,
+            padding: "60px 20px",
+            border: "1px dashed var(--gp-line-2)",
+            borderRadius: 8,
+            marginTop: 16,
+            background: "var(--gp-bg-rule)",
+          }}
+        >
+          <CalendarRange className="h-9 w-9" style={{ color: "var(--gp-ink-5)" }} aria-hidden />
+          <h2 className="gp-section-title">Seleziona un deposito</h2>
+          <p style={{ fontSize: 13, color: "var(--gp-ink-4)", maxWidth: "44ch", textAlign: "center" }}>
+            Scegli un deposito dal menu in alto a destra per visualizzare il calendario dei PdC
+            residenti.
           </p>
-        </Card>
+        </div>
       ) : persone.isLoading ? (
-        <div className="flex items-center justify-center rounded-md border border-border bg-white py-16">
+        <div className="flex items-center justify-center py-16">
           <Spinner label="Caricamento PdC del deposito…" />
         </div>
-      ) : (persone.data ?? []).length === 0 ? (
-        <Card className="flex flex-col items-center gap-3 py-12 text-center">
-          <CalendarRange className="h-10 w-10 text-muted-foreground/40" aria-hidden />
-          <h2 className="text-base font-semibold">Nessun PdC nel deposito</h2>
-          <p className="max-w-md text-sm text-muted-foreground">
+      ) : personeShown.length === 0 ? (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 8,
+            padding: "60px 20px",
+            border: "1px dashed var(--gp-line-2)",
+            borderRadius: 8,
+            marginTop: 16,
+          }}
+        >
+          <CalendarRange className="h-9 w-9" style={{ color: "var(--gp-ink-5)" }} aria-hidden />
+          <h2 className="gp-section-title">Nessun PdC nel deposito</h2>
+          <p style={{ fontSize: 13, color: "var(--gp-ink-4)" }}>
             Il deposito selezionato non ha PdC residenti.
           </p>
-        </Card>
+        </div>
       ) : (
-        <section className="overflow-hidden rounded-lg border border-border bg-white">
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="sticky left-0 z-10 bg-muted/50 px-3 py-2 text-left font-semibold uppercase tracking-wider text-muted-foreground min-w-[200px]">
-                    PdC
-                  </th>
-                  {giorni.map((d) => (
-                    <th
-                      key={d.toISOString()}
-                      className={cn(
-                        "border-l border-border px-2 py-2 text-center font-mono font-semibold",
-                        isWeekend(d)
-                          ? "bg-muted/70 text-muted-foreground"
-                          : "text-foreground",
-                      )}
-                    >
-                      <div className="text-[9px] font-normal uppercase tracking-wider opacity-70">
-                        {WEEKDAY_LABELS[(d.getDay() + 6) % 7]}
-                      </div>
-                      <div className="text-[11px] tabular-nums">
-                        {d.getDate().toString().padStart(2, "0")}
-                      </div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {(persone.data ?? []).map((p) => {
+        <div
+          className="gp-cal-vertical"
+          style={{ "--gp-cal-cols": cols } as CSSProperties}
+        >
+          <div className="gp-cal-h">Giorno</div>
+          {personeShown.map((p) => (
+            <div key={p.id} className="gp-cal-h gp-cal-person-h">
+              <span style={{ fontWeight: 600 }}>
+                <span style={{ textTransform: "uppercase", letterSpacing: ".02em" }}>
+                  {p.cognome}
+                </span>{" "}
+                {p.nome}
+              </span>
+              <span className="gp-cal-person-h-matr">{p.codice_dipendente}</span>
+            </div>
+          ))}
+
+          {giorni.map((d) => {
+            const todayCls = isSameDay(d, today) ? "gp-today" : "";
+            const wknd = isWeekend(d) ? "gp-weekend" : "";
+            const dowIdx = (d.getDay() + 6) % 7;
+            return (
+              <span key={d.toISOString()} style={{ display: "contents" }}>
+                <div className={`gp-cal-day-cell ${todayCls} ${wknd}`}>
+                  <span className="gp-dow">
+                    {WEEKDAY_LABELS[dowIdx]} · {WEEKDAY_LABELS_FULL[dowIdx]}
+                  </span>
+                  <span className="gp-d">{String(d.getDate()).padStart(2, "0")}</span>
+                  {todayCls && <span className="gp-today-tag">oggi</span>}
+                </div>
+                {personeShown.map((p) => {
                   const indispMap = indispByPersonaDate.get(p.id);
+                  const tipo = indispMap?.get(formatISODate(d));
+                  let kind: CellKind;
+                  if (tipo !== undefined) {
+                    kind = TIPO_TO_KIND[tipo] ?? "a";
+                  } else if (isWeekend(d)) {
+                    kind = "rest";
+                  } else {
+                    kind = "t";
+                  }
+                  const letter = LEGEND.find((l) => l.kind === kind)?.letter ?? "—";
                   return (
-                    <tr key={p.id} className="border-b border-border/60">
-                      <td className="sticky left-0 z-10 bg-white px-3 py-1.5">
-                        <Link
-                          to={`/gestione-personale/persone/${p.id}`}
-                          className="text-[12px] font-medium text-foreground hover:text-primary hover:underline"
-                        >
-                          <span className="uppercase">{p.cognome}</span>{" "}
-                          <span className="text-foreground/80">{p.nome}</span>
-                        </Link>
-                      </td>
-                      {giorni.map((d) => {
-                        const iso = formatISODate(d);
-                        const indispTipo = indispMap?.get(iso);
-                        return (
-                          <td
-                            key={iso}
-                            className={cn(
-                              "border-l border-border/60 p-1 text-center",
-                              isWeekend(d) && "bg-muted/30",
-                            )}
-                          >
-                            <CellaStato tipo={indispTipo} weekend={isWeekend(d)} />
-                          </td>
-                        );
-                      })}
-                    </tr>
+                    <div
+                      key={`${p.id}-${d.toISOString()}`}
+                      className={`gp-cal-slot ${todayCls} ${wknd}`}
+                    >
+                      <span className={`gp-cal-pill gp-${kind}`} title={tipo ?? "turno"}>
+                        {letter}
+                      </span>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
-          <div className="border-t border-border bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground">
-            Le celle "T" rappresentano un turno-placeholder: l'integrazione con{" "}
-            <span className="font-mono">turno_pdc_giornata</span> arriverà
-            quando il builder PdC avrà popolato i turni reali su volume.
-          </div>
-        </section>
+              </span>
+            );
+          })}
+        </div>
       )}
-    </div>
-  );
-}
 
-function CellaStato({ tipo, weekend }: { tipo: string | undefined; weekend: boolean }) {
-  if (tipo !== undefined) {
-    const map: Record<string, { letter: string; cls: string }> = {
-      ferie: { letter: "F", cls: "bg-sky-100 border-sky-300 text-sky-800" },
-      malattia: { letter: "M", cls: "bg-red-100 border-red-300 text-red-800" },
-      ROL: { letter: "R", cls: "bg-violet-100 border-violet-300 text-violet-800" },
-      sciopero: { letter: "S", cls: "bg-amber-100 border-amber-300 text-amber-800" },
-      formazione: { letter: "Fo", cls: "bg-indigo-100 border-indigo-300 text-indigo-800" },
-      congedo: { letter: "C", cls: "bg-slate-100 border-slate-300 text-slate-800" },
-    };
-    const e = map[tipo] ?? { letter: "A", cls: "bg-amber-100 border-amber-300 text-amber-800" };
-    return (
-      <span
-        className={cn(
-          "inline-flex h-6 w-7 items-center justify-center rounded border text-[10px] font-bold",
-          e.cls,
-        )}
-        title={tipo}
-      >
-        {e.letter}
-      </span>
-    );
-  }
-  if (weekend) {
-    return <span className="text-muted-foreground/40">—</span>;
-  }
-  // Default: cella turno placeholder
-  return (
-    <span
-      className="inline-flex h-6 w-7 items-center justify-center rounded border border-emerald-300 bg-emerald-100 text-[10px] font-bold text-emerald-800"
-      title="Turno (placeholder)"
-    >
-      T
-    </span>
-  );
-}
-
-function Legend({ color, label }: { color: string; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className={cn("inline-block h-4 w-5 rounded border", color)} aria-hidden />
-      {label}
-    </span>
+      {depotCodice.length > 0 && personeShown.length > 0 && (
+        <p
+          style={{
+            fontSize: 11.5,
+            color: "var(--gp-ink-4)",
+            marginTop: 14,
+            maxWidth: "80ch",
+            lineHeight: 1.6,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <Info className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--gp-ink-4)" }} aria-hidden />
+          Le celle T rappresentano turni-placeholder: l'integrazione con{" "}
+          <code style={{ background: "var(--gp-bg-rule)", padding: "1px 4px", borderRadius: 3 }}>
+            turno_pdc_giornata
+          </code>{" "}
+          avverrà quando il Visualizzatore PdC verrà popolato. I turni reali sovrascrivono i
+          placeholder.
+        </p>
+      )}
+    </section>
   );
 }

@@ -1,406 +1,497 @@
 import { useMemo } from "react";
-import type { ComponentType, SVGProps } from "react";
+import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
-import {
-  AlertTriangle,
-  ArrowRight,
-  BedDouble,
-  Building2,
-  CalendarDays,
-  Heart,
-  Plane,
-  ShieldCheck,
-  Users,
-} from "lucide-react";
+import { AlertTriangle, ChevronRight, Plus, Upload } from "lucide-react";
 
-import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { useAuth } from "@/lib/auth/AuthContext";
 import {
   useGestionePersonaleKpi,
   useGestionePersonaleKpiDepositi,
 } from "@/hooks/useGestionePersonale";
-import { cn } from "@/lib/utils";
+import type { GestionePersonaleKpiPerDepositoRead } from "@/lib/api/gestione-personale";
+import { CoverageBand } from "@/routes/gestione-personale/_shared/CoverageBand";
+import { EditorialHead, EditorialNum } from "@/routes/gestione-personale/_shared/EditorialHead";
+import { useGestionePersonale } from "@/routes/gestione-personale/_shared/GestionePersonaleContext";
 
 /**
- * Sprint 7.9 MR ζ — Home Gestione Personale (4° ruolo).
+ * Sprint 7.10 MR β.1 — Dashboard Gestione Personale (editorial-dense).
  *
- * Layout (allineato al pattern PianificatorePdcDashboardRoute):
- * 1. Breadcrumb + header
- * 2. Banner copertura (verde se ≥ 90%, ambra 80-90%, rosso < 80%)
- * 3. 4 KPI grandi (attivi, in servizio, ferie, malattia)
- * 4. Card mini "Altre assenze" (ROL/sciopero/formazione/congedo)
- * 5. Tabella copertura per deposito (con drilldown)
- * 6. Footer scorciatoie
+ * Layout:
+ * 1. Editorial head (eyebrow + h1 grande + lede + cluster azioni)
+ * 2. KPI stripe orizzontale: Copertura PdC (largo, con barra+target),
+ *    PdC attivi, In servizio, Ferie, Malattia
+ * 3. Callout di stato copertura (border-left tinto, sfondo gradient).
+ *    Reagisce al `coverageTweak` (verde/giallo/rosso/current)
+ * 4. Coverage band: 25 segmenti, uno per deposito → drilldown click
+ * 5. Section "Copertura per deposito" → tabella raggruppata per
+ *    criticità (sotto target / a target / vuoti). Ogni riga apre il
+ *    drilldown deposito (Gantt 7gg)
+ * 6. Note keyboard shortcuts in footer
  */
+
+const TARGET_PCT = 95;
+
+type Tone = "ok" | "warn" | "bad";
+
+const TONE_COLORS: Record<Tone, { color: string; bg: string }> = {
+  ok: { color: "#1F8A4C", bg: "rgba(31, 138, 76, 0.10)" },
+  warn: { color: "#C76A12", bg: "rgba(199, 106, 18, 0.10)" },
+  bad: { color: "#B33636", bg: "rgba(179, 54, 54, 0.10)" },
+};
+
+function toneOf(pct: number): Tone {
+  if (pct >= TARGET_PCT) return "ok";
+  if (pct >= 71) return "warn";
+  return "bad";
+}
+
 export function GestionePersonaleDashboardRoute() {
   const { user } = useAuth();
   const kpi = useGestionePersonaleKpi();
   const kpiDepositi = useGestionePersonaleKpiDepositi();
+  const { coverageOverridePct, coverageOverrideTone, openDepositoDrilldown } =
+    useGestionePersonale();
 
   const data = kpi.data;
-  const banner = useMemo(() => {
-    if (kpi.isLoading) return { kind: "loading" as const };
-    if (kpi.isError || data === undefined) return { kind: "error" as const };
-    const pct = data.copertura_pct;
-    if (pct >= 90) return { kind: "ok" as const, pct };
-    if (pct >= 80) return { kind: "warning" as const, pct };
-    return { kind: "danger" as const, pct };
-  }, [kpi.isLoading, kpi.isError, data]);
+  const realPct = data?.copertura_pct ?? 0;
 
-  const altreAssenze = data === undefined ? 0 : data.in_altra_assenza;
+  // Quando il tweak è attivo, sostituisce % e tono per stripe + callout.
+  const displayedPct = coverageOverridePct ?? realPct;
+  const tone = coverageOverrideTone ?? toneOf(realPct);
+  const palette = TONE_COLORS[tone];
+
+  // Counters per il callout.
+  const depositi = kpiDepositi.data ?? [];
+  const counts = useMemo(() => {
+    const c = { ok: 0, warn: 0, bad: 0, vuoti: 0, totale: depositi.length };
+    for (const d of depositi) {
+      if (d.persone_attive === 0) c.vuoti += 1;
+      else c[toneOf(d.copertura_pct)] += 1;
+    }
+    return c;
+  }, [depositi]);
+
+  // Inline CSS variables propagate to descendants under `.gp-page`.
+  const pageStyle: CSSProperties = {
+    "--gp-cov": palette.color,
+    "--gp-cov-bg": palette.bg,
+    "--gp-cov-pct": displayedPct,
+  } as CSSProperties;
 
   return (
-    <div className="flex flex-col gap-5">
-      {/* breadcrumb */}
-      <div className="text-xs text-muted-foreground">Home</div>
+    <section className="gp-page" style={pageStyle}>
+      <EditorialHead
+        eyebrow={`Gestione personale · ${new Date().toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "numeric" })}`}
+        title={
+          <>
+            Dashboard PdC
+            <EditorialNum>azienda #{user?.azienda_id ?? "—"}</EditorialNum>
+          </>
+        }
+        lede={
+          <>
+            Benvenuto{user !== null ? `, ${user.username}` : ""}. Stato in tempo reale di anagrafica,
+            depositi, copertura turni e indisponibilità. Coordini con i Pianificatori PdC le
+            sostituzioni quando la copertura scende sotto il target del{" "}
+            <b>{TARGET_PCT}%</b>.
+          </>
+        }
+        actions={
+          <>
+            <button type="button" className="gp-action-btn gp-action-btn-line">
+              <Upload className="h-3.5 w-3.5" aria-hidden /> Esporta stato
+            </button>
+            <Link
+              to="/gestione-personale/indisponibilita"
+              className="gp-action-btn gp-action-btn-ink"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden /> Apri indisponibilità
+            </Link>
+          </>
+        }
+      />
 
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold tracking-tight text-primary">
-          Dashboard Gestione Personale
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Benvenuto{user !== null ? `, ${user.username}` : ""}. Da qui gestisci
-          anagrafica PdC, depositi, ferie, malattie e copertura turni.
-        </p>
-      </header>
-
-      <CopertureBanner banner={banner} />
-
-      {/* 4 KPI principali */}
-      <section className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-        <KpiCard
-          icon={Users}
-          label="PdC attivi"
-          value={data?.persone_attive ?? 0}
-          loading={kpi.isLoading}
-          error={kpi.isError}
-          hint="Matricole attive in azienda"
-        />
-        <KpiCard
-          icon={ShieldCheck}
-          label="In servizio oggi"
-          value={data?.in_servizio_oggi ?? 0}
-          loading={kpi.isLoading}
-          error={kpi.isError}
-          hint={`${data?.copertura_pct ?? 0}% di copertura`}
-          accent={banner.kind === "ok" ? "success" : banner.kind === "warning" ? "warning" : banner.kind === "danger" ? "danger" : "neutral"}
-        />
-        <KpiCard
-          icon={Plane}
-          label="In ferie"
-          value={data?.in_ferie ?? 0}
-          loading={kpi.isLoading}
-          error={kpi.isError}
-          hint="Ferie approvate in corso"
-        />
-        <KpiCard
-          icon={Heart}
-          label="In malattia"
-          value={data?.in_malattia ?? 0}
-          loading={kpi.isLoading}
-          error={kpi.isError}
-          hint="Certificate attive oggi"
-          accent={(data?.in_malattia ?? 0) > 0 ? "warning" : "neutral"}
-        />
-      </section>
-
-      {/* riga "altre assenze" piccola */}
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Card className="flex items-center gap-3 p-4">
-          <BedDouble className="h-5 w-5 text-muted-foreground/70" aria-hidden />
-          <div className="flex-1">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              ROL
-            </div>
-            <div className="text-2xl font-bold tabular-nums">
-              {data?.in_rol ?? 0}
-            </div>
+      {/* KPI STRIPE — orizzontale, monospaziata, una sola riga. */}
+      <div
+        className="gp-stripe"
+        style={{
+          gridTemplateColumns: "1.6fr 0.9fr 0.7fr 0.7fr 0.7fr",
+        }}
+      >
+        <div className="gp-stripe-cell" style={{ paddingRight: 24, gridColumn: "1 / span 1" }}>
+          <div className="gp-stripe-k">Copertura PdC · oggi</div>
+          <div className="gp-stripe-v" style={{ color: palette.color }}>
+            {kpi.isLoading ? "…" : kpi.isError ? "—" : displayedPct.toFixed(1)}
+            <small>%</small>
+            {coverageOverrideTone !== null && (
+              <span style={{ marginLeft: 8, fontSize: 10.5, color: "var(--gp-ink-3)" }}>
+                ⌃ tweak attivo
+              </span>
+            )}
           </div>
-        </Card>
-        <Card className="flex items-center gap-3 p-4">
-          <CalendarDays className="h-5 w-5 text-muted-foreground/70" aria-hidden />
-          <div className="flex-1">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Altre assenze
-            </div>
-            <div className="text-2xl font-bold tabular-nums">{altreAssenze}</div>
-            <div className="mt-0.5 text-[10px] text-muted-foreground">
-              sciopero · formazione · congedo
-            </div>
+          <div className="gp-stripe-cov-bar">
+            <div className="gp-stripe-cov-fill" />
+            <div className="gp-stripe-cov-target" />
           </div>
-        </Card>
-        <Link
-          to="/gestione-personale/indisponibilita"
-          className="flex items-center justify-between gap-3 rounded-lg border border-border bg-white p-4 transition hover:border-primary/50 hover:bg-primary/[0.03]"
-        >
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Gestisci ferie & assenze
-            </div>
-            <div className="text-sm font-semibold text-foreground">
-              Apri elenco indisponibilità
-            </div>
+          <div className="gp-stripe-scale">
+            <span>0%</span>
+            <span>50%</span>
+            <span className="gp-target-lbl">{TARGET_PCT}% target</span>
+            <span>100%</span>
           </div>
-          <ArrowRight className="h-4 w-4 text-muted-foreground/40" aria-hidden />
-        </Link>
-      </section>
-
-      {/* copertura per deposito */}
-      <Card className="flex flex-col p-4">
-        <div className="mb-3 flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold text-primary">
-            Copertura per deposito
-          </h2>
-          <span className="text-xs text-muted-foreground">
-            {kpiDepositi.data?.length ?? 0} depositi PdC
-          </span>
         </div>
+        <KpiCell
+          label="PdC attivi"
+          value={data?.persone_attive}
+          loading={kpi.isLoading}
+          error={kpi.isError}
+          meta="matricole in azienda"
+        />
+        <KpiCell
+          label="In servizio"
+          value={data?.in_servizio_oggi}
+          loading={kpi.isLoading}
+          error={kpi.isError}
+          meta={
+            data !== undefined && data.persone_attive > 0
+              ? `${realPct.toFixed(1)}% del totale`
+              : ""
+          }
+        />
+        <KpiCell
+          label="Ferie"
+          value={data?.in_ferie}
+          loading={kpi.isLoading}
+          error={kpi.isError}
+          meta="approvate, in corso"
+        />
+        <KpiCell
+          label="Malattia"
+          value={data?.in_malattia}
+          loading={kpi.isLoading}
+          error={kpi.isError}
+          meta="certificate oggi"
+        />
+      </div>
+
+      {/* CALLOUT (sostituisce banner giallo). Reagisce al tono di copertura. */}
+      <CalloutBlock
+        tone={tone}
+        displayedPct={displayedPct}
+        counts={counts}
+        loading={kpi.isLoading}
+      />
+
+      {/* COVERAGE BAND — la metafora del deposito (25 segmenti). */}
+      {kpiDepositi.isLoading ? (
+        <div className="flex items-center justify-center py-8">
+          <Spinner label="Caricamento depositi…" />
+        </div>
+      ) : kpiDepositi.isError ? (
+        <p className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+          Errore caricamento depositi: {kpiDepositi.error?.message ?? "errore sconosciuto"}
+        </p>
+      ) : depositi.length > 0 ? (
+        <CoverageBand
+          depots={depositi}
+          mediaPct={realPct}
+          onDepotClick={(codice) => {
+            const d = depositi.find((x) => x.depot_codice === codice);
+            if (d !== undefined) {
+              openDepositoDrilldown({
+                codice: d.depot_codice,
+                display_name: d.depot_display_name,
+                copertura_pct: d.copertura_pct,
+                persone_attive: d.persone_attive,
+              });
+            }
+          }}
+        />
+      ) : null}
+
+      {/* SECTION: Copertura per deposito (tabella raggruppata) */}
+      <div className="gp-section">
+        <div className="gp-section-head">
+          <h2 className="gp-section-title">
+            Copertura per deposito
+            <span className="gp-num">
+              {depositi.length} {depositi.length === 1 ? "deposito" : "depositi"} · ord. criticità
+            </span>
+          </h2>
+          <div className="gp-section-meta">
+            <Link to="/gestione-personale/depositi" className="hover:text-[color:var(--gp-ink)]" style={{ color: "var(--gp-ink-3)" }}>
+              Apri elenco completo →
+            </Link>
+          </div>
+        </div>
+
         {kpiDepositi.isLoading ? (
           <div className="flex items-center justify-center py-12">
             <Spinner label="Caricamento depositi…" />
           </div>
-        ) : kpiDepositi.isError ? (
-          <p className="py-4 text-sm text-destructive" role="alert">
-            Errore caricamento depositi: {kpiDepositi.error?.message ?? "errore sconosciuto"}
-          </p>
+        ) : depositi.length === 0 ? (
+          <div className="py-12 text-center text-sm text-muted-foreground">
+            Nessun deposito caricato.
+          </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/50 text-[10px] uppercase tracking-wider text-muted-foreground">
-                  <th className="px-3 py-2 text-left font-semibold">Deposito</th>
-                  <th className="w-20 px-3 py-2 text-right font-semibold">Attivi</th>
-                  <th className="w-24 px-3 py-2 text-right font-semibold">In servizio</th>
-                  <th className="w-24 px-3 py-2 text-right font-semibold">Assenti</th>
-                  <th className="w-32 px-3 py-2 text-right font-semibold">Copertura</th>
-                  <th className="w-8 px-3 py-2" aria-hidden />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {(kpiDepositi.data ?? []).map((d) => {
-                  const pctClass =
-                    d.persone_attive === 0
-                      ? "text-muted-foreground/40"
-                      : d.copertura_pct >= 90
-                        ? "text-emerald-700"
-                        : d.copertura_pct >= 80
-                          ? "text-amber-700"
-                          : "text-red-700";
-                  return (
-                    <tr
-                      key={d.depot_codice}
-                      className="transition-colors hover:bg-primary/[0.03]"
-                    >
-                      <td className="px-3 py-2.5">
-                        <Link
-                          to={`/gestione-personale/depositi/${encodeURIComponent(d.depot_codice)}`}
-                          className="flex items-center gap-2 font-mono text-[13px] font-semibold text-primary hover:underline"
-                        >
-                          <Building2 className="h-3.5 w-3.5 opacity-70" aria-hidden />
-                          {d.depot_codice}
-                        </Link>
-                        <div className="text-[10px] text-muted-foreground">
-                          {d.depot_display_name}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono tabular-nums">
-                        {d.persone_attive}
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono tabular-nums">
-                        {d.in_servizio_oggi}
-                      </td>
-                      <td
-                        className={cn(
-                          "px-3 py-2.5 text-right font-mono tabular-nums",
-                          d.indisponibili_oggi > 0 && "text-amber-700",
-                        )}
-                      >
-                        {d.indisponibili_oggi}
-                      </td>
-                      <td className={cn("px-3 py-2.5 text-right font-mono tabular-nums font-semibold", pctClass)}>
-                        {d.persone_attive > 0 ? `${d.copertura_pct.toFixed(1)}%` : "—"}
-                      </td>
-                      <td className="px-3 py-2.5 text-right">
-                        <ArrowRight className="h-3 w-3 text-muted-foreground/40" aria-hidden />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <DepositiGroupedTable
+            depositi={depositi}
+            onRowClick={(d) =>
+              openDepositoDrilldown({
+                codice: d.depot_codice,
+                display_name: d.depot_display_name,
+                copertura_pct: d.copertura_pct,
+                persone_attive: d.persone_attive,
+              })
+            }
+          />
         )}
-      </Card>
 
-      {/* shortcut footer */}
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <FooterShortcut to="/gestione-personale/persone" title="Anagrafica PdC" cta="Apri anagrafica" />
-        <FooterShortcut to="/gestione-personale/depositi" title="Depositi PdC" cta="Apri elenco depositi" />
-        <FooterShortcut to="/gestione-personale/calendario" title="Calendario assegnazioni" cta="Apri calendario" />
-      </section>
-    </div>
-  );
-}
-
-// ────────────────────────────────────────────────────────────────────────
-// Sub-components
-// ────────────────────────────────────────────────────────────────────────
-
-type LucideIcon = ComponentType<SVGProps<SVGSVGElement>>;
-
-type CopertureBannerState =
-  | { kind: "loading" }
-  | { kind: "error" }
-  | { kind: "ok"; pct: number }
-  | { kind: "warning"; pct: number }
-  | { kind: "danger"; pct: number };
-
-function CopertureBanner({ banner }: { banner: CopertureBannerState }) {
-  if (banner.kind === "loading") {
-    return (
-      <div className="rounded-lg border border-border bg-muted/30 px-5 py-4 text-sm text-muted-foreground">
-        Calcolo copertura PdC in corso…
-      </div>
-    );
-  }
-  if (banner.kind === "error") {
-    return (
-      <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-5 py-4 text-sm text-destructive">
-        KPI copertura non disponibili.
-      </div>
-    );
-  }
-  const tone = {
-    ok: {
-      border: "border-emerald-300",
-      bg: "bg-emerald-50",
-      icon: ShieldCheck,
-      iconColor: "text-emerald-600",
-      eyebrowColor: "text-emerald-700",
-      titleColor: "text-emerald-900",
-      title: "Copertura PdC ottima",
-      desc: "Quasi tutti i PdC attivi sono in servizio oggi.",
-    },
-    warning: {
-      border: "border-amber-300",
-      bg: "bg-amber-50",
-      icon: AlertTriangle,
-      iconColor: "text-amber-600",
-      eyebrowColor: "text-amber-700",
-      titleColor: "text-amber-900",
-      title: "Copertura PdC sotto target",
-      desc: "Coordinati con il Pianificatore PdC per eventuali sostituzioni.",
-    },
-    danger: {
-      border: "border-red-300",
-      bg: "bg-red-50",
-      icon: AlertTriangle,
-      iconColor: "text-red-600",
-      eyebrowColor: "text-red-700",
-      titleColor: "text-red-900",
-      title: "Copertura PdC critica",
-      desc: "Ferie/malattie superano la soglia. Verifica i depositi più colpiti.",
-    },
-  }[banner.kind];
-
-  const Icon = tone.icon;
-  return (
-    <div
-      className={cn(
-        "flex items-center justify-between gap-4 rounded-lg border px-5 py-4",
-        tone.border,
-        tone.bg,
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <Icon className={cn("mt-0.5 h-5 w-5 shrink-0", tone.iconColor)} aria-hidden />
-        <div>
-          <div
-            className={cn(
-              "text-[10px] font-semibold uppercase tracking-wider",
-              tone.eyebrowColor,
-            )}
-          >
-            Stato copertura
-          </div>
-          <div className={cn("text-base font-semibold", tone.titleColor)}>
-            {tone.title} · {banner.pct.toFixed(1)}%
-          </div>
-          <div className="text-xs text-muted-foreground">{tone.desc}</div>
+        <div
+          style={{
+            fontSize: 11.5,
+            color: "var(--gp-ink-4)",
+            marginTop: 14,
+            display: "flex",
+            gap: 24,
+            flexWrap: "wrap",
+          }}
+        >
+          <span>
+            <span className="gp-toolbar-kbd">⌘K</span> apri palette
+          </span>
+          <span>
+            <span className="gp-toolbar-kbd">↵</span> apri deposito
+          </span>
+          <span>
+            <span className="gp-toolbar-kbd">F</span> filtra solo critici
+          </span>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
-interface KpiCardProps {
-  icon: LucideIcon;
+interface KpiCellProps {
   label: string;
-  value: number;
+  value: number | undefined;
   loading: boolean;
   error: boolean;
-  hint: string;
-  accent?: "neutral" | "success" | "warning" | "danger";
+  meta: string;
 }
 
-function KpiCard({
-  icon: Icon,
-  label,
-  value,
-  loading,
-  error,
-  hint,
-  accent = "neutral",
-}: KpiCardProps) {
-  const display = loading ? "…" : error ? "—" : String(value);
-  const accentBorder = {
-    neutral: "border-border",
-    success: "border-emerald-300 ring-1 ring-emerald-100",
-    warning: "border-amber-300 ring-1 ring-amber-100",
-    danger: "border-red-300 ring-1 ring-red-100",
-  }[accent];
-  const accentValueColor = {
-    neutral: "text-foreground",
-    success: "text-emerald-700",
-    warning: "text-amber-700",
-    danger: "text-red-700",
-  }[accent];
+function KpiCell({ label, value, loading, error, meta }: KpiCellProps) {
+  const display = loading ? "…" : error ? "—" : String(value ?? 0);
   return (
-    <Card className={cn("p-5", accentBorder)}>
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {label}
-        </div>
-        <Icon className="h-4 w-4 text-muted-foreground/60" aria-hidden />
-      </div>
-      <div
-        className={cn(
-          "mt-2 text-4xl font-bold tabular-nums",
-          value === 0 && !loading && !error ? "text-muted-foreground/40" : accentValueColor,
-        )}
-      >
-        {display}
-      </div>
-      <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
-    </Card>
+    <div className="gp-stripe-cell">
+      <div className="gp-stripe-k">{label}</div>
+      <div className="gp-stripe-v">{display}</div>
+      <div className="gp-stripe-meta">{meta}</div>
+    </div>
   );
 }
 
-function FooterShortcut({ to, title, cta }: { to: string; title: string; cta: string }) {
+interface CalloutProps {
+  tone: Tone;
+  displayedPct: number;
+  counts: { ok: number; warn: number; bad: number; vuoti: number; totale: number };
+  loading: boolean;
+}
+
+function CalloutBlock({ tone, displayedPct, counts, loading }: CalloutProps) {
+  const titles: Record<Tone, string> = {
+    ok: "Copertura ottima — sopra il target",
+    warn: "Copertura sotto target",
+    bad: "Copertura critica",
+  };
+  const desc =
+    tone === "ok" ? (
+      <>
+        Tutti i depositi tengono il target del {TARGET_PCT}%.{" "}
+        <b>{counts.ok}</b> a target, <b>{counts.warn}</b> warning, <b>{counts.bad}</b> critici.
+      </>
+    ) : tone === "warn" ? (
+      <>
+        <b>{counts.bad}</b> depositi sono in stato <b>critico</b> (≤ 70%) e altri{" "}
+        <b>{counts.warn}</b> in <b>warning</b>. Coordina con i Pianificatori PdC per riassegnare
+        turni o approvare straordinari.
+      </>
+    ) : (
+      <>
+        <b>{counts.bad}</b> depositi sono in stato <b>critico</b> (≤ 70%). Ferie/malattie superano
+        la soglia. Verifica i depositi più colpiti via drilldown.
+      </>
+    );
+
+  const titleSuffix = loading
+    ? ""
+    : ` — ${displayedPct.toFixed(1)}% (${(TARGET_PCT - displayedPct).toFixed(1)} pt sotto al ${TARGET_PCT}%)`;
+
   return (
-    <Link
-      to={to}
-      className="group flex items-center justify-between rounded-md border border-border bg-white px-4 py-3 transition hover:border-primary/50 hover:bg-primary/[0.03]"
-    >
-      <span className="flex flex-col">
-        <span className="text-sm font-semibold text-foreground">{title}</span>
-        <span className="text-xs text-muted-foreground">{cta}</span>
-      </span>
-      <ArrowRight
-        className="h-4 w-4 text-muted-foreground/40 transition group-hover:translate-x-0.5 group-hover:text-primary"
-        aria-hidden
-      />
-    </Link>
+    <div className="gp-callout" role={tone === "bad" ? "alert" : undefined}>
+      <div className="gp-callout-ic">
+        <AlertTriangle className="h-5 w-5" aria-hidden />
+      </div>
+      <div className="gp-callout-body">
+        <div className="gp-callout-title">
+          {titles[tone]}
+          {tone !== "ok" && titleSuffix}
+        </div>
+        <div className="gp-callout-desc">{desc}</div>
+      </div>
+      <div className="gp-callout-cta">
+        <Link
+          to="/pianificatore-pdc/dashboard"
+          className="gp-action-btn gp-action-btn-line"
+        >
+          Apri Pianificatore PdC <ChevronRight className="h-3 w-3" aria-hidden />
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+interface DepositiTableProps {
+  depositi: GestionePersonaleKpiPerDepositoRead[];
+  onRowClick: (d: GestionePersonaleKpiPerDepositoRead) => void;
+}
+
+function DepositiGroupedTable({ depositi, onRowClick }: DepositiTableProps) {
+  const sorted = useMemo(
+    () => [...depositi].sort((a, b) => a.copertura_pct - b.copertura_pct),
+    [depositi],
+  );
+  const sottoTarget = sorted.filter((d) => d.persone_attive > 0 && d.copertura_pct < TARGET_PCT);
+  const aTarget = sorted.filter((d) => d.persone_attive > 0 && d.copertura_pct >= TARGET_PCT);
+  const vuoti = sorted.filter((d) => d.persone_attive === 0);
+
+  let runningIdx = 0;
+
+  return (
+    <table className="gp-tbl">
+      <colgroup>
+        <col style={{ width: 36 }} />
+        <col style={{ width: 160 }} />
+        <col />
+        <col style={{ width: 60 }} />
+        <col style={{ width: 60 }} />
+        <col style={{ width: 60 }} />
+        <col style={{ width: 280 }} />
+        <col style={{ width: 14 }} />
+      </colgroup>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Codice</th>
+          <th>Nome esteso</th>
+          <th className="gp-num">PdC</th>
+          <th className="gp-num">Serv.</th>
+          <th className="gp-num">Ass.</th>
+          <th className="gp-num">Copertura</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        {sottoTarget.length > 0 && (
+          <tr className="gp-tbl-group">
+            <td colSpan={8}>
+              ▾ Sotto target · {sottoTarget.length} {sottoTarget.length === 1 ? "deposito" : "depositi"}
+              <span className="gp-count">richiede attenzione</span>
+            </td>
+          </tr>
+        )}
+        {sottoTarget.map((d) => (
+          <DepositiRow
+            key={d.depot_codice}
+            d={d}
+            idx={(runningIdx += 1)}
+            onClick={() => onRowClick(d)}
+          />
+        ))}
+
+        {aTarget.length > 0 && (
+          <tr className="gp-tbl-group">
+            <td colSpan={8}>
+              ▾ A target · {aTarget.length} {aTarget.length === 1 ? "deposito" : "depositi"}
+              <span className="gp-count">≥ {TARGET_PCT}% copertura</span>
+            </td>
+          </tr>
+        )}
+        {aTarget.map((d) => (
+          <DepositiRow
+            key={d.depot_codice}
+            d={d}
+            idx={(runningIdx += 1)}
+            onClick={() => onRowClick(d)}
+          />
+        ))}
+
+        {vuoti.length > 0 && (
+          <tr className="gp-tbl-group">
+            <td colSpan={8}>
+              ▾ Vuoti · {vuoti.length} {vuoti.length === 1 ? "deposito" : "depositi"}
+              <span className="gp-count">nessun PdC residente</span>
+            </td>
+          </tr>
+        )}
+        {vuoti.map((d) => (
+          <DepositiRow
+            key={d.depot_codice}
+            d={d}
+            idx={(runningIdx += 1)}
+            onClick={() => onRowClick(d)}
+          />
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function DepositiRow({
+  d,
+  idx,
+  onClick,
+}: {
+  d: GestionePersonaleKpiPerDepositoRead;
+  idx: number;
+  onClick: () => void;
+}) {
+  const tone: Tone | null = d.persone_attive === 0 ? null : toneOf(d.copertura_pct);
+  const palette = tone !== null ? TONE_COLORS[tone] : null;
+  return (
+    <tr onClick={onClick} aria-label={`Apri drilldown deposito ${d.depot_codice}`}>
+      <td className="gp-idx">{String(idx).padStart(2, "0")}</td>
+      <td>
+        <span className="gp-cell-code">{d.depot_codice}</span>
+      </td>
+      <td>
+        <div className="gp-cell-name">{d.depot_display_name}</div>
+      </td>
+      <td className="gp-num">{d.persone_attive}</td>
+      <td className="gp-num">{d.persone_attive > 0 ? d.in_servizio_oggi : "—"}</td>
+      <td className="gp-num">{d.persone_attive > 0 ? d.indisponibili_oggi : "—"}</td>
+      <td>
+        {tone === null || palette === null ? (
+          <span style={{ color: "var(--gp-ink-5)", fontSize: 11.5 }}>—</span>
+        ) : (
+          <div className="gp-cov-cell">
+            <div className="gp-cov-cell-vis">
+              <div
+                className="gp-cov-cell-fill"
+                style={{ width: `${d.copertura_pct}%`, background: palette.color }}
+              />
+              <div className="gp-cov-cell-target" />
+            </div>
+            <span className={`gp-cov-cell-pct gp-is-${tone === "ok" ? "ok" : tone === "warn" ? "warn" : "bad"}`}>
+              {d.copertura_pct.toFixed(1)}%
+            </span>
+          </div>
+        )}
+      </td>
+      <td className="gp-num">
+        <ChevronRight style={{ color: "var(--gp-ink-5)", height: 14, width: 14 }} aria-hidden />
+      </td>
+    </tr>
   );
 }
