@@ -10,6 +10,106 @@
 
 ---
 
+## 2026-05-05 (160) — Sprint 7.10 MR α.8 (backend): T-FT + vettura PARTENZA + DORMITA fallback
+
+### Contesto
+
+Smoke utente post-α.7: feedback dettagliato sul builder con due
+screenshot (T-ALESSANDRIA-003 e T-LEGACY-182-01):
+
+1. *"Il caso uno è errato. Se il treno parte da Vercelli, come io
+   da Alessandria posso raggiungere VC? È il classico caso di una
+   DORMITA"* — heuristic non verifica vettura PARTENZA.
+2. *"Non si assegnano mai giornate ad un deposito quando queste non
+   possono essere raggiunte con le vetture"* — quality gate manca
+   sul lato apertura.
+3. *"Non creare mai LEGACY, rinominalo come FUORI TURNO (FT) e
+   assegnalo al deposito di appartenenza dove inizia il treno"* —
+   T-LEGACY criptico.
+4. *"Quando devi inserire una vettura, che sia all'inizio o alla
+   fine, interroghi API arturo live"* — uso API live entrambe le
+   direzioni.
+
+Questo MR backend copre i punti 1-3. Punti 4-5 (Gantt compatto,
+acronimo VC, banner UX) sono nel MR α.8 frontend successivo.
+
+### Modifiche backend `multi_turno.py`
+
+**Step 1 — Rinomina T-LEGACY → T-FT con depot di partenza**:
+
+- `T-FT-{depot_partenza.codice}-{NNN}` quando heuristic non trova
+  depot adatto, assegnando al depot della stazione di partenza.
+- Fallback estremo `T-FT-{giro_id}-NN` se nemmeno la stazione di
+  partenza ha depot.
+- Metadata: `is_fuori_turno: True` + `fuori_turno_motivo`.
+
+**Step 2 — Heuristic con vettura PARTENZA + DORMITA fallback**:
+
+- Nuova dataclass `_RisultatoHeuristic` con
+  `(depot, vettura_partenza, vettura_rientro, dormita_partenza,
+  dormita_rientro)`.
+- `_scegli_deposito_per_segmento` rifatta async, firma
+  `(blocchi, depositi, *, ora_apertura_min, ora_chiusura_min,
+  live_client) → _RisultatoHeuristic | None`.
+- 4 scenari per candidato:
+  1. **Casa-Casa**: no vetture/dormite.
+  2. **Casa-Lontano**: vettura RIENTRO; manca → DORMITA fine.
+  3. **Lontano-Casa**: vettura PARTENZA; manca → DORMITA inizio.
+  4. **Lontano-Lontano**: entrambe; manca una → DORMITA al lato.
+- Nuovo `_valuta_candidato` con sliding window 6h prima
+  dell'apertura per cercare vettura mattutina, margine arrivo
+  ≥5min e ≤6h.
+- `_SegmentoTurno` esteso con `vettura_pre_partenza`,
+  `dormita_partenza`, `dormita_rientro`.
+
+**Step 3 — Wire-up persistenza VETTURA PARTENZA**:
+
+- Nuovo helper `_aggiungi_vettura_partenza`: prepende blocco
+  `VETTURA` PRIMA della PRESA del primo draft del ciclo.
+- `_persisti_segmenti` applica `_aggiungi_vettura_partenza` sul
+  PRIMO draft, `_aggiungi_vettura_rientro` sull'ULTIMO.
+- Metadata: nuovo `vettura_partenza` simmetrico a `vettura_rientro`,
+  con motivo dormita documentato quando applicabile.
+- `builder_strategy: "multi_turno_dp_alpha8"`.
+
+### Verifiche
+
+- ✅ `uv run mypy --strict src/`: 68 file, 0 errori.
+- ✅ `uv run ruff check src/colazione/domain/builder_pdc/`: clean.
+- ✅ `uv run pytest --ignore=tests/test_persister.py`:
+  **612 passed**, 12 skipped, 0 failed.
+- 7 test heuristic riscritti + nuovo test specifico bug VC/Alessandria
+  (`test_scegli_depot_chiusura_in_casa_lontano_apertura_dormita`).
+
+### Stato
+
+- ✅ Step 1 (FT) + Step 2 (heuristic) + Step 3 (wire-up vettura
+  partenza).
+- ⏳ Deploy backend Railway.
+- ⏳ MR α.8 frontend: banner trasparenza decisione builder
+  (vettura/dormita), acronimo VC, Gantt compatto.
+
+### Limitazioni
+
+1. **DORMITA non è blocco esplicito** nel draft: flag in metadata
+   ma niente `DORMITA_PARTENZA` visibile nel Gantt. MR α.8.bis
+   può materializzarlo.
+2. **Cap FR cumulativo** non include ancora dormite partenza/rientro
+   nel calcolo 1/sett, 3/28gg. Da correggere in MR α.8.bis.
+
+### Prossimo step
+
+Commit + push + deploy backend → smoke utente:
+- Rigenera giro G-CRE-003-ATR803-5g.
+- Atteso `T-FT-{DEPOT}-NNN` (no più LEGACY) + metadata
+  `vettura_partenza`/`vettura_rientro` con motivi dormita
+  documentati.
+
+Poi MR α.8 frontend per banner UX trasparenza + Gantt compatto +
+acronimo VC.
+
+---
+
 ## 2026-05-05 (159) — Sprint 7.10 MR α.8: vista fullscreen Gantt giro materiale + hardening visibilità toolbar
 
 ### Contesto

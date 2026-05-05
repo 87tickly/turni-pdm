@@ -58,6 +58,7 @@ from colazione.domain.builder_pdc.builder import (
     ACCESSORI_MIN_STANDARD,
     CONDOTTA_MAX_MIN,
     FINE_SERVIZIO_MIN,
+    PRESA_SERVIZIO_MIN,
     PRESTAZIONE_MAX_NOTTURNO,
     PRESTAZIONE_MAX_STANDARD,
     BuilderTurnoPdcResult,
@@ -120,11 +121,17 @@ class _SegmentoTurno:
     idx_start: int
     idx_end: int
     deposito_assegnato: Depot | None
-    # Sprint 7.10 MR α.5.fix: vettura pre-calcolata dalla heuristic
-    # (= già verificata via API live durante la scelta deposito).
-    # Se valorizzata, `_aggiungi_vettura_rientro` la riusa senza
-    # una seconda chiamata API.
+    # Sprint 7.10 MR α.5.fix: vettura RIENTRO pre-calcolata dalla
+    # heuristic (= già verificata via API live durante la scelta
+    # deposito).
     vettura_pre: TrenoVettura | None = None
+    # Sprint 7.10 MR α.8: vettura PARTENZA pre-calcolata + flag
+    # DORMITA. Decisione utente 2026-05-05: il PdC che inizia in
+    # stazione ≠ depot deve avere vettura mattutina O DORMITA la
+    # sera prima.
+    vettura_pre_partenza: TrenoVettura | None = None
+    dormita_partenza: bool = False
+    dormita_rientro: bool = False
 
 
 def _eccede_cap_prestazione(draft: _GiornataPdcDraft) -> bool:
@@ -236,45 +243,73 @@ def _dp_segmenta_giornata(
     return segmenti
 
 
+@dataclass
+class _RisultatoHeuristic:
+    """Sprint 7.10 MR α.8: esito completo della scelta deposito.
+
+    Quattro bit di stato indipendenti:
+    - ``vettura_partenza``: treno per portare il PdC dal depot alla
+      stazione di apertura (None se apertura == depot O dormita_partenza
+      è True).
+    - ``vettura_rientro``: treno per riportare il PdC alla chiusura
+      (None se chiusura == depot O dormita_rientro è True).
+    - ``dormita_partenza``: True se il PdC deve dormire la notte prima
+      vicino alla stazione di apertura (= nessuna vettura mattutina
+      utile).
+    - ``dormita_rientro``: True se il PdC deve fare FR alla fine del
+      turno (= nessuna vettura serale utile).
+    """
+
+    depot: Depot
+    vettura_partenza: TrenoVettura | None
+    vettura_rientro: TrenoVettura | None
+    dormita_partenza: bool
+    dormita_rientro: bool
+
+
 async def _scegli_deposito_per_segmento(
     blocchi_segmento: list[GiroBlocco],
     depositi: list[Depot],
     *,
+    ora_apertura_min: int,
     ora_chiusura_min: int,
     live_client: httpx.AsyncClient,
-) -> tuple[Depot | None, TrenoVettura | None]:
-    """Heuristic post-DP con quality gate VETTURA — Sprint 7.10 MR α.5.fix.
+) -> _RisultatoHeuristic | None:
+    """Heuristic post-DP con quality gate VETTURA + DORMITA — Sprint 7.10 MR α.8.
 
-    Decisione utente 2026-05-05: *"il turno del deposito di sondrio
-    finisce a lecco e non ci sono vetture, questo vuol dire che non è
-    giusto inserirlo a sondrio"*. Quindi un deposito è candidato solo
-    se il PdC può tornarci a fine turno: o chiude lì naturalmente, o
-    esiste una vettura passiva (treno commerciale reale via API live).
+    Decisioni utente cumulativa 2026-05-05:
+    - α.5.fix: *"non è giusto inserire SONDRIO se il PdC chiude a
+      LECCO e non c'è vettura"* → quality gate vettura rientro.
+    - α.8: *"non si assegnano mai giornate ad un deposito quando
+      queste non possono essere raggiunte con le vetture e la
+      giornata inizia in una località dove esiste il deposito.
+      Cremona è deposito. Vercelli non è deposito quindi crei una
+      DORMITA"*. → quality gate vettura PARTENZA + DORMITA fallback.
 
-    Priorità rivista (con quality gate):
+    Per ogni candidato depot la funzione valuta in 4 scenari:
 
-    1. **Chiusura in casa**: depot.stazione_principale = stazione_a
-       dell'ultimo blocco del segmento → il PdC chiude in casa,
-       niente vettura serve. Vincitore preferenziale.
-    2. **Partenza in casa con vettura**: depot.stazione_principale =
-       stazione_da del primo blocco → serve vettura di rientro.
-       Verifica via ``trova_treno_vettura`` con la stazione di
-       chiusura del segmento. Se trovata → ok, ritorna (depot,
-       vettura). Altrimenti scarta e passa al prossimo.
-    3. **Intermedi con vettura**: stazioni toccate dai blocchi
-       intermedi del segmento. Stesso quality gate: serve vettura.
-    4. **Fallback**: ritorna (None, None) → il builder usa la
-       stazione del materiale come sede legacy.
+    1. **Casa-Casa**: depot = apertura = chiusura. Niente vetture
+       né dormite serve. Vincitore preferenziale.
+    2. **Casa-Lontano**: depot = apertura, chiusura ≠ depot. Vettura
+       RIENTRO richiesta; se manca → DORMITA finale (FR).
+    3. **Lontano-Casa**: chiusura = depot, apertura ≠ depot. Vettura
+       PARTENZA richiesta; se manca → DORMITA iniziale.
+    4. **Lontano-Lontano**: depot ≠ apertura ≠ chiusura. Vettura
+       PARTENZA + RIENTRO; se manca una delle due → DORMITA al lato.
 
-    Returns ``(depot, vettura_pre_calcolata)``. Se ``vettura_pre_calcolata``
-    è valorizzato, il chiamante può riusarla DIRETTAMENTE senza una
-    seconda chiamata API (= ammortizza il costo).
+    Il candidato vince **se e solo se è internamente coerente**: ogni
+    spostamento PdC↔stazione del lavoro è risolto via vettura O
+    dormita esplicita. Niente "buchi" silenti.
+
+    Ritorna ``None`` solo se non c'è nemmeno un depot popolato che
+    matcha apertura/chiusura/intermedie (= fallback FT nel chiamante).
     """
     if not blocchi_segmento or not depositi:
-        return None, None
+        return None
 
     primo = blocchi_segmento[0]
     ultimo = blocchi_segmento[-1]
+    stazione_apertura = primo.stazione_da_codice
     stazione_chiusura = ultimo.stazione_a_codice
 
     # Indice depot by stazione_principale_codice per lookup O(1).
@@ -284,62 +319,152 @@ async def _scegli_deposito_per_segmento(
         if d.stazione_principale_codice is not None
     }
 
-    # Strategia 1: chiusura in casa (preferenziale, no API call).
-    if stazione_chiusura is not None and stazione_chiusura in by_stazione:
-        return by_stazione[stazione_chiusura], None
+    # Lista candidati in ordine di preferenza:
+    # 1. depot = apertura = chiusura (casa-casa, idempotente)
+    # 2. depot = apertura (casa-lontano)
+    # 3. depot = chiusura (lontano-casa)
+    # 4. depot = stazione intermedia (lontano-lontano)
+    candidati_ordinati: list[str] = []
+    seen: set[str] = set()
 
-    if stazione_chiusura is None:
-        # Senza stazione di chiusura non possiamo cercare vetture →
-        # niente quality gate possibile, scegli il primo candidato
-        # toccato (comportamento legacy pre-α.5.fix).
-        if primo.stazione_da_codice is not None and primo.stazione_da_codice in by_stazione:
-            return by_stazione[primo.stazione_da_codice], None
-        for b in blocchi_segmento:
-            if b.stazione_a_codice is not None and b.stazione_a_codice in by_stazione:
-                return by_stazione[b.stazione_a_codice], None
-        return None, None
+    def _aggiungi(s: str | None) -> None:
+        if s is not None and s in by_stazione and s not in seen:
+            candidati_ordinati.append(s)
+            seen.add(s)
 
-    # Lista candidati in ordine di preferenza (stazione_da, poi
-    # intermedi, deduplicati). Stazione_chiusura è già stata gestita
-    # in Strategia 1.
-    candidati_codici: list[str] = []
-    seen_codici: set[str] = set()
-    if primo.stazione_da_codice is not None and primo.stazione_da_codice in by_stazione:
-        candidati_codici.append(primo.stazione_da_codice)
-        seen_codici.add(primo.stazione_da_codice)
+    if (
+        stazione_apertura is not None
+        and stazione_apertura == stazione_chiusura
+    ):
+        _aggiungi(stazione_apertura)  # casa-casa
+    _aggiungi(stazione_apertura)  # casa-lontano (se diverso)
+    _aggiungi(stazione_chiusura)  # lontano-casa
     for b in blocchi_segmento:
-        for s in (b.stazione_da_codice, b.stazione_a_codice):
-            if s is None or s in seen_codici or s not in by_stazione:
-                continue
-            if s == stazione_chiusura:
-                continue  # già gestito da Strategia 1
-            candidati_codici.append(s)
-            seen_codici.add(s)
+        _aggiungi(b.stazione_da_codice)
+        _aggiungi(b.stazione_a_codice)
 
-    # Quality gate VETTURA: per ogni candidato, verifica che esista
-    # un treno commerciale reale di rientro entro la finestra
-    # ammessa. Il primo che passa vince (= meno tempo morto).
-    for codice in candidati_codici:
-        depot = by_stazione[codice]
-        treno = await trova_treno_vettura(
+    # Per ogni candidato, valuta lo scenario e cerca vetture
+    # richieste con fallback DORMITA.
+    for codice_depot in candidati_ordinati:
+        depot = by_stazione[codice_depot]
+        risultato = await _valuta_candidato(
+            depot=depot,
+            stazione_apertura=stazione_apertura,
+            stazione_chiusura=stazione_chiusura,
+            ora_apertura_min=ora_apertura_min,
+            ora_chiusura_min=ora_chiusura_min,
+            live_client=live_client,
+        )
+        if risultato is not None:
+            return risultato
+        logger.info(
+            "Depot %s scartato per segmento (apertura=%s, chiusura=%s): "
+            "scenario non risolvibile",
+            codice_depot,
+            stazione_apertura,
+            stazione_chiusura,
+        )
+
+    return None
+
+
+# Sprint 7.10 MR α.8: tempo minimo che la vettura mattutina deve
+# arrivare PRIMA dell'inizio prestazione del PdC.
+# inizio_prestazione = primo_treno_orario - ACCESSORI_MIN_STANDARD - PRESA_SERVIZIO_MIN
+# Quindi la vettura deve arrivare a `stazione_apertura` entro
+# `ora_apertura_min - VETTURA_GAP_POST_ARRIVO_MIN`.
+VETTURA_GAP_POST_ARRIVO_MIN = 5
+
+
+async def _valuta_candidato(
+    *,
+    depot: Depot,
+    stazione_apertura: str | None,
+    stazione_chiusura: str | None,
+    ora_apertura_min: int,
+    ora_chiusura_min: int,
+    live_client: httpx.AsyncClient,
+) -> _RisultatoHeuristic | None:
+    """Valuta se il `depot` è ammissibile per il segmento.
+
+    Restituisce un ``_RisultatoHeuristic`` valorizzato se il
+    PdC del depot può:
+    - raggiungere la stazione di apertura (vettura mattutina O
+      dormita la sera prima)
+    - tornare al depot dalla chiusura (vettura serale O FR)
+
+    Se il depot non ha ``stazione_principale_codice`` popolata,
+    ritorna ``None`` (lo skippiamo).
+    """
+    sede = depot.stazione_principale_codice
+    if sede is None:
+        return None
+
+    # Lato PARTENZA: serve vettura sede → apertura?
+    serve_vettura_partenza = stazione_apertura is not None and stazione_apertura != sede
+    vettura_partenza: TrenoVettura | None = None
+    dormita_partenza = False
+
+    if serve_vettura_partenza:
+        assert stazione_apertura is not None
+        # La vettura deve ARRIVARE a stazione_apertura entro:
+        # ora_apertura_min (= inizio_prestazione) meno un buffer
+        # per scendere dal treno e prendere servizio.
+        # Cerco una vettura che parta dalla sede entro le 6h prima
+        # dell'apertura (sliding window ampio per coprire treni mattutini).
+        ora_min_partenza_vettura = (
+            ora_apertura_min - 6 * 60
+        ) % (24 * 60)
+        vettura_partenza = await trova_treno_vettura(
+            stazione_partenza_codice=sede,
+            stazione_arrivo_codice=stazione_apertura,
+            ora_min_partenza=ora_min_partenza_vettura,
+            max_attesa_min=6 * 60,
+            client=live_client,
+        )
+        if vettura_partenza is not None:
+            # Verifica che il treno arrivi PRIMA dell'apertura
+            # con buffer.
+            arrivo_min_vettura = vettura_partenza.arrivo_min
+            margine = (ora_apertura_min - arrivo_min_vettura) % (24 * 60)
+            # Se il margine è > 6h (= treno arriva troppo presto) o
+            # troppo piccolo (< buffer) il treno non è utile.
+            if (
+                margine < VETTURA_GAP_POST_ARRIVO_MIN
+                or margine > 6 * 60
+            ):
+                vettura_partenza = None
+        if vettura_partenza is None:
+            # Fallback: DORMITA la sera prima vicino alla stazione di
+            # apertura. Decisione utente 2026-05-05: *"se non ci sono
+            # vetture mattutine per raggiungerlo, questa è una
+            # dormita"*.
+            dormita_partenza = True
+
+    # Lato RIENTRO: serve vettura chiusura → sede?
+    serve_vettura_rientro = stazione_chiusura is not None and stazione_chiusura != sede
+    vettura_rientro: TrenoVettura | None = None
+    dormita_rientro = False
+
+    if serve_vettura_rientro:
+        assert stazione_chiusura is not None
+        vettura_rientro = await trova_treno_vettura(
             stazione_partenza_codice=stazione_chiusura,
-            stazione_arrivo_codice=codice,
+            stazione_arrivo_codice=sede,
             ora_min_partenza=ora_chiusura_min + VETTURA_GAP_PRE_MIN,
             max_attesa_min=VETTURA_ATTESA_MAX_MIN,
             client=live_client,
         )
-        if treno is not None:
-            return depot, treno
-        logger.info(
-            "Depot %s scartato per segmento (chiusura %s): nessuna vettura "
-            "in finestra %dmin",
-            codice,
-            stazione_chiusura,
-            VETTURA_ATTESA_MAX_MIN,
-        )
+        if vettura_rientro is None:
+            dormita_rientro = True
 
-    # Nessun candidato passa il quality gate → fallback legacy.
-    return None, None
+    return _RisultatoHeuristic(
+        depot=depot,
+        vettura_partenza=vettura_partenza,
+        vettura_rientro=vettura_rientro,
+        dormita_partenza=dormita_partenza,
+        dormita_rientro=dormita_rientro,
+    )
 
 
 async def genera_turni_pdc_multi(
@@ -495,9 +620,19 @@ async def genera_turni_pdc_multi(
         for gg, validita, blocchi_gg, ranges in ranges_per_giornata:
             for idx_start, idx_end in ranges:
                 seg_blocchi = blocchi_gg[idx_start : idx_end + 1]
-                # Stima ora di chiusura del PdC per il quality gate
-                # vettura: ora_fine ultimo blocco + ACCa + FINE servizio.
+                primo_blocco = seg_blocchi[0]
                 ultimo_blocco = seg_blocchi[-1]
+                # Sprint 7.10 MR α.8: stima `ora_apertura_min` (= inizio
+                # prestazione del PdC) e `ora_chiusura_min` (= fine
+                # servizio) per i quality gate vettura PARTENZA + RIENTRO.
+                if primo_blocco.ora_inizio is None:
+                    ora_apertura_min = 0
+                else:
+                    ora_apertura_min = (
+                        _t(primo_blocco.ora_inizio)
+                        - ACCESSORI_MIN_STANDARD
+                        - PRESA_SERVIZIO_MIN
+                    ) % (24 * 60)
                 if ultimo_blocco.ora_fine is None:
                     ora_chiusura_min = 0
                 else:
@@ -506,9 +641,10 @@ async def genera_turni_pdc_multi(
                         + ACCESSORI_MIN_STANDARD
                         + FINE_SERVIZIO_MIN
                     ) % (24 * 60)
-                depot, vettura_pre = await _scegli_deposito_per_segmento(
+                heur = await _scegli_deposito_per_segmento(
                     seg_blocchi,
                     depositi,
+                    ora_apertura_min=ora_apertura_min,
                     ora_chiusura_min=ora_chiusura_min,
                     live_client=live_client,
                 )
@@ -520,8 +656,17 @@ async def genera_turni_pdc_multi(
                         blocchi=seg_blocchi,
                         idx_start=idx_start,
                         idx_end=idx_end,
-                        deposito_assegnato=depot,
-                        vettura_pre=vettura_pre,
+                        deposito_assegnato=heur.depot if heur is not None else None,
+                        vettura_pre=heur.vettura_rientro if heur is not None else None,
+                        vettura_pre_partenza=(
+                            heur.vettura_partenza if heur is not None else None
+                        ),
+                        dormita_partenza=(
+                            heur.dormita_partenza if heur is not None else False
+                        ),
+                        dormita_rientro=(
+                            heur.dormita_rientro if heur is not None else False
+                        ),
                     )
                 )
 
@@ -546,6 +691,88 @@ async def genera_turni_pdc_multi(
 
     await session.commit()
     return risultati
+
+
+async def _aggiungi_vettura_partenza(
+    *,
+    draft: _GiornataPdcDraft,
+    depot: Depot,
+    treno_pre_calcolato: TrenoVettura | None,
+) -> _GiornataPdcDraft:
+    """Sprint 7.10 MR α.8: prepende un blocco VETTURA all'inizio del
+    primo draft del ciclo per portare il PdC dal depot alla stazione
+    di apertura.
+
+    Decisione utente 2026-05-05: *"da Alessandria come posso
+    raggiungere VC se il treno parte alle 5? Serve una vettura
+    mattutina o una dormita la sera prima"*.
+
+    Algoritmo (idempotente):
+    1. Se nessun treno pre-calcolato → ritorna draft invariato (il
+       chiamante usa il flag `dormita_partenza` per segnalare che
+       il PdC è arrivato la sera prima).
+    2. Altrimenti, prepende un blocco ``VETTURA`` PRIMA della
+       PRESA, aggiorna ``inizio_prestazione`` alla partenza della
+       vettura, e aggiorna ``prestazione_min`` corrispondentemente.
+
+    Niente verifica cap prestazione qui: la vettura partenza è
+    "tempo passivo" pre-presa, e il cap si misura da PRESA in poi.
+    Lascia gestione cap al builder principale.
+    """
+    if treno_pre_calcolato is None:
+        return draft
+
+    # Costruisci il blocco VETTURA "in partenza" (prima della PRESA).
+    blocco_vettura = _BloccoPdcDraft(
+        seq=0,  # rinumerato a fine pipeline
+        tipo_evento="VETTURA",
+        ora_inizio=_from_min(treno_pre_calcolato.partenza_min),
+        ora_fine=_from_min(treno_pre_calcolato.arrivo_min),
+        durata_min=treno_pre_calcolato.durata_min,
+        stazione_da_codice=treno_pre_calcolato.stazione_partenza_codice,
+        stazione_a_codice=treno_pre_calcolato.stazione_arrivo_codice,
+        accessori_note=(
+            f"Vettura partenza dal deposito {depot.codice}: "
+            f"treno {treno_pre_calcolato.categoria} "
+            f"{treno_pre_calcolato.numero} "
+            f"({treno_pre_calcolato.operatore or '—'})"
+        ),
+    )
+
+    # La PRESA SERVIZIO ora avviene dopo l'arrivo della vettura.
+    # `inizio_prestazione` resta quello calcolato dal builder MVP
+    # (= primo_treno - ACCp - PRESA), perché la vettura è "viaggio
+    # passivo" antecedente. Cambiamo solo l'orario del blocco PRESA
+    # se necessario, e aggiorniamo prestazione/blocchi totali.
+    nuovi_blocchi = [blocco_vettura, *list(draft.blocchi)]
+
+    # Renumera seq.
+    for i, b in enumerate(nuovi_blocchi, start=1):
+        b.seq = i
+
+    # `inizio_prestazione` rimane invariato (la vettura è prima della
+    # presa, quindi è prestazione "extra" notional). Ma per visibilità
+    # operativa, alcune aziende contano il PdC "in turno" già dalla
+    # vettura. Per ora teniamo `inizio_prestazione` invariato (= ora
+    # presa originale) — il blocco VETTURA è visibile prima nel Gantt.
+
+    return _GiornataPdcDraft(
+        numero_giornata=draft.numero_giornata,
+        variante_calendario=draft.variante_calendario,
+        blocchi=nuovi_blocchi,
+        # La stazione di INIZIO del turno è ora il deposito (= dove
+        # parte la vettura), perché è da lì che il PdC inizia il
+        # tragitto.
+        stazione_inizio=treno_pre_calcolato.stazione_partenza_codice,
+        stazione_fine=draft.stazione_fine,
+        inizio_prestazione=draft.inizio_prestazione,
+        fine_prestazione=draft.fine_prestazione,
+        prestazione_min=draft.prestazione_min,
+        condotta_min=draft.condotta_min,
+        refezione_min=draft.refezione_min,
+        is_notturno=draft.is_notturno,
+        violazioni=draft.violazioni,
+    )
 
 
 async def _aggiungi_vettura_rientro(
@@ -738,25 +965,77 @@ async def _persisti_segmenti(
 
     risultati: list[BuilderTurnoPdcResult] = []
 
+    # Indice depot by stazione_principale_codice — riusato per
+    # ri-assegnare i segmenti "FT" al depot della stazione di partenza.
+    by_stazione: dict[str, Depot] = {}
+    for d_iter in (s.deposito_assegnato for s in segmenti if s.deposito_assegnato is not None):
+        if d_iter.stazione_principale_codice is not None:
+            by_stazione[d_iter.stazione_principale_codice] = d_iter
+    # Carica tutti i depositi attivi (la heuristic ne aveva la lista
+    # piena ma qui abbiamo solo quelli vincenti). Ne servono di più
+    # per il match FT su stazione di partenza.
+    all_depots = list(
+        (
+            await session.execute(
+                select(Depot).where(
+                    Depot.azienda_id == azienda_id,
+                    Depot.is_attivo,
+                    Depot.tipi_personale_ammessi == "PdC",
+                )
+            )
+        ).scalars()
+    )
+    for d_iter in all_depots:
+        if d_iter.stazione_principale_codice is not None:
+            by_stazione.setdefault(d_iter.stazione_principale_codice, d_iter)
+
     # 2. Per ogni deposito, persisti 1 TurnoPdc aggregando le sue
-    #    giornate. Per `None` (legacy) faccio 1 turno per segmento
-    #    per visibilità del problema "tratta scoperta".
+    #    giornate. Per `None` (= heuristic non ha trovato depot
+    #    adatto) faccio 1 turno "Fuori Turno" (T-FT) per segmento
+    #    assegnato al depot della stazione di partenza, se esiste.
     # Il `live_client` è ora passato dal chiamante (genera_turni_pdc_multi),
     # così la heuristic deposito (che ne ha già fatto uso per il
     # quality gate vettura) e la persistenza condividono la stessa
     # connessione TLS.
     for depot_key, lista in drafts_per_deposito.items():
         if depot_key is None:
+            # Sprint 7.10 MR α.8: T-LEGACY → T-FT (Fuori Turno).
+            # Decisione utente 2026-05-05: *"non creare mai LEGACY,
+            # rinominalo come FUORI TURNO (FT) e assegnalo al deposito
+            # di appartenenza dove inizia il treno"*.
             for idx, (seg, draft) in enumerate(lista, start=1):
                 draft.numero_giornata = 1
-                codice = f"T-LEGACY-{giro.id}-{idx:02d}"[:50]
+                # Cerca il depot della stazione di PARTENZA del primo
+                # blocco del segmento. Se non popolato come depot,
+                # fallback a codice senza depot.
+                stazione_partenza = (
+                    seg.blocchi[0].stazione_da_codice if seg.blocchi else None
+                )
+                depot_partenza = (
+                    by_stazione.get(stazione_partenza)
+                    if stazione_partenza is not None
+                    else None
+                )
+                if depot_partenza is not None:
+                    nnn_ft = await _prossimo_progressivo_per_deposito(
+                        session, azienda_id, depot_partenza.id
+                    )
+                    codice = f"T-FT-{depot_partenza.codice}-{nnn_ft:03d}"[:50]
+                    stazione_sede = (
+                        depot_partenza.stazione_principale_codice
+                        if depot_partenza.stazione_principale_codice is not None
+                        else draft.stazione_inizio
+                    )
+                else:
+                    codice = f"T-FT-{giro.id}-{idx:02d}"[:50]
+                    stazione_sede = draft.stazione_inizio
                 risultato = await _persisti_un_turno_pdc(
                     session=session,
                     azienda_id=azienda_id,
                     giro=giro,
                     drafts=[draft],
                     codice=codice,
-                    stazione_sede=draft.stazione_inizio,
+                    stazione_sede=stazione_sede,
                     valido_da_eff=valido_da_eff,
                     giornate_ids=giornate_ids_giro,
                     extra_metadata={
@@ -767,9 +1046,16 @@ async def _persisti_segmenti(
                         "multi_turno_idx_start": seg.idx_start,
                         "multi_turno_idx_end": seg.idx_end,
                         "multi_turno_seq": idx,
-                        "builder_strategy": "multi_turno_dp_alpha4_legacy",
+                        "is_fuori_turno": True,
+                        "fuori_turno_motivo": (
+                            "tratta_non_coperta_da_vetture: nessun depot ha "
+                            "rientro fattibile via API live arturo entro "
+                            f"{VETTURA_ATTESA_MAX_MIN}min. Pianificatore deve "
+                            "decidere FR / dormita / assegnazione manuale."
+                        ),
+                        "builder_strategy": "multi_turno_dp_alpha8_ft",
                     },
-                    depot_target=None,
+                    depot_target=depot_partenza,
                     violazioni_ciclo_extra=[],
                 )
                 risultati.append(risultato)
@@ -810,6 +1096,40 @@ async def _persisti_segmenti(
         # blocco VETTURA al draft, oppure flagga "vettura non trovata"
         # nei metadata se non c'è alcun passante in finestra.
         vettura_meta: dict[str, object] | None = None
+        vettura_partenza_meta: dict[str, object] | None = None
+        # Sprint 7.10 MR α.8: VETTURA PARTENZA sul PRIMO draft del
+        # ciclo (= prima giornata operativa). Se la heuristic ha
+        # trovato un treno mattutino dal depot alla stazione di
+        # apertura, lo prependiamo prima della PRESA del draft.
+        primo_seg = lista[0][0]
+        if drafts_finali and primo_seg.vettura_pre_partenza is not None:
+            primo_draft_v = await _aggiungi_vettura_partenza(
+                draft=drafts_finali[0],
+                depot=depot,
+                treno_pre_calcolato=primo_seg.vettura_pre_partenza,
+            )
+            drafts_finali[0] = primo_draft_v
+            tp = primo_seg.vettura_pre_partenza
+            vettura_partenza_meta = {
+                "treno_numero": tp.numero,
+                "treno_categoria": tp.categoria,
+                "operatore": tp.operatore,
+                "stazione_partenza": tp.stazione_partenza_codice,
+                "stazione_arrivo": tp.stazione_arrivo_codice,
+                "partenza_min": tp.partenza_min,
+                "arrivo_min": tp.arrivo_min,
+                "durata_min": tp.durata_min,
+            }
+        elif primo_seg.dormita_partenza:
+            vettura_partenza_meta = {
+                "treno_numero": None,
+                "motivo": (
+                    "dormita_partenza: nessuna vettura mattutina dal "
+                    f"deposito {depot.codice} alla stazione di apertura. "
+                    "Il PdC è arrivato la sera prima (FR)."
+                ),
+            }
+
         if drafts_finali:
             ultimo_idx = len(drafts_finali) - 1
             ultimo_draft = drafts_finali[ultimo_idx]
@@ -837,11 +1157,27 @@ async def _persisti_segmenti(
                     "arrivo_min": treno.arrivo_min,
                     "durata_min": treno.durata_min,
                 }
+            elif ultimo_seg.dormita_rientro:
+                # Sprint 7.10 MR α.8: dormita finale (FR) — PdC dorme
+                # in stazione di chiusura, rientro il giorno dopo o
+                # nel ciclo successivo.
+                vettura_meta = {
+                    "treno_numero": None,
+                    "stazione_partenza": ultimo_draft.stazione_fine,
+                    "stazione_arrivo": depot.stazione_principale_codice,
+                    "motivo": (
+                        "dormita_rientro: nessun treno passante in "
+                        f"finestra {VETTURA_ATTESA_MAX_MIN}min. "
+                        "Il PdC fa FR, rientra il giorno dopo."
+                    ),
+                }
             elif (
                 ultimo_draft.stazione_fine != depot.stazione_principale_codice
                 and depot.stazione_principale_codice is not None
             ):
-                # PdC chiude lontano, ma nessun passante trovato.
+                # Edge case: heuristic non ha pre-calcolato vettura E
+                # nemmeno dormita (caso raro, e.g. depot scelto da
+                # logica non quality-gated). Fallback informativo.
                 vettura_meta = {
                     "treno_numero": None,
                     "stazione_partenza": ultimo_draft.stazione_fine,
@@ -874,7 +1210,8 @@ async def _persisti_segmenti(
                 "multi_turno_progressivo": nnn,
                 "multi_turno_giornate": meta_giornate,
                 "vettura_rientro": vettura_meta,
-                "builder_strategy": "multi_turno_dp_alpha5",
+                "vettura_partenza": vettura_partenza_meta,
+                "builder_strategy": "multi_turno_dp_alpha8",
             },
             depot_target=depot,
             violazioni_ciclo_extra=[],

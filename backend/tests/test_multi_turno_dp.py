@@ -206,153 +206,160 @@ def _build_handler_with_treno(
 
 
 @pytest.mark.asyncio
-async def test_scegli_depot_chiusura_in_casa_no_api_call() -> None:
-    """Strategia 1 (preferenziale): se il segmento chiude in
-    una stazione che è deposito → vince senza API call.
-    Il PdC va a casa naturalmente, niente vettura serve."""
-    import httpx
-
+async def test_scegli_depot_casa_casa_no_api_call() -> None:
+    """Sprint 7.10 MR α.8: scenario "casa-casa". Apertura == chiusura
+    == depot → no vetture, no dormite."""
     blocchi = [
-        _make_blocco(seq=1, da="X", a="VOG", inizio=time(8, 0), fine=time(10, 0)),
+        _make_blocco(seq=1, da="VOG", a="VOG", inizio=time(8, 0), fine=time(10, 0)),
     ]
-    depositi = [
-        _make_depot("ALESSANDRIA", "ALES"),
-        _make_depot("VOGHERA", "VOG"),
-    ]
+    depositi = [_make_depot("VOGHERA", "VOG")]
     transport = httpx.MockTransport(_empty_response_handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        chosen, vettura = await _scegli_deposito_per_segmento(
-            blocchi, depositi, ora_chiusura_min=11 * 60, live_client=client
+        h = await _scegli_deposito_per_segmento(
+            blocchi,
+            depositi,
+            ora_apertura_min=7 * 60,
+            ora_chiusura_min=11 * 60,
+            live_client=client,
         )
-    assert chosen is not None
-    assert chosen.codice == "VOGHERA"
-    assert vettura is None  # niente vettura: PdC chiude in casa
+    assert h is not None
+    assert h.depot.codice == "VOGHERA"
+    assert h.vettura_partenza is None
+    assert h.vettura_rientro is None
+    assert h.dormita_partenza is False
+    assert h.dormita_rientro is False
 
 
 @pytest.mark.asyncio
-async def test_scegli_depot_partenza_con_vettura_disponibile() -> None:
-    """Strategia 2: il segmento chiude in stazione X (non depot),
-    ma una vettura è disponibile dalla X al deposito di partenza
-    → quel depot vince con la vettura allegata."""
-    import httpx
+async def test_scegli_depot_chiusura_in_casa_lontano_apertura_dormita() -> None:
+    """Sprint 7.10 MR α.8 — il caso del bug utente VC/Alessandria.
 
+    Segmento parte da VC (Vercelli, NON depot) e chiude ad ALES
+    (depot ALESSANDRIA). Strategia "lontano-casa": serve vettura
+    PARTENZA ALES→VC. Se nessuna vettura mattutina disponibile,
+    DORMITA all'inizio (PdC arrivato la sera prima a Vercelli)."""
     blocchi = [
-        _make_blocco(seq=1, da="ALES", a="X", inizio=time(8, 0), fine=time(10, 0)),
+        _make_blocco(seq=1, da="VC", a="ALES", inizio=time(5, 5), fine=time(11, 0)),
     ]
-    depositi = [
-        _make_depot("ALESSANDRIA", "ALES"),
+    depositi = [_make_depot("ALESSANDRIA", "ALES")]
+    # API ritorna lista vuota → nessuna vettura ALES→VC.
+    transport = httpx.MockTransport(_empty_response_handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        h = await _scegli_deposito_per_segmento(
+            blocchi,
+            depositi,
+            ora_apertura_min=4 * 60 + 10,  # presa = 04:10
+            ora_chiusura_min=11 * 60 + 55,
+            live_client=client,
+        )
+    assert h is not None
+    assert h.depot.codice == "ALESSANDRIA"
+    # Vettura partenza non trovata → DORMITA partenza.
+    assert h.vettura_partenza is None
+    assert h.dormita_partenza is True
+    # Chiusura in casa, nessuna vettura/dormita rientro serve.
+    assert h.vettura_rientro is None
+    assert h.dormita_rientro is False
+
+
+@pytest.mark.asyncio
+async def test_scegli_depot_lontano_casa_con_vettura_partenza() -> None:
+    """Variante del precedente: la vettura ALES→VC ESISTE in finestra,
+    quindi `vettura_partenza` valorizzata e niente DORMITA."""
+    blocchi = [
+        _make_blocco(seq=1, da="VC", a="ALES", inizio=time(8, 0), fine=time(11, 0)),
     ]
+    depositi = [_make_depot("ALESSANDRIA", "ALES")]
     handler = _build_handler_with_treno(
-        stazione_partenza="X",
-        stazione_arrivo="ALES",
-        partenza_iso="2026-05-05T10:30:00Z",
-        arrivo_iso="2026-05-05T11:30:00Z",
+        stazione_partenza="ALES",
+        stazione_arrivo="VC",
+        partenza_iso="2026-05-05T05:30:00Z",
+        arrivo_iso="2026-05-05T06:30:00Z",
     )
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        chosen, vettura = await _scegli_deposito_per_segmento(
-            blocchi, depositi, ora_chiusura_min=10 * 60, live_client=client
+        h = await _scegli_deposito_per_segmento(
+            blocchi,
+            depositi,
+            ora_apertura_min=7 * 60 + 5,  # presa = 07:05
+            ora_chiusura_min=12 * 60,
+            live_client=client,
         )
-    assert chosen is not None
-    assert chosen.codice == "ALESSANDRIA"
-    assert vettura is not None
-    assert vettura.numero == "9999"
-    assert vettura.partenza_min == 10 * 60 + 30
-    assert vettura.arrivo_min == 11 * 60 + 30
+    assert h is not None
+    assert h.depot.codice == "ALESSANDRIA"
+    assert h.vettura_partenza is not None
+    assert h.vettura_partenza.partenza_min == 5 * 60 + 30
+    assert h.vettura_partenza.arrivo_min == 6 * 60 + 30
+    assert h.dormita_partenza is False
 
 
 @pytest.mark.asyncio
-async def test_scegli_depot_partenza_senza_vettura_scartato() -> None:
-    """Sprint 7.10 MR α.5.fix: il bug dell'utente.
-
-    Segmento parte da SONDR (=depot SONDRIO) e chiude a LECCO. Se
-    nessun treno passa LECCO→SONDRIO entro la finestra → SONDRIO
-    è scartato. Se LECCO è anche depot, vince LECCO (Strategia 1).
-    Altrimenti ritorna None (fallback legacy)."""
-    import httpx
-
+async def test_scegli_depot_casa_lontano_con_vettura_rientro() -> None:
+    """Scenario "casa-lontano": apertura == depot, chiusura ≠ depot.
+    Vettura RIENTRO trovata → ok."""
     blocchi = [
-        _make_blocco(seq=1, da="SONDR", a="LECCO", inizio=time(8, 0), fine=time(20, 0)),
+        _make_blocco(seq=1, da="ALES", a="X", inizio=time(8, 0), fine=time(10, 0)),
     ]
-    depositi = [
-        _make_depot("SONDRIO", "SONDR"),
-        # Niente LECCO depot in questo test → no Strategia 1.
-    ]
-    # API ritorna sempre lista vuota → nessuna vettura trovata.
-    transport = httpx.MockTransport(_empty_response_handler)
+    depositi = [_make_depot("ALESSANDRIA", "ALES")]
+    handler = _build_handler_with_treno(
+        stazione_partenza="X",
+        stazione_arrivo="ALES",
+        partenza_iso="2026-05-05T11:30:00Z",  # dopo ora_chiusura+5
+        arrivo_iso="2026-05-05T12:30:00Z",
+    )
+    transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        chosen, vettura = await _scegli_deposito_per_segmento(
-            blocchi, depositi, ora_chiusura_min=21 * 60, live_client=client
+        h = await _scegli_deposito_per_segmento(
+            blocchi,
+            depositi,
+            ora_apertura_min=7 * 60 + 5,
+            ora_chiusura_min=10 * 60 + 55,
+            live_client=client,
         )
-    # SONDRIO scartato dal quality gate, nessun fallback in casa →
-    # ritorna None (= fallback legacy nel chiamante).
-    assert chosen is None
-    assert vettura is None
-
-
-@pytest.mark.asyncio
-async def test_scegli_depot_chiusura_in_casa_vince_su_partenza() -> None:
-    """Sprint 7.10 MR α.5.fix: nuova priorità. Se il segmento parte
-    da ALES (= depot ALESSANDRIA) E chiude a LECCO (= depot LECCO),
-    vince LECCO (chiusura in casa, Strategia 1) — non ALES, perché
-    non vogliamo costringere il PdC a fare vettura quando può
-    chiudere in casa naturalmente."""
-    import httpx
-
-    blocchi = [
-        _make_blocco(seq=1, da="ALES", a="LECCO", inizio=time(8, 0), fine=time(10, 0)),
-    ]
-    depositi = [
-        _make_depot("ALESSANDRIA", "ALES"),
-        _make_depot("LECCO", "LECCO"),
-    ]
-    transport = httpx.MockTransport(_empty_response_handler)
-    async with httpx.AsyncClient(transport=transport) as client:
-        chosen, vettura = await _scegli_deposito_per_segmento(
-            blocchi, depositi, ora_chiusura_min=11 * 60, live_client=client
-        )
-    assert chosen is not None
-    assert chosen.codice == "LECCO"  # priorità chiusura
-    assert vettura is None
+    assert h is not None
+    assert h.depot.codice == "ALESSANDRIA"
+    # Apertura == depot, niente vettura partenza.
+    assert h.vettura_partenza is None
+    assert h.dormita_partenza is False
+    # Chiusura ≠ depot, vettura rientro trovata.
+    assert h.vettura_rientro is not None
 
 
 @pytest.mark.asyncio
 async def test_scegli_depot_lista_depositi_vuota() -> None:
-    import httpx
-
     blocchi = [
         _make_blocco(seq=1, da="A", a="B", inizio=time(8, 0), fine=time(10, 0)),
     ]
     transport = httpx.MockTransport(_empty_response_handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        chosen, vettura = await _scegli_deposito_per_segmento(
-            blocchi, [], ora_chiusura_min=11 * 60, live_client=client
+        h = await _scegli_deposito_per_segmento(
+            blocchi,
+            [],
+            ora_apertura_min=7 * 60,
+            ora_chiusura_min=11 * 60,
+            live_client=client,
         )
-    assert chosen is None
-    assert vettura is None
+    assert h is None
 
 
 @pytest.mark.asyncio
 async def test_scegli_depot_blocchi_vuoti() -> None:
-    import httpx
-
     depositi = [_make_depot("ALESSANDRIA", "ALES")]
     transport = httpx.MockTransport(_empty_response_handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        chosen, vettura = await _scegli_deposito_per_segmento(
-            [], depositi, ora_chiusura_min=11 * 60, live_client=client
+        h = await _scegli_deposito_per_segmento(
+            [],
+            depositi,
+            ora_apertura_min=0,
+            ora_chiusura_min=0,
+            live_client=client,
         )
-    assert chosen is None
-    assert vettura is None
+    assert h is None
 
 
 @pytest.mark.asyncio
 async def test_scegli_depot_ignora_depositi_senza_stazione_principale() -> None:
-    """Depot con stazione_principale_codice = None viene saltato:
-    senza stazione popolata non possiamo né verificare vettura né
-    fare match su stazione di chiusura."""
-    import httpx
-
+    """Depot con stazione_principale_codice = None viene saltato."""
     blocchi = [
         _make_blocco(seq=1, da="ALES", a="VOG", inizio=time(8, 0), fine=time(10, 0)),
     ]
@@ -362,10 +369,15 @@ async def test_scegli_depot_ignora_depositi_senza_stazione_principale() -> None:
     ]
     transport = httpx.MockTransport(_empty_response_handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        chosen, vettura = await _scegli_deposito_per_segmento(
-            blocchi, depositi, ora_chiusura_min=11 * 60, live_client=client
+        h = await _scegli_deposito_per_segmento(
+            blocchi,
+            depositi,
+            ora_apertura_min=7 * 60 + 5,
+            ora_chiusura_min=10 * 60 + 55,
+            live_client=client,
         )
-    # VOGHERA è la stazione di chiusura (Strategia 1).
-    assert chosen is not None
-    assert chosen.codice == "VOGHERA"
-    assert vettura is None
+    # VOGHERA = stazione_a (chiusura), Strategia 1 vince.
+    assert h is not None
+    assert h.depot.codice == "VOGHERA"
+    assert h.vettura_partenza is None
+    assert h.vettura_rientro is None
