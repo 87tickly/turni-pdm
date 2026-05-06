@@ -79,22 +79,36 @@ async function buildRequest(
   options: ApiFetchOptions,
 ): Promise<{ url: string; init: RequestInit }> {
   const headers = new Headers(options.headers);
-  if (!headers.has("Content-Type") && options.body !== undefined) {
+  // FormData: il browser deve generare ``multipart/form-data; boundary=...``.
+  // Se settiamo manualmente ``application/json`` o un altro Content-Type
+  // l'upload si rompe (boundary mancante, parser server fallisce).
+  const isFormData =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
+  if (
+    !headers.has("Content-Type") &&
+    options.body !== undefined &&
+    !isFormData
+  ) {
     headers.set("Content-Type", "application/json");
   }
   const access = getAccessToken();
   if (access !== null) {
     headers.set("Authorization", `Bearer ${access}`);
   }
+  let body: BodyInit | undefined;
+  if (options.body === undefined) {
+    body = undefined;
+  } else if (typeof options.body === "string") {
+    body = options.body;
+  } else if (isFormData) {
+    body = options.body as FormData;
+  } else {
+    body = JSON.stringify(options.body);
+  }
   const init: RequestInit = {
     ...options,
     headers,
-    body:
-      options.body === undefined
-        ? undefined
-        : typeof options.body === "string"
-          ? options.body
-          : JSON.stringify(options.body),
+    body,
   };
   return { url: `${API_BASE_URL}${path}`, init };
 }

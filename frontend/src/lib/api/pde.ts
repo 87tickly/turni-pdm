@@ -105,10 +105,7 @@ export async function caricaPdEBase(
 
   const res = await apiFetch(path, {
     method: "POST",
-    body: formData as unknown as BodyInit,
-    // FormData richiede che NON impostiamo Content-Type: il browser
-    // genera multipart/form-data con boundary corretto.
-    headers: {},
+    body: formData,
   });
   if (!res.ok) {
     let detail: unknown = null;
