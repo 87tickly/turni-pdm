@@ -615,8 +615,11 @@ def _trova_regola_dominante(
     Convenzione: la regola di una catena è quella con `priorita` più
     alta tra le regole che coprono la PRIMA corsa della catena (giorno
     tipo `feriale` come euristica, allineato col filtro perimetro).
-    Se più regole hanno la stessa priorità, vince quella con `id` più
-    basso (deterministico).
+    Se più regole hanno la stessa priorità, le catene vengono
+    distribuite **round-robin deterministico** fra di esse (entry 188,
+    fix bug "2 regole stessi filtri → solo una genera giri"). La
+    distribuzione usa hash stabile della chiave catena (numero treno +
+    origine + ora_partenza prima corsa) modulo il numero di candidate.
 
     Ritorna ``None`` se la prima corsa non è coperta da nessuna regola
     (catena orfana — il chiamante la scarta con warning).
@@ -629,8 +632,26 @@ def _trova_regola_dominante(
     candidate = [r for r in regole if matches_all(r.filtri_json, prima, "feriale")]
     if not candidate:
         return None
+    # Ordina per priorità desc, poi id asc (stesso comportamento prima
+    # della patch round-robin, per stabilità degli id quando una sola
+    # candidata vince).
     candidate.sort(key=lambda r: (-r.priorita, r.id))
-    return candidate[0]
+    top_prio = candidate[0].priorita
+    top = [r for r in candidate if r.priorita == top_prio]
+    if len(top) == 1:
+        return top[0]
+
+    # Round-robin deterministico fra le top-priority candidate.
+    # Hash stabile via hashlib.blake2b (PYTHONHASHSEED-independent).
+    import hashlib
+
+    chiave = (
+        f"{prima.numero_treno or ''}|{prima.codice_origine or ''}|"
+        f"{prima.ora_partenza.isoformat() if prima.ora_partenza else ''}"
+    )
+    digest = hashlib.blake2b(chiave.encode("utf-8"), digest_size=8).digest()
+    bucket = int.from_bytes(digest, byteorder="big") % len(top)
+    return top[bucket]
 
 
 def _giro_chiude_in_whitelist(
@@ -969,6 +990,30 @@ async def genera_giri(
     if catene_orphane > 0:
         warnings.append(
             f"{catene_orphane} catene scartate: nessuna regola del programma copre la prima corsa."
+        )
+
+    # Entry 188 — fix diagnostico bug "2 regole stessi filtri → solo una
+    # genera giri". Per ogni regola del programma che non ha attribuito
+    # nessuna catena, emit warning esplicito così il pianificatore capisce
+    # cosa sta succedendo (oggi vedrebbe semplicemente "0 giri" senza
+    # spiegazione).
+    regole_senza_catene = [r for r in regole if r.id not in catene_per_regola]
+    for r in regole_senza_catene:
+        materiale = (
+            r.composizione_json[0].get("materiale_tipo_codice")
+            if r.composizione_json
+            else None
+        )
+        summary_filtri = ", ".join(
+            f"{f.get('campo')}={f.get('valore')}" for f in r.filtri_json[:3]
+        )
+        warnings.append(
+            f"Regola #{r.id} (materiale: {materiale or '—'}, "
+            f"filtri: {summary_filtri or '—'}) non ha generato giri. "
+            "Possibili cause: (a) i filtri non matchano nessuna corsa nel "
+            "periodo del programma; (b) la dotazione del materiale è 0 "
+            "in questa sede; (c) le catene candidate sono andate ad altre "
+            "regole con priorità più alta (verifica i filtri)."
         )
 
     giri_dom: list[Giro] = []
