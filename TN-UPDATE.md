@@ -10,6 +10,93 @@
 
 ---
 
+## 2026-05-06 (195) — Sub-MR 5.bis-relazione frontend: badge variazione + sezione genitore/figli
+
+### Contesto
+
+Frontend dell'entry 194. Senza variazioni reali oggi, prepariamo
+il contesto: l'UI rende **visibile** la relazione genitore/figlio
+nei programmi così che quando il pianificatore creerà un fork (sub-MR
+5.bis-fork, entry 191-192), capirà immediatamente la relazione.
+
+Decisione utente 2026-05-06 ribadita: **italiano ovunque**. Tutti i
+label visibili in questa entry sono in italiano.
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/programmi.ts`**:
+
+- Nuova funzione ``listFigliProgramma(programmaId)`` →
+  ``ProgrammaMaterialeRead[]``. Backend: ``GET /api/programmi/{id}/figli``.
+
+**`frontend/src/hooks/useProgrammi.ts`**:
+
+- Nuovo hook ``useFigliProgramma(id)`` con cache key
+  ``["programmi", "figli", id]``. Disabilitato se id mancante.
+
+**`frontend/src/routes/pianificatore-giro/ProgrammiRoute.tsx`**:
+
+- Badge **"variazione"** (amber) accanto al nome del programma in:
+  - ``ProgrammaRow`` (vista calendario, label sinistra).
+  - Riga tabella ``BodyRow``.
+- Tooltip italiano: "Programma di variazione di un altro programma".
+- Vista barra Gantt non modificata (troppo piccola per badge).
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`**:
+
+- Nuova sezione ``RelazioneFamigliaSection`` dopo la
+  ``ConfigurazioneSection`` (posizione 2.4):
+  - **Se programma è un figlio** (``programma_genitore_id !== null``):
+    blocco "Variazione di" con link al genitore (consuma
+    ``useProgramma(genitore_id)``). Fallback se genitore eliminato.
+  - **Se programma ha figli** (``GET /figli`` non vuoto): blocco
+    "Programmi di variazione (N)" con lista cliccabile.
+  - **Se né uno né l'altro**: niente render (programma autonomo,
+    no clutter UI).
+- Bordo + sfondo amber per coerenza visiva con badge "variazione".
+
+### Verifiche
+
+- ✅ ``pnpm tsc -b --noEmit``: clean.
+
+### Decisioni di scope rinviate
+
+- **Convenzione "merge per data" lato consumer**: vista PdC finale,
+  builder, query assegnazioni — sempre rinviata. Quando un fork
+  verrà effettivamente generato e popolato di giri, decideremo se
+  serve il merge automatico o se basta la coesistenza visibile.
+- **Bottone "Crea fork dal genitore"**: oggi il fork si crea solo
+  dal dialog post-applica variazione. Aggiungere un'azione "crea
+  variazione di periodo" sul dettaglio del genitore (senza partire
+  da un alert impatto) può servire per casi manuali. Non in scope
+  ora.
+- **Drilldown "vista combinata genitore + figlio per periodo"**:
+  utile per il pianificatore che vuole capire "in queste date,
+  quale programma vince?". Non in scope.
+
+### Stato
+
+- ✅ Codice frontend pronto: 1 funzione client + 1 hook + 1
+  componente nuovo + 2 modifiche layout.
+- ⏳ Commit + push + deploy frontend Railway.
+
+### Prossimo step
+
+Quando arriverà la prima variazione PdE reale e l'utente la applicherà,
+testeremo end-to-end:
+
+1. Carica variazione → alert programmi impattati
+2. Click "Crea variazione" → fork creato + visibile in lista con
+   badge **"variazione"**
+3. Apri il fork → sezione "Variazione di [genitore]" linkata
+4. Apri il genitore → sezione "Programmi di variazione (1)" con il
+   fork linkato
+
+A quel punto si valuterà se serve la convenzione "merge per data"
+automatica.
+
+---
+
 ## 2026-05-06 (194) — Sub-MR 5.bis-relazione backend: endpoint figli programma
 
 ### Contesto

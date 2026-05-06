@@ -450,11 +450,19 @@ function CalendarRowLabel({ programma }: { programma: ProgrammaMaterialeRead }) 
     <div className="mt-1 flex h-9 flex-col justify-center pr-2 text-right">
       <div
         className={cn(
-          "truncate text-sm font-medium",
+          "flex items-center justify-end gap-1 truncate text-sm font-medium",
           programma.stato === "archiviato" ? "text-muted-foreground" : "text-foreground",
         )}
       >
-        {programma.nome}
+        <span className="truncate">{programma.nome}</span>
+        {programma.programma_genitore_id !== null && (
+          <span
+            className="shrink-0 rounded bg-amber-100 px-1 py-0 text-[9px] font-semibold uppercase tracking-wide text-amber-800"
+            title="Programma di variazione di un altro programma"
+          >
+            variazione
+          </span>
+        )}
       </div>
       <div className="font-mono text-[10px] text-muted-foreground">
         #{programma.id}
@@ -602,7 +610,17 @@ function ProgrammaRow({
           programma.stato === "archiviato" ? "text-muted-foreground" : "text-foreground",
         )}
       >
-        {programma.nome}
+        <span className="inline-flex items-center gap-2">
+          {programma.nome}
+          {programma.programma_genitore_id !== null && (
+            <span
+              className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800"
+              title="Programma di variazione di un altro programma"
+            >
+              variazione
+            </span>
+          )}
+        </span>
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-foreground tabular-nums">
         {formatPeriodo(programma.valido_da, programma.valido_a)}

@@ -236,6 +236,20 @@ export async function getProgramma(id: number): Promise<ProgrammaDettaglioRead> 
   return apiJson<ProgrammaDettaglioRead>(`/api/programmi/${id}`, { method: "GET" });
 }
 
+/**
+ * Sub-MR 5.bis-relazione (entry 194): lista programmi figli del
+ * genitore. Backend: ``GET /api/programmi/{id}/figli``. Ordinato per
+ * ``valido_da`` ascendente.
+ */
+export async function listFigliProgramma(
+  programmaId: number,
+): Promise<ProgrammaMaterialeRead[]> {
+  return apiJson<ProgrammaMaterialeRead[]>(
+    `/api/programmi/${programmaId}/figli`,
+    { method: "GET" },
+  );
+}
+
 export async function createProgramma(
   payload: ProgrammaMaterialeCreate,
 ): Promise<ProgrammaMaterialeRead> {

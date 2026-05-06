@@ -28,6 +28,7 @@ import {
   updateProgramma,
   getLastBuilderRun,
   getProgramma,
+  listFigliProgramma,
   listProgrammi,
   pubblicaProgramma,
   pubblicaVistaPdc,
@@ -67,6 +68,27 @@ export function useProgramma(id: number | undefined): UseQueryResult<ProgrammaDe
         throw new Error("id mancante");
       }
       return getProgramma(id);
+    },
+    enabled: id !== undefined,
+  });
+}
+
+/**
+ * Sub-MR 5.bis-relazione (entry 195): hook per la lista dei programmi
+ * figli (variazioni di periodo) di un programma genitore. La query è
+ * abilitata solo se ``id`` è valorizzato. Ordinata per ``valido_da``
+ * dal backend.
+ */
+export function useFigliProgramma(
+  id: number | undefined,
+): UseQueryResult<ProgrammaMaterialeRead[]> {
+  return useQuery({
+    queryKey: [...PROGRAMMI_KEY, "figli", id],
+    queryFn: () => {
+      if (id === undefined) {
+        throw new Error("id mancante");
+      }
+      return listFigliProgramma(id);
     },
     enabled: id !== undefined,
   });

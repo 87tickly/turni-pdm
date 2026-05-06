@@ -25,6 +25,7 @@ import { useGiriProgramma } from "@/hooks/useGiri";
 import {
   useArchiviaProgramma,
   useConfermaMateriale,
+  useFigliProgramma,
   useLastBuilderRun,
   useProgramma,
   usePubblicaProgramma,
@@ -146,6 +147,9 @@ export function ProgrammaDettaglioRoute() {
         editable={editable}
         onModifica={() => setEditConfigOpen(true)}
       />
+
+      {/* ═══ 2.4 · RELAZIONE GENITORE/FIGLI (entry 195) ═════════ */}
+      <RelazioneFamigliaSection programma={programma} />
 
       {/* ═══ 2.5 · CONVOGLI NECESSARI (Sprint 7.8 MR 5) ═════════ */}
       {giri.length > 0 && (
@@ -1177,5 +1181,118 @@ function ErrorBlock({ message, onRetry }: ErrorBlockProps) {
         )}
       </div>
     </div>
+  );
+}
+
+// =====================================================================
+// Relazione genitore/figli (sub-MR 5.bis-relazione, entry 195)
+// =====================================================================
+
+/**
+ * Mostra la relazione del programma con i suoi familiari:
+ * - Se è un programma figlio (``programma_genitore_id !== null``):
+ *   blocco "Variazione di → [genitore]" con link al genitore.
+ * - Se ha figli (``GET /figli`` non vuoto): blocco "Programmi di
+ *   variazione" con la lista dei figli e link a ognuno.
+ * - Se né l'uno né l'altro: niente render (nessuna relazione,
+ *   programma autonomo).
+ *
+ * Decisione utente 2026-05-06: italiano in tutti i label visibili.
+ */
+function RelazioneFamigliaSection({
+  programma,
+}: {
+  programma: ProgrammaDettaglioRead;
+}) {
+  const isFiglio = programma.programma_genitore_id !== null;
+  const genitoreQuery = useProgramma(
+    isFiglio ? (programma.programma_genitore_id ?? undefined) : undefined,
+  );
+  const figliQuery = useFigliProgramma(programma.id);
+  const figli = figliQuery.data ?? [];
+  const haFigli = figli.length > 0;
+
+  if (!isFiglio && !haFigli) {
+    return null;
+  }
+
+  return (
+    <section className="rounded-lg border border-amber-200 bg-amber-50/40">
+      <header className="border-b border-amber-200 px-5 py-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-amber-900">
+          Relazione tra programmi
+        </h2>
+      </header>
+      <div className="flex flex-col gap-4 px-5 py-4">
+        {isFiglio && (
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-amber-900">
+              Variazione di
+            </div>
+            {genitoreQuery.isLoading ? (
+              <div className="mt-1 text-sm text-muted-foreground">
+                Caricamento genitore…
+              </div>
+            ) : genitoreQuery.data !== undefined ? (
+              <Link
+                to={`/pianificatore-giro/programmi/${genitoreQuery.data.id}`}
+                className="mt-1 inline-flex items-center gap-2 rounded border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-50"
+              >
+                <span>{genitoreQuery.data.nome}</span>
+                <span className="font-mono text-xs text-muted-foreground">
+                  #{genitoreQuery.data.id} ·{" "}
+                  {formatPeriodo(
+                    genitoreQuery.data.valido_da,
+                    genitoreQuery.data.valido_a,
+                  )}
+                </span>
+              </Link>
+            ) : (
+              <div className="mt-1 text-sm italic text-muted-foreground">
+                Genitore non più disponibile (eliminato).
+              </div>
+            )}
+            <div className="mt-1 text-xs text-muted-foreground">
+              Questo programma è una variazione di periodo del genitore. Per
+              le date del proprio range, il pianificatore può scegliere di
+              far prevalere questo programma sul genitore.
+            </div>
+          </div>
+        )}
+
+        {haFigli && (
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-amber-900">
+              Programmi di variazione ({figli.length})
+            </div>
+            <ul className="mt-1 flex flex-col gap-1.5">
+              {figli.map((f) => (
+                <li key={f.id}>
+                  <Link
+                    to={`/pianificatore-giro/programmi/${f.id}`}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded border border-amber-300 bg-white px-3 py-2 text-sm hover:bg-amber-50"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate font-medium text-amber-900">
+                        {f.nome}
+                      </div>
+                      <div className="font-mono text-xs text-muted-foreground">
+                        #{f.id} · {formatPeriodo(f.valido_da, f.valido_a)} ·{" "}
+                        {f.stato.toUpperCase()}
+                      </div>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-1 text-xs text-muted-foreground">
+              Questi programmi figli sono variazioni di periodo create da
+              variazioni PdE che hanno impattato i giri/turni di questo
+              programma.
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
