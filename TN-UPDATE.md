@@ -10,6 +10,120 @@
 
 ---
 
+## 2026-05-06 (178) — Sub-MR 5.bis-d frontend: pagina "PdE Annuale" + voce menu
+
+### Contesto
+
+Chiude lo scope del **sub-MR 5.bis-d**: l'utente ha visto la dashboard
+Pianificatore Giro live e segnalato la mancanza di UI per
+caricamento PdE/variazioni. Backend già pronto (entry 177, 5 endpoint
+``/api/aziende/me/pde/*`` e ``/variazioni/*``). Questa entry aggiunge
+la UI dedicata sotto Pianificatore Giro Materiale.
+
+**Modello UX** (decisione utente 2026-05-06): sezione dedicata con 2
+pannelli verticalmente impilati:
+
+- **PdE Base**: ultimo run BASE caricato + bottone "Sostituisci PdE
+  base" (rosso, cautelativo, raro). Empty state con call-to-action
+  "Carica PdE base" (primary, blu) se mai caricato.
+- **Variazioni applicate**: timeline cronologica DESC con tipo +
+  contatori + file source + note + bottone "Carica variazione"
+  (verde, comune). Empty state se PdE base mancante (disabilita il
+  bottone con tooltip "Carica prima il PdE base").
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/pde.ts`** (nuovo, ~165 righe): client API
+TypeScript per i 5 endpoint backend. Tipi 1:1 con i Pydantic schema:
+``CorsaImportRun``, ``PdEStatus``, ``CaricaPdEBaseResponse``,
+``RegistraVariazionePayload``, ``ApplicaVariazioneResponse``.
+Multipart upload via ``FormData`` con ``apiFetch`` (no
+``Content-Type`` esplicito per lasciare al browser il boundary).
+
+**`frontend/src/hooks/usePde.ts`** (nuovo, ~110 righe): 5 hook
+TanStack Query con cache invalidation:
+
+- ``usePdEStatus()`` → ``["pde", "status"]``.
+- ``useVariazioniGlobali({ limit })`` → ``["pde", "variazioni", { limit }]``.
+- ``useCaricaPdEBase()`` mutation → invalida status + variazioni.
+- ``useRegistraVariazione()`` mutation → invalida variazioni + status.
+- ``useApplicaVariazione()`` mutation → invalida variazioni + status.
+
+**`frontend/src/routes/pianificatore-giro/PdEAnnualeRoute.tsx`**
+(nuovo, ~640 righe): pagina principale con 5 sub-componenti in un
+file unico (per coesione + lazy chunk):
+
+- ``PdEAnnualeRoute``: container con header + 2 pannelli + 2 dialog.
+- ``PdEBasePanel``: card border + icon ``Database``, badge "Caricato"
+  (emerald) o "Non caricato" (amber), bottone primary o
+  outline-destructive a seconda dello stato. Sezione dettagli con
+  4-5 ``Stat`` (file, caricato il, corse attive con sub-counter
+  cancellate, validità, SHA-256 troncato).
+- ``VariazioniTimelinePanel``: card con counter, lista variazioni
+  ordinata DESC. Item per variazione con icon (Check emerald se
+  applicata, ClipboardCheck amber se solo registrata),
+  badge tipo, contatori in line (``+N create · M modificate``),
+  source file mono, note line-clamp.
+- ``CaricaPdEBaseDialog``: form upload con input file
+  (``accept=".numbers,.xlsx"``), checkbox ``Forza re-import``, success
+  card con report dettagliato (skipped + reason oppure counters
+  delta-sync), errori inline.
+- ``CaricaVariazioneDialog``: select tipo (4 valori INTEGRAZIONE/
+  ORARIO/INTERRUZIONE/CANCELLAZIONE con label umane), input file,
+  textarea note opzionali (max 1000 char), bottone "Carica e applica"
+  che chiama in sequenza ``registraMutation`` + ``applicaMutation``.
+  Success card con riepilogo counters + warnings.
+
+**`frontend/src/routes/AppRoutes.tsx`**: import + nuova route
+``/pianificatore-giro/pde`` sotto ``ProtectedRoute requiredRole=
+PIANIFICATORE_GIRO``.
+
+**`frontend/src/components/layout/Sidebar.tsx`**: import icon
+``Database``, nuova voce ``"PdE Annuale"`` in
+``NAV_PIANIFICATORE_GIRO.items`` tra "Home" e "Programmi".
+
+### Verifiche
+
+- ✅ ``pnpm tsc -b --noEmit``: clean (1 errore typed corretto: ``Button
+  variant="default"`` → ``"primary"``).
+- ✅ Preview manuale via ``mcp__Claude_Preview``: pagina rende i 2
+  pannelli, sidebar mostra "PdE Annuale" con highlight attivo, dati
+  live dal backend (residui dei test integration nel DB locale).
+
+### Decisioni di scope rinviate
+
+- **Test vitest**: niente test per ora (la pagina è un wrapper
+  visualizzatore con 2 dialog form-based; il dominio è
+  completamente coperto dai 11 test integration backend entry 177).
+  Da aggiungere quando emergono bug specifici lato React.
+- **Drag-drop file**: oggi solo file picker. Drag-drop UX-friendly
+  in MR successivo se richiesto.
+- **Progress bar real upload**: file PdE Trenord ~30MB +
+  parse 25-30s. Oggi solo Spinner generico. Considerare progress
+  via ``XMLHttpRequest`` o resumable upload in MR successivo.
+- **Lista paginata variazioni**: oggi limit fisso 50. Pagination
+  quando le variazioni superano quel numero.
+
+### Stato
+
+- ✅ Codice 5.bis-d frontend pronto: 1 client API + 5 hook + 1 route
+  con 5 sub-componenti + routing + sidebar.
+- ⏳ Commit + push + deploy frontend Railway.
+
+### Prossimo step
+
+A scelta utente:
+
+- **Carica PdE Trenord 2026 reale** dalla nuova UI per verificare il
+  flusso end-to-end in produzione.
+- **Sub-MR 5.bis-c**: parser file delta mini (Excel/CSV con colonna
+  ``tipo_variazione``).
+- **Audit cross-codebase ``is_cancellata``**: aggiornare le query
+  consumer (giri, builder) con ``WHERE NOT is_cancellata``.
+- Altro lavoro fuori MR 5.
+
+---
+
 ## 2026-05-06 (177) — Sub-MR 5.bis-d backend: PdE livello azienda (5 endpoint)
 
 ### Contesto

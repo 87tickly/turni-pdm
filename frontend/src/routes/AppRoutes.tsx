@@ -8,6 +8,7 @@ import { ProtectedRoute } from "@/routes/ProtectedRoute";
 import { DashboardRoute } from "@/routes/pianificatore-giro/DashboardRoute";
 import { GiroDettaglioRoute } from "@/routes/pianificatore-giro/GiroDettaglioRoute";
 import { MaterialeThreadRoute } from "@/routes/pianificatore-giro/MaterialeThreadRoute";
+import { PdEAnnualeRoute } from "@/routes/pianificatore-giro/PdEAnnualeRoute";
 import { ProgrammaDettaglioRoute } from "@/routes/pianificatore-giro/ProgrammaDettaglioRoute";
 import { ProgrammaGiriRoute } from "@/routes/pianificatore-giro/ProgrammaGiriRoute";
 import { ProgrammiRoute } from "@/routes/pianificatore-giro/ProgrammiRoute";
@@ -71,6 +72,7 @@ export function AppRoutes() {
           <Route path="/pianificatore-giro">
             <Route index element={<Navigate to="/pianificatore-giro/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardRoute />} />
+            <Route path="pde" element={<PdEAnnualeRoute />} />
             <Route path="programmi" element={<ProgrammiRoute />} />
             <Route path="programmi/:programmaId" element={<ProgrammaDettaglioRoute />} />
             <Route path="programmi/:programmaId/giri" element={<ProgrammaGiriRoute />} />

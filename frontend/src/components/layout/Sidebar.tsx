@@ -7,6 +7,7 @@ import {
   CalendarRange,
   ChevronLeft,
   ChevronRight,
+  Database,
   IdCard,
   LayoutDashboard,
   ListOrdered,
@@ -62,6 +63,7 @@ const NAV_PIANIFICATORE_GIRO: NavGroup = {
   icon: Workflow,
   items: [
     { to: "/pianificatore-giro/dashboard", label: "Home", icon: LayoutDashboard },
+    { to: "/pianificatore-giro/pde", label: "PdE Annuale", icon: Database },
     { to: "/pianificatore-giro/programmi", label: "Programmi", icon: ListOrdered },
   ],
 };
