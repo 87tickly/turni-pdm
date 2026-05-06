@@ -922,20 +922,16 @@ async def genera_giri(
         raise ProgrammaNonAttivoError(programma_id, programma.stato)
 
     # MR-1110 sotto-MR 10 (entry 206): routing pipeline builder.
-    # Solo ``v1`` (legacy) è oggi end-to-end con persister. ``v2``
-    # (entry 202, ``costruisci_turni_v2``) esiste come pipeline pura
-    # ma manca l'adapter ``TurnoConVarianti → GiroDaPersistere`` —
-    # follow-up. Programmi con ``builder_version='v2'`` ricevono un
-    # 501-equivalent (NotImplementedError sottoclasse) finché il
-    # wiring non è completo. Programmi senza il campo (DB pre-0038)
-    # ricevono ``"v1"`` da server_default → procede normale.
-    if programma.builder_version not in ("v1", "v2"):
+    # Solo ``v1`` (legacy) è oggi end-to-end con persister. Tutto il
+    # resto (``v2`` di entry 202, valori inattesi da DB pre-0038)
+    # alza ``BuilderVersionNonSupportata``. Quando il wiring v2 sarà
+    # completo (adapter ``TurnoConVarianti → GiroDaPersistere``,
+    # sotto-MR follow-up), questo check si trasformerà in branching:
+    # ``if v2: return _genera_giri_v2(...)``.
+    if programma.builder_version != "v1":
         raise BuilderVersionNonSupportata(
             programma_id, programma.builder_version
         )
-    if programma.builder_version == "v2":
-        raise BuilderVersionNonSupportata(programma_id, "v2")
-    # Da qui in poi: pipeline ``v1`` legacy invariata.
 
     # Sprint 7.5 MR 4 (decisione utente C3): se i parametri non sono
     # specificati, default al periodo intero del programma. Il

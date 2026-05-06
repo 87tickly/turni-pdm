@@ -10,6 +10,77 @@
 
 ---
 
+## 2026-05-07 (209) — Cleanup post-MR-1110: review Fausto + 2 fix di pulizia
+
+### Contesto
+
+Decisione utente 2026-05-06: "quando finisci [10/7/8] fai un controllo
+di tutto il codice e puliscilo facendoti aiutare da Fausto". Code
+review con Grok (alias FAUSTO, MCP `mcp__grok__code_review`) sul
+diff dei due file più toccati nella sessione: ``api/giri.py`` +
+``builder.py`` (~20 KB di diff, 391 righe).
+
+### Finding di Fausto + decisione
+
+| # | Severità | Finding | Azione |
+|---|---|---|---|
+| 1 | bassa | Import ``calcola_etichetta_variante`` con ``# noqa: F401`` ma non usato in ``api/giri.py`` (solo riferito in commenti) | **APPLICATO**: rimosso import morto |
+| 2 | bassa | Docstring di ``BuilderVersionNonSupportata`` con riferimenti MR/entry | Skippato: convenzione progetto è citare entry per tracciabilità |
+| 3 | media | Doppio check ``builder_version`` (``not in ("v1","v2")`` poi ``== "v2"``) ridondante | **APPLICATO**: collassato in singolo ``!= "v1"`` con commento per il futuro branching v2 |
+| 4 | media | Edge case ``regole`` vuota: warning + 0 giri silente | Skippato: comportamento intenzionale (programma vuoto), warning successivo "regola_senza_catene" copre il caso |
+| 5 | media | Edge case ``corse`` vuota | Skippato: skip silenzioso è già il comportamento atteso |
+| 6 | bassa | In ``get_giro_dettaglio``, ramo else mai raggiunto se ``periodo_giro`` deriva da ``date_tutte`` | Skippato: il fallback è difensivo per consistenza |
+| 7 | bassa | Pre-filtro ``qualche_corsa_oggi`` ridondante col loop interno | Skippato: necessario per aggiornare ``primo_giorno_con_corse`` correttamente |
+
+**Conclusione Fausto**: "Nessun bug critico, sicurezza compromessa,
+o anti-pattern gravi. Il codice sembra ben strutturato per le
+modifiche isolate."
+
+### Modifiche applicate
+
+**`api/giri.py`**: rimosso import ``calcola_etichetta_variante`` —
+era marcato ``# noqa: F401`` "kept for backward compat", ma in realtà
+nessun consumer del modulo lo importa via ``api.giri``. Era solo
+codice morto.
+
+**`builder.py`** ``genera_giri()`` routing: due ``if`` consecutivi
+collassati in uno solo (``if programma.builder_version != "v1"``) con
+commento esplicito sul branching futuro ``v2 → _genera_giri_v2(...)``.
+
+### Verifiche
+
+- ✅ ``mypy --strict src/`` clean (80 source files).
+- ✅ ``ruff check`` clean su entrambi i file.
+- ✅ ``pytest tests/test_builder_giri.py tests/test_genera_giri_api.py``
+  → 34 passed, 1 skipped (nessuna rottura).
+
+### Stato
+
+- ✅ Cleanup post-MR-1110 chiuso.
+- ⏳ Commit + push + deploy backend Railway.
+
+### Sintesi sessione 2026-05-06/07
+
+Entry chiuse oggi (8 commit):
+
+- **203**: bug fix "regole non si mescolano" (pool corse per regola
+  dominante)
+- **204**: UI Gantt varianti (Step A nesting + per/km, Step B
+  indicatori concatenazione + ciclo chiuso)
+- **205**: etichetta v2 stile PDF Trenord nell'API read-side (sotto-MR 6)
+- **206**: campo ``builder_version`` + routing scaffold (sotto-MR 10)
+- **207**: deprecazione fusione cluster A1 per pipeline v2 (sotto-MR 7)
+- **208**: integration test PdE 2026 sintetico + scaffold gated (sotto-MR 8)
+- **209**: cleanup Fausto
+
+5 sotto-MR di MR-1110 chiusi (4, 3, 5, 6, 7, 8, 9 step A+B, 10).
+Resta fuori scope MR-1110: il **wiring end-to-end della pipeline v2
+al persister** (adapter ``TurnoConVarianti → GiroDaPersistere``).
+Quando il pianificatore vorrà attivare v2 sui programmi reali
+(``builder_version='v2'``), bisognerà chiudere quel MR follow-up.
+
+---
+
 ## 2026-05-07 (208) — MR-1110 sotto-MR 8: integration test PdE 2026 (sintetico + scaffold reale)
 
 ### Contesto

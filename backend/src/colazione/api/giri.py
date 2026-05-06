@@ -43,10 +43,7 @@ from colazione.domain.builder_giro.builder import (
     carica_festivita_periodo,
     genera_giri,
 )
-from colazione.domain.builder_giro.etichetta import (
-    calcola_etichetta_variante,  # noqa: F401 — kept for backward compat
-    genera_etichetta_parlante,
-)
+from colazione.domain.builder_giro.etichetta import genera_etichetta_parlante
 from colazione.domain.builder_giro.persister import LocalitaNonTrovataError
 from colazione.domain.builder_giro.risolvi_corsa import (
     ComposizioneNonAmmessaError,
