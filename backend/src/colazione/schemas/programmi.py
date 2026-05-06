@@ -13,7 +13,8 @@ shape coerente).
 from __future__ import annotations
 
 from datetime import date, datetime, time
-from typing import Any, Literal
+from decimal import Decimal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -550,3 +551,148 @@ class AssegnaManualeRequest(BaseModel):
     persona_id: int = Field(gt=0)
     turno_pdc_giornata_id: int = Field(gt=0)
     data: date
+
+
+# =====================================================================
+# Apply variazioni PdE — Sub-MR 5.bis-a (entry 176, alignment con MR 5.bis)
+# =====================================================================
+#
+# Endpoint generico ``POST /variazioni/{run_id}/apply`` che riceve
+# operazioni Pydantic già parsate da N input (form UI / file delta / PdE
+# intero). Complementare a ``POST /applica`` (entry 175) che invece
+# riceve un file PdE multipart e lo parsa internamente. I 2 endpoint
+# convivono e applicano le stesse 4 semantiche, sullo stesso schema
+# soft-delete via flag ``is_cancellata`` (migration 0034).
+
+
+class _OperazioneBase(BaseModel):
+    """Base privata per le operazioni di variazione."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class OperazioneInsertCorsaRequest(_OperazioneBase):
+    """Inserisce una nuova ``corsa_commerciale`` (per ``INTEGRAZIONE``).
+
+    Limitazione dichiarata sub-MR 5.bis-a: la corsa creata **non** ha
+    le 9 ``corsa_composizione`` associate (richiede campi PdE
+    aggiuntivi che il payload core non porta). Per le composizioni
+    usare l'endpoint multipart ``/applica`` (entry 175) che parsa il
+    file PdE completo.
+    """
+
+    tipo: Literal["INSERT_CORSA"]
+    numero_treno: str = Field(min_length=1, max_length=20)
+    codice_origine: str = Field(min_length=1, max_length=20)
+    codice_destinazione: str = Field(min_length=1, max_length=20)
+    ora_partenza: time
+    ora_arrivo: time
+    valido_da: date
+    valido_a: date
+    valido_in_date_json: list[str] = Field(default_factory=list)
+    rete: str | None = Field(default=None, max_length=10)
+    codice_linea: str | None = Field(default=None, max_length=20)
+    direttrice: str | None = None
+    categoria: str | None = Field(default=None, max_length=20)
+    min_tratta: int | None = Field(default=None, ge=0)
+    km_tratta: Decimal | None = None
+    row_hash: str | None = Field(default=None, max_length=64)
+
+
+class OperazioneUpdateOrarioRequest(_OperazioneBase):
+    """Aggiorna orari di una corsa esistente (per ``VARIAZIONE_ORARIO``)."""
+
+    tipo: Literal["UPDATE_ORARIO"]
+    corsa_id: int = Field(gt=0)
+    ora_partenza: time | None = None
+    ora_arrivo: time | None = None
+    min_tratta: int | None = Field(default=None, ge=0)
+    km_tratta: Decimal | None = None
+
+
+class OperazioneRimuoviDateRequest(_OperazioneBase):
+    """Esclude date dal ``valido_in_date_json`` (per
+    ``VARIAZIONE_INTERRUZIONE``)."""
+
+    tipo: Literal["RIMUOVI_DATE_VALIDITA"]
+    corsa_id: int = Field(gt=0)
+    date_da_rimuovere: list[date] = Field(min_length=1)
+
+
+class OperazioneCancellaCorsaRequest(_OperazioneBase):
+    """Soft-delete di una corsa (per ``VARIAZIONE_CANCELLAZIONE``)."""
+
+    tipo: Literal["CANCELLA_CORSA"]
+    corsa_id: int = Field(gt=0)
+
+
+OperazioneVariazioneRequest = Annotated[
+    OperazioneInsertCorsaRequest
+    | OperazioneUpdateOrarioRequest
+    | OperazioneRimuoviDateRequest
+    | OperazioneCancellaCorsaRequest,
+    Field(discriminator="tipo"),
+]
+
+
+class ApplyVariazioneRequest(BaseModel):
+    """Body di ``POST /api/programmi/{id}/variazioni/{run_id}/apply``.
+
+    Sub-MR 5.bis-a: porta una lista di operazioni atomiche già parsate
+    dal generatore (form UI / file delta / PdE intero via 5.bis-b/c/d).
+    Il backend valida tutto contro lo stato corse esistente e applica
+    in transazione.
+
+    ``fail_on_any_error``:
+
+    - ``True`` (default, sicuro): se anche **una sola** operazione ha
+      errori, il backend ritorna 400 con la lista errori, **niente**
+      è applicato (atomico tutto-o-niente).
+    - ``False``: applica solo le operazioni valide, ritorna 200 con
+      gli errori delle scartate. Modalità "best-effort" per workflow
+      tolleranti.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    operazioni: list[OperazioneVariazioneRequest] = Field(
+        min_length=1, max_length=10000
+    )
+    fail_on_any_error: bool = True
+
+
+class ApplyVariazioneErroreRead(BaseModel):
+    """Errore su una singola operazione (mappato da
+    ``ErroreValidazione`` del dominio)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    indice_operazione: int
+    codice: str
+    """Valore di ``CodiceErrore`` enum (vedi ``domain/variazioni.py``)."""
+    motivo: str
+    corsa_id: int | None = None
+
+
+class ApplyVariazioneResponse(BaseModel):
+    """Response di ``POST /apply``.
+
+    Counter granulari per il report UX. ``n_no_op`` traccia operazioni
+    valide che non hanno mutato stato (idempotenza).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: int
+    completed_at: datetime
+    n_insert_corsa: int
+    n_update_orario: int
+    n_rimuovi_date: int
+    n_cancella_corsa: int
+    n_no_op: int
+    n_errori: int
+    n_date_rimosse_totale: int
+    """Somma delle date effettivamente rimosse da ``valido_in_date_json``
+    per le ``RimuoviDateValidita`` applicate (può essere < somma date
+    richieste se alcune erano già fuori dalla validità)."""
+    errori: list[ApplyVariazioneErroreRead]

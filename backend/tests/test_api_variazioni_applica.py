@@ -554,10 +554,15 @@ async def test_applica_interruzione_intersezione_date(
 # =====================================================================
 
 
-async def test_applica_cancellazione_svuota_calendario(
+async def test_applica_cancellazione_setta_flag_is_cancellata(
     client: TestClient,
 ) -> None:
-    """Match a 5 → ``valido_in_date_json`` diventa lista vuota."""
+    """Sub-MR 5.bis-a alignment (entry 176): match a 5 → flag
+    ``is_cancellata=True`` con audit trail (``cancellata_da_run_id``,
+    ``cancellata_at``). Il vecchio approccio "svuota
+    ``valido_in_date_json``" è stato sostituito (più tracciabile +
+    coerente col CHECK constraint
+    ``corsa_commerciale_cancellazione_coerente``)."""
     pid = await _crea_programma_var("canc_ok")
     await _crea_stazioni([f"{_STAZ_PREFIX}I", f"{_STAZ_PREFIX}J"])
     corsa_id = await _seed_corsa(
@@ -589,12 +594,21 @@ async def test_applica_cancellazione_svuota_calendario(
     async with session_scope() as session:
         row = (
             await session.execute(
-                text("SELECT valido_in_date_json FROM corsa_commerciale WHERE id = :id"),
+                text(
+                    "SELECT is_cancellata, cancellata_da_run_id, cancellata_at, "
+                    "valido_in_date_json "
+                    "FROM corsa_commerciale WHERE id = :id"
+                ),
                 {"id": corsa_id},
             )
         ).first()
         assert row is not None
-        assert row[0] == []  # Lista vuota = soft cancellation.
+        assert row[0] is True
+        assert row[1] == run_id
+        assert row[2] is not None
+        # ``valido_in_date_json`` resta intatto (audit: si vede cosa era
+        # attivo al momento della cancellazione).
+        assert row[3] == ["2026-07-01", "2026-07-02"]
 
 
 # =====================================================================

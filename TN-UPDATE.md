@@ -10,6 +10,203 @@
 
 ---
 
+## 2026-05-06 (176) — Sub-MR 5.bis-a alignment: core generico /apply + soft-delete via flag
+
+### Contesto
+
+Allineamento del **MR 5.bis** (entry 175) sulle decisioni di design
+concordate con utente il 2026-05-06:
+
+1. **Tutte e tre le opzioni di input**: PdE intero (entry 175 `/applica`),
+   file delta mini, form UI. I 3 input generano **operazioni atomiche**
+   che un applicatore unico valida e persiste.
+2. **Soft-delete via flag dedicato** ``is_cancellata`` (non più via
+   ``valido_in_date_json=[]``).
+3. **Ambito INTERRUZIONE**: solo programma corrente.
+4. **Reversibilità immutabile**: errori → variazione di compenso.
+
+L'entry 175 ha implementato l'**input PdE intero** con soft-delete via
+`valido_in_date_json=()`. Questa entry **estende l'entry 175** con:
+
+- Schema soft-delete via flag dedicato (migration 0034) — sostituisce
+  l'approccio "lista vuota": più tracciabile (audit trail completo
+  ``cancellata_da_run_id`` + ``cancellata_at``) + coerente con CHECK
+  constraint.
+- Endpoint **generico** ``POST /variazioni/{run_id}/apply`` (JSON
+  operazioni atomiche) — complementare a ``/applica`` (multipart file
+  PdE) per gli input form UI / file delta che non hanno un PdE intero.
+- Modulo dominio **core** ``domain/variazioni.py`` — pure-Python
+  DB-agnostic, validazione 4 operazioni atomiche con codici errore
+  granulari. Parallelo a ``domain/variazioni_pde.py`` (parser specifico).
+
+I due endpoint convivono e applicano le stesse 4 semantiche sul
+medesimo schema soft-delete.
+
+### Modifiche schema (migration 0034)
+
+**`backend/alembic/versions/0034_corsa_soft_delete.py`** (nuovo):
+aggiunge a ``corsa_commerciale``:
+
+- ``is_cancellata: Boolean NOT NULL DEFAULT false``.
+- ``cancellata_da_run_id: BigInteger`` con FK su
+  ``corsa_import_run.id`` ON DELETE SET NULL.
+- ``cancellata_at: DateTime(timezone=True)`` nullable.
+- CHECK constraint ``corsa_commerciale_cancellazione_coerente``: i 3
+  campi sono coerenti (entrambi NULL se attiva, NOT NULL se
+  cancellata).
+- Indice parziale ``ix_corsa_commerciale_attive`` su ``(azienda_id)``
+  ``WHERE is_cancellata = false``.
+
+Revision ID ``b2c3d4e5f6a1``, parent ``a1b2c3d4e5f6`` (0033).
+
+**`backend/src/colazione/models/corse.py`** —
+``CorsaCommerciale`` con i 3 nuovi campi mappati.
+
+**`backend/src/colazione/schemas/corse.py`** —
+``CorsaCommercialeRead`` esteso con i 3 campi.
+
+### Modulo dominio nuovo (core)
+
+**`backend/src/colazione/domain/variazioni.py`** (nuovo, ~430 righe):
+modulo pure-Python DB-agnostic, parallelo a ``domain/variazioni_pde.py``
+(parser PdE intero).
+
+- ``TipoOperazione`` StrEnum: ``INSERT_CORSA``, ``UPDATE_ORARIO``,
+  ``RIMUOVI_DATE_VALIDITA``, ``CANCELLA_CORSA``.
+- ``CodiceErrore`` StrEnum: 8 codici granulari.
+- Dataclass frozen: ``CorsaSnapshot``, ``InsertCorsa``, ``UpdateOrario``,
+  ``RimuoviDateValidita``, ``CancellaCorsa``.
+- Type alias ``Operazione`` (union dei 4 tipi).
+- Output: ``ErroreValidazione``, ``OperazioneNormalizzata`` (con
+  ``is_no_op`` per idempotenza), ``RisultatoValidazione`` con
+  property counters.
+- Entry point ``valida_e_normalizza(operazioni, corse_esistenti,
+  azienda_id)``.
+- Helper ``applica_rimozione_date(json_iso, date_da_rimuovere)``.
+
+### Adattamento modulo dominio esistente
+
+**`backend/src/colazione/domain/variazioni_pde.py`**:
+
+- ``CorsaEsistente`` esteso con ``is_cancellata: bool = False``
+  (default per retrocompatibilità test).
+- Nuovo dataclass ``OpSoftCancella(corsa_id: int)`` — sostituisce
+  ``OpUpdateValidoInDate(valido_in_date_json=())`` per la cancellazione.
+- ``RisultatoPianificazione`` aggiunge ``cancellazioni:
+  list[OpSoftCancella]``. ``n_update`` property aggiornato per
+  includerle.
+- ``pianifica_variazione_cancellazione`` riscritto: emette
+  ``OpSoftCancella`` invece di ``OpUpdateValidoInDate``. Idempotenza
+  ora basata su ``is_cancellata=True`` (non più ``valido_in_date_json=()``).
+
+### Schemi Pydantic nuovi
+
+**`backend/src/colazione/schemas/programmi.py`** — 7 schemi nuovi
+``extra=forbid`` con discriminated union via
+``Annotated[..., Field(discriminator='tipo')]``:
+
+- ``OperazioneInsertCorsaRequest``, ``OperazioneUpdateOrarioRequest``,
+  ``OperazioneRimuoviDateRequest``, ``OperazioneCancellaCorsaRequest``.
+- ``OperazioneVariazioneRequest`` (Annotated discriminated union).
+- ``ApplyVariazioneRequest`` (operazioni + ``fail_on_any_error: bool``).
+- ``ApplyVariazioneErroreRead``, ``ApplyVariazioneResponse``.
+
+### Endpoint nuovi/aggiornati
+
+**`backend/src/colazione/api/programmi.py`**:
+
+- Endpoint nuovo ``POST /api/programmi/{id}/variazioni/{run_id}/apply``
+  (auth ``PIANIFICATORE_GIRO``) — riceve operazioni atomiche JSON,
+  valida via ``domain/variazioni.py``, applica.
+- Endpoint esistente ``/applica`` (entry 175) adattato:
+  - ``_carica_corse_esistenti`` ora include ``is_cancellata`` nella
+    SELECT.
+  - ``_applica_operazioni`` gestisce ``risultato.cancellazioni`` con
+    UPDATE flag + ``cancellata_da_run_id`` + ``cancellata_at``.
+- Helper ``_pyd_op_to_domain``, ``_row_hash_per_insert`` privati.
+- Modalità ``fail_on_any_error`` per `/apply`: True (default) =
+  atomico tutto-o-niente; False = best-effort.
+
+### Test
+
+**`backend/tests/test_domain_variazioni.py`** (nuovo, 28 pure unit
+test): InsertCorsa / UpdateOrario / RimuoviDate / CancellaCorsa
+(caso base + edge cases + errori) + batch misti +
+``applica_rimozione_date`` (purity, idempotenza) + frozen dataclass.
+
+**`backend/tests/test_api_programmi_variazioni.py`** (nuovo, 11 test
+integration, 1 skipped placeholder): auth (401), lookup 404 (programma/run
+di altro programma), 409 (BASE / già applicato), 4 tipi in batch
+con persistenza DB verificata, ``fail_on_any_error`` True/False,
+re-apply 409, admin bypass.
+
+**`backend/tests/test_domain_variazioni_pde.py`** (esistente,
+aggiornato): 4 test cancellazione adattati al nuovo
+``OpSoftCancella``:
+
+- ``test_cancellazione_emette_op_softcancella`` (rinominato).
+- ``test_cancellazione_idempotente_se_gia_cancellata`` (rinominato,
+  usa ``is_cancellata=True`` invece di ``valido_in_date_json=()``).
+- ``test_cancellazione_match_ambiguo_applica_a_tutti`` (asserzioni
+  cambiate da ``update_valido_in_date`` a ``cancellazioni``).
+- ``test_cancellazione_no_match_warning`` (invariato).
+- Helper ``_esistente`` esteso con ``is_cancellata: bool = False``.
+
+**`backend/tests/test_api_variazioni_applica.py`** (esistente,
+aggiornato):
+``test_applica_cancellazione_setta_flag_is_cancellata`` (rinominato):
+verifica ``is_cancellata=True``, ``cancellata_da_run_id=run_id``,
+``cancellata_at NOT NULL``, e che ``valido_in_date_json`` resti
+**intatto** (audit: si vede cosa era attivo al momento della
+cancellazione).
+
+**`backend/tests/test_schemas.py`** — mock ``CorsaCommerciale`` esteso
+con i 3 nuovi campi.
+
+### Verifiche
+
+- ✅ ``uv run alembic upgrade head``: migration 0034 applicata locale.
+- ✅ ``uv run mypy --strict src/``: 74 source files clean.
+- ✅ ``uv run ruff check`` su tutti i file MR + test: 0 errori.
+- ✅ ``uv run pytest``: **828 passed, 13 skipped, 0 failed** (+31 dal
+  pre-merge: 28 nuovi domain miei + 11 nuovi integration miei -
+  8 modifiche a test loro per nuovo schema soft-delete).
+
+### Decisioni di scope rinviate (dichiarate)
+
+- **Refactoring profondo** ``variazioni_pde.py`` per usare
+  internamente il mio core ``variazioni.py``: non fatto. I due moduli
+  convivono come strati paralleli (parser specifico vs core generico).
+  Possibile in MR successivi se emergono divergenze di logica.
+- **Composizioni associate alle nuove corse INSERT** via ``/apply``:
+  niente 9 ``corsa_composizione``. Per le composizioni complete usare
+  ``/applica`` con file PdE multipart.
+- **Filtro consumer su ``is_cancellata``**: l'indice parziale esiste,
+  ma le query lato giri / builder non sono state aggiornate. Audit
+  cross-codebase separato (limitazione dichiarata).
+- **Sub-MR 5.bis-c (file delta mini)**: parser per Excel/CSV con
+  colonna ``tipo_variazione``. Non in scope qui.
+- **Sub-MR 5.bis-d (form UI Pianificatore Giro)**: dialog 4 forme
+  (INTERRUZIONE = linea + range, ORARIO/CANCELLAZIONE = picker corse,
+  INTEGRAZIONE = upload file mini). Non in scope qui.
+- **Sub-MR 5.bis-e (timeline UI)**: dashboard variazioni del programma.
+  Non in scope qui.
+
+### Stato
+
+- ✅ Codice 5.bis-a alignment pronto: migration + 1 modulo dominio
+  nuovo + 1 modulo dominio adattato + 7 schemi Pydantic + 1 endpoint
+  nuovo + 1 endpoint adattato + 38 test nuovi miei + 5 test loro
+  adattati.
+- ⏳ Commit + push + deploy backend Railway.
+
+### Prossimo step
+
+Sub-MR 5.bis-c (file delta mini) o 5.bis-d (form UI), a scelta utente.
+La timeline 5.bis-e può essere fatta in parallelo o dopo.
+
+---
+
 ## 2026-05-05 (175) — Sprint 8.0 MR 5.bis: applicazione concreta variazioni PdE
 
 ### Contesto

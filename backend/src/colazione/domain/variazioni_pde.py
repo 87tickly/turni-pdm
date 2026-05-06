@@ -95,9 +95,11 @@ class CorsaEsistente:
 
     L'endpoint API costruisce questa lista da una query
     ``SELECT id, row_hash, numero_treno, valido_da, valido_a,
-    codice_origine, codice_destinazione, valido_in_date_json``
-    sull'azienda del programma. Tutti i campi necessari al match
-    (chiave a 3 o 5) e al diff (per INTERRUZIONE).
+    codice_origine, codice_destinazione, valido_in_date_json,
+    is_cancellata`` sull'azienda del programma. Tutti i campi necessari
+    al match (chiave a 3 o 5) e al diff (per INTERRUZIONE), più il
+    flag di soft-delete (sub-MR 5.bis-a alignment, entry 176): le
+    corse già cancellate vengono skippate dai planner per idempotenza.
     """
 
     id: int
@@ -109,6 +111,12 @@ class CorsaEsistente:
     codice_destinazione: str
     valido_in_date_json: tuple[str, ...]
     """Tuple di date ISO (immutabile per essere ``frozen``)."""
+    is_cancellata: bool = False
+    """Sub-MR 5.bis-a (entry 176): True se ``corsa_commerciale.is_cancellata``.
+    Usato dai planner per idempotenza (cancellazione su corsa già
+    cancellata è skip silenzioso) e per warning (interruzione/orario su
+    corsa cancellata = errore di workflow). Default False per
+    retrocompatibilità con i test esistenti."""
 
 
 @dataclass(frozen=True)
@@ -169,12 +177,34 @@ class OpUpdateOrari:
 
 @dataclass(frozen=True)
 class OpUpdateValidoInDate:
-    """Aggiornare ``valido_in_date_json`` di una corsa esistente
-    (usato sia per INTERRUZIONE — intersezione — sia per
-    CANCELLAZIONE — lista vuota)."""
+    """Aggiornare ``valido_in_date_json`` di una corsa esistente.
+
+    Usato per ``VARIAZIONE_INTERRUZIONE`` (intersezione delle date).
+    NON è più usato per ``VARIAZIONE_CANCELLAZIONE`` dopo l'alignment
+    sub-MR 5.bis-a (entry 176): la cancellazione passa attraverso
+    :class:`OpSoftCancella` che setta il flag dedicato
+    ``corsa_commerciale.is_cancellata`` (migration 0034).
+    """
 
     corsa_id: int
     valido_in_date_json: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class OpSoftCancella:
+    """Soft-delete di una corsa esistente (sub-MR 5.bis-a alignment, entry 176).
+
+    Mappa ``VARIAZIONE_CANCELLAZIONE`` sul flag dedicato della migration
+    0034 (``is_cancellata=True``, ``cancellata_da_run_id=run.id``,
+    ``cancellata_at=now()``). Sostituisce la vecchia semantica "svuoto
+    ``valido_in_date_json``": più tracciabile (audit trail completo) e
+    coerente col CHECK constraint ``corsa_commerciale_cancellazione_coerente``.
+
+    Hard-DELETE è impossibile per FK RESTRICT da ``turno_pdc_blocco``
+    (corse consumate da turni PdC).
+    """
+
+    corsa_id: int
 
 
 @dataclass(frozen=True)
@@ -190,6 +220,7 @@ class RisultatoPianificazione:
     insert: list[OpInsert] = field(default_factory=list)
     update_orari: list[OpUpdateOrari] = field(default_factory=list)
     update_valido_in_date: list[OpUpdateValidoInDate] = field(default_factory=list)
+    cancellazioni: list[OpSoftCancella] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -198,7 +229,13 @@ class RisultatoPianificazione:
 
     @property
     def n_update(self) -> int:
-        return len(self.update_orari) + len(self.update_valido_in_date)
+        # Sub-MR 5.bis-a alignment (entry 176): le ``cancellazioni`` sono
+        # contate come "update" (modifica del flag su riga esistente).
+        return (
+            len(self.update_orari)
+            + len(self.update_valido_in_date)
+            + len(self.cancellazioni)
+        )
 
 
 # =====================================================================
@@ -448,20 +485,28 @@ def pianifica_variazione_cancellazione(
     targets: list[ParsedTarget],
     esistenti: list[CorsaEsistente],
 ) -> RisultatoPianificazione:
-    """Variazione di tipo ``VARIAZIONE_CANCELLAZIONE``: svuota date.
+    """Variazione di tipo ``VARIAZIONE_CANCELLAZIONE``: soft-delete via flag.
 
-    Match per chiave a 5. Per ogni corsa matching, emetto
-    :class:`OpUpdateValidoInDate` con lista vuota. **Soft cancellation**:
-    la riga resta in DB per audit trail (decisione utente "no DELETE",
-    memoria "Niente errori sui dati DB").
+    Sub-MR 5.bis-a alignment (entry 176): la cancellazione setta il
+    flag ``is_cancellata`` (migration 0034) invece di svuotare
+    ``valido_in_date_json``. Il vecchio approccio "lista vuota" era
+    ambiguo (non si distingueva da una corsa con periodicità vuota
+    legittima) e privo di audit trail. Il flag dedicato risolve
+    entrambi i problemi: ``cancellata_da_run_id`` + ``cancellata_at``
+    tracciano chi e quando.
+
+    Match per chiave a 5. Per ogni corsa matching:
 
     - 0 match → warning.
-    - 1+ match → per ognuno svuoto ``valido_in_date_json``.
-    - Se la corsa è già a lista vuota, skip (idempotente).
+    - 1+ match → emetto :class:`OpSoftCancella` per ognuno.
+    - Se la corsa è già cancellata (``is_cancellata=True``), skip
+      idempotente (no-op).
+
+    Hard-DELETE è impossibile per FK RESTRICT da ``turno_pdc_blocco``.
     """
     idx5 = _index_by_key5(esistenti)
     by_id = _index_by_id(esistenti)
-    updates: list[OpUpdateValidoInDate] = []
+    cancellazioni: list[OpSoftCancella] = []
     warnings: list[str] = []
 
     for t in targets:
@@ -489,9 +534,11 @@ def pianifica_variazione_cancellazione(
 
         for cid in match_ids:
             existing = by_id[cid]
-            if not existing.valido_in_date_json:
-                # Già cancellata, idempotente.
+            if existing.is_cancellata:
+                # Già cancellata, idempotente (no-op silenzioso).
                 continue
-            updates.append(OpUpdateValidoInDate(corsa_id=cid, valido_in_date_json=()))
+            cancellazioni.append(OpSoftCancella(corsa_id=cid))
 
-    return RisultatoPianificazione(update_valido_in_date=updates, warnings=warnings)
+    return RisultatoPianificazione(
+        cancellazioni=cancellazioni, warnings=warnings
+    )

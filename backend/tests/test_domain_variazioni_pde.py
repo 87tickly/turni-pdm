@@ -37,6 +37,7 @@ def _esistente(
     codice_origine: str = "S01",
     codice_destinazione: str = "S02",
     valido_in_date_json: tuple[str, ...] = (),
+    is_cancellata: bool = False,
 ) -> CorsaEsistente:
     return CorsaEsistente(
         id=id,
@@ -47,6 +48,7 @@ def _esistente(
         codice_origine=codice_origine,
         codice_destinazione=codice_destinazione,
         valido_in_date_json=valido_in_date_json,
+        is_cancellata=is_cancellata,
     )
 
 
@@ -319,7 +321,10 @@ def test_interruzione_no_match_warning() -> None:
 # =====================================================================
 
 
-def test_cancellazione_svuota_valido_in_date() -> None:
+def test_cancellazione_emette_op_softcancella() -> None:
+    """Sub-MR 5.bis-a alignment (entry 176): la cancellazione passa per
+    ``OpSoftCancella`` (flag dedicato ``is_cancellata``), non più per
+    ``OpUpdateValidoInDate(valido_in_date_json=())``."""
     targets = [_target(numero_treno="13")]
     esistenti = [
         _esistente(
@@ -330,19 +335,23 @@ def test_cancellazione_svuota_valido_in_date() -> None:
     ]
     result = pianifica_variazione_cancellazione(targets, esistenti)
     assert result.n_update == 1
-    op = result.update_valido_in_date[0]
-    assert op.corsa_id == 42
-    assert op.valido_in_date_json == ()
+    assert len(result.cancellazioni) == 1
+    assert result.cancellazioni[0].corsa_id == 42
+    # Niente più OpUpdateValidoInDate per la cancellazione.
+    assert result.update_valido_in_date == []
 
 
-def test_cancellazione_idempotente_se_gia_vuota() -> None:
-    """Corsa già cancellata (lista vuota) → skip."""
+def test_cancellazione_idempotente_se_gia_cancellata() -> None:
+    """Corsa con ``is_cancellata=True`` → skip (sub-MR 5.bis-a alignment).
+    Prima il check era su ``valido_in_date_json=()``, ora sul flag
+    dedicato (più tracciabile + audit trail)."""
     targets = [_target(numero_treno="13")]
     esistenti = [
-        _esistente(numero_treno="13", valido_in_date_json=()),
+        _esistente(numero_treno="13", is_cancellata=True),
     ]
     result = pianifica_variazione_cancellazione(targets, esistenti)
     assert result.n_update == 0
+    assert result.cancellazioni == []
 
 
 def test_cancellazione_match_ambiguo_applica_a_tutti() -> None:
@@ -358,7 +367,8 @@ def test_cancellazione_match_ambiguo_applica_a_tutti() -> None:
     ]
     result = pianifica_variazione_cancellazione(targets, esistenti)
     assert result.n_update == 2
-    assert all(op.valido_in_date_json == () for op in result.update_valido_in_date)
+    assert len(result.cancellazioni) == 2
+    assert {op.corsa_id for op in result.cancellazioni} == {1, 2}
     assert any("match ambiguo" in w for w in result.warnings)
 
 
@@ -366,6 +376,7 @@ def test_cancellazione_no_match_warning() -> None:
     targets = [_target(numero_treno="999")]
     result = pianifica_variazione_cancellazione(targets, [])
     assert result.n_update == 0
+    assert result.cancellazioni == []
     assert len(result.warnings) == 1
 
 

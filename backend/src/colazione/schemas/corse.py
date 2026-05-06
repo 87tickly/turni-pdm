@@ -78,6 +78,11 @@ class CorsaCommercialeRead(BaseModel):
     import_run_id: int | None = None
     imported_at: datetime
 
+    # Sub-MR 5.bis-a: soft-delete (vedi ``models/corse.py``).
+    is_cancellata: bool = False
+    cancellata_da_run_id: int | None = None
+    cancellata_at: datetime | None = None
+
 
 class CorsaComposizioneRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)

@@ -124,6 +124,22 @@ class CorsaCommerciale(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
+    # Sub-MR 5.bis-a (migration 0034): soft-delete via
+    # ``VARIAZIONE_CANCELLAZIONE``. Hard-DELETE è impossibile sulle corse
+    # già consumate da ``turno_pdc_blocco`` (FK RESTRICT). I 3 campi sono
+    # coerenti tra loro (CHECK ``corsa_commerciale_cancellazione_coerente``):
+    # ``is_cancellata=False`` ⟹ entrambi NULL; ``True`` ⟹ entrambi NOT NULL.
+    # Le query consumer devono filtrare con ``WHERE NOT is_cancellata``
+    # (indice parziale ``ix_corsa_commerciale_attive`` ottimizza la query).
+    is_cancellata: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    cancellata_da_run_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("corsa_import_run.id", ondelete="SET NULL"),
+    )
+    cancellata_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
 class CorsaComposizione(Base):
     __tablename__ = "corsa_composizione"

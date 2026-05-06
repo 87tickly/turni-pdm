@@ -66,6 +66,16 @@ from colazione.domain.pipeline import (
     valida_transizione_manutenzione,
     valida_transizione_pdc,
 )
+from colazione.domain.variazioni import (
+    CancellaCorsa,
+    CorsaSnapshot,
+    InsertCorsa,
+    Operazione,
+    RimuoviDateValidita,
+    UpdateOrario,
+    applica_rimozione_date,
+    valida_e_normalizza,
+)
 from colazione.domain.variazioni_pde import (
     CorsaEsistente,
     ParsedTarget,
@@ -102,11 +112,18 @@ from colazione.models.turni_pdc import TurnoPdc, TurnoPdcGiornata
 from colazione.schemas.corse import CorsaImportRunRead
 from colazione.schemas.programmi import (
     ApplicaVariazionePdEResponse,
+    ApplyVariazioneErroreRead,
+    ApplyVariazioneRequest,
+    ApplyVariazioneResponse,
     AssegnaManualeRequest,
     AssegnazioneCreataRead,
     AutoAssegnaPersoneRequest,
     AutoAssegnaPersoneResponse,
     MancanzaRead,
+    OperazioneCancellaCorsaRequest,
+    OperazioneInsertCorsaRequest,
+    OperazioneRimuoviDateRequest,
+    OperazioneUpdateOrarioRequest,
     ProgrammaMaterialeCreate,
     ProgrammaMaterialeRead,
     ProgrammaMaterialeUpdate,
@@ -1637,6 +1654,7 @@ async def _carica_corse_esistenti(
         CorsaCommerciale.codice_origine,
         CorsaCommerciale.codice_destinazione,
         CorsaCommerciale.valido_in_date_json,
+        CorsaCommerciale.is_cancellata,
     ).where(CorsaCommerciale.azienda_id == azienda_id)
     rows = (await session.execute(stmt)).all()
     return [
@@ -1649,6 +1667,7 @@ async def _carica_corse_esistenti(
             codice_origine=row.codice_origine,
             codice_destinazione=row.codice_destinazione,
             valido_in_date_json=tuple(row.valido_in_date_json or []),
+            is_cancellata=row.is_cancellata,
         )
         for row in rows
     ]
@@ -1736,13 +1755,31 @@ async def _applica_operazioni(
             )
         )
 
-    # 3) UPDATE valido_in_date_json (interruzione + cancellazione).
+    # 3) UPDATE valido_in_date_json (solo INTERRUZIONE — la
+    # CANCELLAZIONE è gestita dal flag is_cancellata, vedi sotto).
     for upd_dates in risultato.update_valido_in_date:
         await session.execute(
             update(CorsaCommerciale)
             .where(CorsaCommerciale.id == upd_dates.corsa_id)
             .values(valido_in_date_json=list(upd_dates.valido_in_date_json))
         )
+
+    # 4) Soft-cancellation via flag dedicato (sub-MR 5.bis-a alignment,
+    # entry 176). Il CHECK constraint
+    # ``corsa_commerciale_cancellazione_coerente`` impone i 3 campi
+    # coerenti: ``is_cancellata=True`` ⟹ entrambi NOT NULL.
+    if risultato.cancellazioni:
+        now_cancellazione = datetime.now(UTC)
+        for canc in risultato.cancellazioni:
+            await session.execute(
+                update(CorsaCommerciale)
+                .where(CorsaCommerciale.id == canc.corsa_id)
+                .values(
+                    is_cancellata=True,
+                    cancellata_da_run_id=run_id,
+                    cancellata_at=now_cancellazione,
+                )
+            )
 
 
 @router.post(
@@ -1897,4 +1934,353 @@ async def applica_variazione_pde(
         n_warnings=len(risultato.warnings),
         warnings=risultato.warnings,
         completed_at=completed_at,
+    )
+
+
+# =====================================================================
+# Apply variazioni PdE — endpoint generico (Sub-MR 5.bis-a, entry 176)
+# =====================================================================
+#
+# Endpoint complementare a ``POST /applica`` (entry 175). Mentre
+# ``/applica`` è specializzato sull'input "PdE intero ri-emesso" (sub-MR
+# 5.bis-b nel piano), ``/apply`` è il **core generico**: riceve
+# operazioni atomiche già parsate (Pydantic JSON) da N possibili
+# generatori (form UI 5.bis-d, file delta mini 5.bis-c, parser custom).
+# Entrambi insistono sullo stesso schema soft-delete via flag
+# ``is_cancellata`` (migration 0034).
+
+
+def _pyd_op_to_domain(
+    op: OperazioneInsertCorsaRequest
+    | OperazioneUpdateOrarioRequest
+    | OperazioneRimuoviDateRequest
+    | OperazioneCancellaCorsaRequest,
+) -> Operazione:
+    """Mappa una operazione Pydantic dell'HTTP body sull'omologa
+    dataclass frozen del modulo dominio ``variazioni``.
+
+    Tipo-discriminato via ``op.tipo`` (Pydantic Literal). Le 4 forme
+    Pydantic e le 4 dataclass dominio hanno campi 1:1 ma sono tipi
+    distinti: il dominio è pure-Python, niente Pydantic dependency.
+    """
+    if isinstance(op, OperazioneInsertCorsaRequest):
+        return InsertCorsa(
+            numero_treno=op.numero_treno,
+            codice_origine=op.codice_origine,
+            codice_destinazione=op.codice_destinazione,
+            ora_partenza=op.ora_partenza,
+            ora_arrivo=op.ora_arrivo,
+            valido_da=op.valido_da,
+            valido_a=op.valido_a,
+            valido_in_date_json=tuple(op.valido_in_date_json),
+            rete=op.rete,
+            codice_linea=op.codice_linea,
+            direttrice=op.direttrice,
+            categoria=op.categoria,
+            min_tratta=op.min_tratta,
+            km_tratta=op.km_tratta,
+            row_hash=op.row_hash,
+        )
+    if isinstance(op, OperazioneUpdateOrarioRequest):
+        return UpdateOrario(
+            corsa_id=op.corsa_id,
+            ora_partenza=op.ora_partenza,
+            ora_arrivo=op.ora_arrivo,
+            min_tratta=op.min_tratta,
+            km_tratta=op.km_tratta,
+        )
+    if isinstance(op, OperazioneRimuoviDateRequest):
+        return RimuoviDateValidita(
+            corsa_id=op.corsa_id,
+            date_da_rimuovere=tuple(op.date_da_rimuovere),
+        )
+    return CancellaCorsa(corsa_id=op.corsa_id)
+
+
+def _row_hash_per_insert(op: InsertCorsa, run_id: int, idx: int) -> str:
+    """Genera un ``row_hash`` deterministico se l'operazione non lo porta.
+
+    Per gli ``InsertCorsa`` da form UI o file delta minimale, il caller
+    può non avere a disposizione lo SHA-256 della riga PdE originale
+    (manca il file completo). In tale caso usiamo
+    ``sha256(numero_treno|valido_da|ora_partenza|origine|destinazione|run_id|idx)``
+    per soddisfare il NOT NULL su ``corsa_commerciale.row_hash``
+    mantenendo determinismo (stessa operazione applicata 2 volte →
+    stesso hash, utile per audit cross-environment).
+
+    Se ``op.row_hash`` è valorizzato (parser PdE intero) lo passa-through.
+    """
+    import hashlib
+
+    if op.row_hash:
+        return op.row_hash
+    payload = (
+        f"{op.numero_treno}|{op.valido_da.isoformat()}|"
+        f"{op.ora_partenza.isoformat()}|{op.codice_origine}|"
+        f"{op.codice_destinazione}|run={run_id}|idx={idx}"
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+@router.post(
+    "/{programma_id}/variazioni/{run_id}/apply",
+    response_model=ApplyVariazioneResponse,
+    summary="Applica una variazione PdE registrata da operazioni atomiche JSON",
+)
+async def apply_variazione_pde(
+    programma_id: int,
+    run_id: int,
+    payload: ApplyVariazioneRequest,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> ApplyVariazioneResponse:
+    """Applica una ``CorsaImportRun`` registrata, da operazioni atomiche
+    JSON (sub-MR 5.bis-a alignment, entry 176).
+
+    Endpoint complementare a ``POST /applica`` (entry 175). Differenze:
+
+    - ``/applica`` riceve un file PdE multipart, lo parsa, e applica
+      automaticamente la semantica derivata dal ``run.tipo``.
+    - ``/apply`` (questo) riceve operazioni atomiche già parsate in
+      formato JSON: il chiamante (form UI sub-MR 5.bis-d, parser
+      custom) costruisce esplicitamente la lista. Più granulare,
+      mix di tipi possibile in un singolo batch.
+
+    **Pre-condizioni**:
+
+    - Programma esiste, azienda corrente.
+    - Run esiste, ``programma_materiale_id == programma_id``,
+      ``azienda_id`` corrente.
+    - ``run.tipo != 'BASE'`` (il run BASE è il primo import, applicato
+      direttamente dall'importer).
+    - ``run.completed_at IS NULL`` (idempotenza: 409 se già applicato).
+
+    **Mutazioni** (4 tipi):
+
+    - ``INSERT_CORSA`` → nuova ``corsa_commerciale`` con
+      ``import_run_id=run.id``, ``import_source='variazione'``.
+      Limitazione dichiarata: niente 9 ``corsa_composizione`` associate
+      (richiedono campi PdE non presenti nel payload core; per quelle
+      usare ``/applica`` con file PdE completo).
+    - ``UPDATE_ORARIO`` → SET orari/min/km (solo i campi non None).
+    - ``RIMUOVI_DATE_VALIDITA`` → nuovo ``valido_in_date_json``
+      escludendo le date richieste (idempotente).
+    - ``CANCELLA_CORSA`` → soft-delete via flag ``is_cancellata=True``,
+      ``cancellata_da_run_id=run.id``, ``cancellata_at=now()``.
+
+    **Modalità**: ``fail_on_any_error=True`` (default) → atomico
+    tutto-o-niente; ``False`` → best-effort.
+
+    Auth: ``PIANIFICATORE_GIRO`` (admin bypassa).
+    """
+    p = await _get_programma_or_404(
+        session, programma_id, user.azienda_id, for_update=True
+    )
+
+    run = (
+        await session.execute(
+            select(CorsaImportRun).where(
+                CorsaImportRun.id == run_id,
+                CorsaImportRun.programma_materiale_id == p.id,
+                CorsaImportRun.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"variazione run_id={run_id} non trovata per programma {programma_id}",
+        )
+    if run.tipo == "BASE":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"run_id={run_id} è di tipo BASE: il primo import del PdE "
+                "viene applicato direttamente dall'importer, non da apply"
+            ),
+        )
+    if run.completed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"variazione run_id={run_id} già applicata in data "
+                f"{run.completed_at.isoformat()}: per re-applicare registra "
+                "una nuova variazione"
+            ),
+        )
+
+    # Snapshot corse dell'azienda → dict per validazione dominio.
+    corse_rows = await session.execute(
+        select(
+            CorsaCommerciale.id,
+            CorsaCommerciale.azienda_id,
+            CorsaCommerciale.numero_treno,
+            CorsaCommerciale.valido_da,
+            CorsaCommerciale.valido_a,
+            CorsaCommerciale.valido_in_date_json,
+            CorsaCommerciale.is_cancellata,
+        ).where(CorsaCommerciale.azienda_id == user.azienda_id)
+    )
+    snapshot: dict[int, CorsaSnapshot] = {}
+    for r in corse_rows.all():
+        snapshot[r.id] = CorsaSnapshot(
+            id=r.id,
+            azienda_id=r.azienda_id,
+            numero_treno=r.numero_treno,
+            valido_da=r.valido_da,
+            valido_a=r.valido_a,
+            valido_in_date_json=tuple(r.valido_in_date_json or []),
+            is_cancellata=r.is_cancellata,
+        )
+
+    # Pydantic → dominio.
+    operazioni_dom: list[Operazione] = [
+        _pyd_op_to_domain(o) for o in payload.operazioni
+    ]
+    risultato = valida_e_normalizza(
+        operazioni_dom,
+        snapshot,
+        azienda_id=user.azienda_id,
+    )
+
+    # Modalità atomica: se ci sono errori e fail_on_any_error → 400.
+    if risultato.errori and payload.fail_on_any_error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "messaggio": (
+                    f"{len(risultato.errori)} errori di validazione "
+                    "(fail_on_any_error=True): nessuna mutazione applicata"
+                ),
+                "errori": [
+                    {
+                        "indice_operazione": e.indice_operazione,
+                        "codice": e.codice.value,
+                        "motivo": e.motivo,
+                        "corsa_id": e.corsa_id,
+                    }
+                    for e in risultato.errori
+                ],
+            },
+        )
+
+    now = datetime.now(UTC)
+    n_date_rimosse_totale = 0
+
+    # Carico le entità ORM per le UPDATE/CANCELLAZIONE in batch.
+    corsa_ids_da_aggiornare: set[int] = set()
+    for o in risultato.operazioni_valide:
+        if o.is_no_op:
+            continue
+        if isinstance(
+            o.operazione, (UpdateOrario, RimuoviDateValidita, CancellaCorsa)
+        ):
+            corsa_ids_da_aggiornare.add(o.operazione.corsa_id)
+    corse_orm: dict[int, CorsaCommerciale] = {}
+    if corsa_ids_da_aggiornare:
+        rows = await session.execute(
+            select(CorsaCommerciale).where(
+                CorsaCommerciale.id.in_(corsa_ids_da_aggiornare),
+                CorsaCommerciale.azienda_id == user.azienda_id,
+            )
+        )
+        for c in rows.scalars().all():
+            corse_orm[c.id] = c
+
+    for normalizzata in risultato.operazioni_valide:
+        if normalizzata.is_no_op:
+            continue
+        op = normalizzata.operazione
+        if isinstance(op, InsertCorsa):
+            nuova = CorsaCommerciale(
+                azienda_id=user.azienda_id,
+                row_hash=_row_hash_per_insert(
+                    op, run.id, normalizzata.indice_operazione
+                ),
+                numero_treno=op.numero_treno,
+                rete=op.rete,
+                codice_linea=op.codice_linea,
+                direttrice=op.direttrice,
+                categoria=op.categoria,
+                codice_origine=op.codice_origine,
+                codice_destinazione=op.codice_destinazione,
+                ora_partenza=op.ora_partenza,
+                ora_arrivo=op.ora_arrivo,
+                min_tratta=op.min_tratta,
+                km_tratta=op.km_tratta,
+                valido_da=op.valido_da,
+                valido_a=op.valido_a,
+                giorni_per_mese_json={},
+                valido_in_date_json=list(op.valido_in_date_json),
+                is_treno_garantito_feriale=False,
+                is_treno_garantito_festivo=False,
+                import_source="variazione",
+                import_run_id=run.id,
+            )
+            session.add(nuova)
+        elif isinstance(op, UpdateOrario):
+            corsa = corse_orm[op.corsa_id]
+            if op.ora_partenza is not None:
+                corsa.ora_partenza = op.ora_partenza
+            if op.ora_arrivo is not None:
+                corsa.ora_arrivo = op.ora_arrivo
+            if op.min_tratta is not None:
+                corsa.min_tratta = op.min_tratta
+            if op.km_tratta is not None:
+                corsa.km_tratta = op.km_tratta
+        elif isinstance(op, RimuoviDateValidita):
+            corsa = corse_orm[op.corsa_id]
+            attuale: list[str] = list(corsa.valido_in_date_json or [])
+            nuova_lista, n_rimosse = applica_rimozione_date(
+                attuale, op.date_da_rimuovere
+            )
+            corsa.valido_in_date_json = nuova_lista
+            n_date_rimosse_totale += n_rimosse
+        elif isinstance(op, CancellaCorsa):
+            corsa = corse_orm[op.corsa_id]
+            corsa.is_cancellata = True
+            corsa.cancellata_da_run_id = run.id
+            corsa.cancellata_at = now
+
+    # Aggiornamento run alla chiusura.
+    run.completed_at = now
+    run.n_corse_create = risultato.n_insert_corsa
+    run.n_corse_update = (
+        risultato.n_update_orario
+        + risultato.n_rimuovi_date
+        + risultato.n_cancella_corsa
+    )
+    note_parts = [
+        f"insert={risultato.n_insert_corsa}",
+        f"update_orario={risultato.n_update_orario}",
+        f"rimuovi_date={risultato.n_rimuovi_date}",
+        f"cancella={risultato.n_cancella_corsa}",
+        f"no_op={risultato.n_no_op}",
+        f"errori={risultato.n_errori}",
+    ]
+    note_existing = (run.note + " | ") if run.note else ""
+    run.note = note_existing + "applied: " + ", ".join(note_parts)
+
+    await session.commit()
+    await session.refresh(run)
+
+    return ApplyVariazioneResponse(
+        run_id=run.id,
+        completed_at=run.completed_at,
+        n_insert_corsa=risultato.n_insert_corsa,
+        n_update_orario=risultato.n_update_orario,
+        n_rimuovi_date=risultato.n_rimuovi_date,
+        n_cancella_corsa=risultato.n_cancella_corsa,
+        n_no_op=risultato.n_no_op,
+        n_errori=risultato.n_errori,
+        n_date_rimosse_totale=n_date_rimosse_totale,
+        errori=[
+            ApplyVariazioneErroreRead(
+                indice_operazione=e.indice_operazione,
+                codice=e.codice.value,
+                motivo=e.motivo,
+                corsa_id=e.corsa_id,
+            )
+            for e in risultato.errori
+        ],
     )

@@ -125,6 +125,9 @@ def test_corsa_commerciale_read_with_decimal_and_time() -> None:
         import_source="pde",
         import_run_id=None,
         imported_at=datetime(2026, 4, 25, 12, 0, tzinfo=UTC),
+        is_cancellata=False,
+        cancellata_da_run_id=None,
+        cancellata_at=None,
     )
     out = CorsaCommercialeRead.model_validate(corsa)
     assert out.numero_treno == "28335"
