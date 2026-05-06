@@ -122,6 +122,17 @@ class ProgrammaMateriale(Base):
         JSONB, default=list, server_default="[]"
     )
 
+    # Sub-MR 5.bis-fork (migration 0037): FK self verso il programma
+    # genitore. NULL = programma base autonomo (default, retrocompat).
+    # Valorizzato = programma figlio creato come fork da una variazione
+    # PdE; prevale sul genitore per le date del proprio range
+    # ``valido_da..valido_a``. ON DELETE SET NULL.
+    programma_genitore_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("programma_materiale.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     # Tracking
     created_by_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("app_user.id"))
     created_by: Mapped["AppUser | None"] = relationship(foreign_keys=[created_by_user_id])

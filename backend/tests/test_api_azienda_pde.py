@@ -473,3 +473,166 @@ async def test_applica_variazione_globale_integrazione_smoke(
         headers=_h(_giro_token(client)),
     )
     assert res_again.status_code == 409
+
+
+# =====================================================================
+# Crea fork variazione — Sub-MR 5.bis-fork (entry 190)
+# =====================================================================
+
+
+async def _crea_programma_genitore(suffix: str) -> int:
+    """Crea un programma "base" per i test di fork. Ritorna l'id."""
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text(
+                    "INSERT INTO programma_materiale "
+                    "(azienda_id, nome, valido_da, valido_a, stato, "
+                    "stato_pipeline_pdc, stato_manutenzione, "
+                    "n_giornate_default, n_giornate_min, n_giornate_max, "
+                    "fascia_oraria_tolerance_min, strict_options_json, "
+                    "stazioni_sosta_extra_json, materiali_disponibili_codici_json) "
+                    "SELECT id, :nome, :da, :a, 'attivo', 'PDE_IN_LAVORAZIONE', "
+                    "'IN_ATTESA', 1, 4, 12, 30, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb "
+                    "FROM azienda WHERE codice = 'trenord' RETURNING id"
+                ),
+                {
+                    "nome": f"TEST_AZPDE_FORK_PARENT_{suffix}",
+                    "da": date(2026, 1, 1),
+                    "a": date(2026, 12, 31),
+                },
+            )
+        ).first()
+        await session.commit()
+        assert row is not None
+        return int(row[0])
+
+
+async def _crea_run_globale_completata(suffix: str) -> int:
+    """Crea un CorsaImportRun globale + applicato per i test di fork."""
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text(
+                    "INSERT INTO corsa_import_run "
+                    "(source_file, n_corse, n_corse_create, n_corse_update, "
+                    "azienda_id, programma_materiale_id, tipo, completed_at) "
+                    "SELECT :sf, 0, 0, 0, a.id, NULL, "
+                    "'VARIAZIONE_INTERRUZIONE', NOW() "
+                    "FROM azienda a WHERE a.codice = 'trenord' RETURNING id"
+                ),
+                {"sf": f"TEST_AZPDE_fork_run_{suffix}.xlsx"},
+            )
+        ).first()
+        await session.commit()
+        assert row is not None
+        return int(row[0])
+
+
+async def test_crea_fork_caso_base_ok(client: TestClient) -> None:
+    """Smoke: genitore + run completata → POST crea-fork → 201 con
+    programma figlio creato e ``programma_genitore_id`` valorizzato."""
+    parent_id = await _crea_programma_genitore("ok")
+    run_id = await _crea_run_globale_completata("ok")
+
+    res = client.post(
+        f"/api/aziende/me/variazioni/{run_id}/crea-fork",
+        json={
+            "nome": "TEST_AZPDE_FORK_CHILD_ok",
+            "valido_da": "2026-06-15",
+            "valido_a": "2026-06-30",
+            "genitore_id": parent_id,
+        },
+        headers=_h(_giro_token(client)),
+    )
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["nome"] == "TEST_AZPDE_FORK_CHILD_ok"
+    assert body["programma_genitore_id"] == parent_id
+    assert body["valido_da"] == "2026-06-15"
+    assert body["valido_a"] == "2026-06-30"
+    assert body["stato"] == "bozza"
+    assert body["stato_pipeline_pdc"] == "PDE_IN_LAVORAZIONE"
+
+
+async def test_crea_fork_run_inesistente_404(client: TestClient) -> None:
+    parent_id = await _crea_programma_genitore("404run")
+    res = client.post(
+        "/api/aziende/me/variazioni/9999999/crea-fork",
+        json={
+            "nome": "X",
+            "valido_da": "2026-06-15",
+            "valido_a": "2026-06-30",
+            "genitore_id": parent_id,
+        },
+        headers=_h(_giro_token(client)),
+    )
+    assert res.status_code == 404
+
+
+async def test_crea_fork_run_non_completata_409(client: TestClient) -> None:
+    """Run senza completed_at → 409 (la variazione non è stata
+    ancora applicata)."""
+    parent_id = await _crea_programma_genitore("nocomp")
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text(
+                    "INSERT INTO corsa_import_run "
+                    "(source_file, n_corse, n_corse_create, n_corse_update, "
+                    "azienda_id, programma_materiale_id, tipo, completed_at) "
+                    "SELECT :sf, 0, 0, 0, a.id, NULL, "
+                    "'VARIAZIONE_INTERRUZIONE', NULL "
+                    "FROM azienda a WHERE a.codice = 'trenord' RETURNING id"
+                ),
+                {"sf": "TEST_AZPDE_fork_run_nocomp.xlsx"},
+            )
+        ).first()
+        await session.commit()
+    assert row is not None
+    run_id = int(row[0])
+    res = client.post(
+        f"/api/aziende/me/variazioni/{run_id}/crea-fork",
+        json={
+            "nome": "X",
+            "valido_da": "2026-06-15",
+            "valido_a": "2026-06-30",
+            "genitore_id": parent_id,
+        },
+        headers=_h(_giro_token(client)),
+    )
+    assert res.status_code == 409
+    assert "applicata" in res.json()["detail"]
+
+
+async def test_crea_fork_genitore_inesistente_404(client: TestClient) -> None:
+    run_id = await _crea_run_globale_completata("404parent")
+    res = client.post(
+        f"/api/aziende/me/variazioni/{run_id}/crea-fork",
+        json={
+            "nome": "X",
+            "valido_da": "2026-06-15",
+            "valido_a": "2026-06-30",
+            "genitore_id": 9999999,
+        },
+        headers=_h(_giro_token(client)),
+    )
+    assert res.status_code == 404
+
+
+async def test_crea_fork_validator_periodo_inverso_422(
+    client: TestClient,
+) -> None:
+    parent_id = await _crea_programma_genitore("inv")
+    run_id = await _crea_run_globale_completata("inv")
+    res = client.post(
+        f"/api/aziende/me/variazioni/{run_id}/crea-fork",
+        json={
+            "nome": "X",
+            "valido_da": "2026-06-30",
+            "valido_a": "2026-06-15",
+            "genitore_id": parent_id,
+        },
+        headers=_h(_giro_token(client)),
+    )
+    assert res.status_code == 422

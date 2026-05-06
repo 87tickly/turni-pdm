@@ -63,11 +63,14 @@ from colazione.importers.pde_importer import (
 )
 from colazione.models.anagrafica import Azienda
 from colazione.models.corse import CorsaCommerciale, CorsaImportRun
+from colazione.models.programmi import ProgrammaMateriale
 from colazione.schemas.corse import CorsaImportRunRead
 from colazione.schemas.programmi import (
     ApplicaVariazionePdEResponse,
     CaricaPdEBaseResponse,
+    CreaForkVariazioneRequest,
     PdEStatusRead,
+    ProgrammaMaterialeRead,
     VariazionePdERequest,
 )
 from colazione.schemas.security import CurrentUser
@@ -528,3 +531,132 @@ async def applica_variazione_globale(
         completed_at=completed_at,
         programmi_impattati=impatti,
     )
+
+
+# =====================================================================
+# Crea programma di variazione (fork) — Sub-MR 5.bis-fork (entry 190)
+# =====================================================================
+
+
+@router.post(
+    "/variazioni/{run_id}/crea-fork",
+    response_model=ProgrammaMaterialeRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Crea un programma di variazione figlio dal periodo della run",
+)
+async def crea_fork_variazione(
+    run_id: int,
+    payload: CreaForkVariazioneRequest,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> ProgrammaMateriale:
+    """Crea un nuovo ``programma_materiale`` come **figlio** del genitore
+    indicato, in risposta a una variazione PdE applicata.
+
+    **Pre-condizioni**:
+
+    - Run esiste, appartiene all'azienda, ha ``programma_materiale_id
+      IS NULL`` (variazione globale, non legata a un programma) +
+      ``completed_at IS NOT NULL`` (già applicata) + ``tipo != BASE``.
+    - Genitore esiste e appartiene all'azienda corrente.
+    - Periodo del fork (``valido_da..valido_a``) compatibile con quello
+      del genitore (consigliato ma non imposto: il fork può uscire dal
+      periodo del genitore, es. estensione retroattiva).
+
+    **Effetto**:
+
+    - Crea ``ProgrammaMateriale`` figlio con
+      ``programma_genitore_id=genitore_id``, stato ``bozza``,
+      ``stato_pipeline_pdc=PDE_IN_LAVORAZIONE``.
+    - Eredita ``materiali_disponibili_codici_json`` e
+      ``stazioni_sosta_extra_json`` dal genitore (consigliato per
+      coerenza, ma il pianificatore può modificarli sul figlio).
+    - Eredita anche ``km_max_giornaliero``, ``km_max_ciclo``,
+      ``n_giornate_*`` dal genitore.
+    - Niente cascading di regole / giri / turni: il pianificatore
+      genera dal figlio come per un programma nuovo.
+
+    Auth: ``PIANIFICATORE_GIRO`` (admin bypassa).
+    """
+    # 1) Run esiste + globale + completata + non BASE.
+    run = (
+        await session.execute(
+            select(CorsaImportRun).where(
+                CorsaImportRun.id == run_id,
+                CorsaImportRun.azienda_id == user.azienda_id,
+                CorsaImportRun.programma_materiale_id.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"variazione globale run_id={run_id} non trovata per "
+                "questa azienda"
+            ),
+        )
+    if run.tipo == "BASE":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"run {run_id} è di tipo BASE: il fork si crea da una "
+                "variazione, non dal primo import"
+            ),
+        )
+    if run.completed_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"run {run_id} non ancora applicata: applica la variazione "
+                "prima di creare un programma di variazione"
+            ),
+        )
+
+    # 2) Genitore esiste e appartiene all'azienda.
+    genitore = (
+        await session.execute(
+            select(ProgrammaMateriale).where(
+                ProgrammaMateriale.id == payload.genitore_id,
+                ProgrammaMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if genitore is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"programma genitore_id={payload.genitore_id} non trovato "
+                "per questa azienda"
+            ),
+        )
+
+    # 3) Crea figlio ereditando i parametri di pianificazione dal
+    # genitore. Il pianificatore può poi sovrascriverli via PATCH.
+    figlio = ProgrammaMateriale(
+        azienda_id=user.azienda_id,
+        nome=payload.nome,
+        valido_da=payload.valido_da,
+        valido_a=payload.valido_a,
+        stato="bozza",
+        stato_pipeline_pdc="PDE_IN_LAVORAZIONE",
+        stato_manutenzione="IN_ATTESA",
+        km_max_giornaliero=genitore.km_max_giornaliero,
+        km_max_ciclo=genitore.km_max_ciclo,
+        n_giornate_default=genitore.n_giornate_default,
+        n_giornate_min=genitore.n_giornate_min,
+        n_giornate_max=genitore.n_giornate_max,
+        fascia_oraria_tolerance_min=genitore.fascia_oraria_tolerance_min,
+        strict_options_json=dict(genitore.strict_options_json),
+        stazioni_sosta_extra_json=list(genitore.stazioni_sosta_extra_json),
+        materiali_disponibili_codici_json=list(
+            genitore.materiali_disponibili_codici_json
+        ),
+        programma_genitore_id=genitore.id,
+        created_by_user_id=user.user_id,
+    )
+    session.add(figlio)
+    await session.commit()
+    await session.refresh(figlio)
+    return figlio
+

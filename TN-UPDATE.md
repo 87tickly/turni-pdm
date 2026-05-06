@@ -10,6 +10,135 @@
 
 ---
 
+## 2026-05-06 (191) — Sub-MR 5.bis-fork backend: programma di variazione (figlio)
+
+### Contesto
+
+Implementazione **opzione C** del survey 2026-05-06 (vedi entry 188):
+"programma di variazione (forking)". Il programma base resta intatto;
+il pianificatore può creare un **programma figlio** per il periodo
+specifico della variazione che prevale sul genitore per quelle date.
+
+Backend del workflow utente:
+1. Pianificatore Giro carica una variazione (entry 178)
+2. Sistema mostra alert "N programmi impattati" (entry 188-189)
+3. Pianificatore clicca "Crea programma di variazione" sull'alert
+   → questo endpoint
+4. Sistema crea programma figlio con ``programma_genitore_id`` +
+   periodo della variazione + parametri ereditati dal genitore
+5. Pianificatore genera giri/turni del figlio via il flusso standard
+6. Per le date del periodo del figlio, i suoi giri prevalgono
+
+### Modifiche backend
+
+**`backend/alembic/versions/0037_programma_genitore.py`** (nuovo):
+
+- Aggiunge ``programma_materiale.programma_genitore_id`` (BigInteger
+  nullable, FK self ON DELETE SET NULL).
+- Indice parziale ``ix_programma_materiale_genitore`` su
+  ``(programma_genitore_id) WHERE IS NOT NULL`` per query "programmi
+  figli di X" veloci.
+- Revision ``e5f6a1b2c3d4`` parent ``d4e5f6a1b2c3`` (0036).
+
+**`backend/src/colazione/models/programmi.py`** —
+``ProgrammaMateriale`` con il nuovo campo + commento sulla semantica
+``NULL = base autonomo``, ``int = figlio``.
+
+**`backend/src/colazione/schemas/programmi.py`**:
+
+- ``ProgrammaMaterialeRead`` esteso con
+  ``programma_genitore_id: int | None = None``.
+- Nuovo ``CreaForkVariazioneRequest`` (``nome``, ``valido_da``,
+  ``valido_a``, ``genitore_id``) con validator
+  ``valido_da ≤ valido_a``.
+
+**`backend/src/colazione/api/azienda_pde.py`** — endpoint nuovo:
+
+- ``POST /api/aziende/me/variazioni/{run_id}/crea-fork`` (auth
+  ``PIANIFICATORE_GIRO``, response 201 + ``ProgrammaMaterialeRead``).
+- Pre-condizioni:
+  - run esiste, azienda corretta, ``programma_materiale_id IS NULL``
+    (variazione globale) altrimenti 404.
+  - run ``tipo != BASE`` altrimenti 409.
+  - run ``completed_at IS NOT NULL`` (variazione applicata)
+    altrimenti 409.
+  - genitore esiste e appartiene azienda altrimenti 404.
+- Effetto: crea programma figlio con
+  ``programma_genitore_id=genitore_id``, stato ``bozza``, eredita
+  da genitore: ``km_max_*``, ``n_giornate_*``,
+  ``fascia_oraria_tolerance_min``, ``strict_options_json``,
+  ``stazioni_sosta_extra_json``, ``materiali_disponibili_codici_json``.
+- Pipeline parte da ``PDE_IN_LAVORAZIONE``; nessun cascade di
+  regole / giri / turni.
+
+### Test
+
+**`backend/tests/test_api_azienda_pde.py`** — 5 nuovi test integration
+(sezione "Crea fork variazione"):
+
+- ``test_crea_fork_caso_base_ok``: 201 + ``programma_genitore_id``
+  valorizzato + periodo + stato bozza.
+- ``test_crea_fork_run_inesistente_404``.
+- ``test_crea_fork_run_non_completata_409``.
+- ``test_crea_fork_genitore_inesistente_404``.
+- ``test_crea_fork_validator_periodo_inverso_422``.
+
+Helper privati ``_crea_programma_genitore`` e
+``_crea_run_globale_completata`` per setup ripetibile.
+
+### Convenzione "merge per data" (documentata, non implementata)
+
+Per ogni data X richiesta da un consumer (vista PdC finale, builder,
+assegnazioni), si sceglie il programma con ``valido_da..valido_a``
+più stretto che include X. Quando multipli figli si sovrappongono,
+deterministico per ``id`` minimo (TBD).
+
+**Non in scope di questo MR**: i consumer attuali (vista PdC,
+builder) NON applicano la convenzione. Audit cross-codebase è MR
+successivo. Per ora un programma figlio è creato e visibile ma il
+suo "prevalere" sul genitore è solo concettuale finché i consumer
+non vengono aggiornati.
+
+### Verifiche
+
+- ✅ ``uv run alembic upgrade head``: migration 0037 applicata locale.
+- ✅ ``uv run mypy --strict src/``: 76 source files clean.
+- ✅ ``uv run ruff check`` su file MR: 0 errori (pre-esistenti
+  warning ruff in altri file ignorati, non legati al MR).
+- ✅ ``uv run pytest tests/test_api_azienda_pde.py``: 16 passed
+  (+5 fork).
+- ✅ ``uv run pytest`` full: 851 passed, 13 skipped.
+
+### Decisioni di scope rinviate
+
+- **Frontend bottone "Crea programma di variazione"**: entry
+  successiva (192). Aggiungere sotto l'alert dell'entry 189 un
+  bottone che apre dialog pre-compilato (genitore dall'impatto,
+  periodo dalla variazione).
+- **Convenzione "merge per data" lato consumer**: audit cross-
+  codebase di ``vista PdC finale``, ``builder``, query `assegnazioni`.
+  Significativo. Da fare quando un programma di variazione viene
+  effettivamente usato in produzione e le incoerenze saltano fuori.
+- **Lista programmi figli**: oggi non c'è endpoint dedicato per
+  ``GET /programmi/{id}/figli``. La query è banale via
+  ``programma_genitore_id``, da aggiungere quando l'UI lo richiede.
+
+### Stato
+
+- ✅ Codice 5.bis-fork backend pronto: 1 migration nuova + 1 campo
+  model + 2 schemi + 1 endpoint nuovo + 5 test.
+- ⏳ Commit + push + deploy backend Railway.
+
+### Prossimo step
+
+Frontend (entry 192): aggiornare ``lib/api/pde.ts`` con
+``creaForkVariazione`` + ``ProgrammaMaterialeRead``, hook
+``useCreaForkVariazione``, bottone "Crea programma di variazione"
+sotto ``ProgrammiImpattatiAlert``, dialog di conferma con
+pre-compilazione da impatto.
+
+---
+
 ## 2026-05-06 (190) — Apertura MR-1110: design "turno = giornate-tipo concatenate + varianti calendariali ricche"
 
 ### Contesto

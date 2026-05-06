@@ -269,6 +269,10 @@ class ProgrammaMaterialeRead(BaseModel):
     # MR α (migration 0035): subset di codici MaterialeTipo "a disposizione"
     # del programma. `[]` = tutti i materiali della dotazione azienda.
     materiali_disponibili_codici_json: list[str] = Field(default_factory=list)
+    # Sub-MR 5.bis-fork (migration 0037, entry 190): FK self verso il
+    # programma genitore di cui questo è figlio (variazione di periodo).
+    # NULL = programma base autonomo.
+    programma_genitore_id: int | None = None
     created_by_user_id: int | None = None
     # Sprint dashboard 1° ruolo (entry 88): popolato via JOIN con `app_user`
     # quando la query usa `joinedload(ProgrammaMateriale.created_by)`.
@@ -877,3 +881,44 @@ class ProgrammaImpattoRead(BaseModel):
     impattati. Approssimazione: una giornata può avere molti blocchi,
     qui contiamo le assegnazioni delle giornate che hanno ALMENO un
     blocco impattato."""
+
+
+# =====================================================================
+# Crea programma di variazione (fork) — Sub-MR 5.bis-fork (entry 190)
+# =====================================================================
+
+
+class CreaForkVariazioneRequest(BaseModel):
+    """Body di ``POST /api/aziende/me/variazioni/{run_id}/crea-fork``.
+
+    Crea un nuovo ``programma_materiale`` con
+    ``programma_genitore_id = genitore_id`` e finestra di validità
+    coincidente col periodo della variazione.
+
+    Il programma figlio è in stato ``bozza`` (default) e lo stato
+    pipeline parte da ``PDE_IN_LAVORAZIONE`` come per un programma
+    base. Il pianificatore ci genera giri e turni via il flusso
+    standard. Per le date del proprio range il figlio prevale sul
+    genitore (convenzione "merge per data" — vedi migration 0037).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    nome: str = Field(min_length=1, max_length=200)
+    """Nome del programma figlio. Convenzione consigliata:
+    ``"<nome_genitore> — variazione <descrizione>"``. Validato
+    solo per lunghezza, niente vincoli di unicità (il backend non
+    impone uniqueness su ``nome``)."""
+
+    valido_da: date
+    valido_a: date
+
+    genitore_id: int = Field(gt=0)
+    """ID del ``programma_materiale`` genitore. Deve appartenere
+    all'azienda dell'utente corrente (404 altrimenti)."""
+
+    @model_validator(mode="after")
+    def _validate(self) -> CreaForkVariazioneRequest:
+        if self.valido_da > self.valido_a:
+            raise ValueError("valido_da deve essere ≤ valido_a")
+        return self
