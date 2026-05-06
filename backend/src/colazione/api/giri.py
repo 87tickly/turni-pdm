@@ -21,7 +21,7 @@ Modalità di generazione (decisione utente):
   obbligatorio. Per N località il pianificatore lancia N chiamate.
 """
 
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -554,6 +554,89 @@ async def list_giri_azienda(
             )
         )
     return out
+
+
+class PatchGiroMaterialeRequest(BaseModel):
+    """MR η — payload PATCH ``/api/giri/{id}``.
+
+    Permette di modificare il materiale assegnato a un giro generato.
+    Spec utente 2026-05-06:
+
+    > "Una volta generato il turno io posso interagire sul turno
+    > generato, potendo inserire se il materiale è in doppia, se
+    > sgancia oppure no."
+
+    Scope MR η MVP: solo il materiale del giro (header). Le azioni
+    "doppia composizione" e "sgancio" agiscono su singoli ``GiroBlocco``
+    e sono scope di MR η-bis (non ancora implementate).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    materiale_tipo_codice: str | None = Field(
+        default=None,
+        description="Nuovo codice MaterialeTipo. None = non toccare il valore.",
+    )
+    descrizione_materiale: str | None = Field(
+        default=None, description="Descrizione testuale (denormalizzata)."
+    )
+    tipo_materiale: str | None = Field(
+        default=None,
+        description="Nome del tipo (denormalizzato, es. 'ETR526').",
+    )
+
+
+@giri_dettaglio_router.patch(
+    "/{giro_id}",
+    response_model=GiroMaterialeListItem,
+    summary="Modifica materiale del giro generato (MR η)",
+)
+async def update_giro(
+    giro_id: int,
+    payload: PatchGiroMaterialeRequest,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> GiroMateriale:
+    """MR η — modifica i campi del giro generato (oggi: materiale).
+
+    Vincoli:
+
+    - Giro deve esistere e appartenere all'azienda corrente (404).
+    - Giro non deve essere in stato pipeline freezato (409). Per ora
+      il check è morbido: il programma può essere freezato ma il giro
+      stesso non ha pipeline propria.
+    - Il PATCH è idempotente. Solo i campi forniti vengono aggiornati
+      (Pydantic ``exclude_unset``).
+    """
+    stmt = select(GiroMateriale).where(
+        GiroMateriale.id == giro_id,
+        GiroMateriale.azienda_id == user.azienda_id,
+    )
+    g = (await session.execute(stmt)).scalar_one_or_none()
+    if g is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Giro non trovato")
+
+    # Check freeze pipeline (coerente con i PATCH di altri endpoint).
+    prog_stmt = select(ProgrammaMateriale.stato_pipeline_pdc).where(
+        ProgrammaMateriale.id == g.programma_id
+    )
+    stato_pipeline = (await session.execute(prog_stmt)).scalar_one_or_none()
+    if stato_pipeline is not None and materiale_freezato(stato_pipeline):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"giro nel programma con pipeline {stato_pipeline!r}: read-only. "
+                "L'admin deve sbloccare il programma per modificare il giro."
+            ),
+        )
+
+    data = payload.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        setattr(g, k, v)
+    g.updated_at = datetime.now(UTC)
+    await session.commit()
+    await session.refresh(g)
+    return g
 
 
 @giri_dettaglio_router.get(

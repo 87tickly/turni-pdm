@@ -217,6 +217,26 @@ export async function getGiroDettaglio(giroId: number): Promise<GiroDettaglio> {
   return apiJson<GiroDettaglio>(`/api/giri/${giroId}`, { method: "GET" });
 }
 
+/**
+ * MR η — payload per ``PATCH /api/giri/{id}``. Modifica il materiale
+ * assegnato a un giro generato. Solo i campi forniti vengono aggiornati.
+ */
+export interface PatchGiroPayload {
+  materiale_tipo_codice?: string | null;
+  descrizione_materiale?: string | null;
+  tipo_materiale?: string | null;
+}
+
+export async function patchGiro(
+  giroId: number,
+  payload: PatchGiroPayload,
+): Promise<GiroListItem> {
+  return apiJson<GiroListItem>(`/api/giri/${giroId}`, {
+    method: "PATCH",
+    body: payload,
+  });
+}
+
 // =====================================================================
 // Sprint 7.3 MR 2 — lista giri azienda (cross-programma)
 // =====================================================================

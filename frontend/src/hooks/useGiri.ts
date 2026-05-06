@@ -13,6 +13,7 @@ import {
   listGiriAzienda,
   listGiriProgramma,
   listThreadsGiro,
+  patchGiro,
   type BuilderResult,
   type GeneraGiriParams,
   type GiroDettaglio,
@@ -20,6 +21,7 @@ import {
   type ListGiriAziendaParams,
   type MaterialeThreadDettaglio,
   type MaterialeThreadListItem,
+  type PatchGiroPayload,
 } from "@/lib/api/giri";
 
 const GIRI_KEY = ["giri"] as const;
@@ -98,6 +100,27 @@ export function useGeneraGiri(): UseMutationResult<BuilderResult, Error, GeneraG
     mutationFn: ({ programmaId, params }) => generaGiri(programmaId, params),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: GIRI_KEY });
+    },
+  });
+}
+
+interface PatchGiroArgs {
+  giroId: number;
+  payload: PatchGiroPayload;
+}
+
+/** MR η — PATCH giro (oggi: solo materiale del giro). */
+export function usePatchGiro(): UseMutationResult<GiroListItem, Error, PatchGiroArgs> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ giroId, payload }) => patchGiro(giroId, payload),
+    onSuccess: (_data, vars) => {
+      // Invalida sia la lista cross-programma sia il dettaglio del singolo
+      // giro (che mostra il materiale).
+      void qc.invalidateQueries({ queryKey: GIRI_KEY });
+      void qc.invalidateQueries({
+        queryKey: [...GIRI_KEY, "dettaglio", vars.giroId],
+      });
     },
   });
 }

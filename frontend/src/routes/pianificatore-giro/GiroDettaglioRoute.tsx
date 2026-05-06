@@ -16,6 +16,7 @@ import {
   FileDown,
   Maximize2,
   Minimize2,
+  Pencil,
   Users,
 } from "lucide-react";
 
@@ -24,15 +25,21 @@ import { Card } from "@/components/ui/Card";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@/components/ui/Dialog";
+import { Label } from "@/components/ui/Label";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/Popover";
+import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
-import { useGiroDettaglio, useThreadsGiro } from "@/hooks/useGiri";
+import { useMateriali } from "@/hooks/useAnagrafiche";
+import { useGiroDettaglio, usePatchGiro, useThreadsGiro } from "@/hooks/useGiri";
 import { useTurniPdcGiro } from "@/hooks/useTurniPdc";
 import { ApiError } from "@/lib/api/client";
 import type {
@@ -152,6 +159,8 @@ export function GiroDettaglioRoute() {
 
   const [selectedBlocco, setSelectedBlocco] = useState<GiroBlocco | null>(null);
   const [pdcDialogOpen, setPdcDialogOpen] = useState(false);
+  // MR η: dialog di modifica materiale del giro post-generazione.
+  const [editMaterialeOpen, setEditMaterialeOpen] = useState(false);
   /**
    * Per ogni giornata l'utente sceglie quale variante mostrare. Default:
    * indice 0 (canonica). Stato esposto qui per resilienza ai re-render
@@ -208,7 +217,16 @@ export function GiroDettaglioRoute() {
         <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Lista giri
       </Link>
 
-      <HeroSection giro={giro} onGeneraPdc={() => setPdcDialogOpen(true)} />
+      <HeroSection
+        giro={giro}
+        onGeneraPdc={() => setPdcDialogOpen(true)}
+        onModificaMateriale={() => setEditMaterialeOpen(true)}
+      />
+      <ModificaMaterialeGiroDialog
+        giro={giro}
+        open={editMaterialeOpen}
+        onOpenChange={setEditMaterialeOpen}
+      />
 
       <section className="flex min-w-0 flex-col gap-4">
         <div className="flex min-w-0 flex-col gap-4">
@@ -386,9 +404,11 @@ function ConvogliDelTurnoSection({ giroId }: { giroId: number }) {
 function HeroSection({
   giro,
   onGeneraPdc,
+  onModificaMateriale,
 }: {
   giro: GiroDettaglio;
   onGeneraPdc: () => void;
+  onModificaMateriale: () => void;
 }) {
   const meta = giro.generation_metadata_json as Record<string, unknown>;
   const motivo = typeof meta.motivo_chiusura === "string" ? meta.motivo_chiusura : null;
@@ -442,6 +462,14 @@ function HeroSection({
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="md"
+            onClick={onModificaMateriale}
+            title="MR η: modifica il materiale assegnato a questo giro"
+          >
+            <Pencil className="mr-2 h-4 w-4" aria-hidden /> Modifica materiale
+          </Button>
           <Button
             variant="outline"
             size="md"
@@ -541,6 +569,148 @@ interface GiroKpiStats {
   nValidati: number;
   nTreniCommerciali: number;
   nRientri: number;
+}
+
+// =====================================================================
+// MR η — Dialog "Modifica materiale del giro"
+// =====================================================================
+
+/**
+ * MR η (2026-05-06) — dialog per modificare il materiale del giro
+ * generato. Apre dropdown con tutti i ``MaterialeTipo`` macro
+ * dell'azienda; al submit invia ``PATCH /api/giri/{id}`` aggiornando
+ * sia il codice (``materiale_tipo_codice``) sia i campi denormalizzati
+ * (``tipo_materiale``, ``descrizione_materiale``).
+ *
+ * Errori 409 dal backend (freeze pipeline ``>= MATERIALE_CONFERMATO``)
+ * mostrati inline.
+ *
+ * Scope MVP: solo cambio materiale dell'header del giro. Le azioni
+ * "doppia composizione" (doppia macchina) e "sgancio" agiscono sui
+ * blocchi e sono scope di un MR η-bis futuro.
+ */
+function ModificaMaterialeGiroDialog({
+  giro,
+  open,
+  onOpenChange,
+}: {
+  giro: GiroDettaglio;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const materialiQuery = useMateriali({ enabled: open });
+  const patchMutation = usePatchGiro();
+  const [selected, setSelected] = useState(giro.materiale_tipo_codice ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  // Resync quando il giro o l'open cambia.
+  useEffect(() => {
+    if (open) {
+      setSelected(giro.materiale_tipo_codice ?? "");
+      setError(null);
+    }
+  }, [open, giro.materiale_tipo_codice]);
+
+  const materialiMacro = useMemo(() => {
+    const data = materialiQuery.data;
+    if (!Array.isArray(data)) return [];
+    return data.filter((m) => m != null && m.famiglia != null && m.famiglia.length > 0);
+  }, [materialiQuery.data]);
+
+  const handleClose = (next: boolean) => {
+    if (!next) setError(null);
+    onOpenChange(next);
+  };
+
+  const handleSubmit = async () => {
+    if (selected.length === 0) {
+      setError("Seleziona un materiale.");
+      return;
+    }
+    setError(null);
+    const m = materialiMacro.find((x) => x.codice === selected);
+    try {
+      await patchMutation.mutateAsync({
+        giroId: giro.id,
+        payload: {
+          materiale_tipo_codice: selected,
+          tipo_materiale: m?.codice ?? selected,
+          descrizione_materiale: m?.nome_commerciale ?? null,
+        },
+      });
+      handleClose(false);
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Errore sconosciuto",
+      );
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Modifica materiale del giro</DialogTitle>
+          <DialogDescription>
+            Cambia il materiale assegnato a <strong>{giro.numero_turno}</strong>. La
+            modifica aggiorna l&apos;header del giro; non modifica gli orari né i blocchi
+            del Gantt.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="giro-materiale">Materiale</Label>
+            <Select
+              id="giro-materiale"
+              value={selected}
+              disabled={patchMutation.isPending || materialiQuery.isLoading}
+              onChange={(e) => setSelected(e.target.value)}
+            >
+              <option value="">— scegli —</option>
+              {materialiMacro.map((m) => (
+                <option key={m.codice} value={m.codice}>
+                  {m.codice}
+                  {m.nome_commerciale != null && m.nome_commerciale !== ""
+                    ? ` — ${m.nome_commerciale}`
+                    : ""}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              MR η scope MVP: cambia solo il materiale dell&apos;header. Doppia composizione
+              (doppia macchina) e sgancio sui blocchi sono in arrivo come MR η-bis.
+            </p>
+          </div>
+
+          {error !== null && (
+            <p
+              role="alert"
+              className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+            >
+              {error}
+            </p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => handleClose(false)} disabled={patchMutation.isPending}>
+            Annulla
+          </Button>
+          <Button
+            onClick={() => void handleSubmit()}
+            disabled={patchMutation.isPending || selected.length === 0}
+          >
+            {patchMutation.isPending ? <Spinner label="Salvataggio…" /> : "Salva"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function computeGiroKpi(giro: GiroDettaglio): GiroKpiStats {

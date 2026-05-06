@@ -10,6 +10,97 @@
 
 ---
 
+## 2026-05-06 (186) — MR η (MVP): modifica materiale del giro post-generazione
+
+### Contesto
+
+Spec utente:
+
+> "Una volta generato il turno io posso interagire sul turno generato,
+> potendo inserire se il materiale è in doppia, se sgancia oppure no,
+> così nella duplicazione del turno per motivi di doppia macchina, il
+> flusso di generazione è più semplice."
+
+MR η chiude lo scope MVP del refactor: il pianificatore può cambiare
+il materiale di un giro generato da UI. Le 3 azioni più complesse
+("doppia composizione", "sgancio sui blocchi", "duplicazione completa
+del turno") sono identificate come **MR η-bis** futuro: agiscono sui
+``GiroBlocco`` o richiedono deep-clone con migration di tutte le tabelle
+collegate (giornate, varianti, blocchi).
+
+### Modifiche backend
+
+**`backend/src/colazione/api/giri.py`**:
+
+- Nuovo schema ``PatchGiroMaterialeRequest`` (tutti campi opzionali,
+  ``extra=forbid``).
+- Nuovo endpoint ``PATCH /api/giri/{giro_id}`` che aggiorna i campi
+  ``materiale_tipo_codice``, ``tipo_materiale``,
+  ``descrizione_materiale`` con ``setattr`` generico via
+  ``model_dump(exclude_unset=True)``. Vincoli: 404 se giro non
+  esiste / non è dell'azienda; 409 se il programma è freezato
+  (``materiale_freezato(stato_pipeline)``).
+- Aggiunto import ``UTC`` da ``datetime`` per ``g.updated_at =
+  datetime.now(UTC)``.
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/giri.ts`**:
+
+- Nuovo tipo ``PatchGiroPayload``.
+- Nuova ``patchGiro(giroId, payload)``.
+
+**`frontend/src/hooks/useGiri.ts`**: nuovo hook ``usePatchGiro`` con
+invalidazione ``GIRI_KEY`` + dettaglio specifico.
+
+**`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`**:
+
+- State ``editMaterialeOpen``.
+- ``HeroSection`` ricevitore prop ``onModificaMateriale`` + nuovo
+  bottone "Modifica materiale" con icon ``Pencil`` (a sinistra di
+  "Esporta PDF").
+- Nuovo componente locale ``ModificaMaterialeGiroDialog``: dropdown
+  con tutti i ``MaterialeTipo`` macro dell'azienda (lazy load via
+  ``useMateriali({ enabled: open })``), salva via ``usePatchGiro``,
+  errori 409 in alert inline. Disclaimer esplicito su MR η-bis per
+  doppia/sgancio.
+
+### Verifiche
+
+- ✅ Backend ``test_anagrafiche_api`` + ``test_aggregazione_a2``: 24
+  passed.
+- ✅ Frontend ``pnpm tsc -b --noEmit`` clean.
+- ✅ Frontend vitest pianificatore-giro: 11 passed, 1 skipped.
+
+### Stato
+
+- ✅ MR η backend + frontend (scope MVP) completo.
+- ⏳ Commit + push + Railway deploy.
+- ➡️ Refactor UX terminato (MR α…η). MR η-bis (doppia composizione,
+  sgancio, duplicazione completa del turno) resta come scope futuro:
+  richiede deep-clone schema (giornate + varianti + blocchi) e API
+  per editare singoli ``GiroBlocco``.
+
+### Riepilogo refactor MR α…η
+
+7 MR completati nella stessa sessione 2026-05-06:
+
+| MR | Cosa cambia | Migration |
+|----|-------------|-----------|
+| α  | Materiali in flotta sostituisce strict options | 0035 |
+| β  | Wizard pre-generazione + sede su regola | 0036 |
+| γ  | Composizione opzionale sulla regola | (no DB) |
+| δ  | Preset linea + tipo servizio nel FiltriEditor | (no DB) |
+| ε  | Regole invio sosta inline nel CreaProgrammaDialog | (no DB) |
+| ζ  | Bottoni Modifica funzionanti via PATCH | (no DB) |
+| η  | Modifica materiale del giro post-generazione | (no DB) |
+
+Tutte le 7 entry sono separate ma stesso giorno. Deploy Railway
+sequenziale (backend + frontend per MR α/β/γ; solo frontend per
+MR δ/ε/ζ; backend + frontend per MR η).
+
+---
+
 ## 2026-05-06 (185) — MR ζ: bottoni Modifica funzionanti
 
 ### Contesto
