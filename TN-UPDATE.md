@@ -10,6 +10,50 @@
 
 ---
 
+## 2026-05-06 (197) — Fix bug "2 regole stessi filtri" (round-robin + warning)
+
+### Contesto
+
+Bug segnalato dall'utente in produzione su programma "giugno 2026":
+2 regole (ETR522 + ETR204) con filtri sovrapposti generavano 19 giri
+solo per ETR522, 0 per ETR204.
+
+### Causa
+
+``_trova_regola_dominante`` (Sprint 7.7 MR 1) sceglieva
+deterministicamente la regola con id più basso fra quelle a parità di
+priorità → tutte le catene attribuite alla regola #25, zero alla #26.
+Nessun warning informava il pianificatore.
+
+### Modifiche backend
+
+**`backend/src/colazione/domain/builder_giro/builder.py`** (commit
+``dea752a``):
+
+1. ``_trova_regola_dominante``: round-robin deterministico via
+   ``hashlib.blake2b`` sulla chiave ``"{numero_treno}|{codice_origine}|
+   {ora_partenza}"`` quando 2+ regole hanno stessa priorità top.
+   Stabile a fronte di ``PYTHONHASHSEED`` variabile. Comportamento
+   invariato con singola candidata.
+2. Warning esplicito in ``BuilderRun.warnings_json`` per ogni regola
+   senza catene attribuite (riporta materiale, filtri, 3 cause
+   probabili).
+
+### Verifiche
+
+- ✅ Backend ``test_builder_giri`` + ``test_aggregazione_a2`` +
+  ``test_anagrafiche_api``: 38 passed, 1 skipped.
+- ⏳ Commit ``dea752a`` push, deploy backend Railway.
+
+### Per applicare al programma esistente
+
+1. Aprire il programma "giugno 2026".
+2. Click "Genera giri" → wizard.
+3. Confermare rigenerazione (``force=true``) + cancellazione PdC.
+4. Il nuovo run distribuirà ~50/50 fra ETR522 e ETR204.
+
+---
+
 ## 2026-05-06 (196) — MR-1110 sotto-MR 2: identificazione giornate-tipo (giornata_tipo.py)
 
 ### Contesto
