@@ -10,6 +10,110 @@
 
 ---
 
+## 2026-05-06 (199) — MR-1110 sotto-MR 3: concatenazione ciclica (concatenazione_ciclica.py)
+
+### Contesto
+
+Continuazione MR-1110 (entry 190/193/196/198, decisioni utente
+chiuse). Implementazione dello **Step 4** della pipeline nuovo builder
+(vedi `docs/MR-1110-DESIGN.md` §4.4): dato l'output del sotto-MR 2
+(``identifica_giornate_tipo``), costruisce i ``Turno`` ordinando le
+giornate-tipo ciclicamente con vincolo di concatenazione **rigido**
+(D6) e gestione del ciclo rotto via SCC (D2).
+
+### Modifiche backend
+
+**`backend/src/colazione/domain/builder_giro/concatenazione_ciclica.py`**
+(nuovo, ~330 righe):
+
+- `Turno`: dataclass frozen output con `materiale_tipo_codice`,
+  `localita_codice`, `giornate_tipo` (tuple ordinata ciclicamente),
+  property `n_giornate`. Sostituisce concettualmente
+  `GiroAggregato` v1 con la differenza che le giornate-tipo sono
+  **fasi del ciclo** (chiave 5-uple D1).
+- `concatena_in_turni(giornate)`: API pubblica. Pipeline:
+  1. Raggruppa giornate-tipo per `(materiale, sede)`.
+  2. Tenta ciclo hamiltoniano sul gruppo intero
+     (`_cerca_ciclo_hamiltoniano` — backtracking DFS deterministico,
+     trattabile fino a N≈20, benchmark Caravaggio 1125 N=17).
+  3. **D2 — ciclo rotto**: se nessun ciclo intero, scompone in SCC
+     via Tarjan iterativo (`_componenti_fortemente_connesse`) e
+     cerca cicli dentro ogni SCC. SCC senza ciclo → orfane.
+  4. **N=1 auto-loop**: giornata con `staz_fine == staz_inizio`
+     forma turno valido (caso turno 1104 stagionale Trenord).
+- Ordinamento deterministico output: `(materiale, sede, n desc,
+  prima staz_inizio)`.
+
+**`backend/tests/test_concatenazione_ciclica.py`** (nuovo, ~390 righe,
+17 test):
+
+- Casi base: lista vuota, singolo nodo con/senza auto-loop, due
+  nodi che si concatenano (A↔B).
+- Cicli hamiltoniani: triangolo N=3, settimanale N=7,
+  Caravaggio-style stress test N=17.
+- Chiusura ciclica obbligatoria: A→B→C senza C→A → tutte orfane.
+- D2 multi-turno via SCC: 2 cicli disgiunti A↔B + C↔D nello
+  stesso gruppo → 2 Turni separati.
+- Mix ciclo + orfana: A↔B ciclico + X→Y isolato → 1 Turno + 1
+  orfana.
+- Mix auto-loop + ciclo: HUB↔HUB + A↔B → 2 Turni (N=1 e N=2).
+- Multi-gruppo: materiali/sedi diverse → turni distinti.
+- Determinismo: input mescolato → output stabile.
+- Acceptance turno 1110 concettuale: VARESE↔MI.CERT bidirezionale →
+  1 Turno N=2 con chiusura ciclica verificata esplicitamente.
+- Sanity check `Turno.n_giornate` property.
+
+### Verifiche
+
+- `pytest tests/test_concatenazione_ciclica.py -v` → 17/17 ✅.
+- `pytest` cross-modulo builder_giro (multi_giornata,
+  aggregazione_a2, fusione_cluster_a1, giornata_tipo,
+  concatenazione_ciclica) → 91/91 ✅.
+- `mypy --strict src/colazione/domain/builder_giro/` → clean (17
+  source files).
+- `ruff check` → clean dopo organize-imports automatico.
+
+### Stato
+
+- ✅ Sotto-MR 3 chiuso. Modulo `concatenazione_ciclica.py` pronto,
+  testato, type-clean.
+- ✅ Pipeline MR-1110 ora copre Step 2 + Step 4. Mancano:
+  Step 3 (varianti calendariali per giornata-tipo), upgrade
+  `etichetta.py` (sotto-MR 4), orchestratore `multi_giornata_v2`
+  (sotto-MR 5), aggregazione finale (sotto-MR 6), deprecazione MR
+  12 (sotto-MR 7), integration test PdE 2026 (sotto-MR 8), UI Gantt
+  (sotto-MR 9), backward compat `builder_version` (sotto-MR 10).
+- ⏳ Commit + push + deploy backend Railway.
+
+### Note tecniche
+
+- **Ricerca cicli**: backtracking DFS sul nodo lessicograficamente
+  minimo. Pruning forte (matching `staz_fine`/`staz_inizio` +
+  verifica chiusura ciclica). Per N=17 (massimo benchmark Trenord)
+  trattabile; oltre N≈20 può essere necessario passare a
+  algoritmi più sofisticati (Held-Karp, ILP), ma fuori scope del
+  PdE Trenord 2026.
+- **Tarjan SCC iterativo**: implementato con stack di frame
+  esplicito per evitare problemi di ricorsione profonda su grafi
+  grandi.
+- **Modulo isolato**: nessun consumer chiama ancora
+  `concatena_in_turni`. Sarà invocato dall'orchestratore
+  `multi_giornata_v2` (sotto-MR 5).
+
+### Prossimo step
+
+A scelta utente:
+
+- **Sotto-MR 4** (`etichetta.py` upgrade per etichette parlanti
+  stile PDF Trenord: `LV 1:5`, `F escluso FpF ed escl. ...`,
+  `Si eff. ...`, `Circola Sabato Festivo`).
+- **Step 3** (varianti calendariali per giornata-tipo: dato un
+  ``GiornataTipo`` con N istanze, raggrupparle per sequenza-treni
+  identica in M ``VarianteCalendariale``).
+- Pausa MR-1110 e riprendere altro lavoro.
+
+---
+
 ## 2026-05-06 (198) — MR-1110 Step 1 closure: D2/D3/D4/D5/D8 chiuse
 
 ### Contesto
