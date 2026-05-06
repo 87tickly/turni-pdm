@@ -314,7 +314,7 @@ export function GeneraGiriDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col">
         {step === "form" && (
           <FormStep
             programmaQueryLoading={programmaQuery.isLoading}
