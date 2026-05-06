@@ -10,6 +10,66 @@
 
 ---
 
+## 2026-05-06 (201) — Warning correlato regola↔catene scartate per sede incompatibile
+
+### Contesto
+
+Bug in produzione su programma "giugno 2026" con 2 regole disgiunte:
+
+- Regola #25: linee ALESSANDRIA-MORTARA-MILANO / ALESSANDRIA-VOGHERA-
+  PAVIA-MILANO + ETR522 + sede FIO → 19 giri ✅
+- Regola #26: linee CHIAVENNA-COLICO / BRESCIA-CREMONA + ETR204 + sede
+  FIO → **0 giri** ❌
+
+Causa diagnosticata: le linee CHIAVENNA-COLICO e BRESCIA-CREMONA non
+hanno stazioni nella whitelist ``localita_stazione_vicina`` della sede
+FIO (Fiorenza, Milano nord). Il builder le scarta in
+``posiziona_su_localita`` con ``LocalitaSenzaStazioneError`` /
+``PosizionamentoImpossibileError``. Il warning preesistente
+(``"Catena del XX scartata: …"``) non correla con la regola → il
+pianificatore non capisce.
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_giro/builder.py`**:
+
+1. Estratto helper ``_trova_regola_dominante_per_corsa(prima, regole)``
+   condiviso fra ``Catena`` (pre-posizionamento) e ``CatenaPosizionata``
+   (post-posizionamento).
+2. Loop posizionamento: quando una catena viene scartata per
+   ``LocalitaSenzaStazioneError`` o ``PosizionamentoImpossibileError``,
+   il warning ora include numero treno + ``(regola #N)`` se
+   identificabile. Inoltre incrementa il contatore
+   ``catene_scartate_per_regola[regola_id]``.
+3. Warning finale "regola senza giri" (entry 197): se la regola ha
+   contatore > 0, il messaggio diventa concreto: *"N catene candidate
+   sono state scartate dal posizionamento sulla sede X: la sede non ha
+   stazioni vicine alle linee della regola. Soluzione: scegli una sede
+   compatibile (es. CRE per Cremona, LEC per Lecco/Valtellina, …)."*
+
+### Verifiche
+
+- ✅ Backend pytest 38 passed, 1 skipped (test_builder_giri,
+  test_aggregazione_a2, test_anagrafiche_api).
+
+### Per applicare al programma utente
+
+1. Aprire il programma "giugno 2026" in produzione.
+2. Click "Genera giri" → wizard.
+3. Per la regola #26 (CHIAVENNA-COLICO / BRESCIA-CREMONA), cambiare il
+   dropdown deposito da FIO a una sede compatibile:
+   - **CRE** (Cremona) per linee BRESCIA-CREMONA / cremasche.
+   - **LEC** (Lecco) per linee Valtellina (CHIAVENNA-COLICO).
+   - Oppure usare 2 regole separate (una per linea) ognuna con la sua
+     sede.
+4. Conferma rigenerazione → il nuovo run dovrebbe popolare entrambe
+   le regole.
+
+Se la sede è ancora incompatibile, il pannello "Ultimo run del
+builder" mostrerà ora il warning concreto con la causa.
+
+---
+
 ## 2026-05-06 (200) — Sub-MR 5.bis-audit: filtro is_cancellata su query consumer
 
 ### Contesto

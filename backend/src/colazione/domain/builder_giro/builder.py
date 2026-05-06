@@ -618,35 +618,20 @@ def _corsa_vale_in_data(corsa: CorsaCommerciale, d: date) -> bool:
     return d.isoformat() in corsa.valido_in_date_json
 
 
-def _trova_regola_dominante(
-    cat_pos: CatenaPosizionata,
+def _trova_regola_dominante_per_corsa(
+    prima_corsa: Any,
     regole: list[ProgrammaRegolaAssegnazione],
 ) -> ProgrammaRegolaAssegnazione | None:
-    """Sprint 7.7 MR 1: regola "dominante" che determina il cap del giro.
-
-    Convenzione: la regola di una catena è quella con `priorita` più
-    alta tra le regole che coprono la PRIMA corsa della catena (giorno
-    tipo `feriale` come euristica, allineato col filtro perimetro).
-    Se più regole hanno la stessa priorità, le catene vengono
-    distribuite **round-robin deterministico** fra di esse (entry 188,
-    fix bug "2 regole stessi filtri → solo una genera giri"). La
-    distribuzione usa hash stabile della chiave catena (numero treno +
-    origine + ora_partenza prima corsa) modulo il numero di candidate.
-
-    Ritorna ``None`` se la prima corsa non è coperta da nessuna regola
-    (catena orfana — il chiamante la scarta con warning).
+    """Helper interno (entry 198): trova la regola dominante data la
+    PRIMA corsa di una catena. Estratto da ``_trova_regola_dominante``
+    per essere riusabile sia da ``Catena`` (pre-posizionamento) sia
+    da ``CatenaPosizionata`` (post-posizionamento).
     """
     from colazione.domain.builder_giro.risolvi_corsa import matches_all
 
-    if not cat_pos.catena.corse:
-        return None
-    prima = cat_pos.catena.corse[0]
-    candidate = [r for r in regole if matches_all(r.filtri_json, prima, "feriale")]
+    candidate = [r for r in regole if matches_all(r.filtri_json, prima_corsa, "feriale")]
     if not candidate:
         return None
-    # Ordina per priorità desc, poi id asc (stesso comportamento prima
-    # della patch round-robin, per stabilità degli id quando una sola
-    # candidata vince).
     candidate.sort(key=lambda r: (-r.priorita, r.id))
     top_prio = candidate[0].priorita
     top = [r for r in candidate if r.priorita == top_prio]
@@ -658,12 +643,35 @@ def _trova_regola_dominante(
     import hashlib
 
     chiave = (
-        f"{prima.numero_treno or ''}|{prima.codice_origine or ''}|"
-        f"{prima.ora_partenza.isoformat() if prima.ora_partenza else ''}"
+        f"{prima_corsa.numero_treno or ''}|{prima_corsa.codice_origine or ''}|"
+        f"{prima_corsa.ora_partenza.isoformat() if prima_corsa.ora_partenza else ''}"
     )
     digest = hashlib.blake2b(chiave.encode("utf-8"), digest_size=8).digest()
     bucket = int.from_bytes(digest, byteorder="big") % len(top)
     return top[bucket]
+
+
+def _trova_regola_dominante(
+    cat_pos: CatenaPosizionata,
+    regole: list[ProgrammaRegolaAssegnazione],
+) -> ProgrammaRegolaAssegnazione | None:
+    """Sprint 7.7 MR 1: regola "dominante" che determina il cap del giro.
+
+    Convenzione: la regola di una catena è quella con `priorita` più
+    alta tra le regole che coprono la PRIMA corsa della catena (giorno
+    tipo `feriale` come euristica, allineato col filtro perimetro).
+    Se più regole hanno la stessa priorità, le catene vengono
+    distribuite **round-robin deterministico** fra di esse (entry 197,
+    fix bug "2 regole stessi filtri → solo una genera giri"). La
+    distribuzione usa hash stabile della chiave catena (numero treno +
+    origine + ora_partenza prima corsa) modulo il numero di candidate.
+
+    Ritorna ``None`` se la prima corsa non è coperta da nessuna regola
+    (catena orfana — il chiamante la scarta con warning).
+    """
+    if not cat_pos.catena.corse:
+        return None
+    return _trova_regola_dominante_per_corsa(cat_pos.catena.corse[0], regole)
 
 
 def _giro_chiude_in_whitelist(
@@ -955,6 +963,11 @@ async def genera_giri(
     is_prima_generazione_sede = n_esistenti_sede == 0 or force
     primo_giorno_con_corse: date | None = None
     catene_per_data: dict[date, list[CatenaPosizionata]] = {}
+    # Entry 198: traccia le catene scartate per posizionamento aggregate
+    # per regola dominante. Usato dal warning finale per spiegare
+    # all'utente quando una regola finisce con 0 giri perché la sede
+    # scelta non è compatibile con le linee della regola.
+    catene_scartate_per_regola: dict[int, int] = {}
     for d in date_range:
         corse_giorno = [c for c in corse_perimetro if _corsa_vale_in_data(c, d)]
         if not corse_giorno:
@@ -974,7 +987,27 @@ async def genera_giri(
                     forza_vuoto_iniziale=forza_vuoto_iniziale,
                 )
             except (LocalitaSenzaStazioneError, PosizionamentoImpossibileError) as exc:
-                warnings.append(f"Catena del {d.isoformat()} scartata: {exc}")
+                # Identifica quale regola del programma "avrebbe coperto"
+                # questa catena, così il warning finale può correlare.
+                regola_dom_pre = (
+                    _trova_regola_dominante_per_corsa(cat.corse[0], regole)
+                    if cat.corse
+                    else None
+                )
+                if regola_dom_pre is not None:
+                    catene_scartate_per_regola[regola_dom_pre.id] = (
+                        catene_scartate_per_regola.get(regola_dom_pre.id, 0) + 1
+                    )
+                prima_treno = cat.corse[0].numero_treno if cat.corse else "—"
+                regola_label = (
+                    f" (regola #{regola_dom_pre.id})"
+                    if regola_dom_pre is not None
+                    else ""
+                )
+                warnings.append(
+                    f"Catena del {d.isoformat()} treno {prima_treno}{regola_label} "
+                    f"scartata: {exc}"
+                )
                 continue
             catene_pos.append(cat_pos)
         catene_per_data[d] = catene_pos
@@ -1004,11 +1037,10 @@ async def genera_giri(
             f"{catene_orphane} catene scartate: nessuna regola del programma copre la prima corsa."
         )
 
-    # Entry 188 — fix diagnostico bug "2 regole stessi filtri → solo una
-    # genera giri". Per ogni regola del programma che non ha attribuito
-    # nessuna catena, emit warning esplicito così il pianificatore capisce
-    # cosa sta succedendo (oggi vedrebbe semplicemente "0 giri" senza
-    # spiegazione).
+    # Entry 197/198 — diagnostico bug "regola senza giri". Per ogni
+    # regola del programma che non ha attribuito nessuna catena, emit
+    # warning esplicito che spieghi la causa più probabile basata sui
+    # contatori raccolti (catene scartate per posizionamento, ecc.).
     regole_senza_catene = [r for r in regole if r.id not in catene_per_regola]
     for r in regole_senza_catene:
         materiale = (
@@ -1019,13 +1051,27 @@ async def genera_giri(
         summary_filtri = ", ".join(
             f"{f.get('campo')}={f.get('valore')}" for f in r.filtri_json[:3]
         )
+        n_scartate = catene_scartate_per_regola.get(r.id, 0)
+        if n_scartate > 0:
+            # Causa concreta: la sede non è compatibile con le linee
+            # della regola (catene scartate da posiziona_su_localita).
+            causa = (
+                f"{n_scartate} catene candidate sono state scartate dal "
+                f"posizionamento sulla sede {localita_codice!r}: la sede "
+                "non ha stazioni vicine alle linee della regola. Soluzione: "
+                "scegli una sede compatibile con le linee selezionate "
+                "(es. CRE per Cremona, LEC per Lecco/Valtellina, ecc.)."
+            )
+        else:
+            causa = (
+                "Possibili cause: (a) i filtri non matchano nessuna corsa "
+                "nel periodo del programma; (b) la dotazione del materiale "
+                "è 0 in questa sede; (c) le catene candidate sono andate "
+                "ad altre regole con priorità più alta (verifica i filtri)."
+            )
         warnings.append(
             f"Regola #{r.id} (materiale: {materiale or '—'}, "
-            f"filtri: {summary_filtri or '—'}) non ha generato giri. "
-            "Possibili cause: (a) i filtri non matchano nessuna corsa nel "
-            "periodo del programma; (b) la dotazione del materiale è 0 "
-            "in questa sede; (c) le catene candidate sono andate ad altre "
-            "regole con priorità più alta (verifica i filtri)."
+            f"filtri: {summary_filtri or '—'}) non ha generato giri. {causa}"
         )
 
     giri_dom: list[Giro] = []
