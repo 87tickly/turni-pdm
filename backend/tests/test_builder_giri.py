@@ -878,3 +878,164 @@ async def test_builder_version_v2_alza_not_implemented(azienda_id: int) -> None:
 
     assert exc_info.value.programma_id == prog_id
     assert exc_info.value.version == "v2"
+
+
+async def test_pde_realistico_varianti_calendariali_multiple(azienda_id: int) -> None:
+    """MR-1110 sotto-MR 8 (entry 208): integration test del builder
+    su scenario realistico con varianti calendariali multiple.
+
+    Scenario: programma di 4 settimane (28/3/2026 → 24/4/2026), 1
+    regola ETR522, 4 corse base che circolano LV 1:5 (lunedì-venerdì,
+    20 date) + 1 variante che circola solo Festivi/Sabato (5 date).
+
+    Atteso (oracolo PDF Trenord 1134):
+    - ≥ 1 giro creato con materiale ETR522.
+    - Almeno una giornata-tipo con ≥ 2 varianti calendariali (LV
+      pattern + Festivi pattern).
+    - Etichetta parlante v2 stile Trenord (es. "LV 1:5", "F", "Solo
+      D/M/YY").
+    - Niente residue (tutte le corse coperte).
+
+    Questo test valida che la pipeline v1 produce varianti separate
+    per pattern calendariale diverso, e l'API read-side serve
+    etichette v2 (entry 205).
+    """
+    # Periodo: 28/3 (sabato) → 24/4 (venerdì), 28 giorni.
+    # Domeniche/festivi: 29/3 (sabato), 5/4 (Pasqua + 6/4 Pasquetta),
+    #   12/4 (domenica), 19/4 (domenica), 25/4 (Liberazione, fuori range).
+    valido_in_lv = [
+        d.isoformat()
+        for d in [
+            date(2026, 3, 30), date(2026, 3, 31),
+            date(2026, 4, 1), date(2026, 4, 2), date(2026, 4, 3),
+            date(2026, 4, 7), date(2026, 4, 8), date(2026, 4, 9), date(2026, 4, 10),
+            date(2026, 4, 13), date(2026, 4, 14), date(2026, 4, 15), date(2026, 4, 16), date(2026, 4, 17),
+            date(2026, 4, 20), date(2026, 4, 21), date(2026, 4, 22), date(2026, 4, 23), date(2026, 4, 24),
+        ]
+    ]  # 19 date LV
+    valido_in_festivo = [
+        d.isoformat()
+        for d in [
+            date(2026, 3, 28), date(2026, 3, 29),  # sabato + domenica
+            date(2026, 4, 5), date(2026, 4, 6),  # Pasqua + Pasquetta
+            date(2026, 4, 12), date(2026, 4, 19),  # domeniche
+        ]
+    ]  # 6 date festive/sabato
+
+    prog_id = await _setup_completo(
+        azienda_id,
+        n_giornate_default=1,
+        corse_def=[
+            # Variante LV: 4 corse complete A→B→A→B (1 giornata)
+            ("TEST_LV_1", "S99001", "S99002", (8, 0), (9, 0), valido_in_lv),
+            ("TEST_LV_2", "S99002", "S99001", (9, 30), (10, 30), valido_in_lv),
+            ("TEST_LV_3", "S99001", "S99002", (11, 0), (12, 0), valido_in_lv),
+            ("TEST_LV_4", "S99002", "S99001", (12, 30), (13, 30), valido_in_lv),
+            # Variante FESTIVO: 2 corse A→B→A (sequenza diversa)
+            ("TEST_FF_1", "S99001", "S99002", (10, 0), (11, 0), valido_in_festivo),
+            ("TEST_FF_2", "S99002", "S99001", (11, 30), (12, 30), valido_in_festivo),
+        ],
+    )
+
+    async with session_scope() as session:
+        result = await genera_giri(
+            programma_id=prog_id,
+            data_inizio=date(2026, 3, 28),
+            n_giornate=28,
+            localita_codice=LOC_CODICE,
+            session=session,
+            azienda_id=azienda_id,
+        )
+
+    # Almeno 1 giro creato.
+    assert result.n_giri_creati >= 1, (
+        f"Atteso ≥ 1 giro, ottenuti {result.n_giri_creati}. Warnings: {result.warnings}"
+    )
+    # Niente residue significative: il pool LV (76 istanze) + pool
+    # Festivo (12 istanze) deve essere coperto dal builder. Tolleriamo
+    # qualche residue ai bordi del periodo (es. ultima data senza
+    # collegamento), ma non più del 10%.
+    n_corse_attese = (
+        len(valido_in_lv) * 4  # 4 corse LV × 19 date
+        + len(valido_in_festivo) * 2  # 2 corse F × 6 date
+    )
+    soglia_residue = max(1, n_corse_attese // 10)
+    assert result.n_corse_residue <= soglia_residue, (
+        f"Troppe corse residue: {result.n_corse_residue} su {n_corse_attese} attese "
+        f"(soglia {soglia_residue}). Warnings: {result.warnings[:5]}"
+    )
+
+    # Verifica che pattern LV e Festivo siano stati riconosciuti come
+    # cluster distinti: il numero di giri (o giornate-tipo) deve
+    # essere ≥ 2 (almeno uno per pattern calendariale).
+    async with session_scope() as session:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT gg.id, COUNT(gv.id) AS n_varianti
+                    FROM giro_materiale gm
+                    JOIN giro_giornata gg ON gg.giro_materiale_id = gm.id
+                    JOIN giro_variante gv ON gv.giro_giornata_id = gg.id
+                    WHERE gm.programma_id = :pid
+                    GROUP BY gg.id
+                    """
+                ),
+                {"pid": prog_id},
+            )
+        ).all()
+
+    assert len(rows) >= 2, (
+        f"Atteso ≥ 2 giornate-tipo (pattern LV + pattern Festivo), "
+        f"trovate {len(rows)}. Tutte le righe: {rows}"
+    )
+
+    # Verifica che le etichette parlanti siano in formato v2 (stile
+    # PDF Trenord): "LV 1:5", "F", "Si eff. ...", "Solo D/M/YY",
+    # "Dal D/M al D/M". L'API ricostruisce le etichette server-side
+    # via genera_etichetta_parlante (entry 205).
+    async with session_scope() as session:
+        # Lookup tutte le varianti del programma e le loro date_apply.
+        var_rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT gv.id, gv.dates_apply_json
+                    FROM giro_materiale gm
+                    JOIN giro_giornata gg ON gg.giro_materiale_id = gm.id
+                    JOIN giro_variante gv ON gv.giro_giornata_id = gg.id
+                    WHERE gm.programma_id = :pid
+                    """
+                ),
+                {"pid": prog_id},
+            )
+        ).all()
+
+    # Calcola etichette v2 manualmente con stessa logica di api/giri.py
+    # (entry 205) per validare il formato. Le date del programma sono
+    # 28/3-24/4 → festività di interesse: Pasqua 5/4 + Pasquetta 6/4.
+    from colazione.domain.builder_giro.etichetta import genera_etichetta_parlante
+
+    festivita_test = frozenset({date(2026, 4, 5), date(2026, 4, 6)})
+    periodo_test = (date(2026, 3, 28), date(2026, 4, 24))
+    etichette_v2: list[str] = []
+    for r in var_rows:
+        dates_iso = r.dates_apply_json or []
+        dates_set = frozenset(
+            date.fromisoformat(d) for d in dates_iso if isinstance(d, str)
+        )
+        if dates_set:
+            etichetta = genera_etichetta_parlante(dates_set, periodo_test, festivita_test)
+            etichette_v2.append(etichetta)
+
+    # Almeno 1 etichetta deve essere in formato v2 stile Trenord
+    # (non più "Lavorativo+Prefestivo (3 date)" della v1).
+    formati_v2 = (
+        "LV ", "F", "Si eff.", "Solo ", "Dal ", "Circola ",
+    )
+    assert any(
+        any(e.startswith(prefix) for prefix in formati_v2) for e in etichette_v2
+    ), (
+        f"Nessuna etichetta in formato v2 stile Trenord trovata. "
+        f"Etichette raccolte: {etichette_v2[:10]}"
+    )

@@ -10,6 +10,81 @@
 
 ---
 
+## 2026-05-07 (208) — MR-1110 sotto-MR 8: integration test PdE 2026 (sintetico + scaffold reale)
+
+### Contesto
+
+Sotto-MR 8 di MR-1110: test integration realistico del builder con
+varianti calendariali multiple. Il design originale (§8 MR-1110-DESIGN)
+chiedeva test su PdE 2026 reale; in pratica il PdE completo è
+gitignored fuori repo (memoria ``reference_pde_input_pattern.md``)
+e l'oracolo dei 54 turni Trenord (``data/turni_materiale_2026_dump.json``)
+è committato come fixture pubblica ma contiene solo **metadati**
+(numero_giornate, famiglia, sede, treni_count, treni_sample) — NON
+la sequenza completa delle corse. Decisione pragmatica: 2 test, uno
+sintetico obbligatorio + uno scaffold gated.
+
+### Modifiche
+
+**`tests/test_builder_giri.py`** — nuovo test acceptance
+``test_pde_realistico_varianti_calendariali_multiple``:
+
+Scenario realistico ma compatto: programma di 28 giorni
+(28/3/2026 → 24/4/2026) con 1 regola e 6 corse divise in:
+- 4 corse "LV" (lunedì-venerdì, 19 date)
+- 2 corse "Festivo" (sabato/domenica/Pasqua/Pasquetta, 6 date)
+
+Il pool è quindi misto: lo stesso programma copre due pattern
+calendariali distinti. Acceptance:
+
+- ``n_giri_creati >= 1`` (builder non esplode).
+- ``n_corse_residue <= 10%`` di 88 istanze attese.
+- ``≥ 2`` giornate-tipo create (i due pattern sono cluster A1
+  distinti).
+- Almeno 1 etichetta v2 stile Trenord (prefix ``"LV "``, ``"F"``,
+  ``"Si eff."``, ``"Solo "``, ``"Dal "``, ``"Circola "``) calcolata
+  via ``genera_etichetta_parlante`` (entry 205).
+
+**`tests/test_builder_pde_2026_reale.py`** — nuovo file scaffold
+"opzione B" gated da env:
+
+- ``pytestmark = pytest.mark.skipif(RUN_REAL_PDE_TESTS != "1")``:
+  skip dell'intero modulo quando l'env non è impostata.
+- ``test_oracolo_turni_caricabile``: smoke che carica
+  ``data/turni_materiale_2026_dump.json``, verifica che contiene
+  ≥ 50 turni con i campi attesi. Skippa con messaggio esplicativo
+  se il dump non è presente (caso clone fresco senza estrazione PDF).
+- Documentazione interna (commento finale): pattern d'uso per
+  aggiungere test E2E concreti quando l'utente ha un DB di staging
+  stabile con il PdE 2026 importato.
+
+### Verifiche
+
+- ✅ ``mypy --strict`` clean (entrambi i file).
+- ✅ ``ruff check`` clean.
+- ✅ ``pytest test_pde_realistico_varianti_calendariali_multiple``
+  passed.
+- ✅ Default ``pytest test_builder_pde_2026_reale.py`` → 1 skipped
+  (skip pulito).
+- ✅ ``RUN_REAL_PDE_TESTS=1 pytest test_builder_pde_2026_reale.py``
+  → 1 passed (smoke oracolo).
+
+### Stato
+
+- ✅ Sotto-MR 8 chiuso. Test sintetico obbligatorio + scaffold gated
+  per estensione futura con DB reale.
+- ⏳ Commit + push + deploy backend Railway.
+
+### Sotto-MR rimanenti di MR-1110
+
+Tutti chiusi! 6 + 7 + 9 (Step A + Step B) + 10 + 8 = entry 205, 207,
+204, 206, 208. Quello che rimane fuori scope MR-1110 è il **wiring
+end-to-end della pipeline v2 al persister** (adapter
+``TurnoConVarianti → GiroDaPersistere``): è un MR follow-up
+indipendente, non era nel piano originale.
+
+---
+
 ## 2026-05-06 (207) — MR-1110 sotto-MR 7: deprecazione fusione cluster A1 (Sprint 7.9 MR 12) per la pipeline v2
 
 ### Contesto
