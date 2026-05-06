@@ -42,6 +42,7 @@ import { Textarea } from "@/components/ui/Textarea";
 import {
   useApplicaVariazione,
   useCaricaPdEBase,
+  useCreaForkVariazione,
   usePdEStatus,
   useRegistraVariazione,
   useVariazioniGlobali,
@@ -63,12 +64,18 @@ const TIPO_VARIAZIONE_LABELS: Record<TipoVariazione, string> = {
   VARIAZIONE_CANCELLAZIONE: "Cancellazione corse",
 };
 
+interface ForkRequest {
+  runId: number;
+  impatto: ProgrammaImpatto;
+}
+
 export function PdEAnnualeRoute() {
   const statusQuery = usePdEStatus();
   const variazioniQuery = useVariazioniGlobali({ limit: 50 });
 
   const [baseDialogOpen, setBaseDialogOpen] = useState(false);
   const [variazioneDialogOpen, setVariazioneDialogOpen] = useState(false);
+  const [forkRequest, setForkRequest] = useState<ForkRequest | null>(null);
 
   return (
     <div className="flex flex-col gap-5">
@@ -105,7 +112,19 @@ export function PdEAnnualeRoute() {
       <CaricaVariazioneDialog
         open={variazioneDialogOpen}
         onOpenChange={setVariazioneDialogOpen}
+        onForkRequest={(runId, impatto) => {
+          setVariazioneDialogOpen(false);
+          setForkRequest({ runId, impatto });
+        }}
       />
+
+      {forkRequest !== null && (
+        <CreaForkVariazioneDialog
+          runId={forkRequest.runId}
+          impatto={forkRequest.impatto}
+          onClose={() => setForkRequest(null)}
+        />
+      )}
     </div>
   );
 }
@@ -560,11 +579,13 @@ function CaricaPdEBaseDialog({ open, onOpenChange }: CaricaPdEBaseDialogProps) {
 interface CaricaVariazioneDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onForkRequest?: (runId: number, impatto: ProgrammaImpatto) => void;
 }
 
 function CaricaVariazioneDialog({
   open,
   onOpenChange,
+  onForkRequest,
 }: CaricaVariazioneDialogProps) {
   const [tipo, setTipo] = useState<TipoVariazione>("INTEGRAZIONE");
   const [file, setFile] = useState<File | null>(null);
@@ -572,6 +593,7 @@ function CaricaVariazioneDialog({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [successImpatti, setSuccessImpatti] = useState<ProgrammaImpatto[]>([]);
+  const [successRunId, setSuccessRunId] = useState<number | null>(null);
 
   const registraMutation = useRegistraVariazione();
   const applicaMutation = useApplicaVariazione();
@@ -583,6 +605,7 @@ function CaricaVariazioneDialog({
     setError(null);
     setSuccess(null);
     setSuccessImpatti([]);
+    setSuccessRunId(null);
   }
 
   function handleClose(next: boolean) {
@@ -632,6 +655,7 @@ function CaricaVariazioneDialog({
           `${res.n_corse_lette_da_file} corse lette dal file.`,
       );
       setSuccessImpatti(res.programmi_impattati ?? []);
+      setSuccessRunId(run.id);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -730,7 +754,14 @@ function CaricaVariazioneDialog({
             </div>
           )}
           {successImpatti.length > 0 && (
-            <ProgrammiImpattatiAlert impatti={successImpatti} />
+            <ProgrammiImpattatiAlert
+              impatti={successImpatti}
+              onForkClick={
+                onForkRequest !== undefined && successRunId !== null
+                  ? (impatto) => onForkRequest(successRunId, impatto)
+                  : undefined
+              }
+            />
           )}
 
           <DialogFooter>
@@ -821,17 +852,28 @@ function formatDateIt(iso: string): string {
 
 // =====================================================================
 // Alert programmi impattati (sub-MR 5.bis-impact, entry 188)
+// + bottone "Crea programma di variazione" (sub-MR 5.bis-fork, entry 191)
 // =====================================================================
 
-function ProgrammiImpattatiAlert({ impatti }: { impatti: ProgrammaImpatto[] }) {
+interface ProgrammiImpattatiAlertProps {
+  impatti: ProgrammaImpatto[];
+  /** Sub-MR 5.bis-fork (entry 191): callback opzionale per aprire il
+   * dialog di creazione fork sul programma cliccato. Se omesso, il
+   * bottone non viene reso (es. quando l'alert è in contesto in cui il
+   * runId della variazione non è disponibile). */
+  onForkClick?: (impatto: ProgrammaImpatto) => void;
+}
+
+function ProgrammiImpattatiAlert({
+  impatti,
+  onForkClick,
+}: ProgrammiImpattatiAlertProps) {
   const totGiri = impatti.reduce((s, p) => s + p.n_giri_impattati, 0);
   const totTurni = impatti.reduce((s, p) => s + p.n_turni_pdc_impattati, 0);
   const totAssegn = impatti.reduce(
     (s, p) => s + p.n_assegnazioni_impattate,
     0,
   );
-  // Severity: rosso se ci sono assegnazioni (lavoro Gestione Personale
-  // perduto), amber se solo giri/turni, niente alert se tutto a 0.
   const severo = totAssegn > 0;
   const colorClass = severo
     ? "border-destructive/40 bg-destructive/[0.04] text-destructive"
@@ -855,28 +897,232 @@ function ProgrammiImpattatiAlert({ impatti }: { impatti: ProgrammaImpatto[] }) {
               </>
             )}
           </div>
-          <ul className="mt-2 flex flex-col gap-1">
+          <ul className="mt-2 flex flex-col gap-2">
             {impatti.map((p) => (
-              <li key={p.programma_id} className="text-xs">
-                <span className="font-medium">{p.nome}</span>{" "}
-                <span className="font-mono opacity-70">
-                  ({formatDateIt(p.valido_da)}
-                  {p.valido_a !== null && ` → ${formatDateIt(p.valido_a)}`})
-                </span>
-                : {p.n_giri_impattati} giri · {p.n_turni_pdc_impattati} turni
-                {p.n_assegnazioni_impattate > 0 && (
-                  <> · {p.n_assegnazioni_impattate} assegnazioni</>
+              <li
+                key={p.programma_id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded border border-current/10 bg-white/50 p-2 text-xs"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium">{p.nome}</div>
+                  <div className="font-mono opacity-70">
+                    {formatDateIt(p.valido_da)}
+                    {p.valido_a !== null && ` → ${formatDateIt(p.valido_a)}`}
+                  </div>
+                  <div className="mt-0.5">
+                    {p.n_giri_impattati} giri · {p.n_turni_pdc_impattati} turni
+                    {p.n_assegnazioni_impattate > 0 && (
+                      <> · {p.n_assegnazioni_impattate} assegnazioni</>
+                    )}
+                  </div>
+                </div>
+                {onForkClick !== undefined && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => onForkClick(p)}
+                    className="shrink-0 bg-white text-xs"
+                  >
+                    Crea variazione
+                  </Button>
                 )}
               </li>
             ))}
           </ul>
-          <div className="mt-2 text-xs italic opacity-80">
-            I giri e turni esistenti referenziano corse modificate. La gestione
-            (rigenerazione o creazione di un programma di variazione) sarà
-            disponibile nel prossimo MR.
-          </div>
+          {onForkClick === undefined && (
+            <div className="mt-2 text-xs italic opacity-80">
+              I giri e turni esistenti referenziano corse modificate. Per
+              isolare il problema, crea un programma di variazione per il
+              periodo specifico (apri la variazione dalla timeline).
+            </div>
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+// =====================================================================
+// Dialog "Crea programma di variazione" (sub-MR 5.bis-fork, entry 191)
+// =====================================================================
+
+interface CreaForkVariazioneDialogProps {
+  runId: number;
+  impatto: ProgrammaImpatto;
+  onClose: () => void;
+}
+
+function CreaForkVariazioneDialog({
+  runId,
+  impatto,
+  onClose,
+}: CreaForkVariazioneDialogProps) {
+  // Pre-compilazione: nome derivato dal genitore + data, periodo dal
+  // genitore (l'utente lo restringe al range della variazione).
+  const oggi = new Date().toISOString().slice(0, 10);
+  const [nome, setNome] = useState(
+    `${impatto.nome} — variazione ${oggi}`,
+  );
+  const [validoDa, setValidoDa] = useState(impatto.valido_da);
+  const [validoA, setValidoA] = useState(
+    impatto.valido_a ?? impatto.valido_da,
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [createdNome, setCreatedNome] = useState<string | null>(null);
+  const [createdId, setCreatedId] = useState<number | null>(null);
+
+  const mutation = useCreaForkVariazione();
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (nome.trim().length === 0) {
+      setError("Il nome del programma figlio è obbligatorio");
+      return;
+    }
+    if (validoDa > validoA) {
+      setError("La data 'valido da' deve essere ≤ 'valido a'");
+      return;
+    }
+    try {
+      const created = await mutation.mutateAsync({
+        runId,
+        payload: {
+          nome: nome.trim(),
+          valido_da: validoDa,
+          valido_a: validoA,
+          genitore_id: impatto.programma_id,
+        },
+      });
+      setCreatedId(created.id);
+      setCreatedNome(created.nome);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Errore sconosciuto durante la creazione del fork");
+      }
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Crea programma di variazione</DialogTitle>
+          <DialogDescription>
+            Crea un programma figlio di <strong>{impatto.nome}</strong> per
+            isolare il periodo della variazione. Il programma genitore resta
+            intatto; il figlio prevale per le date che indicherai. Il
+            pianificatore genererà giri e turni del figlio nel flusso
+            standard.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <div>
+            <Label htmlFor="fork-nome" className="text-sm">
+              Nome programma figlio
+            </Label>
+            <Input
+              id="fork-nome"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              maxLength={200}
+              className="mt-1"
+              disabled={createdId !== null}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="fork-da" className="text-sm">
+                Valido da
+              </Label>
+              <Input
+                id="fork-da"
+                type="date"
+                value={validoDa}
+                onChange={(e) => setValidoDa(e.target.value)}
+                className="mt-1"
+                disabled={createdId !== null}
+              />
+            </div>
+            <div>
+              <Label htmlFor="fork-a" className="text-sm">
+                Valido a
+              </Label>
+              <Input
+                id="fork-a"
+                type="date"
+                value={validoA}
+                onChange={(e) => setValidoA(e.target.value)}
+                className="mt-1"
+                disabled={createdId !== null}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
+            <div className="font-medium text-foreground">Genitore</div>
+            <div className="mt-0.5 font-mono">{impatto.nome}</div>
+            <div className="mt-0.5">
+              {formatDateIt(impatto.valido_da)}
+              {impatto.valido_a !== null &&
+                ` → ${formatDateIt(impatto.valido_a)}`}
+              {" · "}
+              {impatto.n_giri_impattati} giri impattati ·{" "}
+              {impatto.n_turni_pdc_impattati} turni PdC
+              {impatto.n_assegnazioni_impattate > 0 && (
+                <> · {impatto.n_assegnazioni_impattate} assegnazioni</>
+              )}
+            </div>
+          </div>
+
+          {error !== null && (
+            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/[0.04] p-3 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              <span>{error}</span>
+            </div>
+          )}
+          {createdId !== null && (
+            <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              <div>
+                Programma figlio <strong>{createdNome}</strong> (#{createdId})
+                creato in stato <span className="font-mono">bozza</span>.
+                Aprilo dalla lista Programmi per generare giri e turni.
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={mutation.isPending}
+            >
+              {createdId !== null ? "Chiudi" : "Annulla"}
+            </Button>
+            {createdId === null && (
+              <Button type="submit" disabled={mutation.isPending}>
+                {mutation.isPending ? (
+                  <>
+                    <Spinner className="mr-2 h-4 w-4" /> Creazione…
+                  </>
+                ) : (
+                  <>
+                    <Plus className="mr-2 h-4 w-4" aria-hidden /> Crea fork
+                  </>
+                )}
+              </Button>
+            )}
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

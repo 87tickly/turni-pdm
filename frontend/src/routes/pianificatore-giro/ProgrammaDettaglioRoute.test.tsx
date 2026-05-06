@@ -56,6 +56,7 @@ function makeProgramma(over: Partial<ProgrammaDettaglioRead> = {}): ProgrammaDet
     },
     stazioni_sosta_extra_json: ["S01440"],
     materiali_disponibili_codici_json: [],
+    programma_genitore_id: null,
     created_by_user_id: 1,
     created_by_username: "admin",
     created_at: "2026-04-25T10:00:00Z",

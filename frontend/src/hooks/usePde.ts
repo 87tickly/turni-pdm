@@ -25,15 +25,18 @@ import {
 import {
   applicaVariazione,
   caricaPdEBase,
+  creaForkVariazione,
   getPdEStatus,
   listVariazioni,
   registraVariazione,
   type ApplicaVariazioneResponse,
   type CaricaPdEBaseResponse,
   type CorsaImportRun,
+  type CreaForkVariazionePayload,
   type PdEStatus,
   type RegistraVariazionePayload,
 } from "@/lib/api/pde";
+import type { ProgrammaMaterialeRead } from "@/lib/api/programmi";
 
 const PDE_STATUS_KEY = ["pde", "status"] as const;
 const PDE_VARIAZIONI_KEY = ["pde", "variazioni"] as const;
@@ -109,6 +112,31 @@ export function useApplicaVariazione(): UseMutationResult<
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: PDE_VARIAZIONI_KEY });
       void qc.invalidateQueries({ queryKey: PDE_STATUS_KEY });
+    },
+  });
+}
+
+interface CreaForkVariazioneVars {
+  runId: number;
+  payload: CreaForkVariazionePayload;
+}
+
+/**
+ * Sub-MR 5.bis-fork (entry 191): crea un programma di variazione
+ * figlio. Su success invalida la cache `programmi` (la lista
+ * programmi includerà il nuovo figlio).
+ */
+export function useCreaForkVariazione(): UseMutationResult<
+  ProgrammaMaterialeRead,
+  Error,
+  CreaForkVariazioneVars
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ runId, payload }: CreaForkVariazioneVars) =>
+      creaForkVariazione(runId, payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["programmi"] });
     },
   });
 }

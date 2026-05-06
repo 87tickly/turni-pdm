@@ -104,6 +104,12 @@ export interface ProgrammaMaterialeRead {
    * creazione programma.
    */
   materiali_disponibili_codici_json: string[];
+  /**
+   * Sub-MR 5.bis-fork (migration 0037, entry 191): FK self verso il
+   * programma genitore di cui questo è figlio (variazione di periodo).
+   * `null` = programma base autonomo.
+   */
+  programma_genitore_id: number | null;
   created_by_user_id: number | null;
   /** Backend entry 88: popolato via JOIN con `app_user`, `null` se utente eliminato. */
   created_by_username: string | null;

@@ -14,6 +14,7 @@
  */
 
 import { ApiError, apiFetch, apiJson } from "@/lib/api/client";
+import type { ProgrammaMaterialeRead } from "@/lib/api/programmi";
 
 export type TipoVariazione =
   | "INTEGRAZIONE"
@@ -193,4 +194,31 @@ export async function applicaVariazione(
     throw new ApiError(res.status, msg, detailVal);
   }
   return (await res.json()) as ApplicaVariazioneResponse;
+}
+
+// =====================================================================
+// Crea fork variazione (sub-MR 5.bis-fork, entry 191)
+// =====================================================================
+
+export interface CreaForkVariazionePayload {
+  nome: string;
+  valido_da: string;
+  valido_a: string;
+  genitore_id: number;
+}
+
+/**
+ * Crea un programma di variazione figlio da una run applicata.
+ * Backend: ``POST /api/aziende/me/variazioni/{run_id}/crea-fork``.
+ * Pre-condizioni: run esiste + globale + completata + tipo!=BASE,
+ * genitore esiste e appartiene azienda. Errori HTTP 404/409/422.
+ */
+export async function creaForkVariazione(
+  runId: number,
+  payload: CreaForkVariazionePayload,
+): Promise<ProgrammaMaterialeRead> {
+  return apiJson<ProgrammaMaterialeRead>(
+    `/api/aziende/me/variazioni/${runId}/crea-fork`,
+    { method: "POST", body: payload },
+  );
 }

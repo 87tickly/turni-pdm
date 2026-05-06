@@ -10,6 +10,102 @@
 
 ---
 
+## 2026-05-06 (192) — Sub-MR 5.bis-fork frontend: bottone "Crea programma di variazione"
+
+### Contesto
+
+Frontend dell'entry 191. Quando l'alert `ProgrammiImpattatiAlert`
+mostra i programmi impattati, ogni riga ha ora un bottone "Crea
+variazione" che apre un dialog di conferma con pre-compilazione e
+chiama l'endpoint backend ``POST /api/aziende/me/variazioni/{run_id}/
+crea-fork``.
+
+### Modifiche
+
+**`frontend/src/lib/api/pde.ts`**:
+
+- Nuovo type ``CreaForkVariazionePayload`` (nome, valido_da/a,
+  genitore_id).
+- Nuova funzione ``creaForkVariazione(runId, payload)`` →
+  ``ProgrammaMaterialeRead``.
+- Re-export type da ``programmi.ts``.
+
+**`frontend/src/lib/api/programmi.ts`**:
+
+- ``ProgrammaMaterialeRead`` esteso con
+  ``programma_genitore_id: number | null``.
+
+**`frontend/src/hooks/usePde.ts`**:
+
+- Nuovo hook ``useCreaForkVariazione()`` mutation. ``onSuccess``
+  invalida la cache ``["programmi"]`` (la lista programmi includerà
+  il figlio).
+
+**`frontend/src/routes/pianificatore-giro/PdEAnnualeRoute.tsx`**:
+
+- ``CaricaVariazioneDialog`` — nuovo state ``successRunId`` salvato
+  insieme a ``successImpatti``. Nuova prop opzionale
+  ``onForkRequest`` che il dialog chiama quando l'utente clicca un
+  bottone "Crea variazione" sull'alert.
+- ``ProgrammiImpattatiAlert`` — nuova prop opzionale ``onForkClick``.
+  Se valorizzata, ogni riga del programma impattato ha un bottone
+  "Crea variazione". Layout aggiornato (card per ogni programma,
+  contenuto + bottone allineati).
+- ``CreaForkVariazioneDialog`` — nuovo componente dedicato. Prop:
+  ``runId`` (dalla variazione applicata), ``impatto`` (dal alert),
+  ``onClose``. Pre-compilazione: nome `"<genitore.nome> — variazione
+  <oggi>"`, periodo dal genitore (utente lo restringe). Submit
+  chiama ``useCreaForkVariazione``. Success card con id + nome del
+  figlio creato + suggerimento "apri dalla lista Programmi per
+  generare giri".
+- ``PdEAnnualeRoute`` — state ``forkRequest: { runId, impatto }``.
+  Quando popolato, monta ``CreaForkVariazioneDialog``. Il dialog
+  Carica variazione si chiude prima di aprire quello fork (UX
+  sequenziale, no nidificazione).
+
+### Test fixtures aggiornate
+
+- ``ProgrammaDettaglioRoute.test.tsx`` + ``ProgrammiRoute.test.tsx``:
+  aggiunto ``programma_genitore_id: null`` ai mock per soddisfare il
+  nuovo campo del type ``ProgrammaMaterialeRead``.
+
+### Verifiche
+
+- ✅ ``pnpm tsc -b --noEmit``: clean.
+
+### Decisioni di scope rinviate
+
+- **Convenzione "merge per data" lato consumer**: scope MR
+  successivo (audit cross-codebase di vista PdC, builder, query
+  giorni). Per ora il programma figlio creato è visibile nella
+  lista Programmi ma il "prevalere sul genitore" è solo concettuale.
+- **Drill-down impatto** (lista giri/turni specifici): non ancora.
+  Oggi mostriamo solo counter aggregati.
+- **Bottone "Crea fork" sulla timeline variazioni passate**: oggi
+  è solo nel dialog success post-applica. Per le variazioni già
+  applicate da altri utenti / sessioni passate non c'è ancora
+  modo di forkare. Aggiungere ``GET /variazioni/{run_id}/impatto``
+  + bottone sulla timeline → MR successivo.
+- **Eredità completa di regole/giri**: il fork è in stato bozza
+  vuoto. Per "rigenerare con le stesse regole del genitore" servirebbe
+  un'opzione "copia regole" nel dialog. Non in scope ora.
+
+### Stato
+
+- ✅ Codice frontend pronto: tipo + hook + 2 modifiche component +
+  1 dialog nuovo.
+- ⏳ Commit + push + deploy frontend Railway.
+
+### Prossimo step
+
+Test end-to-end in produzione una volta deploy completato:
+1. Carica una variazione PdE che impatta giri esistenti
+2. Verifica alert mostra programmi + counter
+3. Click "Crea variazione" → dialog pre-compilato
+4. Conferma → programma figlio creato in lista Programmi
+
+---
+
 ## 2026-05-06 (191) — Sub-MR 5.bis-fork backend: programma di variazione (figlio)
 
 ### Contesto
