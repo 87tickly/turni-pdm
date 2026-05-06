@@ -1251,12 +1251,21 @@ async def genera_giri(
     )
     warnings.extend(warnings_src)
 
-    # 6.5 Fusione cluster A1 simili (Sprint 7.9 MR 12, entry 114):
-    #    riduce la frammentazione del clustering A1 fondendo cluster
-    #    con sequenze simili (Jaccard ≥ 0.7) in cluster unificati.
-    #    Modello target PDF Trenord 1134: poche varianti per giornata-K,
-    #    ognuna con etichetta "tutto il periodo + eccezioni" — non
-    #    centinaia di micro-cluster da 1 data ciascuno.
+    # 6.5 Fusione cluster A1 simili (Sprint 7.9 MR 12, entry 114).
+    # ⚠️  PIPELINE v1 ONLY (MR-1110 sotto-MR 7, entry 207): questa fase
+    #     compatta i cluster A1 frammentati prodotti dal clustering
+    #     "identità esatta" del modello v1. La pipeline v2 (entry 202,
+    #     ``costruisci_turni_v2``) NON ne ha bisogno: nasce con varianti
+    #     calendariali distinte per giornata-tipo, niente da ricucire.
+    #     Quando il routing v2 sarà end-to-end (adapter persister
+    #     follow-up), questa fase NON verrà eseguita per programmi con
+    #     ``builder_version='v2'``.
+    #
+    #     Riduce la frammentazione del clustering A1 fondendo cluster
+    #     con sequenze simili (Jaccard ≥ 0.7) in cluster unificati.
+    #     Modello target PDF Trenord 1134: poche varianti per giornata-K,
+    #     ognuna con etichetta "tutto il periodo + eccezioni" — non
+    #     centinaia di micro-cluster da 1 data ciascuno.
     giri_fusi = fonde_cluster_simili(giri_assegnati)
 
     # 7. Aggregazione A2 (Sprint 7.8 MR 2.5 + 7.9 MR 10 + 7.9 MR α):

@@ -10,6 +10,54 @@
 
 ---
 
+## 2026-05-06 (207) — MR-1110 sotto-MR 7: deprecazione fusione cluster A1 (Sprint 7.9 MR 12) per la pipeline v2
+
+### Contesto
+
+Sotto-MR 7 di MR-1110: formalizza la deprecazione del modulo
+``fusione_cluster_a1.py`` (Sprint 7.9 MR 12, entry 114) per la
+pipeline ``v2``. La fusione era post-processing necessario in v1
+per ricucire artefatti del clustering "identità esatta" del modello
+(90% varianti con 1 sola data → cluster ricomposti via Jaccard ≥ 0.7).
+Il modello v2 (entry 202) nasce con varianti calendariali distinte
+per giornata-tipo (chiave ``(materiale, sede, n_giornate, staz_inizio,
+staz_fine, codice_servizio_dominante)``): non c'è niente da ricucire.
+
+### Modifiche
+
+**`fusione_cluster_a1.py`**: docstring di modulo aggiornata con
+sezione "⚠️ Modulo legacy v1" che spiega:
+- Resta in uso per ``builder_version='v1'`` (backward compat).
+- ``v2`` non lo userà — quando il routing v2 sarà end-to-end, la
+  fase 6.5 di ``builder.py`` non verrà eseguita per programmi v2.
+
+**`builder.py`** step 6.5: commento esteso "PIPELINE v1 ONLY"
+sopra la chiamata ``fonde_cluster_simili()``, con riferimento al
+sotto-MR 7 e alla decisione di non eseguirla in v2.
+
+### Test
+
+**`test_builder_giri.py::test_builder_version_v2_alza_not_implemented`**:
+nuovo test che verifica il routing scaffold di sotto-MR 10. Crea un
+programma, lo promuove a ``builder_version='v2'`` via UPDATE, chiama
+``genera_giri`` e verifica che alzi ``BuilderVersionNonSupportata``
+con i metadati ``programma_id`` e ``version='v2'`` corretti. Garanzia
+contro rimozioni accidentali del routing prima del wiring v2 reale.
+
+### Verifiche
+
+- ✅ ``mypy --strict`` clean.
+- ✅ ``ruff check`` clean.
+- ✅ ``pytest tests/test_builder_giri.py::test_builder_version_v2_alza_not_implemented``
+  → passed.
+
+### Stato
+
+- ✅ Sotto-MR 7 chiuso. Documentazione + 1 test invariante.
+- ⏳ Commit + push + deploy backend Railway.
+
+---
+
 ## 2026-05-06 (206) — MR-1110 sotto-MR 10: campo `builder_version` + routing v1/v2
 
 ### Contesto

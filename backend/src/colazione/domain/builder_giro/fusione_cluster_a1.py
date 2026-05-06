@@ -1,5 +1,20 @@
 """Fusione cluster A1 simili (Sprint 7.9 MR 12).
 
+⚠️ **Modulo legacy v1** — MR-1110 sotto-MR 7 (entry 207, 2026-05-06)
+ne ha formalizzato la deprecazione per la pipeline ``v2``. Resta in
+uso nella pipeline ``builder_version='v1'`` (default per programmi
+esistenti) per backward compat. La pipeline ``v2`` (entry 202,
+``costruisci_turni_v2``) **non** usa questo modulo: il modello
+"M varianti per giornata-tipo" tiene i cluster A1 distinti dalla
+nascita (chiave ``(materiale, sede, n_giornate, staz_inizio,
+staz_fine, codice_servizio_dominante)`` → giornate-tipo native).
+La fusione qui era un post-processing per ricucire artefatti del
+modello v1; in v2 non c'è più niente da ricucire.
+
+Quando il routing v2 diventerà end-to-end (MR follow-up con
+adapter persister), questo modulo resterà solo per i programmi
+``builder_version='v1'``.
+
 Funzione **pura** che, dati i ``GiroAssegnato`` post-clustering A1,
 fonde i cluster con sequenze di catene **simili** (Jaccard ≥ soglia)
 in un unico cluster con:
@@ -51,7 +66,6 @@ from colazione.domain.builder_giro.composizione import (
     GiornataAssegnata,
     GiroAssegnato,
 )
-
 
 # =====================================================================
 # Helpers

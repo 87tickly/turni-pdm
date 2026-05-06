@@ -837,3 +837,44 @@ async def test_due_regole_distinte_non_mescolano_corse(azienda_id: int) -> None:
     assert materiali_visti == {"ETR522", "ETR526"}, (
         f"Atteso un giro per ogni materiale, visti: {materiali_visti}"
     )
+
+
+async def test_builder_version_v2_alza_not_implemented(azienda_id: int) -> None:
+    """MR-1110 sotto-MR 10/7 (entry 206/207): un programma con
+    ``builder_version='v2'`` riceve ``BuilderVersionNonSupportata``
+    (sottoclasse di ``NotImplementedError``) finché l'adapter
+    ``TurnoConVarianti → GiroDaPersistere`` non è scritto. Programmi
+    con ``"v1"`` (default) procedono normalmente.
+
+    Questo test garantisce che il routing scaffold (entry 206) non
+    venga rimosso accidentalmente prima di completare il wiring v2.
+    """
+    from colazione.domain.builder_giro import BuilderVersionNonSupportata
+
+    prog_id = await _setup_completo(azienda_id)
+
+    # Promuovi il programma a v2 (PATCH "manuale" via UPDATE diretto).
+    async with session_scope() as session:
+        await session.execute(
+            text(
+                "UPDATE programma_materiale SET builder_version = 'v2' "
+                "WHERE id = :pid"
+            ),
+            {"pid": prog_id},
+        )
+        await session.commit()
+
+    # genera_giri deve alzare l'eccezione dedicata.
+    async with session_scope() as session:
+        with pytest.raises(BuilderVersionNonSupportata) as exc_info:
+            await genera_giri(
+                programma_id=prog_id,
+                data_inizio=date(2026, 4, 27),
+                n_giornate=1,
+                localita_codice=LOC_CODICE,
+                session=session,
+                azienda_id=azienda_id,
+            )
+
+    assert exc_info.value.programma_id == prog_id
+    assert exc_info.value.version == "v2"
