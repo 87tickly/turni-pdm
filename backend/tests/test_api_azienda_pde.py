@@ -636,3 +636,65 @@ async def test_crea_fork_validator_periodo_inverso_422(
         headers=_h(_giro_token(client)),
     )
     assert res.status_code == 422
+
+
+# =====================================================================
+# Lista figli programma (sub-MR 5.bis-relazione, entry 193)
+# =====================================================================
+
+
+async def test_list_figli_programma_vuoto_se_nessun_fork(
+    client: TestClient,
+) -> None:
+    """Programma senza figli → lista vuota."""
+    parent_id = await _crea_programma_genitore("nofigli")
+    res = client.get(
+        f"/api/programmi/{parent_id}/figli",
+        headers=_h(_giro_token(client)),
+    )
+    assert res.status_code == 200, res.text
+    assert res.json() == []
+
+
+async def test_list_figli_programma_dopo_crea_fork(
+    client: TestClient,
+) -> None:
+    """Crea fork → la lista figli del genitore include il fork creato."""
+    parent_id = await _crea_programma_genitore("withfigli")
+    run_id = await _crea_run_globale_completata("withfigli")
+
+    # Crea fork via API
+    res_fork = client.post(
+        f"/api/aziende/me/variazioni/{run_id}/crea-fork",
+        json={
+            "nome": "TEST_AZPDE_FORK_CHILD_listfigli",
+            "valido_da": "2026-06-15",
+            "valido_a": "2026-06-30",
+            "genitore_id": parent_id,
+        },
+        headers=_h(_giro_token(client)),
+    )
+    assert res_fork.status_code == 201, res_fork.text
+    figlio_id = res_fork.json()["id"]
+
+    # Lista figli del genitore
+    res_lista = client.get(
+        f"/api/programmi/{parent_id}/figli",
+        headers=_h(_giro_token(client)),
+    )
+    assert res_lista.status_code == 200, res_lista.text
+    body = res_lista.json()
+    assert len(body) == 1
+    assert body[0]["id"] == figlio_id
+    assert body[0]["programma_genitore_id"] == parent_id
+
+
+async def test_list_figli_programma_404_su_inesistente(
+    client: TestClient,
+) -> None:
+    """Genitore inesistente → 404."""
+    res = client.get(
+        "/api/programmi/9999999/figli",
+        headers=_h(_giro_token(client)),
+    )
+    assert res.status_code == 404

@@ -449,6 +449,51 @@ async def get_programma(
 
 
 # =====================================================================
+# Programmi figli (sub-MR 5.bis-relazione, entry 193)
+# =====================================================================
+
+
+@router.get(
+    "/{programma_id}/figli",
+    response_model=list[ProgrammaMaterialeRead],
+    summary="Lista programmi figli (variazioni) del programma indicato",
+)
+async def list_figli_programma(
+    programma_id: int,
+    user: CurrentUser = _authz_view,
+    session: AsyncSession = Depends(get_session),
+) -> list[ProgrammaMateriale]:
+    """Restituisce i programmi che hanno ``programma_genitore_id ==
+    programma_id``.
+
+    Convenzione: un programma figlio è una "variazione di periodo" del
+    genitore (vedi sub-MR 5.bis-fork, entry 191). Il pianificatore lo
+    crea quando una variazione PdE impatta giri/turni del genitore e
+    vuole isolare il problema in un periodo specifico.
+
+    Lista ordinata per ``valido_da ASC`` (cronologico). Auth: tutti i
+    4 ruoli pipeline (filter per visibilità a monte come per il
+    dettaglio programma).
+    """
+    # Verifico che il programma genitore esista e sia visibile.
+    p = await _get_programma_or_404(session, programma_id, user.azienda_id)
+    if not _programma_visibile_per_user(p, user):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="programma non trovato",
+        )
+    stmt = (
+        select(ProgrammaMateriale)
+        .where(
+            ProgrammaMateriale.programma_genitore_id == programma_id,
+            ProgrammaMateriale.azienda_id == user.azienda_id,
+        )
+        .order_by(ProgrammaMateriale.valido_da.asc())
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+# =====================================================================
 # PATCH programma
 # =====================================================================
 

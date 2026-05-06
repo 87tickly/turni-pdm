@@ -10,6 +10,83 @@
 
 ---
 
+## 2026-05-06 (194) — Sub-MR 5.bis-relazione backend: endpoint figli programma
+
+### Contesto
+
+Preparazione del contesto per la convivenza genitore/figlio dei
+programmi (sub-MR 5.bis-fork, entry 191-192). L'utente non ha
+variazioni reali oggi, quindi non testiamo end-to-end ma rendiamo
+**visibile** la relazione nei programmi via UI: serve un endpoint
+dedicato per leggere i figli di un programma.
+
+Senza questo endpoint, l'UI non ha modo di mostrare "questo
+programma ha N variazioni di periodo" sul dettaglio del genitore,
+o di linkare al genitore dal dettaglio di un figlio.
+
+Decisione utente 2026-05-06 ribadita: **italiano ovunque** in
+codice, commenti, UI, log. Da rispettare anche nei MR successivi.
+
+### Modifiche backend
+
+**`backend/src/colazione/api/programmi.py`** — endpoint nuovo:
+
+- ``GET /api/programmi/{programma_id}/figli`` (auth ``_authz_view``,
+  visibile a tutti i 4 ruoli pipeline):
+  - 404 se il genitore non esiste o non visibile per ruolo.
+  - Ritorna ``list[ProgrammaMaterialeRead]`` con i programmi che
+    hanno ``programma_genitore_id == programma_id``.
+  - Ordinato per ``valido_da ASC`` (cronologico naturale per le
+    variazioni di periodo).
+
+### Test
+
+**`backend/tests/test_api_azienda_pde.py`** — 3 nuovi test
+(sezione "Lista figli programma"):
+
+- ``test_list_figli_programma_vuoto_se_nessun_fork``: programma
+  senza fork → ``[]``.
+- ``test_list_figli_programma_dopo_crea_fork``: workflow completo
+  (crea fork → lista figli del genitore mostra il fork creato +
+  ``programma_genitore_id`` valorizzato).
+- ``test_list_figli_programma_404_su_inesistente``: genitore
+  inesistente → 404.
+
+### Verifiche
+
+- ✅ ``uv run mypy --strict src/``: 76 source files clean.
+- ✅ ``uv run ruff check`` su file MR: 0 errori.
+- ✅ ``uv run pytest``: 854 passed, 13 skipped (+3 figli).
+
+### Decisioni di scope rinviate
+
+- **Endpoint dettaglio genitore arricchito**: oggi
+  ``GET /programmi/{id}`` non include ``genitore_nome`` derivato.
+  Per il frontend serve ``GET /programmi/{genitore_id}`` separato
+  per leggere il nome del genitore quando si è sul dettaglio di un
+  figlio. Accettabile come cost (1 query in più), evita JOIN
+  prematuro.
+- **Convenzione "merge per data" lato consumer**: sempre rinviata
+  a sub-MR successivo (vista PdC finale, builder).
+- **Test integration con setup completo giro+turno+blocco** per il
+  test reale di ``calcola_impatto_su_programmi``: rinviato. Setup
+  costoso, lo facciamo quando serve come step preparatorio del
+  "merge per data".
+
+### Stato
+
+- ✅ Codice backend pronto: 1 endpoint nuovo + 3 test.
+- ⏳ Commit + push + deploy backend Railway.
+
+### Prossimo step
+
+Frontend (entry 195): badge "Variazione di [genitore]" sulla lista
+Programmi per i programmi figli, sezione "Programmi di variazione"
+sul dettaglio del genitore (consuma ``GET /figli``), link al
+genitore dal dettaglio del figlio (consuma ``GET /programmi/{id}``).
+
+---
+
 ## 2026-05-06 (193) — MR-1110 Step 1: chiusura D1 / D6 / D7
 
 ### Contesto
