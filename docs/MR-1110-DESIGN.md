@@ -562,20 +562,145 @@ questa fase iniziale — solo nuova logica di popolamento.
 
 ---
 
-## 8. Decisioni aperte (da risolvere prima dello Step 1)
+## 8. Decisioni aperte / chiuse
 
-| ID | Decisione | Impatto |
+### 8.1 Stato
+
+| ID | Decisione | Stato |
 |---|---|---|
-| **D1** | Chiave di fase: `(staz_inizio, staz_fine)` o `(staz_inizio, staz_fine, codice_servizio_dominante)`? | Granularità delle giornate-tipo. La 2ª opzione separa giornate con stesso aggancio fisico ma servizio commerciale diverso. |
-| **D2** | Cosa fare se nessun ciclo hamiltoniano esiste? Multi-turno o un turno con sotto-cicli? | Modellazione di turni "rotti" (rari, ma possibili). |
-| **D3** | Soglia `min_istanze` per filtro significatività Step 2: 2, 3, 5? | Trade-off tra tenere varianti rare e generare rumore. |
-| **D4** | Etichetta "FpF" (primo/ultimo festivo del periodo): la calcoliamo o la prende l'utente da configurazione? | UX: serve un'opzione manuale o l'inferenza è abbastanza? |
-| **D5** | Periodo di riferimento per le etichette: quello del programma materiale o un sotto-periodo della giornata-tipo? | Algoritmo etichetta: con quale "totale" confrontare per generare "F escluso ..." o "LV 1:5"? |
-| **D6** | Concatenazione ciclica: vincolo `staz_fine_K == staz_inizio_(K+1)` rigido o tollera "vuoti notturni di posizionamento" tra K e K+1? | Modello dei giri "non puramente ciclici". |
-| **D7** | Backward compat: i programmi materiali già persistiti (giro 271 e simili) si aggiornano automaticamente al nuovo modello via re-run del builder? Migrazione automatica o flag opt-in? | Rischio regressioni in produzione. |
-| **D8** | Test acceptance: replichiamo turno 1110 G6 con dati di test sintetici o con il PdE 2026 reale? | Robustezza dei test e velocità del feedback loop. |
+| **D1** | Chiave di fase: include `codice_servizio_dominante`? | ✅ chiusa 2026-05-06 — vedi §8.2 |
+| **D2** | Cicli non-hamiltoniani: multi-turno o sotto-cicli? | ⏸️ aperta |
+| **D3** | Soglia `min_istanze` Step 2 | ⏸️ aperta |
+| **D4** | Etichetta "FpF": auto o config | ⏸️ aperta |
+| **D5** | Periodo di riferimento etichette | ⏸️ aperta |
+| **D6** | Concatenazione: vincolo rigido o vuoti notturni? | ✅ chiusa 2026-05-06 — vedi §8.2 |
+| **D7** | Backward compat: re-run automatico o opt-in? | ✅ chiusa 2026-05-06 — vedi §8.2 |
+| **D8** | Fixture test: sintetici o PdE 2026 reale? | ⏸️ aperta |
 
-Ogni decisione va documentata in TN-UPDATE prima di essere chiusa.
+Ogni chiusura documentata in TN-UPDATE (per D1/D6/D7: entry 191
+del 2026-05-06).
+
+### 8.2 Decisioni chiuse
+
+#### D1 — Chiave di fase con `codice_servizio_dominante`
+
+**Risposta utente** (2026-05-06): *"sono solo informazioni in più
+se non compromettono la logica va bene."*
+
+**Decisione**: chiave di fase **estesa** =
+`(materiale_tipo_codice, localita_codice, staz_inizio, staz_fine,
+codice_servizio_dominante)`.
+
+`codice_servizio_dominante` definito come:
+
+- Il `codice_servizio_commerciale` più frequente fra le corse della
+  catena (es. `S5`, `R-Mi-Brescia`, `Reg-Tirano`).
+- In caso di parità, lessicograficamente minimo (deterministico).
+- Se nessuna corsa della catena ha `codice_servizio_commerciale`
+  popolato → `None`.
+
+**Comportamento del clustering Step 2** (raggruppamento catene per
+chiave):
+
+- Catene con `codice_servizio_dominante` **valorizzato** vengono
+  raggruppate in giornate-tipo distinte se il codice è diverso, anche
+  a parità degli altri 4 campi della chiave.
+- Catene con `codice_servizio_dominante = None` vengono **mescolate**
+  con catene di qualsiasi servizio se gli altri 4 campi coincidono
+  (fallback morbido — non frammenta in giornate-tipo "orfane senza
+  servizio identificabile").
+
+**Razionale**: l'arricchimento informativo non genera frammentazione
+se il dato non è disponibile, e separa correttamente i casi reali in
+cui un Reg e un RegEx insistono sullo stesso aggancio fisico ma con
+differente significato commerciale.
+
+**Rivisitazione**: se in pratica vediamo giornate-tipo eccessivamente
+frammentate per via di `codice_servizio_dominante`, valutiamo un
+upgrade a "match per **insieme di servizi**" (tolleranza di 1 servizio
+diverso). Aperto come decisione futura, NON parte di questo MVP.
+
+#### D6 — Concatenazione: vincolo rigido
+
+**Risposta utente** (2026-05-06): *"assolutamente no, mai materiali
+vuoti senza un senso logico."*
+
+**Decisione**: il vincolo
+`staz_fine_K == staz_inizio_(K+1)` è **RIGIDO**. Niente vuoti
+notturni "di posizionamento ad hoc" inseriti dal builder fra
+giornate-tipo.
+
+**Conseguenze sull'algoritmo Step 4** (concatenazione ciclica):
+
+- Il grafo orientato delle giornate-tipo (§4.4) ha archi
+  `G_a → G_b` solo se `G_a.staz_fine == G_b.staz_inizio`. Niente
+  archi "fittizi" con costo penalty.
+- Se due giornate-tipo del gruppo non si concatenano per nessuna
+  permutazione → finiscono in **turni distinti** (pattern di flotta
+  separati). Il pianificatore vede 2+ turni invece di 1.
+- I "vuoti che hanno un senso logico" già modellati DENTRO una
+  giornata-tipo (es. vuoto testa/coda di una catena per
+  posizionamento sede ↔ stazione di partenza commerciale) **restano
+  ammessi** — sono parte della catena, non sono vuoti tra
+  giornate-tipo.
+
+**Distinzione operativa importante**:
+
+| Tipo di vuoto | Ammesso? | Dove |
+|---|---|---|
+| Vuoto testa di catena (sede → prima stazione commerciale) | ✅ sì | Dentro la giornata-tipo |
+| Vuoto coda di catena (ultima stazione commerciale → sede) | ✅ sì | Dentro la giornata-tipo |
+| Vuoto intra-giornata (cambio area Milano fra due corse) | ✅ sì | Dentro la catena, già esistente |
+| **Vuoto notturno fra G_K e G_(K+1) per agganciarle** | ❌ NO | Decisione D6 |
+
+#### D7 — Backward compat: opt-in caso per caso
+
+**Risposta utente** (2026-05-06): *"dipende, va valutata ogni
+situazione."*
+
+**Decisione**: niente migrazione automatica dei programmi materiali
+esistenti al nuovo modello. Ogni programma resta sul suo "builder
+storico" finché l'utente non chiede esplicitamente di re-runnarlo.
+
+**Implementazione**:
+
+- Aggiungiamo al `ProgrammaMateriale` un campo
+  `builder_version: str` (default `"v1"` per i programmi esistenti).
+- Nuovi programmi creati DOPO il merge di MR-1110 hanno
+  `builder_version = "v2"` di default.
+- L'utente può cambiare la versione di un programma esistente da UI
+  tramite un'azione esplicita "Aggiorna a builder v2 (rebuild)" che
+  re-runna l'intera pipeline e sovrascrive i giri persistiti. Mostra
+  diff prima/dopo + warning su impatto turni PdC eventualmente
+  costruiti.
+- I programmi v1 continuano a essere serviti dalla pipeline storica
+  (`multi_giornata` + `fusione_cluster_a1` + `aggregazione_a2` v1).
+  Niente cancellazione del codice v1 finché tutti i programmi non
+  sono migrati o archiviati.
+
+**Implicazione per il sotto-MR 5** (rewrite multi_giornata):
+mantenere il vecchio modulo invariato, creare il nuovo
+`multi_giornata_v2.py` parallelo. Lo schema dati è uguale per
+entrambe le versioni — cambia solo cosa viene popolato.
+
+**Pulizia debito tecnico v1**: aperta come MR futuro quando l'utente
+darà OK alla rimozione. Tracciato in `TN-UPDATE` come "non si
+distrugge finché non è esplicito".
+
+### 8.3 Decisioni ancora aperte
+
+| ID | Domanda | Note |
+|---|---|---|
+| **D2** | Cicli non-hamiltoniani: multi-turno o sotto-cicli? | Discutere con esempi reali quando si vede il primo caso. |
+| **D3** | Soglia `min_istanze` Step 2 (2, 3, 5)? | Default proposto: 2. Confermare quando arriviamo allo Step 2. |
+| **D4** | "FpF" (primo/ultimo festivo del periodo): auto o config? | Default proposto: auto inferito dal periodo programma. |
+| **D5** | Periodo di riferimento per le etichette: programma o giornata-tipo? | Default proposto: periodo programma (= validità intera). |
+| **D8** | Fixture test: sintetici o PdE 2026 reale? | Default proposto: misto — unit con sintetici, integration con PdE reale. |
+
+Le altre 5 sono tattiche e si possono chiudere durante
+l'implementazione dello Step corrispondente. Default proposti
+(in tabella) sono già coerenti col modello — l'utente conferma
+solo se vede un controesempio.
 
 ---
 

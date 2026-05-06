@@ -10,6 +10,95 @@
 
 ---
 
+## 2026-05-06 (193) — MR-1110 Step 1: chiusura D1 / D6 / D7
+
+### Contesto
+
+Continuazione del MR-1110 (entry 190 — design del nuovo modello
+"turno = giornate-tipo concatenate + varianti calendariali ricche").
+L'utente in chat risponde alle 3 decisioni più impattanti delle 8
+aperte (§8 del documento di design).
+
+### Decisioni utente
+
+**D6 — Concatenazione: vincolo rigido o vuoti notturni di
+posizionamento?**
+
+> *"assolutamente no, mai materiali vuoti senza un senso logico"*
+
+→ Vincolo `staz_fine_K == staz_inizio_(K+1)` **RIGIDO**. Niente
+vuoti notturni "ad hoc" inseriti dal builder fra giornate-tipo. I
+vuoti che hanno senso logico (testa/coda di catena per
+posizionamento sede ↔ stazione commerciale, vuoti intra-giornata
+già modellati) **restano ammessi** perché sono parte della catena,
+non vuoti fra giornate-tipo. Conseguenza: due giornate-tipo che non
+si concatenano per nessuna permutazione finiscono in turni distinti.
+
+**D7 — Backward compat: re-run automatico o opt-in?**
+
+> *"dipende, va valutata ogni situazione"*
+
+→ Niente migrazione automatica dei programmi esistenti. Aggiungiamo
+`ProgrammaMateriale.builder_version` (`"v1"` per esistenti, `"v2"`
+default per i nuovi). Versione cambiabile da UI con azione esplicita
+"Aggiorna a builder v2 (rebuild)" che mostra diff prima/dopo. Il
+modulo `multi_giornata_v2.py` sarà parallelo al v1 esistente, niente
+cancellazione del v1 finché l'utente non dà OK esplicito.
+
+**D1 — Chiave di fase con `codice_servizio_dominante`?**
+
+> *"sono solo informazioni in più se non compromettono la logica
+> va bene"*
+
+→ Chiave estesa = `(materiale, sede, staz_inizio, staz_fine,
+codice_servizio_dominante)`. `codice_servizio_dominante` = il
+codice servizio commerciale più frequente fra le corse della catena
+(tie-break lessicografico). Se `None` (catena senza servizio
+identificabile) → fallback morbido: si raggruppa con catene di
+qualsiasi servizio purché coincidano gli altri 4 campi. Non frammenta
+in giornate-tipo "orfane".
+
+### Modifiche
+
+- **`docs/MR-1110-DESIGN.md`** — §8 riscritta:
+  - §8.1 tabella riassuntiva con stato per ogni decisione (3 chiuse,
+    5 aperte).
+  - §8.2 dettaglio chiusura D1, D6, D7 con citazione testuale della
+    risposta utente, decisione formale, conseguenze sull'algoritmo,
+    distinzioni operative (es. tabella "tipo di vuoto ammesso/no"
+    per D6).
+  - §8.3 stato delle 5 decisioni aperte (D2, D3, D4, D5, D8) con
+    default proposti (l'utente conferma solo se vede controesempio).
+- **Questa entry TN-UPDATE**.
+
+### Decisioni aperte residue
+
+D2 (cicli non-hamiltoniani), D3 (soglia min_istanze), D4 (FpF auto
+o config), D5 (periodo riferimento etichette), D8 (fixture test).
+Tutte tattiche — chiudibili durante l'implementazione del relativo
+step. Default proposti già coerenti col modello.
+
+### Stato
+
+- ✅ 3/8 decisioni chiuse (le più impattanti).
+- ✅ Documento di design aggiornato con stato decisioni e impatti
+  algoritmici.
+- ⏳ Commit + push (solo `.md`, niente deploy Railway).
+- ⏸️ Step 2 (sotto-MR `giornata_tipo.py`) può essere pianificato:
+  abbiamo abbastanza struttura per cominciare.
+
+### Prossimo step
+
+Decisione utente: aprire il sotto-MR 2 (`giornata_tipo.py` —
+identificazione delle giornate-tipo dalle catene), oppure chiudere
+prima le 5 decisioni residue D2-D5+D8?
+
+Se l'utente preferisce procedere con i default proposti, partiamo
+con sotto-MR 2 e chiudiamo le decisioni residue strada facendo
+quando emergono casi concreti.
+
+---
+
 ## 2026-05-06 (192) — Sub-MR 5.bis-fork frontend: bottone "Crea programma di variazione"
 
 ### Contesto
