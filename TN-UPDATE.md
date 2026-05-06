@@ -10,6 +10,96 @@
 
 ---
 
+## 2026-05-06 (202) — MR-1110 sotto-MR 4 + Step 3 + sotto-MR 5: pipeline builder v2 completa
+
+### Contesto
+
+Continuazione MR-1110 (entry 190/193/196/198/199). 8/8 decisioni
+chiuse. Implementati i 3 step rimanenti della pipeline nuovo builder
+con tutto il flusso end-to-end ora coperto:
+
+- **Sotto-MR 4**: etichette calendariali parlanti stile PDF Trenord.
+- **Step 3**: varianti calendariali per giornata-tipo.
+- **Sotto-MR 5**: orchestratore `multi_giornata_v2` end-to-end.
+
+### Modifiche backend
+
+**`calendario.py`**: aggiunto `festivi_precedenti_festivo(festivita)`
+(D4): formula `{d ∈ festivita | d+1 ∈ festivita}` per riconoscere FpF
+(Pasqua precede Pasquetta, Natale precede S.Stefano).
+
+**`builder_giro/etichetta.py`**: aggiunta `genera_etichetta_parlante`
+con algoritmo decisionale a priorità: vuoto → "Solo D/M/YY" →
+pattern strutturali esatti (LV 1:5, LV 6, Circola Sabato Festivo, F,
+F escluso FpF) → con esclusioni (≤MAX_INLINE) → finestra continua →
+Si eff. → fallback Misto. Helper privati `_classifica_giorno_4_categorie`
+(4 categorie fini: lv_1_5/lv_6/sabato_festivo/festivo) e
+`_partiziona_periodo_4_categorie`. La funzione legacy
+`calcola_etichetta_variante` resta intatta per backward compat v1.
+
+**`builder_giro/varianti_calendariali.py`** (nuovo, ~280 righe):
+
+- `VarianteCalendariale`: dataclass frozen `{catena_canonica,
+  dates_apply, etichetta, prestazione_minuti, km_giornaliera}`.
+- `GiornataTipoConVarianti`: dataclass frozen `{giornata, varianti}`
+  con property forwarder.
+- `genera_varianti_calendariali(g, festivita, periodo)`: API.
+  Raggruppa istanze per `_chiave_sequenza` (tuple di
+  `(numero_treno, ora_partenza_min, ora_arrivo_min)` per ogni corsa,
+  ignorando vuoti tecnici), calcola etichetta + prestazione + km.
+- `_prestazione_minuti`: include vuoti testa/coda, gestisce
+  cross-mezzanotte (+1440 al delta negativo).
+- `genera_varianti_per_lista`: convenience batch.
+
+**`builder_giro/multi_giornata_v2.py`** (nuovo, ~210 righe):
+
+- `TurnoConVarianti`: output finale (tuple di
+  `GiornataTipoConVarianti` ordinate ciclicamente).
+- `ParamBuilderV2`: parametri (min_istanze).
+- `costruisci_turni_v2(istanze, festivita, periodo, params)`:
+  pipeline end-to-end Step 2 → Step 3 → Step 4. Lookup tramite
+  chiave 5-uple D1 per arricchire i Turni puri. Combina orfane
+  Step 2 + istanze recuperate da orfane Step 4.
+
+### Test (36 nuovi, tutti passati)
+
+- **`test_etichetta_parlante.py`** (17): casi base, pattern
+  strutturali, esclusioni, finestra continua, Si eff., misto. 5
+  acceptance turno 1110 G6 PDF Trenord (LV 1:5, Circola Sabato
+  Festivo, Si eff. 22/3 12/4, Si eff. 1/5 2/6, LV 6).
+- **`test_varianti_calendariali.py`** (11): raggruppamento, etichette,
+  prestazione (vuoti, cross-mezzanotte), ordinamento, acceptance
+  turno 1110 (6 varianti), property forwarder, frozen.
+- **`test_multi_giornata_v2.py`** (8): pipeline E2E, vuoto, singola
+  orfana, 2 giornate concatenate, acceptance turno 1110 (1 fase
+  auto-loop + 6 varianti), multi-turno via SCC (D2), orfane
+  combinate (D3+D2), param.
+
+### Verifiche
+
+- `pytest` builder_giro completo (8 file di test) → **127/127 ✅**.
+- `mypy --strict` builder_giro + calendario.py → clean (20 file).
+- `ruff check` builder_giro + 5 nuovi test → clean dopo
+  organize-imports.
+- 1 errore ruff pre-esistente in `aggregazione_a2.py:230` (var
+  unused) — non mio sotto-MR, lasciato intatto (D7 v1 invariato).
+
+### Stato
+
+- ✅ Sotto-MR 4, Step 3, Sotto-MR 5 chiusi.
+- ✅ Pipeline MR-1110 builder v2 **completa end-to-end**:
+  catene-istanza → giornate-tipo → varianti calendariali → turni
+  concatenati ciclicamente.
+- ⏳ Commit + push + deploy backend Railway.
+
+### Prossimo step
+
+Sotto-MR 6-10 rimanenti (persister DB, deprecazione MR 12,
+integration test PdE 2026, UI Gantt, backward compat
+`builder_version`).
+
+---
+
 ## 2026-05-06 (201) — Warning correlato regola↔catene scartate per sede incompatibile
 
 ### Contesto

@@ -172,3 +172,70 @@ def tipo_giorno_categoria(
 
     # 3) Default: lavorativo.
     return "lavorativo"
+
+
+# =====================================================================
+# Festivo precedente Festivo (FpF) — Sprint MR-1110 sotto-MR 4
+# =====================================================================
+
+
+def festivi_precedenti_festivo(
+    festivita: frozenset[date],
+) -> frozenset[date]:
+    """Festivi che precedono **immediatamente** un altro festivo.
+
+    Decisione utente 2026-05-06 (D4 chiusa, vedi
+    ``docs/MR-1110-DESIGN.md`` §8.2): un FpF è un festivo X tale che
+    il giorno X+1 è anch'esso festivo (festività nazionale, locale
+    azienda, o domenica — tutti compresi nel set in input via
+    ``tipo_giorno_categoria`` semantica).
+
+    Esempi tipici (calendario italiano):
+
+    - **Pasqua** (domenica) precede **Pasquetta** (lunedì) → la
+      domenica di Pasqua è FpF.
+    - **Natale** (25/12) precede **S.Stefano** (26/12) → 25/12 è FpF.
+    - **Sabato 25 aprile 2026** (Liberazione, festivo) precede
+      domenica 26/4 (festivo per `tipo_giorno_categoria`) → FpF.
+
+    Note implementative:
+
+    - L'algoritmo usa **solo** il set in input. Il caller è
+      responsabile di costruirlo con `festivita_italiane` + locali
+      azienda + eventualmente date sperimentali (per riconoscere
+      ponti di festività personalizzate).
+    - Le **domeniche** sono trattate come festivi solo se incluse nel
+      set in input. Se vuoi che "venerdì prima di sabato che precede
+      domenica festiva" sia FpF, devi includere domenica come
+      festivo nel set. Convenzione: il caller costruisce il set
+      includendo le domeniche come festivi (coerente con
+      `tipo_giorno_categoria`).
+
+    Args:
+        festivita: set di tutte le date che il caller considera
+            "festive" (festività nazionali + locali azienda +
+            eventualmente domeniche se rilevanti per il calcolo FpF
+            del programma).
+
+    Returns:
+        Frozenset delle date FpF (sottoinsieme di `festivita`).
+        Vuoto se nessun festivo precede un altro festivo.
+
+    Esempi:
+        Set vuoto → FpF vuoto:
+
+        >>> festivi_precedenti_festivo(frozenset())
+        frozenset()
+
+        Pasqua + Pasquetta 2026 (5/4 + 6/4):
+
+        >>> from datetime import date
+        >>> set_festivi = frozenset({date(2026, 4, 5), date(2026, 4, 6)})
+        >>> sorted(festivi_precedenti_festivo(set_festivi))
+        [datetime.date(2026, 4, 5)]
+    """
+    from datetime import timedelta
+
+    return frozenset(
+        d for d in festivita if (d + timedelta(days=1)) in festivita
+    )
