@@ -1191,6 +1191,12 @@ function GanttSection({
 
             {/* Totali */}
             <TotaliRow giro={giro} stats={stats} />
+
+            {/* Sprint 8.0 entry 204 (Step B): banner ciclo chiuso
+                G_N → G_1. Mostra se l'ultima stazione del giro coincide
+                con la prima (= il convoglio fisico chiude il loop e
+                ricomincia). */}
+            <CicloChiusoBanner giro={giro} />
           </div>
         </div>
 
@@ -1198,6 +1204,88 @@ function GanttSection({
         <Legenda />
       </Card>
     </GanttScaleContext.Provider>
+  );
+}
+
+/**
+ * Sprint 8.0 entry 204 (sotto-MR 9 Step B): banner finale del Gantt che
+ * riassume la chiusura del ciclo. Calcola la stazione di terminazione
+ * della variante canonica dell'ultima giornata e quella di partenza
+ * della variante canonica della prima. Se coincidono, il giro materiale
+ * "chiude" e il convoglio è pronto a ripartire dal G1 il giorno dopo
+ * (rotazione realistica). Se non coincidono, c'è un cap di km/sede o
+ * un'anomalia.
+ */
+function CicloChiusoBanner({ giro }: { giro: GiroDettaglio }) {
+  const giornate = giro.giornate;
+  if (giornate.length === 0) return null;
+  const prima = giornate[0];
+  const ultima = giornate[giornate.length - 1];
+  const variantePrima = prima.varianti[0];
+  const varianteUltima = ultima.varianti[0];
+  if (variantePrima === undefined || varianteUltima === undefined) return null;
+  // Stazione di partenza G1 = primo blocco (per ora_inizio).
+  const blocchiPrimaOrd = [...variantePrima.blocchi]
+    .filter((b) => parseTimeToMin(b.ora_inizio) !== null)
+    .sort(
+      (a, b) =>
+        (parseTimeToMin(a.ora_inizio) ?? 0) - (parseTimeToMin(b.ora_inizio) ?? 0),
+    );
+  // Stazione di terminazione GN = ultimo blocco (per ora_fine).
+  const blocchiUltOrd = [...varianteUltima.blocchi]
+    .filter((b) => parseTimeToMin(b.ora_fine) !== null)
+    .sort(
+      (a, b) =>
+        (parseTimeToMin(b.ora_fine) ?? 0) - (parseTimeToMin(a.ora_fine) ?? 0),
+    );
+  const primoBlocco = blocchiPrimaOrd[0];
+  const ultimoBlocco = blocchiUltOrd[0];
+  if (primoBlocco === undefined || ultimoBlocco === undefined) return null;
+  const stazPartenza = primoBlocco.stazione_da_codice;
+  const stazArrivo = ultimoBlocco.stazione_a_codice;
+  const stazPartenzaLabel =
+    primoBlocco.stazione_da_nome ?? stazPartenza ?? "?";
+  const stazArrivoLabel = ultimoBlocco.stazione_a_nome ?? stazArrivo ?? "?";
+  const chiude =
+    stazPartenza !== null &&
+    stazArrivo !== null &&
+    stazPartenza === stazArrivo;
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 border-t px-4 py-2 text-[11px]",
+        chiude
+          ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+          : "border-amber-300 bg-amber-50 text-amber-900",
+      )}
+      title={
+        chiude
+          ? `Il giro chiude il ciclo: G${ultima.numero_giornata} termina nella stessa stazione (${stazArrivoLabel}) da cui parte G1 — il convoglio è pronto a ripartire.`
+          : `Il giro NON chiude il ciclo: G${ultima.numero_giornata} termina a ${stazArrivoLabel}, ma G1 parte da ${stazPartenzaLabel}. Possibili cause: cap km raggiunto, sede di rientro diversa, o anomalia builder.`
+      }
+    >
+      <span className="text-base leading-none">{chiude ? "🔁" : "⚠"}</span>
+      <span className="font-medium uppercase tracking-wide">
+        {chiude ? "Ciclo chiuso" : "Ciclo aperto"}
+      </span>
+      <span className="text-border">·</span>
+      <span>
+        G{ultima.numero_giornata} termina a{" "}
+        <span className="font-mono font-semibold">{stazArrivoLabel}</span>
+      </span>
+      <span className="text-border">→</span>
+      <span>
+        G1 parte da{" "}
+        <span className="font-mono font-semibold">{stazPartenzaLabel}</span>
+      </span>
+      {chiude ? (
+        <span className="ml-auto italic opacity-80">
+          stessa stazione · convoglio pronto al ciclo successivo
+        </span>
+      ) : (
+        <span className="ml-auto italic opacity-80">stazioni diverse</span>
+      )}
+    </div>
   );
 }
 
@@ -2339,12 +2427,41 @@ function NotteRow({
 
   const sostaInfo = computeSostaNotturna(prevVar, nextVar);
 
+  // Sprint 8.0 entry 204 (Step B): indicatore visivo concatenazione
+  // G_K → G_(K+1). ✓ verde se la stazione di terminazione di G_K
+  // coincide con la stazione di partenza di G_(K+1); ✗ rosso se
+  // discontinua (anomalia builder).
+  const concatenazioneOk =
+    sostaInfo.terminaA !== null &&
+    sostaInfo.iniziaDa !== null &&
+    !sostaInfo.discontinua;
+
   return (
     <div className="flex" style={{ height: NOTTE_ROW_HEIGHT_PX }}>
       <div
-        className="night-band sticky left-0 z-20 flex items-center border-r border-border px-3"
+        className="night-band sticky left-0 z-20 flex items-center gap-1.5 border-r border-border px-3"
         style={{ width: GIORNATA_LABEL_COL_PX }}
       >
+        {concatenazioneOk && (
+          <span
+            className="inline-flex items-center justify-center rounded-full bg-emerald-100 text-[10px] font-bold leading-none text-emerald-700"
+            style={{ width: 14, height: 14 }}
+            title={`Concatenazione G${giornataPrev.numero_giornata} → G${giornataNext.numero_giornata}: stessa stazione (${sostaInfo.stazione ?? sostaInfo.terminaA ?? "?"})`}
+            aria-label="Concatenazione corretta"
+          >
+            ✓
+          </span>
+        )}
+        {sostaInfo.discontinua && (
+          <span
+            className="inline-flex items-center justify-center rounded-full bg-destructive/15 text-[10px] font-bold leading-none text-destructive"
+            style={{ width: 14, height: 14 }}
+            title={`Discontinuità G${giornataPrev.numero_giornata} → G${giornataNext.numero_giornata}: ${sostaInfo.terminaA ?? "?"} ≠ ${sostaInfo.iniziaDa ?? "?"} (anomalia builder)`}
+            aria-label="Discontinuità: stazioni diverse"
+          >
+            ✗
+          </span>
+        )}
         <span
           className={cn(
             "text-[10px] uppercase tracking-wide",

@@ -10,6 +10,102 @@
 
 ---
 
+## 2026-05-06 (204) — MR-1110 sotto-MR 9: UI Gantt varianti calendariali (Step A + Step B)
+
+### Contesto
+
+Continuazione MR-1110 (entry 199/202): pipeline builder v2 chiusa
+end-to-end. Sotto-MR 9 attiva l'UI per visualizzare il modello "M
+varianti calendariali per giornata-tipo" stile PDF Trenord 1134.
+
+Design ref: ``docs/MR-1110-DESIGN.md`` §7 "Impatti UI Gantt" (5
+requirement, decisione utente 2026-05-06 di approvazione globale).
+
+### Modifiche frontend (un solo file)
+
+**``frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx``**
+(2824 → ~3070 righe, single-file Gantt custom).
+
+#### Step A — refactor del rendering varianti
+
+1. **Nesting collassabile**: nuovo state ``expandedGiornate: Set<number>``
+   persistito in ``localStorage`` (key ``colazione.gantt-giro.expanded``).
+   Per default ogni giornata mostra solo la variante canonica (idx 0).
+   Bottone chevron in ``GiornataHeaderRow`` espande/comprime la singola
+   giornata; toolbar ha "Espandi/Comprimi varianti" globale per tutte
+   le giornate con varianti multiple. Quando espansa, le N varianti
+   diventano N righe sorelle con barra a sinistra (canonica più scura)
+   per legarle visivamente. ``NotteRow`` resta tra giornate, non tra
+   varianti.
+
+2. **Etichetta parlante con tooltip**: aggiunto ``title=etichetta_parlante``
+   sulla label col di ``VarianteRow`` (truncate visivo a 36 char,
+   stringa completa nel tooltip nativo). Indicatore "canonica" sotto
+   la label per ``variant_index === 0`` in modalità expanded.
+
+3. **Per/Km per variante**:
+   - **Per** (prestazione minuti): nuova helper ``computePrestazioneVariante``
+     calcola client-side da ``ora_inizio`` del primo blocco a ``ora_fine``
+     dell'ultimo, gestendo cross-mezzanotte (+1440 al delta negativo).
+     Helper ``formatPrestazione`` formatta in "Xh Ym" (es. "8h30").
+     Sopravvive al sotto-MR 6 persister v2: basterà sostituire la
+     fonte se il backend popolerà ``prestazione_minuti`` direttamente.
+   - **Km**: backend persiste solo ``giornata.km_giornata`` per la
+     variante canonica. Mostriamo il valore per la canonica e "—" per
+     le altre, con tooltip che spiega l'attesa del sotto-MR 6.
+
+#### Step B — indicatori topologici del ciclo
+
+4. **Indicatore concatenazione G_K → G_(K+1)**: in ``NotteRow``,
+   prima del testo "Materiale in sosta...", icona ✓ verde se
+   ``staz_terminazione_K === staz_partenza_(K+1)`` (concatenazione
+   pulita), ✗ rosso se discontinua (anomalia builder, dovrebbe non
+   accadere post-MR α). Tooltip esplicativo coi codici stazione.
+
+5. **Banner ciclo chiuso GN → G1**: nuovo componente
+   ``CicloChiusoBanner`` dopo ``TotaliRow``. Calcola la stazione di
+   terminazione della variante canonica della giornata N e quella di
+   partenza della variante canonica della giornata 1. Banner verde
+   "🔁 Ciclo chiuso · GN termina a X → G1 parte da X" se coincidono,
+   amber "⚠ Ciclo aperto · GN termina a X → G1 parte da Y · stazioni
+   diverse" altrimenti. Tooltip spiega le possibili cause (cap km,
+   sede di rientro diversa, anomalia builder).
+
+### Verifiche
+
+- ✅ ``pnpm exec tsc --noEmit`` clean (Step A + Step B).
+- ✅ ``pnpm exec vitest run`` → 58 passed, 1 skipped (invariato).
+- ⏳ Verifica visuale in produzione una volta che Railway finisce il
+  build (l'utente ha programma "giugno 2026" con giri ETR522/ETR526
+  per testare il nesting reale).
+
+### Stato
+
+- ✅ Sotto-MR 9 chiuso (Step A + Step B).
+- ⏳ Commit + push + deploy frontend Railway.
+
+### Bonus chiuso nello stesso ciclo
+
+**Bug UI dropdown wizard genera giri** (parcheggiato in entry 203):
+``DialogContent`` senza ``max-h`` faceva uscire il footer dal viewport
+quando il programma aveva 3+ regole. Aggiunto ``max-h-[90vh] flex
+flex-col`` su ``GeneraGiriDialog.tsx``. Commit ``c12581f`` (separato).
+
+### Prossimo step
+
+Sotto-MR rimanenti di MR-1110:
+
+- **Sotto-MR 6**: persister DB delle varianti v2 (collega
+  ``GiornataTipoConVarianti`` → ``giro_variante``). Quando chiuso, il
+  Gantt vedrà le etichette parlanti v2 (es. "LV 1:5", "F escluso FpF
+  ed escl. 22/3, 12/4", "Si eff. 1/5 e 2/6") al posto del v1
+  ("Lavorativo", "Festivo", ecc.) — *senza modifiche frontend*.
+- **Sotto-MR 7**: deprecazione MR 12 (vecchio path).
+- **Sotto-MR 8**: integration test PdE 2026 reale.
+- **Sotto-MR 10**: backward compat ``builder_version``.
+
+---
+
 ## 2026-05-06 (203) — Fix bug "regole che si mescolano": pool corse per regola dominante
 
 ### Contesto
