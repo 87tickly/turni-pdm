@@ -10,6 +10,118 @@
 
 ---
 
+## 2026-05-06 (196) — MR-1110 sotto-MR 2: identificazione giornate-tipo (giornata_tipo.py)
+
+### Contesto
+
+Continuazione MR-1110. Decisione utente in chat: *"procedi con il
+numero 1 [sotto-MR 2 con default proposti] e poi con il numero 2
+[chiusura D2-D5+D8]"*.
+
+Implementazione del **Step 2** della pipeline nuovo builder
+(vedi `docs/MR-1110-DESIGN.md` §4.2): identificazione delle
+giornate-tipo del ciclo del convoglio dalle catene posizionate
+(output di Step 1 esistente). Modulo nuovo, **DB-agnostic**, niente
+modifica a moduli esistenti.
+
+### Modifiche backend
+
+**`backend/src/colazione/domain/builder_giro/giornata_tipo.py`**
+(nuovo, ~340 righe):
+
+- `ParamGiornataTipo`: `min_istanze: int = 2` (D3 default).
+- `CatenaIstanza`: dataclass frozen `{data, catena_posizionata,
+  materiale_tipo_codice}` — unità di input.
+- `GiornataTipo`: dataclass frozen output con chiave 5-uple D1
+  `(materiale, sede, staz_inizio, staz_fine, codice_servizio_dominante)`
+  + tuple di istanze ordinate per data.
+- `identifica_giornate_tipo(istanze, params)`: API pubblica.
+  Pipeline a 5 step:
+  1. Calcola chiave 5-uple per ogni istanza.
+  2. Raggruppa per chiave.
+  3. **Fallback morbido D1** (`_fondi_orfani_servizio`): catene
+     con `codice_servizio_dominante=None` vengono fuse nel gruppo
+     gemello (= stessi primi 4 prefix campi) con servizio
+     valorizzato lessicograficamente minimo. Niente frammentazione
+     in giornate-tipo orfane.
+  4. **Filtro significatività D3**: gruppi con `len(istanze) <
+     min_istanze` vanno in `istanze_orfane` (output secondario).
+  5. Ordinamento deterministico per chiave.
+- Helpers privati: `_staz_inizio` / `_staz_fine` (estraggono dalla
+  prima/ultima corsa, ignorando vuoti tecnici testa/coda),
+  `_codice_servizio_dominante` (Counter + tie-break lessicografico
+  ascendente).
+
+**`backend/tests/test_giornata_tipo.py`** (nuovo, ~440 righe, 18
+test):
+
+- Casi base: lista vuota, singola istanza orfana, due istanze stesso
+  pattern → 1 GT.
+- `codice_servizio_dominante`: majority wins, tie-break
+  lessicografico, mix `None`+valorizzato, tutto `None`.
+- Fallback morbido D1: orfana fusa nel gemello valorizzato; orfana
+  senza gemelli resta isolata; più gemelli → fusione nel
+  lessicograficamente minimo.
+- Servizi diversi → giornate-tipo separate (no falsi merge).
+- Materiali diversi → giornate-tipo separate.
+- Sedi diverse → giornate-tipo separate.
+- `min_istanze` configurabile (3 con 2 istanze → orfane).
+- Determinismo dell'ordinamento (input mescolato → output stabile).
+- **Test acceptance turno 1110 G6** (riferimento PDF Trenord): 6
+  istanze tutte con stessa fase `(VARESE, VARESE)` → 1 sola
+  giornata-tipo con 6 istanze. Punto: il builder NON le frammenta
+  per "giorno della settimana di partenza" (com'era nel v1) ma le
+  raggruppa correttamente come fasi della stessa giornata-tipo.
+- Sanity check `frozen=True` su `GiornataTipo`.
+
+### Verifiche
+
+- `pytest tests/test_giornata_tipo.py -v` → 18/18 ✅.
+- `pytest` cross-modulo per non-regressione su builder_giro
+  esistente (multi_giornata, aggregazione_a2, fusione_cluster_a1) →
+  74/74 ✅.
+- `mypy --strict src/colazione/domain/builder_giro/` → clean (16
+  source files).
+- `ruff check` → clean dopo organize-imports automatico.
+
+### Stato
+
+- ✅ Sotto-MR 2 chiuso. Modulo `giornata_tipo.py` pronto, testato,
+  type-clean.
+- ⏳ Commit + push + deploy backend Railway (regola CLAUDE.md
+  "ogni modifica → main su Railway"; cambia solo backend, nessuna
+  migration).
+- ⏸️ D2-D5+D8 da chiudere in chat con utente come prossimo step
+  (decisione utente "procedi con 1 e poi con 2").
+
+### Note tecniche
+
+- **Niente integrazione con la pipeline attuale**: il modulo è
+  isolato, nessun consumer in `multi_giornata.py` lo chiama. Sarà
+  invocato dal nuovo `multi_giornata_v2.py` (sotto-MR 5) o
+  similmente. Coesistenza v1/v2 garantita da D7 chiusa.
+- **Niente modifica a `composizione.py`**: il caller del nuovo
+  builder dovrà costruire `CatenaIstanza` estraendo
+  `materiale_tipo_codice` dal blocco di composizione. È
+  responsabilità dell'orchestratore (sotto-MR 5), non di questo
+  modulo.
+- **`codice_linea` accesso via `getattr`**: `Catena.corse:
+  tuple[Any, ...]` quindi non c'è Protocol stretto. Le test fixture
+  espongono il campo come dataclass attribute, l'ORM
+  `CorsaCommerciale` come `Mapped[str | None]`. Fallback a `None`
+  se assente.
+
+### Prossimo step
+
+In chat: chiusura D2 (cicli non-hamiltoniani), D3 (soglia
+min_istanze definitiva — è già 2 di default ma confermare),
+D4 (FpF auto/config), D5 (periodo riferimento etichette), D8
+(fixture test). Dopo, sotto-MR 3 (`concatenazione_ciclica.py` per
+costruire l'ordine ciclico G1→G2→…→GN→G1 dalle giornate-tipo
+prodotte da questo modulo).
+
+---
+
 ## 2026-05-06 (195) — Sub-MR 5.bis-relazione frontend: badge variazione + sezione genitore/figli
 
 ### Contesto
