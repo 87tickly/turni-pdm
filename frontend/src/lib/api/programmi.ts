@@ -133,6 +133,12 @@ export interface ProgrammaRegolaAssegnazioneRead {
   priorita: number;
   /** Sprint 7.7 MR 1: cap km del ciclo specifico per regola (es. ETR526 ~4500). */
   km_max_ciclo: number | null;
+  /**
+   * MR β (migration 0036): sede manutentiva preferita per i giri di
+   * questa regola. `null` = non ancora scelta. Il wizard pre-generazione
+   * pre-popola da qui (modificabile per il run).
+   */
+  localita_codice: string | null;
   note: string | null;
   created_at: string;
 }
@@ -148,6 +154,19 @@ export interface ProgrammaRegolaAssegnazioneCreate {
   priorita?: number;
   /** Sprint 7.7 MR 1: cap km del ciclo specifico per regola (opzionale). */
   km_max_ciclo?: number | null;
+  /** MR β: sede manutentiva preferita (memo, modificabile per run). */
+  localita_codice?: string | null;
+  note?: string | null;
+}
+
+/** MR β — payload PATCH per editare una regola esistente. */
+export interface ProgrammaRegolaAssegnazioneUpdate {
+  filtri_json?: FiltroRegolaPayload[];
+  composizione?: ComposizioneItemPayload[];
+  is_composizione_manuale?: boolean;
+  priorita?: number;
+  km_max_ciclo?: number | null;
+  localita_codice?: string | null;
   note?: string | null;
 }
 
@@ -286,6 +305,21 @@ export async function deleteRegola(programmaId: number, regolaId: number): Promi
   await apiJson<void>(`/api/programmi/${programmaId}/regole/${regolaId}`, {
     method: "DELETE",
   });
+}
+
+/** MR β — PATCH regola esistente (sede, ipotesi materiale, filtri, ecc.). */
+export async function updateRegola(
+  programmaId: number,
+  regolaId: number,
+  payload: ProgrammaRegolaAssegnazioneUpdate,
+): Promise<ProgrammaRegolaAssegnazioneRead> {
+  return apiJson<ProgrammaRegolaAssegnazioneRead>(
+    `/api/programmi/${programmaId}/regole/${regolaId}`,
+    {
+      method: "PATCH",
+      body: payload,
+    },
+  );
 }
 
 // =====================================================================

@@ -10,6 +10,124 @@
 
 ---
 
+## 2026-05-06 (181) — MR β: wizard pre-generazione, sede su regola
+
+### Contesto
+
+Continua il refactor UX della creazione giro materiale. **MR β** chiude
+la spec utente:
+
+> "Quando schiaccio su genera giri, lui prima di farlo, mi apre una
+> pagina con tutte le linee che io ho deciso di voler generare, lì
+> assegno i materiali e il deposito e successivamente genero il giro,
+> ogni singola generazione del turno deve avere un deposito assegnato."
+
+Risposte concordate:
+
+- "Ogni linea, ovvero regola, ha la sua sede" → la sede è attributo
+  della regola.
+- Il valore "viene memorizzato e popolato la prossima volta, ma
+  modificabile" (= memo + override per run).
+
+### Modifiche backend
+
+**`backend/alembic/versions/0036_regola_localita_codice.py`** (nuovo):
+aggiunge ``programma_regola_assegnazione.localita_codice`` (FK
+opzionale a ``localita_manutenzione.codice``, ON DELETE SET NULL) +
+indice ``ix_regola_localita_codice``.
+
+**`backend/src/colazione/models/programmi.py`**: nuovo attributo
+``localita_codice: Mapped[str | None]`` su ``ProgrammaRegolaAssegnazione``.
+
+**`backend/src/colazione/schemas/programmi.py`**:
+
+- ``ProgrammaRegolaAssegnazioneRead``: nuovo campo
+  ``localita_codice: str | None``.
+- ``ProgrammaRegolaAssegnazioneCreate``: nuovo campo opzionale.
+- Nuovo schema ``ProgrammaRegolaAssegnazioneUpdate`` per PATCH (tutti
+  campi opzionali, manteniamo parità con Create + auto-popolamento dei
+  campi legacy ``materiale_tipo_codice``/``numero_pezzi`` dal primo
+  elemento di ``composizione``).
+
+**`backend/src/colazione/api/programmi.py`**:
+
+- ``add_regola`` e ``create_programma`` (regole nested) passano il
+  nuovo campo al constructor.
+- Nuovo endpoint ``PATCH /api/programmi/{id}/regole/{regola_id}`` per
+  editare la regola. Vincoli: 400 se programma archiviato, 409 se
+  pipeline ``>= MATERIALE_CONFERMATO``, 404 se regola non esiste o
+  non appartiene al programma.
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/programmi.ts`**:
+
+- ``ProgrammaRegolaAssegnazioneRead``: nuovo campo
+  ``localita_codice: string | null``.
+- ``ProgrammaRegolaAssegnazioneCreate``: nuovo campo opzionale.
+- Nuovo tipo ``ProgrammaRegolaAssegnazioneUpdate``.
+- Nuova API call ``updateRegola(programmaId, regolaId, payload)``.
+
+**`frontend/src/hooks/useProgrammi.ts`**: nuovo hook ``useUpdateRegola``
+con invalidazione su ``PROGRAMMI_KEY``.
+
+**`frontend/src/hooks/useAnagrafiche.ts`**: ``useLocalitaManutenzione``
+ora accetta ``options.enabled`` (lazy loading per i wizard).
+
+**`frontend/src/routes/pianificatore-giro/regola/RegolaEditor.tsx`**:
+nuovo dropdown "Deposito preferito (opzionale)" tra km_max_ciclo e
+note. Carica le sedi via ``useLocalitaManutenzione`` e salva
+``localita_codice`` sulla regola al submit.
+
+**`frontend/src/routes/pianificatore-giro/GeneraGiriDialog.tsx`**
+(rewrite completo): da single-form a wizard 3 step:
+
+- Step 1 ``form``: tabella regole con colonne {Regola (filtri
+  compatti), Composizione, Deposito}. Il dropdown deposito è
+  precompilato con ``regola.localita_codice`` se memorizzata. Modifica
+  inline marca la riga come "modificata" (badge giallo, auto-save al
+  lancio). Checkbox conferma cancellazione PdC dipendenti.
+- Step 2 ``running``: spinner con sede corrente + counter sedi totali.
+  Per ogni sede modificata, auto-save via PATCH (idempotente) prima
+  del builder. Per ogni sede unica, una chiamata sequenziale a
+  ``POST /api/programmi/{id}/genera-giri`` con ``force=true`` (scope
+  per sede, le altre sedi non vengono toccate, vedi
+  ``Sprint 7.9 strategy A``).
+- Step 3 ``done``: ``AggregatedResult`` con counters cumulati su tutte
+  le sedi processate + lista warning + lista errori per sede.
+
+### Verifiche
+
+- ✅ ``alembic upgrade head`` applicato (0035 → 0036).
+- ✅ ``pnpm tsc -b --noEmit`` clean.
+- ✅ Frontend test ``src/routes/pianificatore-giro``: 11 passed,
+  1 skipped.
+- ✅ Backend ``test_anagrafiche_api`` + ``test_aggregazione_a2`` +
+  ``test_builder_giri``: 38 passed, 1 skipped.
+
+### Stato
+
+- ✅ MR β backend + frontend completo.
+- ⏳ Commit + push + Railway deploy.
+- ➡️ MR γ: composizione opzionale sulla regola (oggi obbligatoria).
+  Il wizard β oggi mostra la composizione come read-only nella tabella
+  regole. In MR γ la composizione diventa "ipotesi" modificabile sia
+  nell'editor regola che nel wizard pre-generazione.
+
+### Prossimo step
+
+MR γ. Modifiche previste:
+
+1. Backend: ``composizione_json`` su regola può essere ``[]`` (non
+   più ``min_length=1``). ``materiale_tipo_codice``/``numero_pezzi``
+   nullable già così. Builder gestisce regola senza composizione
+   come "ipotesi default per tipo servizio" (mapping da decidere).
+2. Frontend: ``ComposizioneEditor`` opzionale nel ``RegolaEditor``
+   (mostra come "ipotesi"). ``GeneraGiriDialog`` aggiunge dropdown
+   materiale per regola, con valore precompilato dall'ipotesi.
+
+---
+
 ## 2026-05-06 (180) — MR α: pannello "Materiali in flotta" sostituisce strict options
 
 ### Contesto

@@ -197,6 +197,12 @@ class ProgrammaRegolaAssegnazione(Base):
     # cap effettivo del giro generato da questa regola. Ogni materiale
     # ha autonomie diverse (ETR526 ~4500, E464 ~6000, ATR803 ~ecc).
     km_max_ciclo: Mapped[int | None] = mapped_column(Integer)
+    # MR β (migration 0036): sede manutentiva preferita per i giri di
+    # questa regola. NULL = da scegliere nel wizard pre-generazione.
+    # Il wizard pre-popola dal valore memorizzato (modificabile per run).
+    localita_codice: Mapped[str | None] = mapped_column(
+        String(80), ForeignKey("localita_manutenzione.codice", ondelete="SET NULL")
+    )
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

@@ -12,8 +12,10 @@ import {
 } from "@/components/ui/Dialog";
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
+import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
 import { Textarea } from "@/components/ui/Textarea";
+import { useLocalitaManutenzione } from "@/hooks/useAnagrafiche";
 import { useAddRegola } from "@/hooks/useProgrammi";
 import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
@@ -92,10 +94,14 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
   const [composizione, setComposizione] = useState<ComposizioneRow[]>([emptyRow()]);
   // Sprint 7.8 MR 6: campo "priorità" rimosso dalla UI (default fisso 60).
   const [kmMaxCiclo, setKmMaxCiclo] = useState("");
+  // MR β: sede manutentiva preferita per la regola. Memo persistito sulla
+  // regola, modificabile per il run nel wizard pre-generazione.
+  const [localitaCodice, setLocalitaCodice] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const addMutation = useAddRegola();
+  const localitaQuery = useLocalitaManutenzione();
 
   const handleClose = (next: boolean) => {
     if (!next) {
@@ -103,6 +109,7 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
       setModo("singola");
       setComposizione([emptyRow()]);
       setKmMaxCiclo("");
+      setLocalitaCodice("");
       setNote("");
       setError(null);
     }
@@ -167,6 +174,9 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
           priorita: 60,
           // Sprint 7.7 MR 1: cap km del ciclo specifico per regola.
           km_max_ciclo: kmCicloNum,
+          // MR β: sede manutentiva preferita (opzionale). Se l'utente non
+          // la sceglie qui, il wizard pre-generazione la chiederà.
+          localita_codice: localitaCodice.length > 0 ? localitaCodice : null,
           note: note.trim().length > 0 ? note.trim() : null,
         },
       });
@@ -251,6 +261,29 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
               Cap chilometrico del ciclo per il materiale di questa regola (es. ETR526 ~4500
               km/ciclo, E464 ~6000). Quando raggiunto, il giro chiude appena il treno è in zona
               sede. Se vuoto, nessun limite hard — il giro chiude per safety net o naturalmente.
+            </p>
+          </section>
+
+          {/* MR β: sede manutentiva preferita per la regola (memo). */}
+          <section className="flex flex-col gap-1.5">
+            <Label htmlFor="regola-localita">Deposito preferito (opzionale)</Label>
+            <Select
+              id="regola-localita"
+              value={localitaCodice}
+              onChange={(e) => setLocalitaCodice(e.target.value)}
+              disabled={addMutation.isPending || localitaQuery.isLoading}
+            >
+              <option value="">— da scegliere al lancio del builder —</option>
+              {(localitaQuery.data ?? []).map((l) => (
+                <option key={l.codice} value={l.codice}>
+                  {l.codice_breve ?? l.codice} — {l.nome_canonico}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Sede manutentiva di partenza/rientro per i giri costruiti da questa regola.
+              Memorizzata sulla regola e pre-popolata nel wizard pre-generazione, dove resta
+              modificabile per il singolo run.
             </p>
           </section>
 

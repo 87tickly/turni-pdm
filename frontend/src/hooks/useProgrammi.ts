@@ -15,6 +15,7 @@ import {
 
 import {
   addRegola,
+  updateRegola,
   archiviaProgramma,
   assegnaManuale,
   autoAssegnaPersone,
@@ -41,6 +42,7 @@ import {
   type ProgrammaMaterialeRead,
   type ProgrammaRegolaAssegnazioneCreate,
   type ProgrammaRegolaAssegnazioneRead,
+  type ProgrammaRegolaAssegnazioneUpdate,
   type SbloccaProgrammaPayload,
 } from "@/lib/api/programmi";
 
@@ -146,6 +148,28 @@ export function useDeleteRegola(): UseMutationResult<void, Error, DeleteRegolaAr
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ programmaId, regolaId }) => deleteRegola(programmaId, regolaId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: PROGRAMMI_KEY });
+    },
+  });
+}
+
+interface UpdateRegolaArgs {
+  programmaId: number;
+  regolaId: number;
+  payload: ProgrammaRegolaAssegnazioneUpdate;
+}
+
+/** MR β — PATCH regola (sede, materiale ipotesi, filtri, composizione). */
+export function useUpdateRegola(): UseMutationResult<
+  ProgrammaRegolaAssegnazioneRead,
+  Error,
+  UpdateRegolaArgs
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ programmaId, regolaId, payload }) =>
+      updateRegola(programmaId, regolaId, payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: PROGRAMMI_KEY });
     },

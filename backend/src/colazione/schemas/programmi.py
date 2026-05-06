@@ -232,6 +232,9 @@ class ProgrammaRegolaAssegnazioneRead(BaseModel):
     priorita: int
     # Sprint 7.7 MR 1: cap km del ciclo specifico per regola.
     km_max_ciclo: int | None = None
+    # MR β (migration 0036): sede preferita memorizzata sulla regola.
+    # NULL = da scegliere nel wizard pre-generazione.
+    localita_codice: str | None = None
     note: str | None = None
     created_at: datetime
 
@@ -307,6 +310,28 @@ class ProgrammaRegolaAssegnazioneCreate(BaseModel):
     # (es. ETR526 ~4500 km/ciclo, E464 ~6000). Se vuoto, builder usa
     # il fallback DEFAULT_KM_MEDIO_GIORNALIERO * n_giornate_safety.
     km_max_ciclo: int | None = Field(default=None, ge=1)
+    # MR β: sede manutentiva preferita. Opzionale alla creazione (può
+    # essere settata nel wizard pre-generazione e auto-salvata).
+    localita_codice: str | None = Field(default=None, min_length=1)
+    note: str | None = None
+
+
+class ProgrammaRegolaAssegnazioneUpdate(BaseModel):
+    """MR β — payload PATCH per editare una regola esistente.
+
+    Tutti i campi opzionali. Mantiene parità con ``Create`` ma senza
+    obbligatorietà. La modifica di ``filtri_json`` o ``composizione``
+    invalida i giri persistiti del programma — la UI mostra warning.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    filtri_json: list[FiltroRegola] | None = Field(default=None, min_length=1)
+    composizione: list[ComposizioneItem] | None = Field(default=None, min_length=1)
+    is_composizione_manuale: bool | None = None
+    priorita: int | None = Field(default=None, ge=0, le=100)
+    km_max_ciclo: int | None = Field(default=None, ge=1)
+    localita_codice: str | None = None
     note: str | None = None
 
 

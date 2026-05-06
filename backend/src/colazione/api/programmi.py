@@ -133,6 +133,7 @@ from colazione.schemas.programmi import (
     ProgrammaMaterialeUpdate,
     ProgrammaRegolaAssegnazioneCreate,
     ProgrammaRegolaAssegnazioneRead,
+    ProgrammaRegolaAssegnazioneUpdate,
     SbloccaProgrammaRequest,
     VariazionePdERequest,
     WarningSoftRead,
@@ -353,6 +354,7 @@ async def create_programma(
             numero_pezzi=composizione[0].n_pezzi,
             priorita=regola_payload.priorita,
             km_max_ciclo=regola_payload.km_max_ciclo,
+            localita_codice=regola_payload.localita_codice,
             note=regola_payload.note,
         )
         session.add(regola)
@@ -541,9 +543,80 @@ async def add_regola(
         numero_pezzi=composizione[0].n_pezzi,
         priorita=payload.priorita,
         km_max_ciclo=payload.km_max_ciclo,
+        localita_codice=payload.localita_codice,
         note=payload.note,
     )
     session.add(regola)
+    await session.commit()
+    await session.refresh(regola)
+    return regola
+
+
+@router.patch(
+    "/{programma_id}/regole/{regola_id}",
+    response_model=ProgrammaRegolaAssegnazioneRead,
+)
+async def update_regola(
+    programma_id: int,
+    regola_id: int,
+    payload: ProgrammaRegolaAssegnazioneUpdate,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> ProgrammaRegolaAssegnazione:
+    """MR β — modifica una regola esistente (sede, materiale ipotesi,
+    filtri, composizione, km cap, note).
+
+    Solo i campi forniti vengono aggiornati (Pydantic ``exclude_unset``).
+    Vincoli:
+
+    - programma + regola devono esistere e appartenere all'azienda
+      corrente (404 silenzioso altrimenti).
+    - programma in stato ``archiviato`` → 400.
+    - programma in stato pipeline ``>= MATERIALE_CONFERMATO`` → 409
+      (consistente con add_regola/delete_regola).
+
+    Side effect: se ``filtri_json`` o ``composizione`` cambiano e ci
+    sono giri persistiti, l'utente è atteso a rigenerare con
+    ``force=true``. Il backend non cancella automaticamente.
+    """
+    p = await _get_programma_or_404(session, programma_id, user.azienda_id)
+    if p.stato == "archiviato":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="programma archiviato: regole non modificabili",
+        )
+    _verifica_modificabile_o_409(p)
+
+    stmt = (
+        select(ProgrammaRegolaAssegnazione)
+        .where(
+            ProgrammaRegolaAssegnazione.id == regola_id,
+            ProgrammaRegolaAssegnazione.programma_id == programma_id,
+        )
+        .limit(1)
+    )
+    regola = (await session.execute(stmt)).scalar_one_or_none()
+    if regola is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="regola non trovata"
+        )
+
+    data = payload.model_dump(exclude_unset=True)
+    if "filtri_json" in data and data["filtri_json"] is not None:
+        # Pydantic ha già validato i singoli FiltroRegola via min_length=1.
+        data["filtri_json"] = [f.model_dump() for f in payload.filtri_json or []]
+    if "composizione" in data and data["composizione"] is not None:
+        composizione_items = payload.composizione or []
+        data["composizione_json"] = [item.model_dump() for item in composizione_items]
+        # Aggiorna anche i campi legacy dal primo elemento.
+        if composizione_items:
+            data["materiale_tipo_codice"] = composizione_items[0].materiale_tipo_codice
+            data["numero_pezzi"] = composizione_items[0].n_pezzi
+        # Rimuovi la chiave non-DB.
+        del data["composizione"]
+
+    for k, v in data.items():
+        setattr(regola, k, v)
     await session.commit()
     await session.refresh(regola)
     return regola

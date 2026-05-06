@@ -22,6 +22,7 @@ function makeRegola(
     numero_pezzi: 1,
     priorita: 60,
     km_max_ciclo: null,
+    localita_codice: null,
     note: null,
     created_at: "2026-04-25T10:00:00Z",
     ...over,

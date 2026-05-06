@@ -1,6 +1,5 @@
-import { useState } from "react";
-import type { FormEvent } from "react";
-import { CheckCircle2, AlertTriangle } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, CheckCircle2, ChevronRight, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import {
@@ -11,14 +10,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/Dialog";
-import { Label } from "@/components/ui/Label";
 import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
 import { useLocalitaManutenzione } from "@/hooks/useAnagrafiche";
 import { useGeneraGiri } from "@/hooks/useGiri";
+import { useProgramma, useUpdateRegola } from "@/hooks/useProgrammi";
 import { ApiError } from "@/lib/api/client";
-import type { BuilderResult, GeneraGiriParams } from "@/lib/api/giri";
-import { formatNumber } from "@/lib/format";
+import type { BuilderResult } from "@/lib/api/giri";
+import type { ProgrammaRegolaAssegnazioneRead } from "@/lib/api/programmi";
+import { cn } from "@/lib/utils";
 
 interface GeneraGiriDialogProps {
   programmaId: number;
@@ -28,68 +28,57 @@ interface GeneraGiriDialogProps {
   validoA: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCompleted?: (result: BuilderResult) => void;
-}
-
-interface FormState {
-  localita_codice: string;
-  force: boolean;
-  /** Sprint 7.9 strategy A: conferma cancellazione cascata PdC. */
-  confirm_delete_pdc: boolean;
-}
-
-const INITIAL: FormState = {
-  localita_codice: "",
-  force: false,
-  confirm_delete_pdc: false,
-};
-
-/**
- * Sprint 7.9 strategy A: dettagli del 409 strutturato sui PdC dipendenti.
- * Backend restituisce in `detail` un oggetto con questa shape quando la
- * rigenerazione cancellerebbe N turni PdC senza che l'utente abbia
- * confermato esplicitamente.
- */
-interface PdcDipendentiDetail {
-  code: "pdc_dipendenti";
-  messaggio: string;
-  n_pdc_dipendenti: number;
-  pdc_codici: string[];
-  programma_id: number;
-  localita_codice: string;
-}
-
-function parsePdcDipendentiDetail(detail: unknown): PdcDipendentiDetail | null {
-  if (
-    typeof detail === "object" &&
-    detail !== null &&
-    "code" in detail &&
-    (detail as { code: unknown }).code === "pdc_dipendenti"
-  ) {
-    return detail as PdcDipendentiDetail;
-  }
-  return null;
+  onCompleted?: (result: AggregatedResult) => void;
 }
 
 /**
- * Dialog di lancio dell'algoritmo `POST /api/programmi/{id}/genera-giri`.
+ * MR β (2026-05-06) — wizard pre-generazione multi-step.
  *
- * Sprint 7.6 (post-MR3, decisione utente 2026-05-02 "non capisco questa
- * schermata"): semplificato a un unico campo (sede) + bottone Avvia.
- * Il backend usa di default il **periodo intero del programma** (vedi
- * Sprint 7.5 MR 4 default = `valido_da..valido_a`). Niente più scelte
- * "periodo intero / da data / range parziale" — il pianificatore vuole
- * click-and-go.
+ * Spec utente:
  *
- * Tre stati nel dialog:
- * 1. form: scegli la sede materiale → "Avvia generazione"
- * 2. running: spinner durante la chiamata
- * 3. done: stats restituite dal builder (n_giri_creati, residue, warnings)
+ * > "Quando schiaccio su genera giri, lui prima di farlo, mi apre una
+ * > pagina con tutte le linee che io ho deciso di voler generare, lì
+ * > assegno i materiali e il deposito e successivamente genero il giro."
  *
- * Anti-rigenerazione (MR 3.1): se la sede ha già giri persistiti il
- * backend ritorna 409 — il dialog mostra una checkbox "Sovrascrivi"
- * scoped per sede. Le altre sedi del programma NON vengono toccate.
+ * Step 1 — **Anteprima regole**: tabella con tutte le regole del
+ * programma. Per ogni regola: nome (filtri compatti) + dropdown sede
+ * (precompilato da `regola.localita_codice` se memorizzata).
+ *
+ * Step 2 — **Esecuzione sequenziale**: il wizard raggruppa le regole
+ * per sede unica e invoca `POST /api/programmi/{id}/genera-giri` una
+ * volta per ogni sede. Le sedi modificate dall'utente vengono
+ * auto-salvate sulla regola via PATCH (idempotente).
+ *
+ * Step 3 — **Riepilogo**: counters aggregati su tutte le sedi
+ * processate.
+ *
+ * Il composizione (materiale ipotesi) resta sulla regola in MR β
+ * (composizione obbligatoria, come oggi). MR γ la renderà opzionale e
+ * il wizard avrà anche un dropdown materiale per regola.
  */
+
+interface PerRegolaState {
+  regola: ProgrammaRegolaAssegnazioneRead;
+  /** Codice sede scelto/modificato per questo run. */
+  localita: string;
+  /** True se il valore differisce da `regola.localita_codice` (auto-save al lancio). */
+  modificato: boolean;
+}
+
+export interface AggregatedResult {
+  n_sedi_processate: number;
+  n_giri_creati_totale: number;
+  n_corse_processate_totale: number;
+  n_corse_residue_totale: number;
+  n_giri_chiusi_totale: number;
+  n_giri_non_chiusi_totale: number;
+  warnings: string[];
+  errori_per_sede: Array<{ sede: string; messaggio: string }>;
+  per_sede: Array<{ sede: string; result: BuilderResult }>;
+}
+
+type Step = "form" | "running" | "done";
+
 export function GeneraGiriDialog({
   programmaId,
   validoDa,
@@ -98,226 +87,426 @@ export function GeneraGiriDialog({
   onOpenChange,
   onCompleted,
 }: GeneraGiriDialogProps) {
-  const [form, setForm] = useState<FormState>(INITIAL);
-  const [error, setError] = useState<string | null>(null);
-  const [needsForce, setNeedsForce] = useState(false);
-  /** Sprint 7.9 strategy A: dettagli PdC dipendenti dal 409 strutturato. */
-  const [pdcDipendenti, setPdcDipendenti] = useState<PdcDipendentiDetail | null>(null);
-  const [result, setResult] = useState<BuilderResult | null>(null);
-
-  const localitaQuery = useLocalitaManutenzione();
+  const programmaQuery = useProgramma(open ? programmaId : undefined);
+  const localitaQuery = useLocalitaManutenzione({ enabled: open });
   const generaMutation = useGeneraGiri();
+  const updateRegolaMutation = useUpdateRegola();
+
+  const [step, setStep] = useState<Step>("form");
+  const [perRegola, setPerRegola] = useState<Record<number, PerRegolaState>>({});
+  /** Sede correntemente in corso di generazione (UX progress). */
+  const [sedeCorrente, setSedeCorrente] = useState<string | null>(null);
+  /** Sede totale per il progress. */
+  const [sediTotali, setSediTotali] = useState<number>(0);
+  const [aggregato, setAggregato] = useState<AggregatedResult | null>(null);
+  const [globalError, setGlobalError] = useState<string | null>(null);
+  /** Sprint 7.9 strategy A: conferma cancellazione cascata PdC su tutte le sedi. */
+  const [confirmDeletePdc, setConfirmDeletePdc] = useState(false);
+
+  const regole = programmaQuery.data?.regole ?? [];
+  const localita = localitaQuery.data ?? [];
+
+  // Pre-popola lo state per regola quando il dialog si apre o le regole arrivano.
+  useEffect(() => {
+    if (!open || regole.length === 0) return;
+    setPerRegola((prev) => {
+      const next: Record<number, PerRegolaState> = {};
+      for (const r of regole) {
+        const esistente = prev[r.id];
+        const localitaPrecompilata = esistente?.localita ?? r.localita_codice ?? "";
+        next[r.id] = {
+          regola: r,
+          localita: localitaPrecompilata,
+          modificato:
+            esistente?.modificato === true
+              ? true
+              : (r.localita_codice ?? "") !== localitaPrecompilata,
+        };
+      }
+      return next;
+    });
+  }, [open, regole]);
 
   const handleClose = (next: boolean) => {
     if (!next) {
-      setForm(INITIAL);
-      setError(null);
-      setNeedsForce(false);
-      setPdcDipendenti(null);
-      setResult(null);
+      setStep("form");
+      setPerRegola({});
+      setSedeCorrente(null);
+      setSediTotali(0);
+      setAggregato(null);
+      setGlobalError(null);
+      setConfirmDeletePdc(false);
     }
     onOpenChange(next);
   };
 
-  const submit = async (forceFlag: boolean, confirmDeletePdc: boolean) => {
-    setError(null);
-    // Periodo intero del programma sempre — niente data_inizio/n_giornate
-    // (backend default Sprint 7.5 MR 4 = valido_da..valido_a).
-    const params: GeneraGiriParams = {
-      localita_codice: form.localita_codice,
-      force: forceFlag,
-      confirm_delete_pdc: confirmDeletePdc,
-    };
-    try {
-      const r = await generaMutation.mutateAsync({ programmaId, params });
-      setResult(r);
-      onCompleted?.(r);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        // Sprint 7.9 strategy A: distingui 409 generico (giri esistenti)
-        // da 409 strutturato (PdC dipendenti). Il secondo richiede una
-        // seconda conferma esplicita.
-        const pdcDetail = parsePdcDipendentiDetail(err.detail);
-        if (pdcDetail !== null) {
-          setPdcDipendenti(pdcDetail);
-          // PdC dipendenti implica giri esistenti già confermati a monte
-          // (force=true): il 409 PdC è sollevato DOPO il check giri.
-          // Persistiamo force=true così il prossimo submit manda entrambi.
-          setNeedsForce(true);
-          setForm((p) => ({ ...p, force: true }));
-          setError(null);
-          return;
-        }
-        setNeedsForce(true);
-        setError(err.message);
-        return;
-      }
-      setError(
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "Errore sconosciuto",
-      );
+  const cambiaLocalita = (regolaId: number, value: string) => {
+    setPerRegola((prev) => {
+      const stato = prev[regolaId];
+      if (stato === undefined) return prev;
+      const persistita = stato.regola.localita_codice ?? "";
+      return {
+        ...prev,
+        [regolaId]: {
+          ...stato,
+          localita: value,
+          modificato: value !== persistita,
+        },
+      };
+    });
+  };
+
+  const tutteSediCompilate = useMemo(() => {
+    if (regole.length === 0) return false;
+    return regole.every((r) => (perRegola[r.id]?.localita ?? "").length > 0);
+  }, [regole, perRegola]);
+
+  // Sedi uniche da processare (1 chiamata builder per sede).
+  const sediUniche = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of regole) {
+      const sede = perRegola[r.id]?.localita ?? "";
+      if (sede.length > 0) set.add(sede);
     }
+    return Array.from(set).sort();
+  }, [regole, perRegola]);
+
+  const avviaGenerazione = async () => {
+    if (!tutteSediCompilate) return;
+    setStep("running");
+    setGlobalError(null);
+    setSediTotali(sediUniche.length);
+
+    const aggregato_local: AggregatedResult = {
+      n_sedi_processate: 0,
+      n_giri_creati_totale: 0,
+      n_corse_processate_totale: 0,
+      n_corse_residue_totale: 0,
+      n_giri_chiusi_totale: 0,
+      n_giri_non_chiusi_totale: 0,
+      warnings: [],
+      errori_per_sede: [],
+      per_sede: [],
+    };
+
+    // Auto-save: per ogni regola modificata, persiste localita_codice
+    // sulla regola via PATCH. Non blocca il run su errore singolo.
+    for (const stato of Object.values(perRegola)) {
+      if (!stato.modificato) continue;
+      try {
+        await updateRegolaMutation.mutateAsync({
+          programmaId,
+          regolaId: stato.regola.id,
+          payload: { localita_codice: stato.localita || null },
+        });
+      } catch (err) {
+        // Salvataggio fallito ma il builder può comunque procedere col valore corrente.
+        const msg = err instanceof ApiError ? err.message : (err as Error).message;
+        aggregato_local.warnings.push(
+          `Auto-save sede regola #${stato.regola.id} fallito: ${msg}`,
+        );
+      }
+    }
+
+    // Esegue il builder per ogni sede unica, in serie.
+    for (const sede of sediUniche) {
+      setSedeCorrente(sede);
+      try {
+        const result = await generaMutation.mutateAsync({
+          programmaId,
+          params: {
+            localita_codice: sede,
+            // force=true: il backend cancella e ricostruisce solo i giri
+            // della sede target; le altre sedi del programma restano
+            // intatte (vedi `genera_giri` Sprint 7.9 strategy A).
+            force: true,
+            confirm_delete_pdc: confirmDeletePdc,
+          },
+        });
+        aggregato_local.n_sedi_processate += 1;
+        aggregato_local.n_giri_creati_totale += result.n_giri_creati;
+        aggregato_local.n_corse_processate_totale += result.n_corse_processate;
+        aggregato_local.n_corse_residue_totale += result.n_corse_residue;
+        aggregato_local.n_giri_chiusi_totale += result.n_giri_chiusi;
+        aggregato_local.n_giri_non_chiusi_totale += result.n_giri_non_chiusi;
+        aggregato_local.warnings.push(
+          ...result.warnings.map((w) => `[${sede}] ${w}`),
+        );
+        aggregato_local.per_sede.push({ sede, result });
+      } catch (err) {
+        const msg =
+          err instanceof ApiError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : "Errore sconosciuto";
+        aggregato_local.errori_per_sede.push({ sede, messaggio: msg });
+      }
+    }
+
+    setAggregato(aggregato_local);
+    setSedeCorrente(null);
+    setStep("done");
+    onCompleted?.(aggregato_local);
   };
-
-  const isValid = form.localita_codice.length > 0;
-
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!isValid) return;
-    void submit(form.force, form.confirm_delete_pdc);
-  };
-
-  const localita = localitaQuery.data ?? [];
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-md">
-        {result === null ? (
-          <>
-            <DialogHeader>
-              <DialogTitle>Genera giri materiale</DialogTitle>
-              <DialogDescription>
-                Costruisce i giri delle corse del programma per la sede selezionata. Periodo:
-                tutto il programma (dal <strong>{validoDa}</strong> al{" "}
-                <strong>{validoA}</strong>).
-              </DialogDescription>
-            </DialogHeader>
-
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="gg-loc">Sede materiale</Label>
-                <Select
-                  id="gg-loc"
-                  value={form.localita_codice}
-                  onChange={(e) => setForm((p) => ({ ...p, localita_codice: e.target.value }))}
-                  disabled={generaMutation.isPending || localitaQuery.isLoading}
-                  required
-                >
-                  <option value="">— seleziona una sede —</option>
-                  {localita.map((l) => (
-                    <option key={l.codice} value={l.codice}>
-                      {l.codice_breve ?? l.codice} — {l.nome_canonico}
-                    </option>
-                  ))}
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Per coprire più sedi, lancia la generazione una volta per ogni sede: i giri
-                  delle altre sedi del programma non vengono toccati.
-                </p>
-              </div>
-
-              {needsForce && (
-                <label className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={form.force}
-                    onChange={(e) => setForm((p) => ({ ...p, force: e.target.checked }))}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    <strong>Rigenera questa sede.</strong> Cancella e ricostruisce i giri
-                    della sede selezionata. I giri delle altre sedi del programma NON vengono
-                    toccati.
-                  </span>
-                </label>
-              )}
-
-              {pdcDipendenti !== null && (
-                <div className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
-                  <p className="font-semibold text-destructive">
-                    ⚠ Cancellerai anche {pdcDipendenti.n_pdc_dipendenti} turn
-                    {pdcDipendenti.n_pdc_dipendenti === 1 ? "o" : "i"} PdC
-                  </p>
-                  <p className="text-foreground">
-                    La rigenerazione dei giri di questa sede distruggerà i seguenti
-                    turni PdC che ne dipendono. Operazione irreversibile.
-                  </p>
-                  <ul className="ml-4 list-disc font-mono text-xs text-foreground">
-                    {pdcDipendenti.pdc_codici.slice(0, 8).map((codice) => (
-                      <li key={codice}>{codice}</li>
-                    ))}
-                    {pdcDipendenti.pdc_codici.length > 8 && (
-                      <li className="italic text-muted-foreground">
-                        … e altri {pdcDipendenti.pdc_codici.length - 8}
-                      </li>
-                    )}
-                  </ul>
-                  <label className="mt-1 flex items-start gap-2">
-                    <input
-                      type="checkbox"
-                      checked={form.confirm_delete_pdc}
-                      onChange={(e) =>
-                        setForm((p) => ({ ...p, confirm_delete_pdc: e.target.checked }))
-                      }
-                      className="mt-0.5"
-                    />
-                    <span>
-                      <strong>Confermo la cancellazione dei {pdcDipendenti.n_pdc_dipendenti} turn
-                      {pdcDipendenti.n_pdc_dipendenti === 1 ? "o" : "i"} PdC</strong> insieme
-                      ai giri di questa sede. Dovranno essere rigenerati dopo.
-                    </span>
-                  </label>
-                </div>
-              )}
-
-              {error !== null && (
-                <p
-                  role="alert"
-                  className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
-                >
-                  {error}
-                </p>
-              )}
-
-              <DialogFooter>
-                <Button
-                  variant="ghost"
-                  type="button"
-                  onClick={() => handleClose(false)}
-                  disabled={generaMutation.isPending}
-                >
-                  Annulla
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={
-                    !isValid ||
-                    generaMutation.isPending ||
-                    // Se ci sono PdC dipendenti, il submit richiede entrambe
-                    // le conferme: force (giri esistenti) + confirm_delete_pdc.
-                    (pdcDipendenti !== null &&
-                      (!form.force || !form.confirm_delete_pdc))
-                  }
-                >
-                  {generaMutation.isPending ? (
-                    <Spinner label="Generazione…" />
-                  ) : pdcDipendenti !== null ? (
-                    "Conferma e rigenera"
-                  ) : (
-                    "Avvia generazione"
-                  )}
-                </Button>
-              </DialogFooter>
-            </form>
-          </>
-        ) : (
-          <RisultatoBuilder result={result} onClose={() => handleClose(false)} />
+      <DialogContent className="max-w-3xl">
+        {step === "form" && (
+          <FormStep
+            programmaQueryLoading={programmaQuery.isLoading}
+            validoDa={validoDa}
+            validoA={validoA}
+            regole={regole}
+            perRegola={perRegola}
+            cambiaLocalita={cambiaLocalita}
+            localita={localita}
+            confirmDeletePdc={confirmDeletePdc}
+            setConfirmDeletePdc={setConfirmDeletePdc}
+            tutteSediCompilate={tutteSediCompilate}
+            sediUniche={sediUniche}
+            onAnnulla={() => handleClose(false)}
+            onAvvia={avviaGenerazione}
+            error={globalError}
+          />
+        )}
+        {step === "running" && (
+          <RunningStep sedeCorrente={sedeCorrente} sediTotali={sediTotali} />
+        )}
+        {step === "done" && aggregato !== null && (
+          <DoneStep aggregato={aggregato} onClose={() => handleClose(false)} />
         )}
       </DialogContent>
     </Dialog>
   );
 }
 
-interface RisultatoBuilderProps {
-  result: BuilderResult;
-  onClose: () => void;
+// =====================================================================
+// Step 1 — Form
+// =====================================================================
+
+function FormStep({
+  programmaQueryLoading,
+  validoDa,
+  validoA,
+  regole,
+  perRegola,
+  cambiaLocalita,
+  localita,
+  confirmDeletePdc,
+  setConfirmDeletePdc,
+  tutteSediCompilate,
+  sediUniche,
+  onAnnulla,
+  onAvvia,
+  error,
+}: {
+  programmaQueryLoading: boolean;
+  validoDa: string;
+  validoA: string;
+  regole: ProgrammaRegolaAssegnazioneRead[];
+  perRegola: Record<number, PerRegolaState>;
+  cambiaLocalita: (regolaId: number, value: string) => void;
+  localita: ReturnType<typeof useLocalitaManutenzione>["data"];
+  confirmDeletePdc: boolean;
+  setConfirmDeletePdc: (v: boolean) => void;
+  tutteSediCompilate: boolean;
+  sediUniche: string[];
+  onAnnulla: () => void;
+  onAvvia: () => void;
+  error: string | null;
+}) {
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>Genera giri materiale — wizard</DialogTitle>
+        <DialogDescription>
+          Per ogni regola del programma, conferma il deposito assegnato. Periodo:{" "}
+          <strong>{validoDa}</strong> → <strong>{validoA}</strong>. Una volta lanciato, il
+          builder gira in sequenza per ogni sede distinta.
+        </DialogDescription>
+      </DialogHeader>
+
+      {programmaQueryLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <Spinner label="Caricamento regole…" />
+        </div>
+      ) : regole.length === 0 ? (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          Nessuna regola configurata. Aggiungi almeno una regola prima di lanciare il builder.
+        </div>
+      ) : (
+        <div className="flex max-h-[55vh] flex-col gap-3 overflow-y-auto">
+          <div className="overflow-hidden rounded-md border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 text-left">Regola</th>
+                  <th className="px-3 py-2 text-left">Composizione</th>
+                  <th className="px-3 py-2 text-left">Deposito</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {regole.map((r) => {
+                  const stato = perRegola[r.id];
+                  const sede = stato?.localita ?? "";
+                  const modificata = stato?.modificato === true;
+                  return (
+                    <tr key={r.id} className="bg-white">
+                      <td className="px-3 py-2 align-top">
+                        <div className="text-xs font-mono text-muted-foreground">
+                          #{r.id}
+                        </div>
+                        <FiltriCompatti filtri={r.filtri_json} />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <ComposizioneCompatta composizione={r.composizione_json} />
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <Select
+                          value={sede}
+                          onChange={(e) => cambiaLocalita(r.id, e.target.value)}
+                          aria-label={`Deposito regola ${r.id}`}
+                          className={cn(
+                            modificata && sede.length > 0 && "border-amber-400 bg-amber-50",
+                          )}
+                        >
+                          <option value="">— scegli sede —</option>
+                          {(localita ?? []).map((l) => (
+                            <option key={l.codice} value={l.codice}>
+                              {l.codice_breve ?? l.codice} — {l.nome_canonico}
+                            </option>
+                          ))}
+                        </Select>
+                        {modificata && sede.length > 0 && (
+                          <p className="mt-1 text-[11px] text-amber-700">
+                            sede modificata · auto-save sulla regola al lancio
+                          </p>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            Il builder verrà lanciato {sediUniche.length}{" "}
+            {sediUniche.length === 1 ? "volta" : "volte"} (una per sede unica).
+            {sediUniche.length > 0 && (
+              <> Sedi: <span className="font-mono">{sediUniche.join(", ")}</span>.</>
+            )}
+          </p>
+
+          <label className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
+            <input
+              type="checkbox"
+              checked={confirmDeletePdc}
+              onChange={(e) => setConfirmDeletePdc(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              <strong>Conferma cancellazione PdC dipendenti</strong>: la rigenerazione
+              cancella eventuali turni PdC costruiti sui giri precedenti delle sedi
+              processate. Senza questa conferma il builder restituisce un errore se trova
+              PdC dipendenti.
+            </span>
+          </label>
+        </div>
+      )}
+
+      {error !== null && (
+        <p
+          role="alert"
+          className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+        >
+          {error}
+        </p>
+      )}
+
+      <DialogFooter>
+        <Button variant="ghost" type="button" onClick={onAnnulla}>
+          Annulla
+        </Button>
+        <Button
+          type="button"
+          onClick={onAvvia}
+          disabled={!tutteSediCompilate || regole.length === 0}
+          title={
+            !tutteSediCompilate
+              ? "Compila il deposito per tutte le regole"
+              : `Lancia builder per ${sediUniche.length} ${
+                  sediUniche.length === 1 ? "sede" : "sedi"
+                }`
+          }
+        >
+          <ChevronRight className="mr-1 h-4 w-4" aria-hidden /> Avvia generazione
+        </Button>
+      </DialogFooter>
+    </>
+  );
 }
 
-function RisultatoBuilder({ result, onClose }: RisultatoBuilderProps) {
-  const ok = result.n_corse_residue === 0 && result.warnings.length === 0;
+// =====================================================================
+// Step 2 — Running
+// =====================================================================
+
+function RunningStep({
+  sedeCorrente,
+  sediTotali,
+}: {
+  sedeCorrente: string | null;
+  sediTotali: number;
+}) {
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          <Loader2 className="h-5 w-5 animate-spin text-primary" aria-hidden />
+          Generazione giri in corso…
+        </DialogTitle>
+        <DialogDescription>
+          Builder lanciato per ogni sede unica delle regole. Non chiudere la finestra fino al
+          completamento.
+        </DialogDescription>
+      </DialogHeader>
+      <div className="flex flex-col gap-3 py-6">
+        <div className="text-sm">
+          {sedeCorrente !== null ? (
+            <>
+              In esecuzione su sede <span className="font-mono font-semibold">{sedeCorrente}</span>
+              …
+            </>
+          ) : (
+            "Preparazione…"
+          )}
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {sediTotali} {sediTotali === 1 ? "sede" : "sedi"} in coda.
+        </div>
+      </div>
+    </>
+  );
+}
+
+// =====================================================================
+// Step 3 — Done
+// =====================================================================
+
+function DoneStep({
+  aggregato,
+  onClose,
+}: {
+  aggregato: AggregatedResult;
+  onClose: () => void;
+}) {
+  const ok =
+    aggregato.errori_per_sede.length === 0 &&
+    aggregato.n_corse_residue_totale === 0 &&
+    aggregato.warnings.length === 0;
+
   return (
     <>
       <DialogHeader>
@@ -330,36 +519,58 @@ function RisultatoBuilder({ result, onClose }: RisultatoBuilderProps) {
           Generazione completata
         </DialogTitle>
         <DialogDescription>
-          {result.n_giri_creati} giri creati ({result.n_giri_chiusi} chiusi naturalmente,{" "}
-          {result.n_giri_non_chiusi} con motivo di chiusura non standard).
+          {aggregato.n_sedi_processate} {aggregato.n_sedi_processate === 1 ? "sede" : "sedi"}{" "}
+          processate · {aggregato.n_giri_creati_totale} giri creati
+          {aggregato.errori_per_sede.length > 0 && (
+            <> · {aggregato.errori_per_sede.length} errori</>
+          )}
+          .
         </DialogDescription>
       </DialogHeader>
 
       <dl className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-md border border-border bg-secondary/40 p-4 text-sm">
-        <Stat label="Giri creati" value={formatNumber(result.n_giri_creati)} />
-        <Stat label="Corse processate" value={formatNumber(result.n_corse_processate)} />
+        <Stat label="Giri creati" value={String(aggregato.n_giri_creati_totale)} />
+        <Stat label="Corse processate" value={String(aggregato.n_corse_processate_totale)} />
         <Stat
           label="Corse residue"
-          value={formatNumber(result.n_corse_residue)}
-          warn={result.n_corse_residue > 0}
+          value={String(aggregato.n_corse_residue_totale)}
+          warn={aggregato.n_corse_residue_totale > 0}
         />
-        <Stat label="Eventi composizione" value={formatNumber(result.n_eventi_composizione)} />
+        <Stat label="Giri chiusi naturalmente" value={String(aggregato.n_giri_chiusi_totale)} />
         <Stat
-          label="Incompatibilità materiale"
-          value={formatNumber(result.n_incompatibilita_materiale)}
-          warn={result.n_incompatibilita_materiale > 0}
+          label="Giri con motivo non standard"
+          value={String(aggregato.n_giri_non_chiusi_totale)}
+          warn={aggregato.n_giri_non_chiusi_totale > 0}
         />
       </dl>
 
-      {result.warnings.length > 0 && (
+      {aggregato.errori_per_sede.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-destructive">
+            Errori ({aggregato.errori_per_sede.length})
+          </p>
+          <ul className="max-h-32 list-disc overflow-y-auto rounded-md border border-destructive/30 bg-destructive/5 px-6 py-2 text-xs text-destructive">
+            {aggregato.errori_per_sede.map((e, i) => (
+              <li key={i}>
+                <span className="font-mono">{e.sede}</span>: {e.messaggio}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {aggregato.warnings.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Warning ({result.warnings.length})
+            Warning ({aggregato.warnings.length})
           </p>
-          <ul className="max-h-40 list-disc overflow-y-auto rounded-md bg-amber-50 px-6 py-3 text-sm text-amber-900">
-            {result.warnings.map((w, i) => (
+          <ul className="max-h-32 list-disc overflow-y-auto rounded-md bg-amber-50 px-6 py-2 text-xs text-amber-900">
+            {aggregato.warnings.slice(0, 30).map((w, i) => (
               <li key={i}>{w}</li>
             ))}
+            {aggregato.warnings.length > 30 && (
+              <li className="italic">…e altri {aggregato.warnings.length - 30}</li>
+            )}
           </ul>
         </div>
       )}
@@ -368,6 +579,69 @@ function RisultatoBuilder({ result, onClose }: RisultatoBuilderProps) {
         <Button onClick={onClose}>Chiudi</Button>
       </DialogFooter>
     </>
+  );
+}
+
+// =====================================================================
+// Helpers
+// =====================================================================
+
+function FiltriCompatti({ filtri }: { filtri: { campo: string; op: string; valore: unknown }[] }) {
+  if (filtri.length === 0) {
+    return <span className="text-xs italic text-muted-foreground">nessun filtro</span>;
+  }
+  const linea = filtri.find((f) => f.campo === "direttrice");
+  const tipoTreno = filtri.find(
+    (f) =>
+      f.campo === "categoria" ||
+      f.campo === "is_treno_garantito_feriale" ||
+      f.campo === "is_treno_garantito_festivo",
+  );
+  const fmt = (f: { campo: string; op: string; valore: unknown }) => {
+    if (Array.isArray(f.valore)) return f.valore.join(", ");
+    return String(f.valore);
+  };
+  return (
+    <div className="flex flex-col gap-0.5 text-xs">
+      {linea !== undefined && (
+        <div>
+          <span className="text-muted-foreground">linea: </span>
+          <span className="font-medium">{fmt(linea)}</span>
+        </div>
+      )}
+      {tipoTreno !== undefined && (
+        <div>
+          <span className="text-muted-foreground">tipo: </span>
+          <span className="font-medium">{fmt(tipoTreno)}</span>
+        </div>
+      )}
+      {linea === undefined && tipoTreno === undefined && (
+        <div className="text-muted-foreground">{filtri.length} filtri</div>
+      )}
+    </div>
+  );
+}
+
+function ComposizioneCompatta({
+  composizione,
+}: {
+  composizione: { materiale_tipo_codice: string; n_pezzi: number }[];
+}) {
+  if (composizione.length === 0) {
+    return <span className="text-xs italic text-muted-foreground">—</span>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {composizione.map((c, i) => (
+        <span
+          key={i}
+          className="inline-flex items-center gap-0.5 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]"
+        >
+          {c.materiale_tipo_codice}
+          {c.n_pezzi > 1 && <span className="opacity-60">×{c.n_pezzi}</span>}
+        </span>
+      ))}
+    </div>
   );
 }
 

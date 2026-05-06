@@ -74,11 +74,14 @@ export function useDirettrici(): UseQueryResult<string[]> {
   });
 }
 
-export function useLocalitaManutenzione(): UseQueryResult<LocalitaManutenzioneRead[]> {
+export function useLocalitaManutenzione(
+  options: { enabled?: boolean } = {},
+): UseQueryResult<LocalitaManutenzioneRead[]> {
   return useQuery({
     queryKey: ["anagrafiche", "localita-manutenzione"],
     queryFn: listLocalitaManutenzione,
     staleTime: FIVE_MIN,
+    enabled: options.enabled ?? true,
   });
 }
 
