@@ -41,6 +41,7 @@ import {
 import { AuthContext } from "@/lib/auth/AuthContext";
 import { formatDateIt, formatPeriodo } from "@/lib/format";
 import { GeneraGiriDialog } from "@/routes/pianificatore-giro/GeneraGiriDialog";
+import { ModificaConfigurazioneDialog } from "@/routes/pianificatore-giro/ModificaConfigurazioneDialog";
 import { RegoleInvioSostaSection } from "@/routes/pianificatore-giro/RegoleInvioSostaSection";
 import { RegolaCard } from "@/routes/pianificatore-giro/regola/RegolaCard";
 import { RegolaEditor } from "@/routes/pianificatore-giro/regola/RegolaEditor";
@@ -76,6 +77,8 @@ export function ProgrammaDettaglioRoute() {
   const giriQuery = useGiriProgramma(programmaId);
   const [editorOpen, setEditorOpen] = useState(false);
   const [generaOpen, setGeneraOpen] = useState(false);
+  // MR ζ: dialog di modifica configurazione programma.
+  const [editConfigOpen, setEditConfigOpen] = useState(false);
 
   if (programmaId === undefined || Number.isNaN(programmaId)) {
     return <ErrorBlock message="ID programma non valido nell'URL." />;
@@ -127,16 +130,22 @@ export function ProgrammaDettaglioRoute() {
         giriCount={giriCount}
         giriLoading={giriQuery.isLoading}
         canGenerate={canGenerate}
+        editable={editable}
         onGenera={() => setGeneraOpen(true)}
         onMutated={() => void query.refetch()}
         onVediGiri={() => navigate(`/pianificatore-giro/programmi/${programma.id}/giri`)}
+        onModifica={() => setEditConfigOpen(true)}
       />
 
       {/* ═══ 1.5 · PIPELINE BANNER (Sprint 8.0 MR 1) ════════════ */}
       <PipelineBanner programma={programma} onMutated={() => void query.refetch()} />
 
       {/* ═══ 2 · CONFIGURAZIONE ═════════════════════════════════ */}
-      <ConfigurazioneSection programma={programma} editable={editable} />
+      <ConfigurazioneSection
+        programma={programma}
+        editable={editable}
+        onModifica={() => setEditConfigOpen(true)}
+      />
 
       {/* ═══ 2.5 · CONVOGLI NECESSARI (Sprint 7.8 MR 5) ═════════ */}
       {giri.length > 0 && (
@@ -166,6 +175,13 @@ export function ProgrammaDettaglioRoute() {
         onOpenChange={setGeneraOpen}
         onCompleted={() => navigate(`/pianificatore-giro/programmi/${programma.id}/giri`)}
       />
+      {/* MR ζ: dialog "Modifica configurazione". */}
+      <ModificaConfigurazioneDialog
+        programma={programma}
+        open={editConfigOpen}
+        onOpenChange={setEditConfigOpen}
+        onSaved={() => void query.refetch()}
+      />
     </div>
   );
 }
@@ -179,9 +195,11 @@ interface HeroHeaderProps {
   giriCount: number;
   giriLoading: boolean;
   canGenerate: boolean;
+  editable: boolean;
   onGenera: () => void;
   onMutated: () => void;
   onVediGiri: () => void;
+  onModifica: () => void;
 }
 
 function HeroHeader({
@@ -189,9 +207,11 @@ function HeroHeader({
   giriCount,
   giriLoading,
   canGenerate,
+  editable,
   onGenera,
   onMutated,
   onVediGiri,
+  onModifica,
 }: HeroHeaderProps) {
   const giorni = diffDaysInclusive(programma.valido_da, programma.valido_a);
   // Backend entry 88: la response include `created_by_username` via JOIN.
@@ -244,9 +264,11 @@ function HeroHeader({
         <ActionCluster
           programma={programma}
           canGenerate={canGenerate}
+          editable={editable}
           onGenera={onGenera}
           onMutated={onMutated}
           onVediGiri={onVediGiri}
+          onModifica={onModifica}
         />
       </div>
     </Card>
@@ -279,15 +301,19 @@ function DividerInline() {
 function ActionCluster({
   programma,
   canGenerate,
+  editable,
   onGenera,
   onMutated,
   onVediGiri,
+  onModifica,
 }: {
   programma: ProgrammaDettaglioRead;
   canGenerate: boolean;
+  editable: boolean;
   onGenera: () => void;
   onMutated: () => void;
   onVediGiri: () => void;
+  onModifica: () => void;
 }) {
   const pubblicaMutation = usePubblicaProgramma();
   const archiviaMutation = useArchiviaProgramma();
@@ -316,8 +342,13 @@ function ActionCluster({
         </Button>
         <Button
           variant="outline"
-          disabled
-          title="Modifica configurazione: dialog non ancora disponibile (TN-UPDATE residuo)"
+          onClick={onModifica}
+          disabled={!editable}
+          title={
+            editable
+              ? "Modifica configurazione del programma"
+              : "Programma archiviato/freezato: read-only"
+          }
         >
           Modifica
         </Button>
@@ -539,9 +570,11 @@ function PipelineBanner({
 function ConfigurazioneSection({
   programma,
   editable,
+  onModifica,
 }: {
   programma: ProgrammaDettaglioRead;
   editable: boolean;
+  onModifica: () => void;
 }) {
   const sosta = programma.stazioni_sosta_extra_json;
 
@@ -554,11 +587,12 @@ function ConfigurazioneSection({
         <Button
           variant="outline"
           size="sm"
-          disabled
+          disabled={!editable}
+          onClick={onModifica}
           title={
             editable
-              ? "Modifica configurazione: dialog non ancora disponibile (MR ζ)"
-              : "Programma archiviato: configurazione read-only"
+              ? "Modifica nome, periodo, lunghezza giri, materiali, ecc."
+              : "Programma archiviato o materiale confermato: configurazione read-only"
           }
         >
           Modifica configurazione

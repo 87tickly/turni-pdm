@@ -10,6 +10,68 @@
 
 ---
 
+## 2026-05-06 (185) — MR ζ: bottoni Modifica funzionanti
+
+### Contesto
+
+Spec utente: "I tasti modifica non sono abilitati, io una volta che
+genero non posso modificare nulla." I bottoni "Modifica" (in stato
+bozza) e "Modifica configurazione" erano disabilitati con tooltip
+"TN-UPDATE residuo" (vedi entry 119, MR 13). MR ζ li abilita
+collegandoli al PATCH ``/api/programmi/{id}`` già esistente.
+
+### Modifiche
+
+**`frontend/src/routes/pianificatore-giro/ModificaConfigurazioneDialog.tsx`**
+(nuovo, ~340 righe): dialog unico che espone tutti i campi
+modificabili in PATCH:
+
+- Nome.
+- Periodo validità (``valido_da``, ``valido_a``).
+- Lunghezza giri (``n_giornate_min``, ``n_giornate_max``).
+- ``km_max_giornaliero`` (opzionale).
+- ``fascia_oraria_tolerance_min``.
+- Subset materiali a disposizione (multi-checkbox, stessa logica del
+  ``CreaProgrammaDialog``).
+
+Le regole di assegnazione e le regole invio sosta restano editabili
+dalle loro UI dedicate (RegolaEditor inline + RegoleInvioSostaSection).
+
+Errori 409 dal backend (freeze pipeline ``>= MATERIALE_CONFERMATO``)
+visualizzati inline.
+
+**`frontend/src/hooks/useProgrammi.ts`**: nuovo hook
+``useUpdateProgramma`` con invalidazione ``PROGRAMMI_KEY``.
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`**:
+
+- State ``editConfigOpen``.
+- ``HeroHeader``/``ActionCluster`` ricevono prop ``editable`` +
+  ``onModifica``. Bottone "Modifica" (stato bozza) ora apre il dialog
+  (disabled solo per archiviato/freezato).
+- ``ConfigurazioneSection`` riceve prop ``onModifica``. Bottone
+  "Modifica configurazione" idem.
+- Mount del nuovo ``<ModificaConfigurazioneDialog>`` con ``onSaved``
+  che fa ``query.refetch()``.
+- Bottone "Elimina" del programma resta disabled (manca endpoint
+  DELETE backend, scope futuro).
+
+### Verifiche
+
+- ✅ ``pnpm tsc -b --noEmit`` clean.
+- ✅ ``pnpm vitest run src/routes/pianificatore-giro``: 11 passed,
+  1 skipped.
+
+### Stato
+
+- ✅ MR ζ frontend completo (no backend changes — PATCH già esistente).
+- ⏳ Commit + push + Railway deploy.
+- ➡️ MR η: azioni post-giro (assegna materiale, configura doppia,
+  configura sgancio, duplica per doppia macchina). MR finale del
+  refactor UX.
+
+---
+
 ## 2026-05-06 (184) — MR ε: regole invio sosta inline nel CreaProgrammaDialog
 
 ### Contesto

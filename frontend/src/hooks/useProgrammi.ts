@@ -25,6 +25,7 @@ import {
   confermaPersonale,
   createProgramma,
   deleteRegola,
+  updateProgramma,
   getLastBuilderRun,
   getProgramma,
   listProgrammi,
@@ -40,6 +41,7 @@ import {
   type ProgrammaDettaglioRead,
   type ProgrammaMaterialeCreate,
   type ProgrammaMaterialeRead,
+  type ProgrammaMaterialeUpdate,
   type ProgrammaRegolaAssegnazioneCreate,
   type ProgrammaRegolaAssegnazioneRead,
   type ProgrammaRegolaAssegnazioneUpdate,
@@ -114,6 +116,26 @@ export function useArchiviaProgramma(): UseMutationResult<ProgrammaMaterialeRead
   const qc = useQueryClient();
   return useMutation({
     mutationFn: archiviaProgramma,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: PROGRAMMI_KEY });
+    },
+  });
+}
+
+interface UpdateProgrammaArgs {
+  id: number;
+  payload: ProgrammaMaterialeUpdate;
+}
+
+/** MR ζ — PATCH programma (nome, periodo, parametri, materiali). */
+export function useUpdateProgramma(): UseMutationResult<
+  ProgrammaMaterialeRead,
+  Error,
+  UpdateProgrammaArgs
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }) => updateProgramma(id, payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: PROGRAMMI_KEY });
     },
