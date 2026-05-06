@@ -10,6 +10,140 @@
 
 ---
 
+## 2026-05-06 (188) — Sub-MR 5.bis-impact: detection programmi impattati da variazioni
+
+### Contesto
+
+Risposta alla domanda utente 2026-05-06: *"come gestiamo le variazioni
+sul turno materiale e turno PdC, avendo già un turno materiale e un
+turno PdC?"*
+
+Le variazioni PdE (UPDATE_ORARIO / RIMUOVI_DATE_VALIDITA /
+CANCELLAZIONE) modificano corse che possono essere già consumate da
+``giro_blocco.corsa_commerciale_id`` e
+``turno_pdc_blocco.corsa_commerciale_id`` (FK RESTRICT su entrambi).
+Senza alert, l'utente non sa quali programmi attivi diventano
+incoerenti.
+
+**Decisione architetturale concordata** (utente, 2026-05-06):
+
+- **Opzione C** del survey: "programma di variazione (forking)". Il
+  programma base resta intatto; si crea un programma figlio per il
+  periodo della variazione che prevale per quelle date.
+- Split in 2 sub-MR sequenziali:
+  1. **5.bis-impact** (questa entry, prerequisito): detection +
+     alerting. Senza sapere cosa è impattato, il fork è cieco.
+  2. **5.bis-fork** (successivo): migration ``programma_genitore_id``
+     + endpoint "crea programma di variazione" + UI bottone +
+     convenzione "merge per data" lato consumer.
+
+Questa entry chiude solo il **detection**. Niente azione automatica:
+quando l'utente applica una variazione, vede *quanti* giri/turni
+sono impattati e su quali programmi, ma non interviene
+automaticamente — è prerequisito per una decisione informata.
+
+### Modifiche backend
+
+**`backend/src/colazione/api/variazioni_impatto.py`** (nuovo, ~190
+righe): modulo dedicato.
+
+- ``calcola_impatto_su_programmi(session, *, corse_ids, azienda_id)
+  -> list[ProgrammaImpattoRead]``: 4 query SQL (giri, turni PdC,
+  assegnazioni PdC, intestazione programmi) + join in memoria via
+  ``programma_id``. Multi-tenant safety (filter ``azienda_id``
+  ovunque). Short-circuit su ``corse_ids=set()`` → ``[]``. Ordinato
+  DESC per impatto (giri DESC, turni DESC, nome ASC).
+- Match relazione turno→programma via cast JSONB
+  ``generation_metadata_json["giro_materiale_id"]`` → ``BigInteger``
+  (pattern entry 168/172).
+- ``estrai_corse_ids_da_risultato_pianificazione(risultato) ->
+  set[int]``: helper che legge le 3 liste operazioni di una
+  ``RisultatoPianificazione`` (variazioni_pde domain): ``OpUpdateOrari``,
+  ``OpUpdateValidoInDate``, ``OpSoftCancella``. ``OpInsert``
+  esclusi (corse nuove → niente blocchi preesistenti).
+
+**`backend/src/colazione/schemas/programmi.py`**:
+
+- Nuova ``ProgrammaImpattoRead``: ``programma_id``, ``nome``,
+  ``valido_da``, ``valido_a``, ``n_giri_impattati``,
+  ``n_turni_pdc_impattati``, ``n_assegnazioni_impattate``.
+- ``ApplicaVariazionePdEResponse`` esteso con
+  ``programmi_impattati: list[ProgrammaImpattoRead] = []``.
+- ``ApplyVariazioneResponse`` (core endpoint sub-MR 5.bis-a) esteso
+  con stesso campo per coerenza.
+
+**`backend/src/colazione/api/programmi.py`** — 2 endpoint estesi:
+
+- ``POST /api/programmi/{id}/variazioni/{run_id}/applica``: dopo il
+  commit chiama ``estrai_corse_ids`` + ``calcola_impatto`` e popola
+  ``programmi_impattati`` nella response.
+- ``POST /api/programmi/{id}/variazioni/{run_id}/apply`` (core
+  generico): itera su ``risultato.operazioni_valide`` non-noop,
+  estrae ``corsa_id`` da ``UpdateOrario`` / ``RimuoviDateValidita``
+  / ``CancellaCorsa``, calcola impatto, popola response.
+
+**`backend/src/colazione/api/azienda_pde.py`**:
+
+- ``POST /api/aziende/me/variazioni/{run_id}/applica`` (livello
+  azienda): stessa logica del per-programma. Le variazioni globali
+  possono impattare più programmi → response più ricca.
+
+### Test
+
+**`backend/tests/test_variazioni_impatto.py`** (nuovo, 7 test):
+
+- 4 unit pure-Python su ``estrai_corse_ids_da_risultato_pianificazione``:
+  vuoto, solo OpInsert (zero corse), mix update/cancellazioni con
+  3 corse distinte, dedupe corsa stessa in 2 operazioni.
+- 3 smoke con DB su ``calcola_impatto_su_programmi``:
+  ``corse_ids=set()`` → ``[]``, corse inesistenti → ``[]``,
+  ``azienda_id`` non esistente → ``[]`` (multi-tenant safety).
+
+Test reale (con setup giro + turno + blocco che referenzia corsa
+impattata) è scope sub-MR fork: il setup completo sarà richiesto
+comunque per il fork.
+
+### Verifiche
+
+- ✅ ``uv run mypy --strict src/``: 76 source files clean.
+- ✅ ``uv run ruff check`` su file MR: 0 errori.
+- ✅ ``uv run pytest tests/test_variazioni_impatto.py``: 7 passed.
+- ✅ ``uv run pytest`` full: 845 passed, 13 skipped, 1 fallimento
+  preesistente flaky (``test_seed_idempotente`` — race condition nel
+  setup, non legato al MR).
+
+### Note operative
+
+Lavoro avvenuto in parallelo a un altro committer (MR α…η + η-bis)
+sullo stesso branch. Le mie modifiche a ``api/programmi.py`` +
+``schemas/programmi.py`` erano già state integrate nei commit
+intermedi del committer parallelo (probabilmente via merge automatico
+durante un loro pull). Restano da committare solo:
+``api/azienda_pde.py``, ``variazioni_impatto.py`` (nuovo),
+``test_variazioni_impatto.py`` (nuovo).
+
+### Decisioni di scope rinviate
+
+- **Sub-MR 5.bis-fork** (next): migration ``programma_genitore_id``,
+  endpoint "crea programma di variazione" dal run_id di una
+  variazione applicata, UI bottone "Crea programma figlio" sulla
+  timeline, convenzione "merge per data" lato consumer (vista PdC
+  finale, builder).
+- **Frontend impatto**: entry successiva. Aggiornare
+  ``lib/api/pde.ts`` con tipi, ``CaricaVariazioneDialog`` mostra
+  alert post-success, ``VariazioneItem`` nella timeline mostra
+  badge ⚠.
+- **Test integration con giro reale**: rinviato al sub-MR fork per
+  evitare doppio setup.
+
+### Stato
+
+- ✅ Codice 5.bis-impact backend pronto: 1 modulo nuovo + 2 schemi
+  nuovi + 3 endpoint estesi + 7 test.
+- ⏳ Commit + push + deploy backend Railway.
+
+---
+
 ## 2026-05-06 (187) — MR η-bis: doppia composizione, sgancio, duplicazione giro
 
 ### Contesto

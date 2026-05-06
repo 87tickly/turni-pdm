@@ -47,6 +47,10 @@ from colazione.api.programmi import (
     _planner_per_tipo,
     _to_parsed_target,
 )
+from colazione.api.variazioni_impatto import (
+    calcola_impatto_su_programmi,
+    estrai_corse_ids_da_risultato_pianificazione,
+)
 from colazione.auth import require_role
 from colazione.db import get_session
 from colazione.importers.pde import (
@@ -505,6 +509,13 @@ async def applica_variazione_globale(
     await session.commit()
     await session.refresh(run)
 
+    # Detection impatto su programmi esistenti (sub-MR 5.bis-impact,
+    # entry 179). Stesso pattern dell'endpoint per-programma.
+    corse_coinvolte = estrai_corse_ids_da_risultato_pianificazione(risultato)
+    impatti = await calcola_impatto_su_programmi(
+        session, corse_ids=corse_coinvolte, azienda_id=user.azienda_id
+    )
+
     completed_at = run.completed_at or datetime.now(UTC)
     return ApplicaVariazionePdEResponse(
         run_id=run.id,
@@ -515,4 +526,5 @@ async def applica_variazione_globale(
         n_warnings=len(risultato.warnings),
         warnings=risultato.warnings,
         completed_at=completed_at,
+        programmi_impattati=impatti,
     )
