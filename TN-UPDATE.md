@@ -10,6 +10,70 @@
 
 ---
 
+## 2026-05-06 (176) — Code review completa Sprint 8.0 (4 CRITICI, 9 IMPORTANTI, 5 MINORI)
+
+### Contesto
+
+Code review completa del repo dopo Sprint 8.0 MR 5.bis (entry 175,
+commit `f26ec2c`). Scope: `backend/`, `frontend/`, `data/`,
+`tests/`, `scripts/`. Condotta leggendo `NORMATIVA-PDC.md`,
+`MODELLO-DATI.md`, TN-UPDATE ultime 5 entry prima di toccare il codice.
+
+### Modifiche
+
+Creato `docs/CODE-REVIEW-2026-05-06.md` con 18 finding totali.
+Nessuna modifica al codice di produzione (scope dichiarato: solo
+il file di review + questa entry).
+
+### Findings principali
+
+**CRITICI (4):**
+- C1 `builder_pdc/builder.py:57` — `ACCESSORI_MIN_STANDARD = 40`
+  sempre, mai 80' in dic-gen-feb. Violazione normativa §3.3
+  (preriscaldo invernale). Zero test di copertura.
+- C2 `assegnazione_persone.py:311` — `storia_per_persona` inizia
+  vuota: riposo intraturno §11.5 HARD è cieco alle assegnazioni
+  DB pre-esistenti (run precedenti).
+- C3 `assegnazione_persone.py:315` — `fr_per_persona` inizia vuota:
+  cap FR §10.6 (max 3/28gg, 1/sett) SOFT non considera FR da run
+  precedenti.
+- C4 `builder_pdc/builder.py:331` — `is_notturno` cattura 22:01-23:59
+  → `_riposo_richiesto_h` restituisce 16h invece di 11h per turni
+  serali. Over-blocking: genera mancanze false non dovute a §11.5.
+
+**IMPORTANTI (9):** divergenza model-migration (UniqueConstraint/CHECK
+non dichiarati nei modelli — I1, I2); full table scan `TurnoPdc`
+nell'anti-rigenerazione builder (I3); `datetime.utcnow()` deprecato
+Python 3.12 (I4); `assegna_manuale` non aggiorna `copertura_pct`
+bloccando il gate `conferma_personale` (I5); fallback silente su
+`data_a = valido_da` se `valido_a` è NULL (I6); soglia copertura
+hardcoded frontend (I7); description warning §11.4 usa costante
+sbagliata 16h vs 62h (I8); variante non riconosciuta → match-all
+silenzioso (I9).
+
+**MINORI (5):** `GiriEsistentiError` in fondo al file invece che con
+le altre eccezioni (M1); `PERSISTER_VERSION` stale (M2); `Persona`
+manca mirror `__table_args__` (M3); `valido_da` non propagato come
+contesto stagionale in builder (M4); assenza test per C1 e C2 (M5).
+
+### Stato
+
+Review consegnata. Nessuna modifica al codice produzione.
+PR aperta con solo `docs/CODE-REVIEW-2026-05-06.md`.
+
+### Prossimo step
+
+Decidere quali finding affrontare nel prossimo sprint:
+- **Obbligatorio prima di qualsiasi deploy invernale**: C1
+  (preriscaldo ACCp).
+- **Alta priorità operativa**: C2 + C3 (riposo intraturno / FR
+  cross-run), I5 (`copertura_pct` post assegna-manuale).
+- **Fix veloci (< 30 min ciascuno)**: C4, I4, I8, M1.
+- **Migration**: I1 + I2 (dichiarare in models ciò che già esiste
+  in DB — nessuna migration DB necessaria, solo aggiornamento ORM).
+
+---
+
 ## 2026-05-05 (175) — Sprint 8.0 MR 5.bis: applicazione concreta variazioni PdE
 
 ### Contesto
