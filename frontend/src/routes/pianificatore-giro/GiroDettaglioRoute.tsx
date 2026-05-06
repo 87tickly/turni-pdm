@@ -11,6 +11,7 @@ import { Link, useParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowLeft,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -110,6 +111,12 @@ type ZoomLevel = (typeof ZOOM_LEVELS)[number];
 const DEFAULT_ZOOM: ZoomLevel = 1;
 const LS_KEY_GANTT_ZOOM = "colazione.gantt-giro.zoom";
 
+// Sprint 8.0 entry 204 (sotto-MR 9 Step A): nesting varianti collassabile.
+// Default: ogni giornata mostra solo la variante canonica (idx 0); click
+// sull'header espande TUTTE le varianti come righe separate. Persistito
+// per id-giornata in localStorage così la scelta sopravvive a refresh.
+const LS_KEY_GANTT_EXPANDED = "colazione.gantt-giro.expanded";
+
 interface GanttScale {
   /** Larghezza totale della timeline in px (24h scalate da zoom). */
   timelineWidthPx: number;
@@ -148,6 +155,24 @@ function readPersistedZoom(): ZoomLevel {
 function persistZoom(z: ZoomLevel): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(LS_KEY_GANTT_ZOOM, String(z));
+}
+
+function readPersistedExpanded(): Set<number> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(LS_KEY_GANTT_EXPANDED);
+    if (raw === null) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((x): x is number => typeof x === "number"));
+  } catch {
+    return new Set();
+  }
+}
+
+function persistExpanded(ids: Set<number>): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(LS_KEY_GANTT_EXPANDED, JSON.stringify([...ids]));
 }
 
 /** Soglia gap "long" (tratteggio aggiuntivo). */
@@ -878,6 +903,48 @@ function GanttSection({
     persistZoom(z);
   };
 
+  // Sprint 8.0 entry 204 (sotto-MR 9 Step A): nesting varianti.
+  // Default per ogni giornata = collapsed (mostra solo la variante
+  // canonica idx 0); click sull'header espande tutte le varianti come
+  // righe separate. Stato persistito in localStorage per giornata.id.
+  const [expandedGiornate, setExpandedGiornate] = useState<Set<number>>(() =>
+    readPersistedExpanded(),
+  );
+  const toggleExpanded = (giornataId: number) => {
+    setExpandedGiornate((prev) => {
+      const next = new Set(prev);
+      if (next.has(giornataId)) {
+        next.delete(giornataId);
+      } else {
+        next.add(giornataId);
+      }
+      persistExpanded(next);
+      return next;
+    });
+  };
+  // Helper: espandi/comprimi tutte le giornate con varianti multiple.
+  const giornateConVariantiMultiple = useMemo(
+    () => giro.giornate.filter((g) => g.varianti.length > 1).map((g) => g.id),
+    [giro.giornate],
+  );
+  const allExpanded =
+    giornateConVariantiMultiple.length > 0 &&
+    giornateConVariantiMultiple.every((id) => expandedGiornate.has(id));
+  const expandAll = () => {
+    setExpandedGiornate(() => {
+      const next = new Set(giornateConVariantiMultiple);
+      persistExpanded(next);
+      return next;
+    });
+  };
+  const collapseAll = () => {
+    setExpandedGiornate(() => {
+      const next = new Set<number>();
+      persistExpanded(next);
+      return next;
+    });
+  };
+
   // Sprint 7.10 MR α.8 (2026-05-05): vista fullscreen del Gantt giro
   // materiale. Decisione utente "non si vede tutto il turno, viene
   // tagliato ai lati" — il Gantt incastrato fra HeroSection e
@@ -1015,6 +1082,33 @@ function GanttSection({
             <span className="tabular-nums">
               1h = {Math.round(scale.pxPerHour)}px
             </span>
+            {giornateConVariantiMultiple.length > 0 && (
+              <>
+                <span className="text-border">·</span>
+                <button
+                  type="button"
+                  onClick={allExpanded ? collapseAll : expandAll}
+                  aria-label={
+                    allExpanded
+                      ? "Comprimi tutte le varianti"
+                      : "Espandi tutte le varianti"
+                  }
+                  title={
+                    allExpanded
+                      ? "Comprimi tutte le varianti calendariali"
+                      : `Espandi tutte le varianti calendariali (${giornateConVariantiMultiple.length} giornate con varianti multiple)`
+                  }
+                  className="inline-flex items-center gap-1 rounded border border-border bg-white px-2 py-1 text-[10px] font-medium text-muted-foreground hover:bg-muted"
+                >
+                  {allExpanded ? (
+                    <ChevronDown className="h-3 w-3" aria-hidden />
+                  ) : (
+                    <ChevronRight className="h-3 w-3" aria-hidden />
+                  )}
+                  {allExpanded ? "Comprimi varianti" : "Espandi varianti"}
+                </button>
+              </>
+            )}
             <span className="text-border">·</span>
             <button
               type="button"
@@ -1053,10 +1147,17 @@ function GanttSection({
             {/* Sticky header X axis */}
             <AxisHeader />
 
-            {/* Per giornata: header row + variante row + (notte band se non ultima) */}
+            {/* Per giornata: header row + 1 o N variante row + (notte band se non ultima)
+                Sprint 8.0 entry 204: nesting collassabile. Default = solo
+                la variante "active" (canonica idx 0). Se la giornata è in
+                expandedGiornate → tutte le varianti come righe separate. */}
             {giro.giornate.map((g, idx) => {
               const activeIdx = activeVariantByGiornata[g.id] ?? 0;
-              const active = g.varianti[activeIdx] ?? g.varianti[0];
+              const isExpanded = expandedGiornate.has(g.id);
+              const hasMultiple = g.varianti.length > 1;
+              const variantiDaMostrare = isExpanded
+                ? g.varianti
+                : g.varianti.slice(activeIdx, activeIdx + 1);
               const next = giro.giornate[idx + 1];
               return (
                 <div key={g.id}>
@@ -1065,15 +1166,22 @@ function GanttSection({
                     activeIdx={activeIdx}
                     selectedClusterA1Ids={selectedClusterA1Ids}
                     onChangeActive={(i) => onChangeActiveVariant(g.id, i)}
+                    expanded={isExpanded}
+                    onToggleExpand={
+                      hasMultiple ? () => toggleExpanded(g.id) : null
+                    }
                   />
-                  {active !== undefined && (
+                  {variantiDaMostrare.map((v) => (
                     <VarianteRow
+                      key={v.id}
                       giornata={g}
-                      variante={active}
+                      variante={v}
+                      isCanonica={v.variant_index === 0}
+                      isInExpandedGroup={isExpanded && hasMultiple}
                       selectedBloccoId={selectedBlocco?.id ?? null}
                       onSelectBlocco={onSelectBlocco}
                     />
-                  )}
+                  ))}
                   {next !== undefined && (
                     <NotteRow giornataPrev={g} giornataNext={next} activeVariantByGiornata={activeVariantByGiornata} />
                   )}
@@ -1195,11 +1303,17 @@ function GiornataHeaderRow({
   activeIdx,
   selectedClusterA1Ids,
   onChangeActive,
+  expanded,
+  onToggleExpand,
 }: {
   giornata: GiroGiornata;
   activeIdx: number;
   selectedClusterA1Ids: Set<number> | null;
   onChangeActive: (idx: number) => void;
+  /** Sprint 8.0 entry 204: stato "varianti espanse" per la giornata. */
+  expanded: boolean;
+  /** ``null`` se la giornata ha 1 sola variante (toggle non ha senso). */
+  onToggleExpand: (() => void) | null;
 }) {
   const { timelineWidthPx } = useGanttScale();
   const varianti = giornata.varianti;
@@ -1232,6 +1346,37 @@ function GiornataHeaderRow({
         className="flex flex-1 items-center gap-1.5 overflow-x-auto px-3 py-2"
         style={{ width: timelineWidthPx }}
       >
+        {/* Sprint 8.0 entry 204 — Step A: bottone expand/collapse per
+            mostrare TUTTE le varianti come righe separate. Visibile solo
+            se la giornata ha 2+ varianti. Quando collapsed, le tab sono
+            interattive (cambia variante visualizzata); quando expanded,
+            le tab diventano evidenziatori della variante "active" perché
+            tutte sono già rese come righe sotto. */}
+        {hasMultiple && onToggleExpand !== null && (
+          <button
+            type="button"
+            onClick={onToggleExpand}
+            aria-expanded={expanded}
+            aria-label={
+              expanded
+                ? `Comprimi varianti giornata ${giornata.numero_giornata}`
+                : `Espandi ${varianti.length} varianti giornata ${giornata.numero_giornata}`
+            }
+            title={
+              expanded
+                ? "Comprimi: mostra solo la variante canonica"
+                : `Espandi: mostra tutte le ${varianti.length} varianti calendariali`
+            }
+            className="inline-flex items-center gap-1 rounded border border-border bg-white px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-muted"
+          >
+            {expanded ? (
+              <ChevronDown className="h-3 w-3" aria-hidden />
+            ) : (
+              <ChevronRight className="h-3 w-3" aria-hidden />
+            )}
+            {varianti.length} varianti
+          </button>
+        )}
         {varianti.map((v, idx) => {
           const isActive = idx === activeIdx;
           return (
@@ -1251,9 +1396,9 @@ function GiornataHeaderRow({
             </button>
           );
         })}
-        {hasMultiple && (
+        {hasMultiple && !expanded && (
           <span className="ml-2 text-[10px] italic text-muted-foreground/70">
-            {varianti.length} varianti · stai vedendo "{truncateLabel(active?.etichetta_parlante ?? "")}"
+            stai vedendo "{truncateLabel(active?.etichetta_parlante ?? "")}"
           </span>
         )}
         {!clusterEsteso && (
@@ -1292,6 +1437,44 @@ function bloccoCategoryFromVariant(v: GiroVariante | undefined): string | null {
   return null;
 }
 
+/**
+ * Sprint 8.0 entry 204 — Step A: prestazione (durata) della variante in
+ * minuti. Calcolato client-side da `ora_inizio` del primo blocco
+ * significativo a `ora_fine` dell'ultimo, gestendo cross-mezzanotte
+ * (se ora_fine < ora_inizio, +1440). Ritorna ``null`` se non ci sono
+ * blocchi o gli orari mancano.
+ *
+ * In futuro (sotto-MR 6 persister v2) il backend popolerà direttamente
+ * `prestazione_minuti` su ``GiroVariante`` — basterà sostituire la
+ * fonte senza toccare l'UI.
+ */
+function computePrestazioneVariante(
+  blocchiOrdinati: GiroBlocco[],
+): number | null {
+  if (blocchiOrdinati.length === 0) return null;
+  const primo = blocchiOrdinati[0];
+  const ultimo = blocchiOrdinati[blocchiOrdinati.length - 1];
+  const inizio = parseTimeToMin(primo.ora_inizio);
+  const fineUlt = parseTimeToMin(ultimo.ora_fine);
+  if (inizio === null || fineUlt === null) return null;
+  // Anche l'ora_inizio dell'ultimo, per intercettare cross-mezzanotte
+  // (se ora_inizio dell'ultimo > ora_fine, l'ultimo blocco stesso
+  // attraversa la mezzanotte → ora_fine_corretto = ora_fine + 1440).
+  const inizioUlt = parseTimeToMin(ultimo.ora_inizio) ?? fineUlt;
+  let fineCorretto = fineUlt;
+  if (fineUlt < inizioUlt) fineCorretto = fineUlt + 1440;
+  if (fineCorretto < inizio) fineCorretto = fineCorretto + 1440;
+  return fineCorretto - inizio;
+}
+
+/** Sprint 8.0 entry 204 — Step A: formatta minuti come "Xh Ym" / "Ym". */
+function formatPrestazione(min: number): string {
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, "0")}`;
+}
+
 // =====================================================================
 // Variante row — single-line timeline
 // =====================================================================
@@ -1299,11 +1482,21 @@ function bloccoCategoryFromVariant(v: GiroVariante | undefined): string | null {
 function VarianteRow({
   giornata,
   variante,
+  isCanonica,
+  isInExpandedGroup,
   selectedBloccoId,
   onSelectBlocco,
 }: {
   giornata: GiroGiornata;
   variante: GiroVariante;
+  /** Sprint 8.0 entry 204: la variante 0 è "canonica" — usiamo
+   * `giornata.km_giornata` come km della variante (il backend persiste
+   * solo il km della canonica). Per le altre, fallback "—". */
+  isCanonica: boolean;
+  /** ``true`` se la giornata è espansa e questa è una delle N righe
+   * sorelle. Aggiunge un indicatore visuale (rientro + barra colorata)
+   * per leggere il gruppo. */
+  isInExpandedGroup: boolean;
   selectedBloccoId: number | null;
   onSelectBlocco: (b: GiroBlocco) => void;
 }) {
@@ -1329,22 +1522,50 @@ function VarianteRow({
   const firstId = blocchiOrdinati[0]?.id ?? null;
   const lastId = blocchiOrdinati[blocchiOrdinati.length - 1]?.id ?? null;
 
-  // Per/Km per giornata: usiamo km_giornata se presente; "Per" è
-  // un campo non ancora persistito nel backend (vedi residui TN-UPDATE).
+  // Sprint 8.0 entry 204 — Step A: Per/Km PER variante (non più per
+  // giornata). "Per" = prestazione minuti calcolata client-side (primo
+  // ora_inizio → ultimo ora_fine, gestione cross-mezzanotte). "Km" =
+  // backend espone solo `giornata.km_giornata` per la variante canonica
+  // (variant_index 0); per le altre varianti mostriamo "—" finché il
+  // sotto-MR 6 (persister v2) popola km per variante. Né più né meno.
+  const prestazioneMinuti = useMemo(
+    () => computePrestazioneVariante(blocchiOrdinati),
+    [blocchiOrdinati],
+  );
+  const per =
+    prestazioneMinuti !== null ? formatPrestazione(prestazioneMinuti) : "—";
   const km =
-    giornata.km_giornata !== null ? formatNumber(Math.round(giornata.km_giornata)) : "—";
-  const per = "—"; // personale per giornata: non popolato dal builder
+    isCanonica && giornata.km_giornata !== null
+      ? formatNumber(Math.round(giornata.km_giornata))
+      : "—";
 
   return (
-    <div className="relative flex border-b border-border">
+    <div
+      className={cn(
+        "relative flex border-b border-border",
+        // In modalità "espansa", aggiunge una sottile barra a sinistra
+        // per legare visivamente le N varianti come gruppo della stessa
+        // giornata. La canonica ha barra più pronunciata.
+        isInExpandedGroup && "border-l-2",
+        isInExpandedGroup && (isCanonica ? "border-l-foreground/40" : "border-l-foreground/15"),
+      )}
+    >
       {/* Label col sticky-left */}
       <div
         className="sticky left-0 z-20 flex flex-col justify-center border-r border-border bg-white px-3 py-3"
         style={{ width: GIORNATA_LABEL_COL_PX }}
       >
-        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <div
+          className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          title={variante.etichetta_parlante}
+        >
           {truncateLabel(variante.etichetta_parlante)}
         </div>
+        {isInExpandedGroup && isCanonica && (
+          <div className="mt-0.5 text-[9px] font-medium uppercase tracking-wider text-foreground/60">
+            canonica
+          </div>
+        )}
         {variante.dates_apply_json.length > 0 && (
           <div className="text-[9px] italic text-muted-foreground/70">
             {variante.dates_apply_json.length} dat
@@ -1396,15 +1617,31 @@ function VarianteRow({
         ))}
       </div>
 
-      {/* Per + Km sticky-right */}
+      {/* Per + Km sticky-right (Sprint 8.0 entry 204: per variante) */}
       <div
         className="sticky right-0 z-20 flex border-l border-border bg-white"
         style={{ width: PER_KM_COL_PX }}
       >
-        <div className="flex w-1/2 items-center justify-center border-r border-border font-mono text-sm tabular-nums text-foreground">
+        <div
+          className="flex w-1/2 items-center justify-center border-r border-border font-mono text-sm tabular-nums text-foreground"
+          title={
+            prestazioneMinuti !== null
+              ? `Prestazione variante: ${prestazioneMinuti} min`
+              : "Prestazione non calcolabile (blocchi senza orari)"
+          }
+        >
           {per}
         </div>
-        <div className="flex w-1/2 items-center justify-center font-mono text-sm tabular-nums text-foreground">
+        <div
+          className="flex w-1/2 items-center justify-center font-mono text-sm tabular-nums text-foreground"
+          title={
+            isCanonica
+              ? giornata.km_giornata !== null
+                ? `Km giornata canonica: ${Math.round(giornata.km_giornata)}`
+                : "Km giornata non disponibile"
+              : "Km variante non canonica: il backend popola km solo per la canonica (sotto-MR 6 persister v2)"
+          }
+        >
           {km}
         </div>
       </div>
