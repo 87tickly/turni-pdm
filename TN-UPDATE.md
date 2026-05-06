@@ -10,6 +10,57 @@
 
 ---
 
+## 2026-05-06 (184) — MR ε: regole invio sosta inline nel CreaProgrammaDialog
+
+### Contesto
+
+Spec utente:
+
+> "Regole invio sosta deve essere messo quando genero un turno
+> materiale, no lì." (= non come sezione separata nel dettaglio
+> programma, ma nel dialog di creazione).
+
+> "Nel dialog di creazione programma voglio un mini-editor inline."
+
+### Modifiche
+
+**`frontend/src/routes/pianificatore-giro/CreaProgrammaDialog.tsx`**:
+
+- Nuovo state ``regoleInvioSosta: RegolaInvioSostaDraft[]`` (lista in
+  editing, non persistita finché il programma non è creato).
+- Nuovo componente locale ``RegoleInvioSostaInlineEditor``: pannello
+  con header "+ Nuova regola" + lista di card per ogni regola (6
+  campi: stazione sgancio, tipo materiale, finestra inizio/fine,
+  località sosta, fallback sosta, note).
+- Submit refactor: dopo ``createMutation.mutateAsync`` (POST programma)
+  partono N POST sequenziali a ``/api/programmi/{id}/regole-invio-sosta``
+  via ``useCreateRegolaInvioSosta``. Se uno fallisce, viene raccolto
+  in un summary e mostrato all'utente con ``window.alert`` ma il
+  programma è comunque creato (l'utente può ritentare le regole dalla
+  sezione esistente nel dettaglio).
+
+**Sezione esistente preservata** (``RegoleInvioSostaSection`` nel
+``ProgrammaDettaglioRoute``): resta operativa per modifiche
+post-creazione. MR ζ (Modifica configurazione) la integrerà come parte
+della UX coerente di edit.
+
+### Verifiche
+
+- ✅ ``pnpm tsc -b --noEmit`` clean.
+- ✅ ``pnpm vitest run src/routes/pianificatore-giro``: 11 passed,
+  1 skipped.
+
+### Stato
+
+- ✅ MR ε frontend completo (no backend changes — API ``regole-invio-
+  sosta`` già esistenti).
+- ⏳ Commit + push + Railway deploy.
+- ➡️ MR ζ: bottoni "Modifica programma" e "Modifica configurazione"
+  oggi disabilitati con tooltip "TN-UPDATE residuo". Diventano
+  funzionali con dialog di edit (PATCH già esiste lato backend).
+
+---
+
 ## 2026-05-06 (183) — MR δ: preset linea + tipo servizio nel FiltriEditor
 
 ### Contesto
