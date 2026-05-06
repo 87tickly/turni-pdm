@@ -639,6 +639,334 @@ async def update_giro(
     return g
 
 
+class PatchBloccoRequest(BaseModel):
+    """MR η-bis — payload PATCH ``/api/giri/{giro_id}/blocchi/{blocco_id}``.
+
+    Permette di marcare un blocco come "doppia composizione" (n_pezzi=2)
+    o come punto di "sgancio" (è il blocco DOPO il quale il materiale
+    si separa). Salvato in ``metadata_json`` per evitare migration —
+    è semantica UI/operativa, non vincolo del builder.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    n_pezzi: int | None = Field(default=None, ge=1, le=4)
+    is_sgancio: bool | None = None
+    is_validato_utente: bool | None = None
+
+
+class DuplicaGiroResponse(BaseModel):
+    """MR η-bis — response del ``POST /api/giri/{giro_id}/duplica``.
+
+    Ritorna l'``id`` del nuovo giro creato + il ``numero_turno``
+    generato col suffisso ``-DUP-{N}``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    nuovo_giro_id: int
+    nuovo_numero_turno: str
+    n_giornate_copiate: int
+    n_varianti_copiate: int
+    n_blocchi_copiati: int
+
+
+@giri_dettaglio_router.patch(
+    "/{giro_id}/blocchi/{blocco_id}",
+    response_model=GiroBloccoRead,
+    summary="Modifica un singolo GiroBlocco (MR η-bis: doppia/sgancio)",
+)
+async def patch_blocco(
+    giro_id: int,
+    blocco_id: int,
+    payload: PatchBloccoRequest,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> GiroBloccoRead:
+    """MR η-bis — aggiorna metadata di un blocco.
+
+    Attualmente supporta:
+
+    - ``n_pezzi`` (1..4): doppia/multi composizione su questo blocco.
+    - ``is_sgancio`` (bool): marker "il materiale si sgancia dopo questo
+      blocco" (semantica UI per la visualizzazione).
+    - ``is_validato_utente`` (bool): conferma manuale del pianificatore.
+
+    I primi due sono salvati in ``metadata_json`` per evitare migration:
+    sono semantica operativa, il builder non li usa per costruire la
+    sequenza.
+    """
+    # Verifica ownership: giro appartiene all'azienda + blocco
+    # appartiene a quel giro.
+    g_stmt = select(GiroMateriale).where(
+        GiroMateriale.id == giro_id,
+        GiroMateriale.azienda_id == user.azienda_id,
+    )
+    giro = (await session.execute(g_stmt)).scalar_one_or_none()
+    if giro is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Giro non trovato")
+
+    # Pipeline freeze.
+    prog_stmt = select(ProgrammaMateriale.stato_pipeline_pdc).where(
+        ProgrammaMateriale.id == giro.programma_id
+    )
+    stato_pipeline = (await session.execute(prog_stmt)).scalar_one_or_none()
+    if stato_pipeline is not None and materiale_freezato(stato_pipeline):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"programma freezato (pipeline {stato_pipeline!r}): blocco read-only.",
+        )
+
+    # Carica blocco e verifica che appartenga al giro (via variante →
+    # giornata → giro).
+    b_stmt = (
+        select(GiroBlocco)
+        .join(GiroVariante, GiroVariante.id == GiroBlocco.giro_variante_id)
+        .join(GiroGiornata, GiroGiornata.id == GiroVariante.giro_giornata_id)
+        .where(
+            GiroBlocco.id == blocco_id,
+            GiroGiornata.giro_materiale_id == giro_id,
+        )
+    )
+    blocco = (await session.execute(b_stmt)).scalar_one_or_none()
+    if blocco is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="blocco non trovato per questo giro",
+        )
+
+    metadata = dict(blocco.metadata_json) if blocco.metadata_json else {}
+    if payload.n_pezzi is not None:
+        metadata["n_pezzi"] = payload.n_pezzi
+    if payload.is_sgancio is not None:
+        metadata["is_sgancio"] = payload.is_sgancio
+    blocco.metadata_json = metadata
+    if payload.is_validato_utente is not None:
+        blocco.is_validato_utente = payload.is_validato_utente
+
+    await session.commit()
+    await session.refresh(blocco)
+
+    # Lookup nomi stazione + numero treno per la response (riusiamo lo
+    # stesso pattern di get_giro_dettaglio).
+    nome_stazione: dict[str, str] = {}
+    codici = [
+        c for c in (blocco.stazione_da_codice, blocco.stazione_a_codice) if c is not None
+    ]
+    if codici:
+        st_stmt = select(Stazione.codice, Stazione.nome).where(
+            Stazione.codice.in_(codici), Stazione.azienda_id == user.azienda_id
+        )
+        nome_stazione = dict((await session.execute(st_stmt)).tuples().all())
+    num: str | None = None
+    if blocco.corsa_commerciale_id is not None:
+        n_stmt = select(CorsaCommerciale.numero_treno).where(
+            CorsaCommerciale.id == blocco.corsa_commerciale_id
+        )
+        num = (await session.execute(n_stmt)).scalar_one_or_none()
+    elif blocco.corsa_materiale_vuoto_id is not None:
+        n_stmt2 = select(CorsaMaterialeVuoto.numero_treno_vuoto).where(
+            CorsaMaterialeVuoto.id == blocco.corsa_materiale_vuoto_id
+        )
+        num = (await session.execute(n_stmt2)).scalar_one_or_none()
+
+    return GiroBloccoRead(
+        id=blocco.id,
+        seq=blocco.seq,
+        tipo_blocco=blocco.tipo_blocco,
+        corsa_commerciale_id=blocco.corsa_commerciale_id,
+        corsa_materiale_vuoto_id=blocco.corsa_materiale_vuoto_id,
+        stazione_da_codice=blocco.stazione_da_codice,
+        stazione_a_codice=blocco.stazione_a_codice,
+        stazione_da_nome=(
+            nome_stazione.get(blocco.stazione_da_codice)
+            if blocco.stazione_da_codice
+            else None
+        ),
+        stazione_a_nome=(
+            nome_stazione.get(blocco.stazione_a_codice)
+            if blocco.stazione_a_codice
+            else None
+        ),
+        ora_inizio=blocco.ora_inizio,
+        ora_fine=blocco.ora_fine,
+        descrizione=blocco.descrizione,
+        is_validato_utente=blocco.is_validato_utente,
+        metadata_json=blocco.metadata_json,
+        numero_treno=num,
+    )
+
+
+@giri_dettaglio_router.post(
+    "/{giro_id}/duplica",
+    response_model=DuplicaGiroResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Duplica un giro materiale (MR η-bis: per doppia macchina)",
+)
+async def duplica_giro(
+    giro_id: int,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> DuplicaGiroResponse:
+    """MR η-bis — clona un GiroMateriale completo (header + giornate +
+    varianti + blocchi) per scenari di "doppia macchina".
+
+    Il nuovo giro ottiene un suffisso ``-DUP-{N}`` sul ``numero_turno``
+    (N progressivo se esiste già un duplicato). Tutti i campi
+    ``materiale_tipo_codice``, ``localita_manutenzione_*``, ``programma_id``
+    sono ereditati. Le FK alle ``corsa_commerciale``/``corsa_materiale_vuoto``
+    sono mantenute (= il duplicato copre le stesse corse).
+    """
+    g_stmt = select(GiroMateriale).where(
+        GiroMateriale.id == giro_id,
+        GiroMateriale.azienda_id == user.azienda_id,
+    )
+    src = (await session.execute(g_stmt)).scalar_one_or_none()
+    if src is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Giro non trovato")
+
+    # Pipeline freeze.
+    prog_stmt = select(ProgrammaMateriale.stato_pipeline_pdc).where(
+        ProgrammaMateriale.id == src.programma_id
+    )
+    stato_pipeline = (await session.execute(prog_stmt)).scalar_one_or_none()
+    if stato_pipeline is not None and materiale_freezato(stato_pipeline):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"programma freezato (pipeline {stato_pipeline!r}): "
+                "duplicazione non ammessa."
+            ),
+        )
+
+    # Calcola il nuovo numero_turno con suffisso progressivo.
+    base_num = src.numero_turno
+    # Se è già un duplicato, prendi la radice.
+    import re
+
+    m = re.match(r"^(.*?)-DUP-(\d+)$", base_num)
+    radice = m.group(1) if m else base_num
+    # Trova il prossimo N libero scansionando i giri esistenti del programma.
+    existing_stmt = select(GiroMateriale.numero_turno).where(
+        GiroMateriale.programma_id == src.programma_id,
+        GiroMateriale.numero_turno.like(f"{radice}-DUP-%"),
+    )
+    existing = list((await session.execute(existing_stmt)).scalars().all())
+    used_n = set()
+    for nt in existing:
+        m2 = re.match(rf"^{re.escape(radice)}-DUP-(\d+)$", nt)
+        if m2:
+            used_n.add(int(m2.group(1)))
+    n_dup = 1
+    while n_dup in used_n:
+        n_dup += 1
+    new_numero_turno = f"{radice}-DUP-{n_dup}"
+
+    # 1. clone GiroMateriale.
+    new_giro = GiroMateriale(
+        azienda_id=src.azienda_id,
+        programma_id=src.programma_id,
+        numero_turno=new_numero_turno,
+        validita_codice=src.validita_codice,
+        tipo_materiale=src.tipo_materiale,
+        descrizione_materiale=src.descrizione_materiale,
+        materiale_tipo_codice=src.materiale_tipo_codice,
+        numero_giornate=src.numero_giornate,
+        km_media_giornaliera=src.km_media_giornaliera,
+        km_media_annua=src.km_media_annua,
+        posti_1cl=src.posti_1cl,
+        posti_2cl=src.posti_2cl,
+        localita_manutenzione_partenza_id=src.localita_manutenzione_partenza_id,
+        localita_manutenzione_arrivo_id=src.localita_manutenzione_arrivo_id,
+        stato="bozza",
+        generation_metadata_json={
+            **(src.generation_metadata_json or {}),
+            "duplicato_da_giro_id": src.id,
+            "duplicato_n": n_dup,
+        },
+    )
+    session.add(new_giro)
+    await session.flush()  # popola new_giro.id
+
+    # 2. clone giornate (mantenendo `numero_giornata`).
+    gg_src_stmt = (
+        select(GiroGiornata)
+        .where(GiroGiornata.giro_materiale_id == src.id)
+        .order_by(GiroGiornata.numero_giornata)
+    )
+    giornate_src = list((await session.execute(gg_src_stmt)).scalars().all())
+    map_giornata: dict[int, int] = {}
+    for gg_src in giornate_src:
+        gg_new = GiroGiornata(
+            giro_materiale_id=new_giro.id,
+            numero_giornata=gg_src.numero_giornata,
+            km_giornata=gg_src.km_giornata,
+        )
+        session.add(gg_new)
+        await session.flush()
+        map_giornata[gg_src.id] = gg_new.id
+
+    # 3. clone varianti.
+    if giornate_src:
+        gv_src_stmt = (
+            select(GiroVariante)
+            .where(GiroVariante.giro_giornata_id.in_([g.id for g in giornate_src]))
+            .order_by(GiroVariante.giro_giornata_id, GiroVariante.variant_index)
+        )
+        varianti_src = list((await session.execute(gv_src_stmt)).scalars().all())
+    else:
+        varianti_src = []
+    map_variante: dict[int, int] = {}
+    for gv_src in varianti_src:
+        gv_new = GiroVariante(
+            giro_giornata_id=map_giornata[gv_src.giro_giornata_id],
+            variant_index=gv_src.variant_index,
+            validita_testo=gv_src.validita_testo,
+            dates_apply_json=list(gv_src.dates_apply_json or []),
+            dates_skip_json=list(gv_src.dates_skip_json or []),
+        )
+        session.add(gv_new)
+        await session.flush()
+        map_variante[gv_src.id] = gv_new.id
+
+    # 4. clone blocchi.
+    n_blocchi_clonati = 0
+    if varianti_src:
+        gb_src_stmt = (
+            select(GiroBlocco)
+            .where(GiroBlocco.giro_variante_id.in_([v.id for v in varianti_src]))
+            .order_by(GiroBlocco.giro_variante_id, GiroBlocco.seq)
+        )
+        for gb_src in (await session.execute(gb_src_stmt)).scalars():
+            gb_new = GiroBlocco(
+                giro_variante_id=map_variante[gb_src.giro_variante_id],
+                seq=gb_src.seq,
+                tipo_blocco=gb_src.tipo_blocco,
+                corsa_commerciale_id=gb_src.corsa_commerciale_id,
+                corsa_materiale_vuoto_id=gb_src.corsa_materiale_vuoto_id,
+                stazione_da_codice=gb_src.stazione_da_codice,
+                stazione_a_codice=gb_src.stazione_a_codice,
+                ora_inizio=gb_src.ora_inizio,
+                ora_fine=gb_src.ora_fine,
+                descrizione=gb_src.descrizione,
+                is_validato_utente=gb_src.is_validato_utente,
+                metadata_json=dict(gb_src.metadata_json or {}),
+            )
+            session.add(gb_new)
+            n_blocchi_clonati += 1
+
+    await session.commit()
+    await session.refresh(new_giro)
+
+    return DuplicaGiroResponse(
+        nuovo_giro_id=new_giro.id,
+        nuovo_numero_turno=new_giro.numero_turno,
+        n_giornate_copiate=len(giornate_src),
+        n_varianti_copiate=len(varianti_src),
+        n_blocchi_copiati=n_blocchi_clonati,
+    )
+
+
 @giri_dettaglio_router.get(
     "/{giro_id}",
     response_model=GiroMaterialeDettaglioRead,

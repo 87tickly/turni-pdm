@@ -7,20 +7,25 @@ import {
 } from "@tanstack/react-query";
 
 import {
+  duplicaGiro,
   generaGiri,
   getGiroDettaglio,
   getThreadDettaglio,
   listGiriAzienda,
   listGiriProgramma,
   listThreadsGiro,
+  patchBlocco,
   patchGiro,
   type BuilderResult,
+  type DuplicaGiroResult,
   type GeneraGiriParams,
+  type GiroBlocco,
   type GiroDettaglio,
   type GiroListItem,
   type ListGiriAziendaParams,
   type MaterialeThreadDettaglio,
   type MaterialeThreadListItem,
+  type PatchBloccoPayload,
   type PatchGiroPayload,
 } from "@/lib/api/giri";
 
@@ -121,6 +126,39 @@ export function usePatchGiro(): UseMutationResult<GiroListItem, Error, PatchGiro
       void qc.invalidateQueries({
         queryKey: [...GIRI_KEY, "dettaglio", vars.giroId],
       });
+    },
+  });
+}
+
+interface PatchBloccoArgs {
+  giroId: number;
+  bloccoId: number;
+  payload: PatchBloccoPayload;
+}
+
+/** MR η-bis — PATCH blocco (doppia composizione, sgancio, validazione). */
+export function usePatchBlocco(): UseMutationResult<GiroBlocco, Error, PatchBloccoArgs> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ giroId, bloccoId, payload }) =>
+      patchBlocco(giroId, bloccoId, payload),
+    onSuccess: (_data, vars) => {
+      // Invalida il dettaglio del giro (i blocchi sono renderizzati dentro
+      // GiroDettaglio + dipendenze sub-views).
+      void qc.invalidateQueries({
+        queryKey: [...GIRI_KEY, "dettaglio", vars.giroId],
+      });
+    },
+  });
+}
+
+/** MR η-bis — POST /api/giri/{id}/duplica per scenario "doppia macchina". */
+export function useDuplicaGiro(): UseMutationResult<DuplicaGiroResult, Error, number> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (giroId: number) => duplicaGiro(giroId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: GIRI_KEY });
     },
   });
 }

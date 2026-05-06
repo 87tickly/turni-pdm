@@ -13,12 +13,15 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  Copy,
   FileDown,
   Maximize2,
   Minimize2,
   Pencil,
+  Unlink,
   Users,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -39,7 +42,13 @@ import {
 import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
 import { useMateriali } from "@/hooks/useAnagrafiche";
-import { useGiroDettaglio, usePatchGiro, useThreadsGiro } from "@/hooks/useGiri";
+import {
+  useDuplicaGiro,
+  useGiroDettaglio,
+  usePatchBlocco,
+  usePatchGiro,
+  useThreadsGiro,
+} from "@/hooks/useGiri";
 import { useTurniPdcGiro } from "@/hooks/useTurniPdc";
 import { ApiError } from "@/lib/api/client";
 import type {
@@ -156,6 +165,8 @@ export function GiroDettaglioRoute() {
   const { giroId: giroIdParam } = useParams<{ giroId: string }>();
   const giroId = giroIdParam !== undefined ? Number(giroIdParam) : undefined;
   const query = useGiroDettaglio(giroId);
+  const navigate = useNavigate();
+  const duplicaMutation = useDuplicaGiro();
 
   const [selectedBlocco, setSelectedBlocco] = useState<GiroBlocco | null>(null);
   const [pdcDialogOpen, setPdcDialogOpen] = useState(false);
@@ -221,6 +232,32 @@ export function GiroDettaglioRoute() {
         giro={giro}
         onGeneraPdc={() => setPdcDialogOpen(true)}
         onModificaMateriale={() => setEditMaterialeOpen(true)}
+        onDuplica={() => {
+          if (
+            !window.confirm(
+              `Duplicare il turno "${giro.numero_turno}" per doppia macchina?\n\n` +
+                "Verrà creato un nuovo giro con suffisso -DUP-N e tutte le " +
+                "giornate/varianti/blocchi clonati. Le corse referenziate restano le stesse.",
+            )
+          ) {
+            return;
+          }
+          duplicaMutation.mutate(giro.id, {
+            onSuccess: (res) => {
+              window.alert(
+                `Giro duplicato: ${res.nuovo_numero_turno}\n` +
+                  `${res.n_giornate_copiate} giornate, ${res.n_varianti_copiate} varianti, ` +
+                  `${res.n_blocchi_copiati} blocchi clonati.`,
+              );
+              navigate(`/pianificatore-giro/giri/${res.nuovo_giro_id}`);
+            },
+            onError: (err) => {
+              const msg = err instanceof ApiError ? err.message : (err as Error).message;
+              window.alert(`Duplicazione fallita: ${msg}`);
+            },
+          });
+        }}
+        duplicaPending={duplicaMutation.isPending}
       />
       <ModificaMaterialeGiroDialog
         giro={giro}
@@ -405,10 +442,14 @@ function HeroSection({
   giro,
   onGeneraPdc,
   onModificaMateriale,
+  onDuplica,
+  duplicaPending,
 }: {
   giro: GiroDettaglio;
   onGeneraPdc: () => void;
   onModificaMateriale: () => void;
+  onDuplica: () => void;
+  duplicaPending: boolean;
 }) {
   const meta = giro.generation_metadata_json as Record<string, unknown>;
   const motivo = typeof meta.motivo_chiusura === "string" ? meta.motivo_chiusura : null;
@@ -469,6 +510,16 @@ function HeroSection({
             title="MR η: modifica il materiale assegnato a questo giro"
           >
             <Pencil className="mr-2 h-4 w-4" aria-hidden /> Modifica materiale
+          </Button>
+          <Button
+            variant="outline"
+            size="md"
+            onClick={onDuplica}
+            disabled={duplicaPending}
+            title="MR η-bis: clona giro completo per doppia macchina"
+          >
+            <Copy className="mr-2 h-4 w-4" aria-hidden />
+            {duplicaPending ? "Duplicazione…" : "Duplica turno"}
           </Button>
           <Button
             variant="outline"
@@ -2443,6 +2494,9 @@ function BloccoDialogBody({
           </div>
         )}
 
+        {/* MR η-bis: configurazione doppia/sgancio sul blocco. */}
+        <BloccoConfigDoppiaSgancio giroId={giro.id} blocco={blocco} />
+
         {/* Metadata */}
         <BloccoMetadata blocco={blocco} />
 
@@ -2487,6 +2541,111 @@ function KpiPanel({ label, value }: { label: string; value: string }) {
     <div>
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="text-base font-semibold tabular-nums text-foreground">{value}</div>
+    </div>
+  );
+}
+
+/**
+ * MR η-bis (2026-05-06) — Pannello inline nel dialog blocco per
+ * marcare doppia composizione (``n_pezzi=2``) o sgancio. I valori
+ * vivono in ``metadata_json`` del blocco (no migration). Persistiti
+ * via ``PATCH /api/giri/{giro}/blocchi/{blocco}``. UI minimale: 2
+ * checkbox + bottone Salva.
+ */
+function BloccoConfigDoppiaSgancio({
+  giroId,
+  blocco,
+}: {
+  giroId: number;
+  blocco: GiroBlocco;
+}) {
+  const meta = (blocco.metadata_json ?? {}) as Record<string, unknown>;
+  const initialNPezzi = typeof meta.n_pezzi === "number" ? meta.n_pezzi : 1;
+  const initialIsSgancio = meta.is_sgancio === true;
+
+  const [doppia, setDoppia] = useState(initialNPezzi >= 2);
+  const [isSgancio, setIsSgancio] = useState(initialIsSgancio);
+  const [error, setError] = useState<string | null>(null);
+  const patchMutation = usePatchBlocco();
+
+  // Risincronizza quando cambia il blocco selezionato.
+  useEffect(() => {
+    setDoppia(initialNPezzi >= 2);
+    setIsSgancio(initialIsSgancio);
+    setError(null);
+  }, [blocco.id, initialNPezzi, initialIsSgancio]);
+
+  const dirty =
+    doppia !== initialNPezzi >= 2 || isSgancio !== initialIsSgancio;
+
+  const onSalva = async () => {
+    setError(null);
+    try {
+      await patchMutation.mutateAsync({
+        giroId,
+        bloccoId: blocco.id,
+        payload: {
+          n_pezzi: doppia ? 2 : 1,
+          is_sgancio: isSgancio,
+          is_validato_utente: true,
+        },
+      });
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : (err as Error).message;
+      setError(msg);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-md border border-primary/30 bg-primary/5 p-3">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-primary">
+        Configurazione operativa (MR η-bis)
+      </div>
+      <div className="flex flex-col gap-2 text-sm">
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={doppia}
+            disabled={patchMutation.isPending}
+            onChange={(e) => setDoppia(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            <strong>Doppia composizione</strong> (2 pezzi accoppiati su questo blocco).
+          </span>
+        </label>
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={isSgancio}
+            disabled={patchMutation.isPending}
+            onChange={(e) => setIsSgancio(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span className="inline-flex items-center gap-1">
+            <Unlink className="h-3.5 w-3.5" aria-hidden />
+            <strong>Sgancio</strong>: il materiale si separa dopo questo blocco.
+          </span>
+        </label>
+        {error !== null && (
+          <p
+            role="alert"
+            className="rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1 text-xs text-destructive"
+          >
+            {error}
+          </p>
+        )}
+        <div className="flex justify-end">
+          <Button
+            variant={dirty ? "primary" : "outline"}
+            size="sm"
+            onClick={() => void onSalva()}
+            disabled={patchMutation.isPending || !dirty}
+          >
+            {patchMutation.isPending ? "Salvataggio…" : "Salva"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

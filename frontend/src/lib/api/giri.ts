@@ -237,6 +237,46 @@ export async function patchGiro(
   });
 }
 
+/**
+ * MR η-bis — payload per ``PATCH /api/giri/{id}/blocchi/{blocco_id}``.
+ * Marca un blocco come doppia composizione (n_pezzi=2) o sgancio.
+ */
+export interface PatchBloccoPayload {
+  n_pezzi?: number | null;
+  is_sgancio?: boolean | null;
+  is_validato_utente?: boolean | null;
+}
+
+export async function patchBlocco(
+  giroId: number,
+  bloccoId: number,
+  payload: PatchBloccoPayload,
+): Promise<GiroBlocco> {
+  return apiJson<GiroBlocco>(
+    `/api/giri/${giroId}/blocchi/${bloccoId}`,
+    { method: "PATCH", body: payload },
+  );
+}
+
+/**
+ * MR η-bis — response del ``POST /api/giri/{id}/duplica``.
+ * Clona giro completo (giornate + varianti + blocchi) per scenario
+ * "doppia macchina".
+ */
+export interface DuplicaGiroResult {
+  nuovo_giro_id: number;
+  nuovo_numero_turno: string;
+  n_giornate_copiate: number;
+  n_varianti_copiate: number;
+  n_blocchi_copiati: number;
+}
+
+export async function duplicaGiro(giroId: number): Promise<DuplicaGiroResult> {
+  return apiJson<DuplicaGiroResult>(`/api/giri/${giroId}/duplica`, {
+    method: "POST",
+  });
+}
+
 // =====================================================================
 // Sprint 7.3 MR 2 — lista giri azienda (cross-programma)
 // =====================================================================

@@ -10,6 +10,100 @@
 
 ---
 
+## 2026-05-06 (187) — MR η-bis: doppia composizione, sgancio, duplicazione giro
+
+### Contesto
+
+Chiusura del refactor UX 2026-05-06 con le 3 azioni post-giro
+identificate come "MR η-bis" nell'entry 186:
+
+1. **Doppia composizione**: il blocco rappresenta 2 pezzi accoppiati
+   (es. 2 ETR526 sulla stessa corsa).
+2. **Sgancio**: marker "il materiale si separa dopo questo blocco".
+3. **Duplicazione completa del turno**: clone giro + giornate +
+   varianti + blocchi per scenari di doppia macchina.
+
+Decisione architetturale: i flag (1) e (2) vivono in
+``giro_blocco.metadata_json`` (JSONB già presente, no migration).
+Sono semantica **operativa/UI** — il builder non li usa per costruire
+la sequenza, sono override del pianificatore post-generazione.
+
+### Modifiche backend
+
+**`backend/src/colazione/api/giri.py`** — 2 nuovi endpoint:
+
+- ``PATCH /api/giri/{giro_id}/blocchi/{blocco_id}``: aggiorna
+  ``metadata_json.n_pezzi`` (1..4) + ``metadata_json.is_sgancio`` +
+  ``is_validato_utente``. Vincoli: 404 se blocco non appartiene al giro,
+  409 se programma freezato. Nuovo schema ``PatchBloccoRequest``.
+- ``POST /api/giri/{giro_id}/duplica``: clona ``GiroMateriale`` +
+  cascade su ``GiroGiornata``/``GiroVariante``/``GiroBlocco`` con
+  copia profonda (deep clone via 4 query SELECT + INSERT batch).
+  Genera ``numero_turno`` con suffisso ``-DUP-{N}`` progressivo
+  (scansione regex sui giri del programma per evitare duplicati).
+  Mantiene FK esterne (corsa_commerciale_id, stazione_codice ecc).
+  Stato del nuovo giro = ``"bozza"``. ``generation_metadata_json``
+  guadagna ``duplicato_da_giro_id`` + ``duplicato_n`` per tracciabilità.
+  Nuovo schema ``DuplicaGiroResponse`` con counters.
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/giri.ts`**:
+
+- ``patchBlocco(giroId, bloccoId, payload)`` + tipo ``PatchBloccoPayload``.
+- ``duplicaGiro(giroId)`` + tipo ``DuplicaGiroResult``.
+
+**`frontend/src/hooks/useGiri.ts`**: 2 nuovi hook ``usePatchBlocco`` +
+``useDuplicaGiro`` con invalidazione ``GIRI_KEY`` + dettaglio mirato.
+
+**`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`**:
+
+- ``HeroSection`` riceve nuove prop ``onDuplica`` + ``duplicaPending``.
+- Nuovo bottone "Duplica turno" con icon ``Copy`` accanto a "Modifica
+  materiale". Al click: ``window.confirm`` → ``useDuplicaGiro`` →
+  ``window.alert`` con counters → ``navigate`` al nuovo giro.
+- Nuovo componente ``BloccoConfigDoppiaSgancio`` inserito nel
+  ``BloccoDialogBody`` prima dei metadata: card primary-tinted con 2
+  checkbox (Doppia composizione + Sgancio) + bottone Salva. Salva via
+  ``usePatchBlocco`` settando anche ``is_validato_utente=true`` (il
+  pianificatore ha confermato manualmente).
+
+### Verifiche
+
+- ✅ Backend ``test_anagrafiche_api`` + ``test_aggregazione_a2`` +
+  ``test_builder_giri``: 38 passed, 1 skipped.
+- ✅ Frontend ``pnpm tsc -b --noEmit`` clean.
+- ✅ Frontend vitest pianificatore-giro: 11 passed, 1 skipped.
+
+### Stato
+
+- ✅ MR η-bis backend + frontend completo.
+- ⏳ Commit + push + Railway deploy.
+- ✅ Refactor UX 2026-05-06 chiuso completamente: 8 MR (α…η + η-bis)
+  in una sessione, 2 migration, 0 regressioni sui test esistenti.
+
+### Riepilogo finale (8 MR)
+
+| MR | Cosa cambia | Migration |
+|----|-------------|-----------|
+| α  | Materiali in flotta sostituisce strict options | 0035 |
+| β  | Wizard pre-generazione + sede su regola | 0036 |
+| γ  | Composizione opzionale sulla regola | (no DB) |
+| δ  | Preset linea + tipo servizio nel FiltriEditor | (no DB) |
+| ε  | Regole invio sosta inline nel CreaProgrammaDialog | (no DB) |
+| ζ  | Bottoni Modifica funzionanti via PATCH | (no DB) |
+| η  | Modifica materiale del giro post-generazione | (no DB) |
+| η-bis | Doppia composizione + sgancio + duplicazione completa | (no DB, usa metadata_json) |
+
+### Scope ancora aperto (non in MR α…η-bis)
+
+- Eliminazione programma: bottone "Elimina" resta disabled, manca
+  endpoint DELETE backend.
+- Live ARTURO: nessuna API pubblica documentata, anagrafica linee
+  resta dal DB locale.
+
+---
+
 ## 2026-05-06 (186) — MR η (MVP): modifica materiale del giro post-generazione
 
 ### Contesto
