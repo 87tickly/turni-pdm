@@ -57,18 +57,20 @@ from colazione.domain.builder_giro.capacity_routing import (
     carica_dotazione_per_azienda,
     ribilancia_per_capacity,
 )
-from colazione.domain.builder_giro.fusione_cluster_a1 import fonde_cluster_simili
 from colazione.domain.builder_giro.catena import costruisci_catene
 from colazione.domain.builder_giro.composizione import (
     GiroAssegnato,
     assegna_e_rileva_eventi,
 )
 from colazione.domain.builder_giro.etichetta import calcola_etichetta_giro
+from colazione.domain.builder_giro.fusione_cluster_a1 import fonde_cluster_simili
 from colazione.domain.builder_giro.multi_giornata import (
     Giro,
     ParamMultiGiornata,
-    _km_giornata as _km_giornata_catena,
     costruisci_giri_multigiornata,
+)
+from colazione.domain.builder_giro.multi_giornata import (
+    _km_giornata as _km_giornata_catena,
 )
 from colazione.domain.builder_giro.persister import (
     GiroDaPersistere,
@@ -83,7 +85,7 @@ from colazione.domain.builder_giro.posizionamento import (
     posiziona_su_localita,
 )
 from colazione.models.anagrafica import FestivitaUfficiale, LocalitaManutenzione
-from colazione.models.corse import CorsaCommerciale
+from colazione.models.corse import CorsaCommerciale, corse_attive_clause
 from colazione.models.programmi import (
     BuilderRun,
     ProgrammaMateriale,
@@ -369,11 +371,21 @@ async def _carica_corse(
     data_da: date,
     data_a: date,
 ) -> list[CorsaCommerciale]:
-    """Corse con finestra di validità che si sovrappone all'intervallo."""
-    stmt = select(CorsaCommerciale).where(
-        CorsaCommerciale.azienda_id == azienda_id,
-        CorsaCommerciale.valido_da <= data_a,
-        CorsaCommerciale.valido_a >= data_da,
+    """Corse con finestra di validità che si sovrappone all'intervallo.
+
+    Sub-MR 5.bis-audit (entry 196): le corse soft-cancellate via
+    ``VARIAZIONE_CANCELLAZIONE`` sono escluse dalla generazione (audit
+    trail conservato sulle corse esistenti, ma non vengono proposte
+    come candidate per nuovi giri).
+    """
+    stmt = (
+        select(CorsaCommerciale)
+        .where(
+            CorsaCommerciale.azienda_id == azienda_id,
+            CorsaCommerciale.valido_da <= data_a,
+            CorsaCommerciale.valido_a >= data_da,
+        )
+        .where(corse_attive_clause())
     )
     return list((await session.execute(stmt)).scalars().all())
 

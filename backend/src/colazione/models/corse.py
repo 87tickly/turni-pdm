@@ -7,6 +7,8 @@ di materiale vuoto (posizionamento) e tracking delle import run.
 Vedi `docs/SCHEMA-DATI-NATIVO.md` §4.
 """
 
+from __future__ import annotations
+
 from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any
@@ -14,6 +16,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    ColumnElement,
     Date,
     DateTime,
     ForeignKey,
@@ -184,3 +187,34 @@ class CorsaMaterialeVuoto(Base):
     valido_da: Mapped[date | None] = mapped_column(Date)
     valido_a: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# =====================================================================
+# Helper "corse attive" (sub-MR 5.bis-audit, entry 196)
+# =====================================================================
+
+
+def corse_attive_clause() -> ColumnElement[bool]:
+    """Clausola SQL ``CorsaCommerciale.is_cancellata = False``.
+
+    Sub-MR 5.bis-audit (entry 196): da applicare nelle query
+    **generative** dove le corse cancellate via
+    ``VARIAZIONE_CANCELLAZIONE`` non devono comparire come candidate.
+    Esempi: builder giri (selezione corse per la generazione), lista
+    direttrici per i filtri regola, autocompletamento UI.
+
+    **Da NON usare** nelle query "audit/variazioni": l'importer (delta-
+    sync vede tutto), l'apply variazione (target esplicito), i lookup
+    di numero treno per blocchi esistenti (audit storico). In quei
+    casi la corsa cancellata deve essere visibile per coerenza
+    referenziale e tracciabilità.
+
+    Esempio d'uso::
+
+        stmt = (
+            select(CorsaCommerciale)
+            .where(CorsaCommerciale.azienda_id == azienda_id)
+            .where(corse_attive_clause())
+        )
+    """
+    return CorsaCommerciale.is_cancellata.is_(False)

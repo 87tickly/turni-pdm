@@ -40,7 +40,7 @@ from colazione.models.anagrafica import (
     RegolaInvioSosta,
     Stazione,
 )
-from colazione.models.corse import CorsaCommerciale
+from colazione.models.corse import CorsaCommerciale, corse_attive_clause
 from colazione.schemas.security import CurrentUser
 
 router = APIRouter(prefix="/api", tags=["anagrafiche"])
@@ -196,7 +196,12 @@ async def list_direttrici(
     """Distinct delle direttrici presenti nel PdE per l'azienda.
 
     Usato dal frontend per popolare il menu a tendina del filtro regola
-    sul campo `direttrice`. Esclude NULL.
+    sul campo ``direttrice``. Esclude NULL.
+
+    Sub-MR 5.bis-audit (entry 196): esclude anche le direttrici
+    "fantasma" che esistono solo su corse soft-cancellate via
+    ``VARIAZIONE_CANCELLAZIONE``. Il pianificatore non deve poter
+    selezionare una direttrice che non ha più corse attive.
     """
     stmt = (
         select(distinct(CorsaCommerciale.direttrice))
@@ -204,6 +209,7 @@ async def list_direttrici(
             CorsaCommerciale.azienda_id == user.azienda_id,
             CorsaCommerciale.direttrice.is_not(None),
         )
+        .where(corse_attive_clause())
         .order_by(CorsaCommerciale.direttrice)
     )
     rows = (await session.execute(stmt)).scalars().all()

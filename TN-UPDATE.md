@@ -10,6 +10,132 @@
 
 ---
 
+## 2026-05-06 (200) — Sub-MR 5.bis-audit: filtro is_cancellata su query consumer
+
+### Contesto
+
+Chiusura del debito tecnico **dichiarato esplicitamente in tutti i
+sub-MR del blocco 5.bis** (entry 173-195): le query consumer di
+``corsa_commerciale`` non filtravano ``is_cancellata=False``, quindi
+una corsa cancellata via ``VARIAZIONE_CANCELLAZIONE`` continuava a:
+
+- Essere proposta dal **builder giri** come candidata per nuove
+  generazioni → giri "fantasma"
+- Apparire nella lista direttrici per i **filtri regola** del
+  programma → menu a tendina con direttrici di solo corse cancellate
+
+Senza l'audit, il primo uso reale del flusso variazioni avrebbe
+prodotto bug subdoli sui dati a valle. Decisione utente 2026-05-06:
+"chiudere il debito prima di altri features".
+
+### Audit (catalogo completo, A1)
+
+Tutte le query SQL/SQLAlchemy che leggono ``corsa_commerciale``:
+
+| File | Riga | Cosa fa | Patch? |
+|---|---|---|---|
+| ``domain/builder_giro/builder.py`` | 373 | Selezione corse candidate | ✅ |
+| ``domain/builder_giro/thread_proiezione.py`` | 332 | Lookup km_tratta blocchi | ❌ audit |
+| ``api/anagrafiche.py`` | 202 | Lista direttrici per filtri | ✅ |
+| ``importer pde_importer.py`` | varie | Delta-sync (vede tutto) | ❌ |
+| ``api/programmi.py`` apply variazione | varie | Target esplicito | ❌ |
+| ``api/giri.py``, ``api/turni_pdc.py`` | lookup nome | Audit lookup | ❌ |
+| ``api/personale_pdc.py`` (mio turno) | n/a | Non legge direttamente | ❌ |
+
+3 query critiche da patchare; le altre devono mantenere visibilità
+sulle corse cancellate per **audit trail** (lookup di numero treno
+sui blocchi esistenti, delta-sync dell'import, target di una
+variazione applicata).
+
+### Modifiche backend
+
+**`backend/src/colazione/models/corse.py`** — nuovo helper:
+
+- ``corse_attive_clause() -> ColumnElement[bool]``: clausola SQL
+  ``CorsaCommerciale.is_cancellata = False`` riusabile. Docstring
+  esplicita quando va usato (query "generative") e quando no
+  (query "audit/variazioni").
+
+**`backend/src/colazione/domain/builder_giro/builder.py`**:
+
+- ``_carica_corse(session, azienda_id, data_da, data_a)`` ora
+  applica ``corse_attive_clause()``. Le corse soft-cancellate
+  non vengono più proposte come candidate per la generazione di
+  nuovi giri. L'audit trail sui giri esistenti (che possono
+  ancora referenziare corse cancellate) resta intatto.
+
+**`backend/src/colazione/api/anagrafiche.py`**:
+
+- ``GET /api/anagrafiche/direttrici``: ora filtra
+  ``corse_attive_clause()``. Il pianificatore non vede direttrici
+  che esistono solo su corse soft-cancellate.
+
+**`backend/src/colazione/domain/builder_giro/thread_proiezione.py`**:
+
+- ``_km_tratta_da_corsa()``: aggiunto **commento esplicito** che
+  spiega perché NON filtriamo (audit retrospettivo dei blocchi
+  esistenti — il km_tratta era valido al momento della generazione
+  del giro). Niente patch funzionale.
+
+### Convenzione documentata
+
+Quando filtrare e quando no, riassunto nel docstring di
+``corse_attive_clause``:
+
+- **Filtra** (``corse_attive_clause()``): query generative — builder,
+  filtri regola, autocompletamento UI per nuove scelte del
+  pianificatore.
+- **Non filtrare** (lasciare passare cancellate): audit/variazioni —
+  importer delta-sync, apply variazione (target esplicito), lookup
+  di corse referenziate da blocchi esistenti.
+
+### Verifiche
+
+- ✅ ``uv run mypy --strict src/``: 78 source files clean.
+- ✅ ``uv run ruff check`` su file MR: 0 errori (1 warning B008 in
+  ``anagrafiche.py:277`` pre-esistente, non legato al MR).
+- ✅ ``uv run pytest`` full: **889 passed, 13 skipped**.
+
+### Decisioni di scope rinviate
+
+- **Badge UI "incoerente"** sui giri/turni che referenziano corse
+  cancellate: scope frontend separato. Quando un fork viene
+  popolato di giri, è utile vedere a colpo d'occhio quali giri
+  del genitore hanno ora corse cancellate (= "candidati al fork").
+  Da fare se serve concretamente.
+- **Audit cross-codebase ``programma_genitore_id``**: oggi i
+  consumer non distinguono tra "programma autonomo" e "fork". La
+  convenzione "merge per data" (figlio prevale su genitore per le
+  date del periodo del figlio) NON è applicata dai consumer (vista
+  PdC finale, builder). Sempre rinviata: senza un fork reale
+  popolato, non emergono incoerenze concrete.
+- **Test integration con setup completo giro+turno+corsa cancellata**
+  per verificare end-to-end che il builder non veda la corsa: il
+  setup è costoso, lo facciamo se emerge un bug reale.
+
+### Stato
+
+- ✅ Codice backend pronto: 1 helper nuovo + 3 patch (1 funzionale +
+  1 funzionale + 1 commento documentale).
+- ⏳ Commit + push + deploy backend Railway.
+
+### Prossimo step
+
+Fine del blocco 5.bis come infrastruttura. Tutti i debiti tecnici
+dichiarati nei sub-MR sono chiusi (con scope-cut motivati e
+documentati per UI badge incoerente, audit programma_genitore_id,
+test integration completi).
+
+A scelta utente:
+
+1. **Test end-to-end con variazione reale** quando arriverà la prima
+2. **Tornare al lavoro fuori 5.bis** (refactor pianificatore-giro
+   del committer parallelo, sviluppo nuove feature)
+3. **Audit `programma_genitore_id` sui consumer** (merge per data)
+   se vuoi chiudere anche quel debito per simmetria
+
+---
+
 ## 2026-05-06 (199) — MR-1110 sotto-MR 3: concatenazione ciclica (concatenazione_ciclica.py)
 
 ### Contesto

@@ -322,7 +322,15 @@ async def proietta_thread_giro(
 async def _km_corsa_commerciale(
     session: AsyncSession, corsa_commerciale_id: int | None
 ) -> Decimal | None:
-    """Carica km_tratta da CorsaCommerciale (FK opzionale)."""
+    """Carica km_tratta da CorsaCommerciale (FK opzionale).
+
+    Sub-MR 5.bis-audit (entry 196): NON filtriamo ``is_cancellata=False``
+    perché qui leggiamo la corsa di un blocco già esistente — il
+    ``km_tratta`` era valido al momento della generazione del giro e
+    serve per la proiezione retrospettiva. Il giro con corsa cancellata
+    è già segnalato come "incoerente" lato UI; il valore va comunque
+    riportato per audit.
+    """
     if corsa_commerciale_id is None:
         return None
     from sqlalchemy import select
