@@ -10,6 +10,64 @@
 
 ---
 
+## 2026-05-06 (198) — MR-1110 Step 1 closure: D2/D3/D4/D5/D8 chiuse
+
+### Contesto
+
+Continuazione MR-1110 (entry 190/193/196). L'utente conferma in chat
+i 5 default proposti per le decisioni residue, con una correzione
+semantica importante su D4: **FpF = "Festivo precedente Festivo"**
+(festivo che cade immediatamente prima di un altro festivo
+consecutivo, es. Pasqua → Pasquetta, Natale → S.Stefano), NON
+"primo/ultimo festivo del periodo" come avevo ipotizzato in entry
+190.
+
+### Decisioni utente
+
+- **D2 — ciclo rotto**: multi-turno (anche da 1 giornata
+  auto-concatenata). Niente sotto-cicli dentro un turno. Coerente
+  con D6 rigida.
+- **D3 — `min_istanze = 2`** (default in `ParamGiornataTipo`).
+  Catene con 1 sola data → "corse residue".
+- **D4 — FpF auto**: calcolato da `calendario.py` con la formula
+  `{d ∈ festivita | d+1 ∈ festivita}`. Niente configurazione
+  manuale (override possibile come campo opzionale del programma se
+  in pratica serve).
+- **D5 — periodo riferimento = validità programma materiale**.
+  Stesso periodo per tutte le varianti del programma → coerenza UI.
+- **D8 — test misti**: unit con fixture sintetiche per i sotto-MR
+  isolati, 1-2 integration con PdE 2026 reale per verifica
+  end-to-end. Niente snapshot del PDF Trenord (PDF è riferimento
+  concettuale, non oracolo — decisione utente 2026-05-06).
+
+### Modifiche
+
+- **`docs/MR-1110-DESIGN.md`**:
+  - §5.3 algoritmo etichetta: corretta semantica FpF (era
+    "primo/ultimo del periodo", ora "festivo precedente festivo
+    consecutivo") con riferimento crociato a §8.2 D4.
+  - §8.1 tabella stato: tutte 8 decisioni chiuse con riferimento
+    entry di chiusura.
+  - §8.2 aggiunti 5 blocchi di chiusura (D2/D3/D4/D5/D8) con
+    decisione, conseguenze, snippet algoritmico per FpF.
+  - §8.3 rimossa (più nessuna decisione aperta).
+- **Questa entry TN-UPDATE**.
+
+### Stato
+
+- ✅ 8/8 decisioni MR-1110 chiuse.
+- ✅ Documento di design completo, niente decisioni aperte residue.
+- ⏳ Commit + push (solo `.md`, niente deploy Railway).
+
+### Prossimo step
+
+Sotto-MR 3 (`concatenazione_ciclica.py`): dato l'output di
+`giornata_tipo.py` (sotto-MR 2 chiuso entry 196), costruire l'ordine
+ciclico G1→G2→…→GN→G1 dei turni. Stima 4-6h, modulo isolato
+DB-agnostic come il sotto-MR 2.
+
+---
+
 ## 2026-05-06 (197) — Fix bug "2 regole stessi filtri" (round-robin + warning)
 
 ### Contesto

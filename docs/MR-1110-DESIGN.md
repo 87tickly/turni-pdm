@@ -406,10 +406,12 @@ per replicare il PDF Trenord.
 6. **Tutte le date ∈ sabati festivi** (sabato che cade festività) →
    `"Circola Sabato Festivo"`.
 7. **Tutte le date ∈ festivi** del periodo escluse N≤soglia →
-   `"F esclusi <date>"`. Se l'esclusione corrisponde a "primo/ultimo
-   festivo del periodo", esprimila come `"F escluso FpF"`. Se ci
-   sono *entrambe* esclusioni FpF e date specifiche, joinare:
-   `"F escluso FpF ed escl. <date>"`.
+   `"F esclusi <date>"`. Se le date escluse coincidono con i **FpF
+   del periodo** (`Festivo precedente Festivo` = festivo che precede
+   un altro festivo consecutivo, es. Pasqua → Pasquetta, Natale →
+   S.Stefano), esprimila come `"F escluso FpF"`. Se ci sono
+   *entrambe* esclusioni FpF e date specifiche, joinare:
+   `"F escluso FpF ed escl. <date>"`. Calcolo FpF: vedi §8.2 D4.
 8. **Tutte le date in una finestra continua [d_inizio, d_fine]**
    → `"Dal DD/M al DD/M"`.
 9. **Mix di categorie** → fallback: `"Misto: <sigle> (N date)"`.
@@ -562,23 +564,22 @@ questa fase iniziale — solo nuova logica di popolamento.
 
 ---
 
-## 8. Decisioni aperte / chiuse
+## 8. Decisioni chiuse
 
 ### 8.1 Stato
 
-| ID | Decisione | Stato |
-|---|---|---|
-| **D1** | Chiave di fase: include `codice_servizio_dominante`? | ✅ chiusa 2026-05-06 — vedi §8.2 |
-| **D2** | Cicli non-hamiltoniani: multi-turno o sotto-cicli? | ⏸️ aperta |
-| **D3** | Soglia `min_istanze` Step 2 | ⏸️ aperta |
-| **D4** | Etichetta "FpF": auto o config | ⏸️ aperta |
-| **D5** | Periodo di riferimento etichette | ⏸️ aperta |
-| **D6** | Concatenazione: vincolo rigido o vuoti notturni? | ✅ chiusa 2026-05-06 — vedi §8.2 |
-| **D7** | Backward compat: re-run automatico o opt-in? | ✅ chiusa 2026-05-06 — vedi §8.2 |
-| **D8** | Fixture test: sintetici o PdE 2026 reale? | ⏸️ aperta |
+Tutte le 8 decisioni del MR-1110 sono chiuse al 2026-05-06.
 
-Ogni chiusura documentata in TN-UPDATE (per D1/D6/D7: entry 191
-del 2026-05-06).
+| ID | Decisione | Chiusura |
+|---|---|---|
+| **D1** | Chiave di fase con `codice_servizio_dominante` + fallback morbido | entry 193 |
+| **D2** | Ciclo rotto → multi-turno (anche 1 giornata) | entry 198 |
+| **D3** | Soglia `min_istanze = 2` (default) | entry 198 |
+| **D4** | FpF (Festivo precedente Festivo) calcolato auto dal calendario | entry 198 |
+| **D5** | Periodo riferimento etichette = validità programma | entry 198 |
+| **D6** | Concatenazione `staz_fine_K == staz_inizio_(K+1)` rigida | entry 193 |
+| **D7** | Backward compat opt-in (`builder_version` per programma) | entry 193 |
+| **D8** | Test misti: unit sintetici + 1-2 integration con PdE 2026 reale | entry 198 |
 
 ### 8.2 Decisioni chiuse
 
@@ -687,20 +688,76 @@ entrambe le versioni — cambia solo cosa viene popolato.
 darà OK alla rimozione. Tracciato in `TN-UPDATE` come "non si
 distrugge finché non è esplicito".
 
-### 8.3 Decisioni ancora aperte
+#### D2 — Ciclo rotto: multi-turno
 
-| ID | Domanda | Note |
-|---|---|---|
-| **D2** | Cicli non-hamiltoniani: multi-turno o sotto-cicli? | Discutere con esempi reali quando si vede il primo caso. |
-| **D3** | Soglia `min_istanze` Step 2 (2, 3, 5)? | Default proposto: 2. Confermare quando arriviamo allo Step 2. |
-| **D4** | "FpF" (primo/ultimo festivo del periodo): auto o config? | Default proposto: auto inferito dal periodo programma. |
-| **D5** | Periodo di riferimento per le etichette: programma o giornata-tipo? | Default proposto: periodo programma (= validità intera). |
-| **D8** | Fixture test: sintetici o PdE 2026 reale? | Default proposto: misto — unit con sintetici, integration con PdE reale. |
+**Decisione**: se le giornate-tipo di un gruppo `(materiale, sede)`
+non si concatenano in un unico ciclo hamiltoniano, ogni componente
+ciclica diventa un **turno separato** (anche da 1 sola giornata-tipo
+auto-concatenata). Niente "sotto-cicli dentro un turno": un turno =
+un ciclo coerente. Coerente con D6 rigida (niente vuoti di
+posizionamento ad hoc per agganciare giornate-tipo lontane).
 
-Le altre 5 sono tattiche e si possono chiudere durante
-l'implementazione dello Step corrispondente. Default proposti
-(in tabella) sono già coerenti col modello — l'utente conferma
-solo se vede un controesempio.
+**Conseguenza Step 4**: l'algoritmo di concatenazione produce 1+
+turni per gruppo, non un turno con sotto-strutture. Il pianificatore
+vede ogni turno come unità autonoma.
+
+#### D3 — Soglia `min_istanze = 2`
+
+**Decisione**: default 2. Catene con 1 sola data di applicazione
+finiscono nelle "corse residue" del programma — sono troppo
+eccezionali per essere giornate-tipo del ciclo. Soglia 3 sarebbe più
+aggressiva e perderemmo varianti calendariali legittime tipo
+`"Si eff. 22/3, 12/4"` del turno 1110 G6 (esattamente 2 date).
+
+**Configurabile** via `ParamGiornataTipo.min_istanze` per i casi
+rari in cui serve ritarare.
+
+#### D4 — FpF auto
+
+**Definizione utente** (2026-05-06): FpF = **Festivo precedente
+Festivo** = festivo che cade **immediatamente prima** di un altro
+festivo. Esempi:
+
+- **Pasqua** (domenica) → **Pasquetta** (lunedì): la domenica di
+  Pasqua è FpF.
+- **Natale** (25/12) → **S.Stefano** (26/12): il 25/12 è FpF.
+
+**Decisione**: calcolato in automatico da `calendario.py` data la
+lista delle festività azienda. Algoritmo:
+
+```python
+def festivi_precedenti_festivo(festivita: frozenset[date]) -> frozenset[date]:
+    return frozenset(d for d in festivita if (d + timedelta(days=1)) in festivita)
+```
+
+Niente configurazione manuale per ora. Se in pratica vediamo bisogno
+di forzare FpF su date "speciali" non festive (es. ponte), aprire
+override esplicito come campo opzionale del `ProgrammaMateriale`.
+
+#### D5 — Periodo riferimento = validità programma
+
+**Decisione**: per ogni etichetta calendariale di una variante, il
+periodo di confronto (= "tutti i lavorativi del periodo", "tutti i
+festivi del periodo", ecc.) è la validità del **programma materiale**
+(`valido_da`/`valido_a`), vincolata dalla validità del PdE base.
+Stesso periodo per tutte le varianti del programma → coerenza UI.
+
+#### D8 — Test misti
+
+**Decisione**:
+
+- **Unit test** (per ogni sotto-MR: `giornata_tipo`,
+  `concatenazione_ciclica`, `etichetta`, `multi_giornata_v2`) con
+  **fixture sintetiche** in-memory. Feedback loop veloce, niente DB,
+  deterministico. Stile attuale (`test_giornata_tipo.py` 18 test).
+- **Integration test** end-to-end (sotto-MR 8): 1-2 test che
+  caricano il **PdE 2026 reale** in un DB di test e verificano
+  proprietà strutturali dell'output (es. il giro 271 dopo rebuild
+  v2 produce N giornate-tipo, almeno una con M ≥ 2 varianti
+  calendariali, etichette stile `LV`/`F`/`Si eff.`).
+
+Niente snapshot test del PDF Trenord — il PDF è riferimento
+concettuale, non oracolo (decisione utente 2026-05-06).
 
 ---
 
