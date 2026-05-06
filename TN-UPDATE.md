@@ -10,6 +10,61 @@
 
 ---
 
+## 2026-05-06 (183) — MR δ: preset linea + tipo servizio nel FiltriEditor
+
+### Contesto
+
+Spec utente:
+
+> "Quando aggiungo una determinata linea, devo poter aggiungere in
+> contemporanea anche il tipo di servizio (RE, R, S ecc ecc), non ho
+> la possibilità di spezzare la linea, ci sono treni (es: codogno-
+> cremona-bozzolo) ma la linea è unica e non posso determinarla."
+
+### Modifiche
+
+**`frontend/src/routes/pianificatore-giro/regola/FiltriEditor.tsx`**:
+
+- Nuovo componente locale ``PresetLineaTipo`` mostrato in cima
+  all'editor filtri. Card primary-tinted con icon ``Wand2`` e 2
+  multi-select chip:
+  - Linee (da ``useDirettrici()``, anagrafica DB locale popolata
+    dal PdE Trenord).
+  - Tipi servizio (``CATEGORIE_COMUNI`` Trenord: REG/RE/R/MET/S/INT).
+- Bottone "+ Aggiungi alla regola": invoca ``onApplica`` sul
+  ``FiltriEditor``, che rimuove dai filtri esistenti eventuali righe
+  ``direttrice``/``categoria`` (per evitare duplicati AND
+  incoerenti) e poi inserisce 2 nuove righe filtro:
+  ``{campo: "direttrice", op: "in", valore: <linee>}`` +
+  ``{campo: "categoria", op: "in", valore: <tipi>}``.
+
+L'editor "avanzato" sotto il preset resta inalterato — chi vuole
+altri filtri (giorno_tipo, fascia_oraria, ...) li aggiunge come prima.
+
+### Live ARTURO
+
+**Non integrato** in MR δ. La verifica della spec utente
+(``live.arturo.travel`` con "chiave volutamente aperta") ha mostrato
+che il sito ARTURO Live non espone API pubbliche documentate per
+arricchire l'anagrafica linee. Le linee disponibili nel preset
+provengono dunque dal DB locale (estratto dal PdE Trenord). Se in
+futuro emergerà un endpoint stabile (o l'integrazione interna con il
+monorepo ARTURO Live), potremo aggiungerlo come fallback.
+
+### Verifiche
+
+- ✅ ``pnpm tsc -b --noEmit`` clean.
+- ✅ ``pnpm vitest run src/routes/pianificatore-giro``: 11 passed,
+  1 skipped.
+
+### Stato
+
+- ✅ MR δ frontend completo (no backend changes).
+- ⏳ Commit + push + Railway deploy.
+- ➡️ MR ε: regole invio sosta inline nel ``CreaProgrammaDialog``.
+
+---
+
 ## 2026-05-06 (182) — MR γ: composizione opzionale + materiale ipotesi nel wizard
 
 ### Contesto

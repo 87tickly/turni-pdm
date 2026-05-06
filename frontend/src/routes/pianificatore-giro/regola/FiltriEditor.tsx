@@ -1,4 +1,5 @@
-import { Plus, Trash2, X } from "lucide-react";
+import { useState } from "react";
+import { Plus, Trash2, X, Wand2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -55,8 +56,48 @@ export function FiltriEditor({ filtri, onChange, disabled = false }: FiltriEdito
     onChange([...filtri, { id: makeRowId(), campo: "direttrice", op: "in", valore: "" }]);
   };
 
+  // MR δ: aggiunta combinata "linea + tipo servizio" in una sola
+  // azione, secondo spec utente 2026-05-06:
+  //
+  // > "Quando aggiungo una determinata linea, devo poter aggiungere in
+  // > contemporanea anche il tipo di servizio (RE, R, S ecc ecc)."
+  //
+  // Internamente diventano 2 righe filtro AND (campo direttrice + campo
+  // categoria, entrambe con op "in"). Sostituisce le righe esistenti
+  // sugli stessi campi se l'utente ne aveva già aggiunte.
+  const aggiungiLineaConTipi = (linee: string[], tipi: string[]) => {
+    const senzaCampiDuplicati = filtri.filter(
+      (r) => r.campo !== "direttrice" && r.campo !== "categoria",
+    );
+    const nuovi: FiltroRow[] = [];
+    if (linee.length > 0) {
+      nuovi.push({
+        id: makeRowId(),
+        campo: "direttrice",
+        op: "in",
+        valore: linee.join(", "),
+      });
+    }
+    if (tipi.length > 0) {
+      nuovi.push({
+        id: makeRowId(),
+        campo: "categoria",
+        op: "in",
+        valore: tipi.join(", "),
+      });
+    }
+    onChange([...senzaCampiDuplicati, ...nuovi]);
+  };
+
   return (
     <div className="flex flex-col gap-3">
+      {/* MR δ: preset rapido linea+tipo. */}
+      <PresetLineaTipo
+        direttrici={direttriciQuery.data ?? []}
+        disabled={disabled}
+        onApplica={aggiungiLineaConTipi}
+      />
+
       {filtri.length === 0 ? (
         <p
           role="alert"
@@ -470,6 +511,154 @@ function MultiValueChips({
           }}
         />
       )}
+    </div>
+  );
+}
+
+// =====================================================================
+// MR δ — Preset rapido "Linea + Tipi servizio"
+// =====================================================================
+
+interface PresetLineaTipoProps {
+  direttrici: string[];
+  disabled: boolean;
+  onApplica: (linee: string[], tipi: string[]) => void;
+}
+
+/**
+ * Preset rapido per aggiungere in un solo click una coppia di filtri
+ * "Linea + Tipo servizio". Utile per scenari tipici (es. "linea
+ * Tirano-Mi.Centrale, tipi RE+R") senza dover aggiungere manualmente
+ * due righe filtro separate.
+ *
+ * Le linee provengono da ``useDirettrici()`` (anagrafica DB locale,
+ * estratta dal PdE Trenord). I tipi servizio sono i ``CATEGORIE_COMUNI``
+ * di Trenord (REG/RE/R/MET/S/INT). Live ARTURO non espone API
+ * pubbliche per arricchire la lista linee (verifica 2026-05-06): se in
+ * futuro l'anagrafica del DB locale risulta insufficiente, si potrà
+ * aggiungere un fallback verso un endpoint dedicato.
+ *
+ * Side effect: l'``onApplica`` rimuove dai filtri eventuali righe
+ * esistenti su ``direttrice``/``categoria`` per evitare duplicati AND
+ * incoerenti, poi aggiunge le 2 righe nuove.
+ */
+function PresetLineaTipo({ direttrici, disabled, onApplica }: PresetLineaTipoProps) {
+  const [linee, setLinee] = useState<string[]>([]);
+  const [tipi, setTipi] = useState<string[]>([]);
+
+  const linee_disponibili = direttrici.filter((d) => !linee.includes(d));
+  const tipi_disponibili = CATEGORIE_COMUNI.filter((t) => !tipi.includes(t));
+
+  const aggiungi = () => {
+    if (linee.length === 0 && tipi.length === 0) return;
+    onApplica(linee, tipi);
+    setLinee([]);
+    setTipi([]);
+  };
+
+  return (
+    <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <Wand2 className="h-4 w-4 text-primary" aria-hidden />
+        <span className="text-sm font-medium text-foreground">
+          Aggiunta rapida: linea + tipi servizio
+        </span>
+      </div>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Scegli una o più linee e i tipi treno (RE, R, S, ecc.). Verranno aggiunti come 2 filtri
+        AND. Linee/tipi già presenti negli altri filtri saranno sostituiti.
+      </p>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs">Linee</Label>
+          {linee.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {linee.map((l) => (
+                <Badge key={l} variant="secondary" className="gap-1 pr-1">
+                  <span className="font-normal">{l}</span>
+                  {!disabled && (
+                    <button
+                      type="button"
+                      onClick={() => setLinee(linee.filter((x) => x !== l))}
+                      className="ml-0.5 rounded-full p-0.5 hover:bg-muted-foreground/20"
+                      aria-label={`Rimuovi ${l}`}
+                    >
+                      <X className="h-3 w-3" aria-hidden />
+                    </button>
+                  )}
+                </Badge>
+              ))}
+            </div>
+          )}
+          <Select
+            value=""
+            disabled={disabled || linee_disponibili.length === 0}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v.length > 0) setLinee([...linee, v]);
+            }}
+            aria-label="Aggiungi linea"
+          >
+            <option value="">+ aggiungi linea…</option>
+            {linee_disponibili.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs">Tipi servizio</Label>
+          {tipi.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {tipi.map((t) => (
+                <Badge key={t} variant="secondary" className="gap-1 pr-1">
+                  <span className="font-normal">{t}</span>
+                  {!disabled && (
+                    <button
+                      type="button"
+                      onClick={() => setTipi(tipi.filter((x) => x !== t))}
+                      className="ml-0.5 rounded-full p-0.5 hover:bg-muted-foreground/20"
+                      aria-label={`Rimuovi ${t}`}
+                    >
+                      <X className="h-3 w-3" aria-hidden />
+                    </button>
+                  )}
+                </Badge>
+              ))}
+            </div>
+          )}
+          <Select
+            value=""
+            disabled={disabled || tipi_disponibili.length === 0}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v.length > 0) setTipi([...tipi, v]);
+            }}
+            aria-label="Aggiungi tipo servizio"
+          >
+            <option value="">+ aggiungi tipo (REG, RE, R, S…)</option>
+            {tipi_disponibili.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
+      <div className="mt-3 flex justify-end">
+        <Button
+          type="button"
+          size="sm"
+          onClick={aggiungi}
+          disabled={disabled || (linee.length === 0 && tipi.length === 0)}
+        >
+          <Plus className="mr-1 h-3.5 w-3.5" aria-hidden /> Aggiungi alla regola
+        </Button>
+      </div>
     </div>
   );
 }
