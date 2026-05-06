@@ -10,6 +10,74 @@
 
 ---
 
+## 2026-05-06 (206) — MR-1110 sotto-MR 10: campo `builder_version` + routing v1/v2
+
+### Contesto
+
+Continuazione MR-1110 (decisione utente 2026-05-06: "facciamo questi
+[7/8/10]"). Sotto-MR 10 introduce il tag esplicito della pipeline
+builder usata da ciascun programma. Necessario per separare i
+programmi legacy (``"v1"`` con fusione cluster A1, MR 12 di Sprint
+7.9) dai programmi che adotteranno la nuova pipeline a varianti
+calendariali (``"v2"`` di entry 202).
+
+### Modifiche
+
+**Migration `0038_programma_builder_version.py`** (nuovo): aggiunge
+``programma_materiale.builder_version`` String(5), NOT NULL,
+``server_default='v1'``, con CHECK constraint che vincola a
+``IN ('v1', 'v2')``.
+
+**`models/programmi.py`** — class `ProgrammaMateriale`: nuovo campo
+``builder_version: Mapped[str]`` con default ``"v1"`` + server_default.
+
+**`schemas/programmi.py`**:
+- `ProgrammaMaterialeRead`: nuovo campo ``builder_version: Literal["v1", "v2"]``
+- `ProgrammaMaterialeCreate`: campo opzionale (default ``"v1"``)
+- `ProgrammaMaterialeUpdate`: campo opzionale per PATCH (PATCH cambia
+  pipeline → richiede rigenerazione giri).
+
+**`builder.py`**:
+- Nuova eccezione ``BuilderVersionNonSupportata(NotImplementedError)``
+  con metadati ``programma_id`` + ``version``.
+- ``genera_giri()`` legge ``programma.builder_version`` subito dopo
+  il check ``stato='attivo'``: se ``"v2"`` alza l'eccezione (il
+  wiring v2-end-to-end al persister è follow-up). ``"v1"`` o
+  default → procede com'era.
+- Esportata in ``builder_giro/__init__.py``.
+
+**`api/giri.py`**:
+- Nuovo handler ``except BuilderVersionNonSupportata`` su
+  ``POST /api/programmi/{id}/genera-giri`` → 501 NOT IMPLEMENTED
+  con detail strutturato ``{code, messaggio, programma_id, version}``.
+  Il pianificatore vede un errore esplicito invece di un 500 opaco.
+
+### Decisione progettuale
+
+V2 non è ancora end-to-end: ``costruisci_turni_v2`` (entry 202)
+produce ``TurnoConVarianti`` (frozen dataclass), ma manca l'adapter
+che lo trasforma in ``GiroDaPersistere`` per il persister attuale.
+Questo MR aggiunge solo il **tag + routing scaffold**: nuovo MR
+follow-up scriverà l'adapter, e quando merged basterà rimuovere il
+``raise`` nel routing.
+
+### Verifiche
+
+- ✅ ``mypy --strict src/`` clean (80 source files).
+- ✅ ``ruff check`` su file MR clean.
+- ✅ ``alembic upgrade head`` sul DB locale (0037 → 0038).
+- ✅ ``pytest`` tests/test_builder_giri.py + tests/test_genera_giri_api.py +
+  tests/test_api_programmi_conferma.py → 88 passed, 1 skipped (nessuna
+  rottura: tutti i programmi di test usano default ``"v1"``).
+
+### Stato
+
+- ✅ Sotto-MR 10 chiuso.
+- ⏳ Commit + push + deploy backend Railway (migration applicata
+  automaticamente al boot via ``CMD = alembic upgrade head && uvicorn``).
+
+---
+
 ## 2026-05-06 (205) — MR-1110 sotto-MR 6: etichetta variante v2 nell'API read-side
 
 ### Contesto

@@ -211,6 +211,30 @@ class StrictModeViolation(ValueError):
         self.violazioni = violazioni
 
 
+class BuilderVersionNonSupportata(NotImplementedError):
+    """MR-1110 sotto-MR 10 (entry 206): il programma chiede una pipeline
+    builder che non è ancora completamente wired al persister.
+
+    Oggi solo ``v1`` è completamente operativa end-to-end. La pipeline
+    ``v2`` (entry 202: catene-istanza → giornate-tipo → varianti
+    calendariali → turni concatenati) esiste come funzioni pure ma
+    l'output ``TurnoConVarianti`` non è ancora persistito in
+    ``GiroMateriale`` (richiede un adapter dedicato — sotto-MR
+    follow-up). Switching un programma a ``v2`` oggi genera questo
+    errore al primo ``genera_giri``: il pianificatore deve riportare
+    la regola a ``v1`` o aspettare il wiring v2.
+    """
+
+    def __init__(self, programma_id: int, version: str) -> None:
+        super().__init__(
+            f"programma {programma_id} richiede builder_version={version!r}, "
+            "non ancora wired al persister (sotto-MR follow-up). "
+            "Riporta builder_version='v1' per generare oggi."
+        )
+        self.programma_id = programma_id
+        self.version = version
+
+
 # =====================================================================
 # Output dataclass
 # =====================================================================
@@ -896,6 +920,22 @@ async def genera_giri(
     programma = await _carica_programma(session, programma_id, azienda_id)
     if programma.stato != "attivo":
         raise ProgrammaNonAttivoError(programma_id, programma.stato)
+
+    # MR-1110 sotto-MR 10 (entry 206): routing pipeline builder.
+    # Solo ``v1`` (legacy) è oggi end-to-end con persister. ``v2``
+    # (entry 202, ``costruisci_turni_v2``) esiste come pipeline pura
+    # ma manca l'adapter ``TurnoConVarianti → GiroDaPersistere`` —
+    # follow-up. Programmi con ``builder_version='v2'`` ricevono un
+    # 501-equivalent (NotImplementedError sottoclasse) finché il
+    # wiring non è completo. Programmi senza il campo (DB pre-0038)
+    # ricevono ``"v1"`` da server_default → procede normale.
+    if programma.builder_version not in ("v1", "v2"):
+        raise BuilderVersionNonSupportata(
+            programma_id, programma.builder_version
+        )
+    if programma.builder_version == "v2":
+        raise BuilderVersionNonSupportata(programma_id, "v2")
+    # Da qui in poi: pipeline ``v1`` legacy invariata.
 
     # Sprint 7.5 MR 4 (decisione utente C3): se i parametri non sono
     # specificati, default al periodo intero del programma. Il

@@ -133,6 +133,19 @@ class ProgrammaMateriale(Base):
         nullable=True,
     )
 
+    # MR-1110 sotto-MR 10 (migration 0038, 2026-05-06): tag esplicito
+    # della pipeline builder usata. ``"v1"`` (default, retrocompat) =
+    # ``costruisci_giri_multigiornata`` legacy con fusione cluster A1
+    # (Sprint 7.9 MR 12). ``"v2"`` = pipeline ``costruisci_turni_v2``
+    # (entry 202): catene-istanza → giornate-tipo → varianti
+    # calendariali → turni concatenati ciclicamente. Decisione utente
+    # 2026-05-06: i programmi esistenti restano ``"v1"`` server_default,
+    # i nuovi creati DOPO il merge possono optare ``"v2"``. CHECK
+    # constraint accetta solo questi due valori.
+    builder_version: Mapped[str] = mapped_column(
+        String(5), default="v1", server_default="v1", nullable=False
+    )
+
     # Tracking
     created_by_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("app_user.id"))
     created_by: Mapped["AppUser | None"] = relationship(foreign_keys=[created_by_user_id])

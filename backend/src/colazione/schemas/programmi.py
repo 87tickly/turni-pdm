@@ -273,6 +273,10 @@ class ProgrammaMaterialeRead(BaseModel):
     # programma genitore di cui questo è figlio (variazione di periodo).
     # NULL = programma base autonomo.
     programma_genitore_id: int | None = None
+    # MR-1110 sotto-MR 10 (migration 0038, entry 206): tag pipeline
+    # builder. ``"v1"`` = legacy (default), ``"v2"`` = pipeline
+    # ``costruisci_turni_v2`` (entry 202).
+    builder_version: Literal["v1", "v2"] = "v1"
     created_by_user_id: int | None = None
     # Sprint dashboard 1° ruolo (entry 88): popolato via JOIN con `app_user`
     # quando la query usa `joinedload(ProgrammaMateriale.created_by)`.
@@ -364,6 +368,12 @@ class ProgrammaMaterialeCreate(BaseModel):
     # MR α: subset di codici MaterialeTipo dichiarato dal pianificatore.
     # `[]` (default) = tutti i materiali della dotazione azienda.
     materiali_disponibili_codici_json: list[str] = Field(default_factory=list)
+    # MR-1110 sotto-MR 10 (entry 206): pipeline builder. Default ``"v1"``
+    # (legacy) per nuovi programmi creati via API; il pianificatore può
+    # esplicitare ``"v2"`` per attivare il nuovo builder a varianti
+    # calendariali (PDF Trenord). Migration 0038 setta tutti i programmi
+    # esistenti a ``"v1"`` server_default.
+    builder_version: Literal["v1", "v2"] = "v1"
     regole: list[ProgrammaRegolaAssegnazioneCreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -398,6 +408,10 @@ class ProgrammaMaterialeUpdate(BaseModel):
     stazioni_sosta_extra_json: list[str] | None = None
     # MR α: aggiornamento subset codici materiale disponibili.
     materiali_disponibili_codici_json: list[str] | None = None
+    # MR-1110 sotto-MR 10 (entry 206): switch tra pipeline builder
+    # legacy ("v1") e nuova ("v2"). Cambio invasivo: rigenerare i giri
+    # del programma dopo il PATCH.
+    builder_version: Literal["v1", "v2"] | None = None
 
 
 # =====================================================================

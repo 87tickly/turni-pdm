@@ -33,6 +33,7 @@ from colazione.auth import require_any_role, require_role
 from colazione.db import get_session
 from colazione.domain.builder_giro.builder import (
     BuilderResult,
+    BuilderVersionNonSupportata,
     GiriEsistentiError,
     PdcDipendentiError,
     PeriodoFuoriProgrammaError,
@@ -230,6 +231,19 @@ async def genera_giri_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ProgrammaNonAttivoError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except BuilderVersionNonSupportata as exc:
+        # MR-1110 sotto-MR 10 (entry 206): 501 NOT IMPLEMENTED quando il
+        # programma chiede builder_version='v2' ma il wiring al persister
+        # non è ancora pronto. Il pianificatore deve riportarlo a 'v1'.
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "code": "builder_version_non_supportata",
+                "messaggio": str(exc),
+                "programma_id": exc.programma_id,
+                "version": exc.version,
+            },
+        ) from exc
     except PeriodoFuoriProgrammaError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)

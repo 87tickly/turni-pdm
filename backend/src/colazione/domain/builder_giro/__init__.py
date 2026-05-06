@@ -41,8 +41,15 @@ Tutto è **DB-agnostic**: ricevi dataclass/oggetti, ritorni dataclass.
 La persistenza è in `api/` o CLI in `interfaces/`.
 """
 
+from colazione.domain.builder_giro.aggregazione_a2 import (
+    GiornataAggregata,
+    GiroAggregato,
+    VarianteGiornata,
+    aggrega_a2,
+)
 from colazione.domain.builder_giro.builder import (
     BuilderResult,
+    BuilderVersionNonSupportata,
     GiriEsistentiError,
     PdcDipendentiError,
     ProgrammaNonAttivoError,
@@ -67,12 +74,6 @@ from colazione.domain.builder_giro.composizione import (
     assegna_e_rileva_eventi,
     assegna_materiali,
     rileva_eventi_composizione,
-)
-from colazione.domain.builder_giro.aggregazione_a2 import (
-    GiornataAggregata,
-    GiroAggregato,
-    VarianteGiornata,
-    aggrega_a2,
 )
 from colazione.domain.builder_giro.etichetta import (
     ETICHETTE_AMMESSE,
@@ -141,6 +142,7 @@ __all__ = [
     "LocalitaNonTrovataError",
     "LocalitaSenzaStazioneError",
     "MotivoChiusura",
+    "BuilderVersionNonSupportata",
     "ParamCatena",
     "PdcDipendentiError",
     "ParamMultiGiornata",
