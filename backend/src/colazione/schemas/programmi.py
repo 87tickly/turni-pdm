@@ -696,3 +696,89 @@ class ApplyVariazioneResponse(BaseModel):
     per le ``RimuoviDateValidita`` applicate (può essere < somma date
     richieste se alcune erano già fuori dalla validità)."""
     errori: list[ApplyVariazioneErroreRead]
+
+
+# =====================================================================
+# PdE livello azienda (Sub-MR 5.bis-d, entry 177)
+# =====================================================================
+#
+# Il PdE Trenord è un singolo file annuale per azienda (~10580 corse,
+# validità 14/12 → 12/12 dell'anno successivo). Caricato 1 volta a
+# inizio stagione. Le variazioni infrannuali (interruzioni RFI,
+# integrazioni weekend, modifiche orari) si accumulano cronologicamente
+# e modificano lo stato delle corse — il PdE base resta come record.
+#
+# Le variazioni a livello azienda hanno ``programma_materiale_id IS NULL``
+# (FK SET NULL già esistente sul modello). Tutti i programmi vedono
+# automaticamente lo stato corrente delle corse.
+
+
+class PdEStatusRead(BaseModel):
+    """Stato del PdE corrente dell'azienda dell'utente loggato.
+
+    Letto dal pannello "PdE Annuale" della dashboard PIANIFICATORE_GIRO.
+    Rappresenta una vista aggregata: ultimo run BASE caricato + count
+    delle variazioni applicate nel tempo.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_run: dict[str, Any] | None = None
+    """Ultimo ``CorsaImportRun`` di tipo ``BASE`` (= ``CorsaImportRunRead``
+    serializzato come dict per evitare circular import). ``None`` se
+    non è mai stato caricato un PdE base per questa azienda."""
+
+    n_corse_attive: int
+    """Conteggio corse non cancellate (``is_cancellata=False``) per
+    l'azienda. Stato corrente del PdE applicato."""
+
+    n_corse_totali: int
+    """Conteggio corse totali (incluse cancellate). Differenza con
+    ``n_corse_attive`` = corse soft-deleted via VARIAZIONE_CANCELLAZIONE."""
+
+    n_variazioni_totali: int
+    """Conteggio ``CorsaImportRun`` di tipo non-BASE collegate
+    all'azienda con ``programma_materiale_id IS NULL`` (variazioni
+    globali). Tutte (applicate + non applicate)."""
+
+    n_variazioni_applicate: int
+    """Subset di ``n_variazioni_totali`` con ``completed_at IS NOT NULL``."""
+
+    ultima_variazione_at: datetime | None = None
+    """Timestamp ``completed_at`` della variazione applicata più recente.
+    ``None`` se nessuna variazione è ancora stata applicata."""
+
+    validity_da: date | None = None
+    """``MIN(valido_da)`` delle corse non cancellate. Tipicamente
+    14/12 dell'anno precedente."""
+
+    validity_a: date | None = None
+    """``MAX(valido_a)`` delle corse non cancellate. Tipicamente
+    12/12 dell'anno corrente."""
+
+
+class CaricaPdEBaseResponse(BaseModel):
+    """Risposta dell'endpoint ``POST /api/aziende/me/pde/base``.
+
+    Mappa diretta di ``ImportSummary`` (vedi ``importers/pde_importer.py``).
+    Counter delta-sync: il caricamento applica diff multiset rispetto
+    allo stato corrente (kept = id stabile, create = nuovo, delete =
+    rimosso dal file ma presente in DB).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    skipped: bool
+    """``True`` se il file è già stato importato (stesso SHA-256). Il
+    body include ``run_id`` del run originale per riferimento."""
+
+    skip_reason: str | None = None
+    """Descrizione del motivo dello skip (per UI feedback)."""
+
+    run_id: int | None = None
+    n_total: int
+    n_create: int
+    n_delete: int
+    n_kept: int
+    n_warnings: int
+    duration_s: float

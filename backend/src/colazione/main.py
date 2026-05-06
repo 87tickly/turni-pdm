@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from colazione import __version__
 from colazione.api import anagrafiche as anagrafiche_routes
 from colazione.api import auth as auth_routes
+from colazione.api import azienda_pde as azienda_pde_routes
 from colazione.api import giri as giri_routes
 from colazione.api import personale as personale_routes
 from colazione.api import personale_pdc as personale_pdc_routes
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
     app.include_router(personale_routes.router)
     app.include_router(personale_pdc_routes.router)
     app.include_router(pipeline_overview_routes.router)
+    app.include_router(azienda_pde_routes.router)
 
     return app
 

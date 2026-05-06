@@ -10,6 +10,147 @@
 
 ---
 
+## 2026-05-06 (177) — Sub-MR 5.bis-d backend: PdE livello azienda (5 endpoint)
+
+### Contesto
+
+Apre il **sub-MR 5.bis-d** del piano (UI per caricare PdE annuale +
+variazioni). L'utente ha visto la dashboard Pianificatore Giro live
+in produzione e segnalato la mancanza di UI per il PdE: oggi il PdE
+si carica solo via CLI dev-only (``python -m colazione.importers.pde_importer``)
+e le variazioni solo via API REST diretta.
+
+**Modello concettuale concordato** (utente, 2026-05-06):
+
+- **PdE Base** = file annuale Trenord caricato 1 volta a inizio
+  stagione. Resta come record originale, non viene mai sostituito.
+- **Variazioni** = delta cumulativi infrannuali (interruzioni RFI,
+  integrazioni weekend, modifiche orari). Non sostituiscono il base,
+  modificano lo stato delle corse per le date specifiche.
+- Lo **stato corrente** delle corse al giorno X = ``Base`` + ``Σ
+  variazioni applicate con data ≤ X``.
+
+**Architettura**: PdE + variazioni a livello **azienda** (non
+programma). Tutti i programmi materiali esistenti vedono
+automaticamente lo stato corrente. Schema DB già supportava entrambi:
+``corsa_import_run.programma_materiale_id`` è nullable (FK SET NULL).
+Variazione globale = ``programma_materiale_id IS NULL``.
+
+Questa entry chiude il **backend**. La UI frontend è scope sub-MR
+5.bis-d frontend (entry 178).
+
+### Modifiche backend
+
+**`backend/src/colazione/api/azienda_pde.py`** (nuovo, ~470 righe):
+nuovo router ``/api/aziende/me/`` con 5 endpoint. Auth uniforme
+``PIANIFICATORE_GIRO`` (admin bypassa). Multi-tenant via
+``CurrentUser.azienda_id`` da JWT.
+
+- ``GET /pde/status`` → ``PdEStatusRead``: ultimo run BASE + counters
+  (corse attive/totali, variazioni totali/applicate, ultima
+  variazione_at, range validità min/max). 4 query aggregate, latency
+  target < 100ms.
+- ``POST /pde/base`` (multipart UploadFile + ``?force=bool``) →
+  ``CaricaPdEBaseResponse``: wrappa
+  ``importers.pde_importer.importa_pde`` (CLI-equivalent). File salvato
+  in ``tempfile.NamedTemporaryFile`` + chiamata async. Idempotente per
+  SHA-256 file (skip silenzioso se già caricato). 415 per estensioni
+  non supportate (solo ``.numbers``/``.xlsx``). 400 per errori parsing.
+  Helper privato ``_get_azienda_codice(azienda_id)`` per lookup
+  inverso (``importa_pde`` accetta ``codice``, non ``id``).
+- ``POST /variazioni`` (body ``VariazionePdERequest``) →
+  ``CorsaImportRunRead``: registra metadati di una variazione globale
+  (``programma_materiale_id=None``). Parallelo a
+  ``POST /api/programmi/{id}/variazioni`` (entry 170) ma a livello
+  azienda.
+- ``GET /variazioni?limit=50`` → ``list[CorsaImportRunRead]``: timeline
+  variazioni globali (filter ``programma_materiale_id IS NULL`` + ``tipo
+  != BASE``). Ordinata DESC per ``started_at``.
+- ``POST /variazioni/{run_id}/applica`` (multipart UploadFile) →
+  ``ApplicaVariazionePdEResponse``: specchio di
+  ``POST /api/programmi/{id}/variazioni/{run_id}/applica`` (entry 175)
+  ma a livello azienda. Riusa gli helper privati di
+  ``api.programmi`` (``_carica_corse_esistenti``, ``_to_parsed_target``,
+  ``_planner_per_tipo``, ``_applica_operazioni``) per coerenza
+  semantica e zero duplicazione di logica. Errori HTTP standard:
+  404 (run non globale o non esistente), 409 (già applicato),
+  415/400 (file).
+
+**`backend/src/colazione/schemas/programmi.py`** — 2 nuovi schemi
+``extra=forbid``:
+
+- ``PdEStatusRead``: ``base_run`` (dict serializzato di
+  ``CorsaImportRunRead`` per evitare circular import) +
+  ``n_corse_attive`` + ``n_corse_totali`` + ``n_variazioni_totali`` +
+  ``n_variazioni_applicate`` + ``ultima_variazione_at`` +
+  ``validity_da`` + ``validity_a``.
+- ``CaricaPdEBaseResponse``: mappa diretta di ``ImportSummary`` del
+  CLI (``skipped``, ``skip_reason``, ``run_id``, ``n_total``,
+  ``n_create``, ``n_delete``, ``n_kept``, ``n_warnings``,
+  ``duration_s``).
+
+**`backend/src/colazione/main.py`** — registrato il nuovo router.
+
+### Test
+
+**`backend/tests/test_api_azienda_pde.py`** (nuovo, 11 test
+integration):
+
+- 401 senza token su ``/pde/status``.
+- ``/pde/status`` schema response su DB con qualsiasi stato
+  (potrebbe esserci un base_run pre-esistente nel DB di test).
+- ``/pde/base`` 415 estensione invalida.
+- ``/pde/base`` xlsx mini ok → 1 corsa creata + ``run_id`` valorizzato.
+- ``/pde/base`` re-upload identico → ``skipped=True`` (idempotenza
+  SHA-256).
+- ``/variazioni`` POST registra (201, ``programma_materiale_id=None``,
+  ``completed_at=None``).
+- ``/variazioni`` POST con ``tipo=BASE`` → 422 (Pydantic Literal).
+- ``/variazioni`` POST admin bypassa role check.
+- ``/variazioni`` GET: 2 variazioni create → list ordinata DESC,
+  filtro ``programma_materiale_id IS NULL`` rispettato.
+- ``/variazioni/{run_id}/applica`` 404 su run inesistente.
+- ``/variazioni/{run_id}/applica`` smoke: registra INTEGRAZIONE +
+  applica xlsx mini → ``n_corse_create=1`` + ``completed_at`` popolato.
+  Re-applica → 409.
+
+Setup helpers: ``_build_xlsx_pde_mini`` + ``_row_pde_minimal`` (replica
+del helper esistente in ``test_api_variazioni_applica.py`` per
+coerenza). Cleanup FK-safe via prefisso ``TEST_AZPDE_*``.
+
+### Verifiche
+
+- ✅ ``uv run mypy --strict src/``: 75 source files clean.
+- ✅ ``uv run ruff check`` su file MR + test: 0 errori.
+- ✅ ``uv run pytest``: **839 passed, 13 skipped, 0 failed** (+11
+  nuovi test).
+
+### Decisioni di scope rinviate (dichiarate)
+
+- **Frontend UI** (sub-MR 5.bis-d frontend, entry 178): pagina
+  ``/pianificatore-giro/pde`` con 2 pannelli (PdE Base + Timeline
+  Variazioni) + 2 dialog (carica base + carica variazione). Voce
+  menu laterale "PdE Annuale" sopra "Programmi".
+- **Refactor degli helper privati** (``_carica_corse_esistenti``
+  ecc.) in modulo ``services/`` condiviso: oggi importati con prefix
+  underscore da ``api.programmi``. Refactor minore quando emergono
+  altre route che li usano.
+- **Audit cross-codebase su ``is_cancellata``**: limitazione già
+  dichiarata nell'entry 176, non in scope qui.
+
+### Stato
+
+- ✅ Codice 5.bis-d backend pronto: 1 nuovo router + 2 schemi nuovi
+  + registrazione main + 11 test integration.
+- ⏳ Commit + push + deploy backend Railway.
+
+### Prossimo step
+
+Sub-MR 5.bis-d frontend (entry 178): pagina PdE Annuale per
+PIANIFICATORE_GIRO con i 2 pannelli che consumano i 5 endpoint sopra.
+
+---
+
 ## 2026-05-06 (176) — Sub-MR 5.bis-a alignment: core generico /apply + soft-delete via flag
 
 ### Contesto
