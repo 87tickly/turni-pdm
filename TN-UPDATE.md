@@ -10,6 +10,104 @@
 
 ---
 
+## 2026-05-06 (203) — Fix bug "regole che si mescolano": pool corse per regola dominante
+
+### Contesto
+
+Bug rilevato in produzione su programma "giugno 2026" con 2 regole
+distinte (ETR522 + 4 linee Alessandria/Bergamo/Mantova/...; ETR526 +
+altre linee). Il pianificatore osservava che i giri ETR522 contenevano
+corse di linee della regola ETR526 e viceversa — le regole "si
+incontravano" anche se separate per intento di configurazione.
+
+Decisione utente 2026-05-06: *"le regole sono distinte e separate e
+non devono in nessun modo incontrarsi"*. Anche se una corsa fa match
+con più regole, deve restare nella sola regola dominante (priorità
+massima).
+
+### Causa
+
+In ``builder.py::genera_giri`` (Sprint 5.6) il filtro pool catene era
+``corse_perimetro = [c for c in corse if any(matches_all(r, c) for r
+in regole)]`` (riga 951 pre-fix). Pool unico mescolato di tutte le
+regole. ``costruisci_catene(corse_giorno)`` concatenava poi le corse
+solo per criteri spazio-temporali (stazione_arrivo == stazione_partenza,
+gap min/max), senza considerare la regola/materiale di appartenenza.
+Risultato: catene miste tipo ``A1 (ETR522, linea α) → B1 (ETR526,
+linea β) → B2 → A2`` quando geograficamente concatenabili a una
+stazione hub.
+
+L'attribuzione finale alla regola dominante (riga 1029,
+``_trova_regola_dominante``) era POST-FATTO sulla prima corsa della
+catena → un giro ETR522 si "ereditava" corse ETR526 successive.
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_giro/builder.py`**:
+
+- Nuovo helper ``_raggruppa_corse_per_regola_dominante(corse, regole)``:
+  ritorna ``dict[regola_id, list[CorsaCommerciale]]``. Una corsa
+  appartiene SOLO alla regola con priorità massima che la matcha
+  (``_trova_regola_dominante_per_corsa``, già esistente, round-robin
+  deterministico per parità). Corse non coperte da nessuna regola
+  sono escluse.
+- ``genera_giri`` step 3 riscritto: rimossa ``_corsa_in_perimetro_programma``
+  + ``corse_perimetro`` (pool unico). Il loop date ora itera **per
+  regola dominante × per data**, costruendo catene SOLO sul
+  sotto-pool della regola corrente. Le catene risultanti sono per
+  costruzione "scope-singola-regola": niente mescolanza tra
+  materiali/linee.
+- Warning aggiunto se corse del periodo non sono coperte da nessuna
+  regola (escluse dalla generazione).
+- Lo step 4 successivo (raggruppamento ``catene_per_regola`` via
+  ``_trova_regola_dominante``) resta invariato — ora ridondante
+  (ogni catena ha già una regola implicita), ma coerente.
+
+### Test
+
+**`backend/tests/test_builder_giri.py`**:
+
+- Nuovo test acceptance ``test_due_regole_distinte_non_mescolano_corse``:
+  setup con 2 regole (ETR522 + filtri TEST_A*; ETR526 + filtri
+  TEST_B*) e corse geograficamente concatenabili (S99002 hub).
+  Pre-fix: catena unica mista ``A1 → B1 → B2`` attribuita a ETR522.
+  Post-fix: 2 giri puliti — ETR522 contiene solo TEST_A*, ETR526
+  contiene solo TEST_B*. Asserzione esplicita per pattern numero
+  treno + materiale.
+
+### Verifiche
+
+- ✅ ``uv run mypy --strict src/`` → 80 source files clean.
+- ✅ ``uv run ruff check`` su file MR (builder.py + test) → clean.
+  Errori pre-esistenti su altri file (B008 require_role, B007 var
+  unused thread_proiezione.py, I001 import sort) non legati al MR.
+- ✅ ``uv run pytest`` full → **926 passed, 13 skipped** (era
+  889 passed prima del MR, +37 = nuovo test acceptance + altri).
+
+### Stato
+
+- ✅ Pool corse isolato per regola dominante: garanzia di non
+  mescolanza tra materiali/linee di regole diverse.
+- ⏳ Commit + push + deploy backend Railway.
+
+### Impatto su programmi esistenti in produzione
+
+I programmi già generati con il vecchio pool unico (es. "giugno 2026")
+producono giri con potenziali mescolanze. Una rigenerazione (force=true)
+post-deploy produrrà giri **diversi** (corretti). Eventuali turni PdC
+costruiti sui vecchi giri verrebbero invalidati al wipe.
+
+### Prossimo step (parcheggiati)
+
+- **Bug UI dropdown wizard non scrollabile** (lo screen mostra
+  bottone "Avvia generazione" sbiadito perché ``DialogContent`` non
+  ha ``max-h`` + ``overflow``: con 3+ regole il footer esce dal
+  viewport). Fix circoscritto a ``GeneraGiriDialog.tsx`` riga 317,
+  ~30 min. Non incluso in questo MR per non mescolare frontend e
+  backend.
+
+---
+
 ## 2026-05-06 (202) — MR-1110 sotto-MR 4 + Step 3 + sotto-MR 5: pipeline builder v2 completa
 
 ### Contesto

@@ -651,6 +651,31 @@ def _trova_regola_dominante_per_corsa(
     return top[bucket]
 
 
+def _raggruppa_corse_per_regola_dominante(
+    corse: list[CorsaCommerciale],
+    regole: list[ProgrammaRegolaAssegnazione],
+) -> dict[int, list[CorsaCommerciale]]:
+    """Sprint 8.0 entry 203: raggruppa corse per regola dominante.
+
+    Una corsa appartiene SOLO alla regola con ``priorita`` più alta tra
+    quelle che la matchano (``_trova_regola_dominante_per_corsa``,
+    round-robin deterministico per parità). Corse non coperte da
+    nessuna regola sono escluse dal mapping.
+
+    Garantisce che le catene successive siano costruite ISOLATE per
+    regola: niente mescolanza tra materiali/linee di regole diverse.
+    Decisione utente 2026-05-06: "le regole sono distinte e separate
+    e non devono in nessun modo incontrarsi".
+    """
+    out: dict[int, list[CorsaCommerciale]] = {}
+    for c in corse:
+        regola_dom = _trova_regola_dominante_per_corsa(c, regole)
+        if regola_dom is None:
+            continue
+        out.setdefault(regola_dom.id, []).append(c)
+    return out
+
+
 def _trova_regola_dominante(
     cat_pos: CatenaPosizionata,
     regole: list[ProgrammaRegolaAssegnazione],
@@ -934,23 +959,27 @@ async def genera_giri(
             )
         await _wipe_giri_programma(session, programma_id, localita_id=localita.id)
 
-    # 3. Pipeline: carica corse + costruisci catene per data
+    # 3. Pipeline: carica corse + costruisci catene per data, isolate
+    #    PER REGOLA (Sprint 8.0 entry 203, decisione utente 2026-05-06:
+    #    "le regole sono distinte e separate e non devono in nessun modo
+    #    incontrarsi"). Le catene si formano SOLO tra corse della stessa
+    #    regola dominante — niente mescolanza tra materiali/linee di
+    #    regole diverse. Sostituisce il filtro perimetro Sprint 5.6
+    #    (`any(regole)`), che lasciava il pool unico e provocava giri
+    #    misti tipo "ETR522 con corse di linee della regola ETR526".
     date_range = [data_inizio_eff + timedelta(days=i) for i in range(n_giornate_eff)]
     corse = await _carica_corse(session, azienda_id, date_range[0], date_range[-1])
 
-    # Sprint 5.6: filtro pool catene = corse che matchano almeno una
-    # regola del programma. Evita giri "shell" generati da catene di
-    # corse fuori-perimetro che il programma non assegna comunque.
-    # Il giorno_tipo è euristico (`feriale`) — ai fini del filtro pool
-    # è sufficiente; l'assegnazione finale userà il giorno_tipo reale.
-    from colazione.domain.builder_giro.risolvi_corsa import matches_all
-
-    def _corsa_in_perimetro_programma(c: Any) -> bool:
-        return any(matches_all(r.filtri_json, c, "feriale") for r in regole)
-
-    corse_perimetro = [c for c in corse if _corsa_in_perimetro_programma(c)]
+    corse_per_regola_dom = _raggruppa_corse_per_regola_dominante(corse, regole)
 
     warnings: list[str] = []
+    n_corse_orfane = len(corse) - sum(len(v) for v in corse_per_regola_dom.values())
+    if n_corse_orfane > 0:
+        warnings.append(
+            f"{n_corse_orfane} corse del periodo non coperte da nessuna "
+            "regola del programma — escluse dalla generazione."
+        )
+
     # Sprint 5.6 Feature 3: attiva il vincolo finestra uscita deposito
     # 01:00-03:00 per programmi reali (non per test puri legacy).
     param_pos = ParamPosizionamento(finestra_uscita_vietata_attiva=True)
@@ -959,7 +988,7 @@ async def genera_giri(
     # sono "uscita reale dal deposito" — il vuoto sede→origine va
     # generato anche se la stazione di partenza è fuori whitelist
     # (non c'è una giornata K-1 del ciclo che abbia portato il treno
-    # lì la sera prima).
+    # lì la sera prima). Scope: per sede (sede del run), non per regola.
     is_prima_generazione_sede = n_esistenti_sede == 0 or force
     primo_giorno_con_corse: date | None = None
     catene_per_data: dict[date, list[CatenaPosizionata]] = {}
@@ -969,48 +998,51 @@ async def genera_giri(
     # scelta non è compatibile con le linee della regola.
     catene_scartate_per_regola: dict[int, int] = {}
     for d in date_range:
-        corse_giorno = [c for c in corse_perimetro if _corsa_vale_in_data(c, d)]
-        if not corse_giorno:
-            continue
-        if primo_giorno_con_corse is None:
+        # forza_vuoto_iniziale è scope sede: prima data del periodo con
+        # qualche corsa in qualunque regola.
+        qualche_corsa_oggi = any(
+            _corsa_vale_in_data(c, d)
+            for corse_regola in corse_per_regola_dom.values()
+            for c in corse_regola
+        )
+        if qualche_corsa_oggi and primo_giorno_con_corse is None:
             primo_giorno_con_corse = d
+        if not qualche_corsa_oggi:
+            continue
         forza_vuoto_iniziale = is_prima_generazione_sede and d == primo_giorno_con_corse
-        catene = costruisci_catene(corse_giorno)
-        catene_pos: list[CatenaPosizionata] = []
-        for cat in catene:
-            try:
-                cat_pos = posiziona_su_localita(
-                    cat,
-                    localita,
-                    whitelist,
-                    param_pos,
-                    forza_vuoto_iniziale=forza_vuoto_iniziale,
-                )
-            except (LocalitaSenzaStazioneError, PosizionamentoImpossibileError) as exc:
-                # Identifica quale regola del programma "avrebbe coperto"
-                # questa catena, così il warning finale può correlare.
-                regola_dom_pre = (
-                    _trova_regola_dominante_per_corsa(cat.corse[0], regole)
-                    if cat.corse
-                    else None
-                )
-                if regola_dom_pre is not None:
-                    catene_scartate_per_regola[regola_dom_pre.id] = (
-                        catene_scartate_per_regola.get(regola_dom_pre.id, 0) + 1
-                    )
-                prima_treno = cat.corse[0].numero_treno if cat.corse else "—"
-                regola_label = (
-                    f" (regola #{regola_dom_pre.id})"
-                    if regola_dom_pre is not None
-                    else ""
-                )
-                warnings.append(
-                    f"Catena del {d.isoformat()} treno {prima_treno}{regola_label} "
-                    f"scartata: {exc}"
-                )
+
+        catene_pos_giorno: list[CatenaPosizionata] = []
+        # Sprint 8.0 entry 203: itera per regola → ogni regola è una
+        # "scatola chiusa". Le sue corse non incontrano mai quelle di
+        # un'altra regola, anche se geograficamente concatenabili.
+        for regola_id, corse_regola in corse_per_regola_dom.items():
+            corse_giorno = [c for c in corse_regola if _corsa_vale_in_data(c, d)]
+            if not corse_giorno:
                 continue
-            catene_pos.append(cat_pos)
-        catene_per_data[d] = catene_pos
+            catene = costruisci_catene(corse_giorno)
+            for cat in catene:
+                try:
+                    cat_pos = posiziona_su_localita(
+                        cat,
+                        localita,
+                        whitelist,
+                        param_pos,
+                        forza_vuoto_iniziale=forza_vuoto_iniziale,
+                    )
+                except (LocalitaSenzaStazioneError, PosizionamentoImpossibileError) as exc:
+                    # La regola di questa catena è già nota per costruzione
+                    # (regola_id corrente del loop). Niente lookup post-fatto.
+                    catene_scartate_per_regola[regola_id] = (
+                        catene_scartate_per_regola.get(regola_id, 0) + 1
+                    )
+                    prima_treno = cat.corse[0].numero_treno if cat.corse else "—"
+                    warnings.append(
+                        f"Catena del {d.isoformat()} treno {prima_treno} "
+                        f"(regola #{regola_id}) scartata: {exc}"
+                    )
+                    continue
+                catene_pos_giorno.append(cat_pos)
+        catene_per_data[d] = catene_pos_giorno
 
     # 4. Multi-giornata (cross-notte) con cumulo km e chiusura dinamica.
     # Sprint 7.7 MR 1 (refactor cap-per-regola): per ogni catena calcolo

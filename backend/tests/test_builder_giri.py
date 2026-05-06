@@ -668,3 +668,172 @@ async def test_data_inizio_oltre_valido_a_raises(azienda_id: int) -> None:
                 session=session,
                 azienda_id=azienda_id,
             )
+
+
+async def test_due_regole_distinte_non_mescolano_corse(azienda_id: int) -> None:
+    """Sprint 8.0 entry 203: pool corse isolato per regola dominante.
+
+    Setup: programma con 2 regole + materiali diversi (ETR522 vs ETR526).
+    Le corse delle due regole sono geograficamente concatenabili: pre-fix
+    il pool unico avrebbe formato una catena mista A1→B1→B2→A2 (ETR522 +
+    ETR526 nello stesso giro). Post-fix: catene SOLO dentro la regola.
+
+    Decisione utente 2026-05-06: "le regole sono distinte e separate e
+    non devono in nessun modo incontrarsi".
+    """
+    async with session_scope() as session:
+        for codice in ("S99001", "S99002", "S99003"):
+            session.add(Stazione(codice=codice, nome=codice, azienda_id=azienda_id))
+        await session.flush()
+
+        loc = LocalitaManutenzione(
+            codice=LOC_CODICE,
+            codice_breve=LOC_BREVE,
+            nome_canonico=LOC_CODICE,
+            stazione_collegata_codice="S99001",
+            azienda_id=azienda_id,
+        )
+        session.add(loc)
+        await session.flush()
+        for stz in ("S99001", "S99002", "S99003"):
+            session.add(
+                LocalitaStazioneVicina(
+                    localita_manutenzione_id=loc.id, stazione_codice=stz
+                )
+            )
+
+        prog = ProgrammaMateriale(
+            azienda_id=azienda_id,
+            nome="TEST_due_regole_isolate",
+            valido_da=date(2026, 1, 1),
+            valido_a=date(2026, 12, 31),
+            stato="attivo",
+            n_giornate_default=1,
+            fascia_oraria_tolerance_min=30,
+            strict_options_json={
+                "no_corse_residue": False,
+                "no_overcapacity": False,
+                "no_aggancio_non_validato": False,
+                "no_orphan_blocks": False,
+                "no_giro_appeso": False,
+                "no_km_eccesso": False,
+            },
+        )
+        session.add(prog)
+        await session.flush()
+        prog_id = int(prog.id)
+
+        # Regola A: ETR522, filtra TEST_A*
+        session.add(
+            ProgrammaRegolaAssegnazione(
+                programma_id=prog_id,
+                filtri_json=[
+                    {
+                        "campo": "numero_treno",
+                        "op": "in",
+                        "valore": ["TEST_A1", "TEST_A2"],
+                    }
+                ],
+                composizione_json=[
+                    {"materiale_tipo_codice": "ETR522", "n_pezzi": 1}
+                ],
+                materiale_tipo_codice="ETR522",
+                numero_pezzi=1,
+                priorita=10,
+            )
+        )
+        # Regola B: ETR526, filtra TEST_B*
+        session.add(
+            ProgrammaRegolaAssegnazione(
+                programma_id=prog_id,
+                filtri_json=[
+                    {
+                        "campo": "numero_treno",
+                        "op": "in",
+                        "valore": ["TEST_B1", "TEST_B2"],
+                    }
+                ],
+                composizione_json=[
+                    {"materiale_tipo_codice": "ETR526", "n_pezzi": 1}
+                ],
+                materiale_tipo_codice="ETR526",
+                numero_pezzi=1,
+                priorita=10,
+            )
+        )
+
+        # A1 e B1 si "vorrebbero" attaccare a S99002 (gap 30 min < gap_max).
+        # Pre-fix: catena mista. Post-fix: pool isolati per regola.
+        for nt, o, dst, p, a in [
+            ("TEST_A1", "S99001", "S99002", (8, 0), (9, 0)),
+            ("TEST_A2", "S99002", "S99001", (10, 0), (11, 0)),
+            ("TEST_B1", "S99002", "S99003", (9, 30), (10, 30)),
+            ("TEST_B2", "S99003", "S99002", (12, 0), (13, 0)),
+        ]:
+            session.add(
+                CorsaCommerciale(
+                    azienda_id=azienda_id,
+                    row_hash=("test_" + nt).ljust(64, "0")[:64],
+                    numero_treno=nt,
+                    codice_origine=o,
+                    codice_destinazione=dst,
+                    ora_partenza=time(*p),
+                    ora_arrivo=time(*a),
+                    valido_da=date(2026, 1, 1),
+                    valido_a=date(2026, 12, 31),
+                    valido_in_date_json=["2026-04-27"],
+                )
+            )
+
+    async with session_scope() as session:
+        result = await genera_giri(
+            programma_id=prog_id,
+            data_inizio=date(2026, 4, 27),
+            n_giornate=1,
+            localita_codice=LOC_CODICE,
+            session=session,
+            azienda_id=azienda_id,
+        )
+
+    # Almeno un giro per regola → 2+ giri totali.
+    assert result.n_giri_creati >= 2, (
+        f"Atteso almeno 1 giro per regola, ottenuti {result.n_giri_creati}"
+    )
+
+    # Verifica acceptance: ogni giro contiene SOLO corse della propria
+    # regola — niente mescolanza tra ETR522 e ETR526.
+    async with session_scope() as session:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT gm.id, gm.materiale_tipo_codice,
+                           array_agg(cc.numero_treno) AS treni
+                    FROM giro_materiale gm
+                    JOIN giro_giornata gg ON gg.giro_materiale_id = gm.id
+                    JOIN giro_variante gv ON gv.giro_giornata_id = gg.id
+                    JOIN giro_blocco gb ON gb.giro_variante_id = gv.id
+                    LEFT JOIN corsa_commerciale cc ON cc.id = gb.corsa_commerciale_id
+                    WHERE gm.programma_id = :pid
+                    GROUP BY gm.id, gm.materiale_tipo_codice
+                    """
+                ),
+                {"pid": prog_id},
+            )
+        ).all()
+
+    materiali_visti: set[str] = set()
+    for row in rows:
+        treni = [t for t in (row.treni or []) if t is not None]
+        materiali_visti.add(row.materiale_tipo_codice)
+        if row.materiale_tipo_codice == "ETR522":
+            assert all(t.startswith("TEST_A") for t in treni), (
+                f"Giro ETR522 (id={row.id}) contiene corse non-A: {treni}"
+            )
+        elif row.materiale_tipo_codice == "ETR526":
+            assert all(t.startswith("TEST_B") for t in treni), (
+                f"Giro ETR526 (id={row.id}) contiene corse non-B: {treni}"
+            )
+    assert materiali_visti == {"ETR522", "ETR526"}, (
+        f"Atteso un giro per ogni materiale, visti: {materiali_visti}"
+    )
