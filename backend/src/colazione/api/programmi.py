@@ -344,14 +344,19 @@ async def create_programma(
         # Sprint 5.1: composizione è la fonte autorevole. I campi legacy
         # (materiale_tipo_codice, numero_pezzi) sono ri-popolati dal primo
         # elemento per retrocompat con `risolvi_corsa()` fino a Sub 5.5.
+        # MR γ: composizione può essere vuota (ipotesi non ancora dichiarata).
         composizione = regola_payload.composizione
+        materiale_tipo_codice_legacy = (
+            composizione[0].materiale_tipo_codice if composizione else None
+        )
+        numero_pezzi_legacy = composizione[0].n_pezzi if composizione else None
         regola = ProgrammaRegolaAssegnazione(
             programma_id=programma.id,
             filtri_json=[f.model_dump() for f in regola_payload.filtri_json],
             composizione_json=[item.model_dump() for item in composizione],
             is_composizione_manuale=regola_payload.is_composizione_manuale,
-            materiale_tipo_codice=composizione[0].materiale_tipo_codice,
-            numero_pezzi=composizione[0].n_pezzi,
+            materiale_tipo_codice=materiale_tipo_codice_legacy,
+            numero_pezzi=numero_pezzi_legacy,
             priorita=regola_payload.priorita,
             km_max_ciclo=regola_payload.km_max_ciclo,
             localita_codice=regola_payload.localita_codice,
@@ -534,13 +539,20 @@ async def add_regola(
     _verifica_modificabile_o_409(p)
 
     composizione = payload.composizione
+    # MR γ: composizione opzionale. Se vuota, ``materiale_tipo_codice``
+    # e ``numero_pezzi`` legacy restano NULL (verranno popolati dal
+    # wizard pre-generazione via PATCH).
+    materiale_tipo_codice_legacy = (
+        composizione[0].materiale_tipo_codice if composizione else None
+    )
+    numero_pezzi_legacy = composizione[0].n_pezzi if composizione else None
     regola = ProgrammaRegolaAssegnazione(
         programma_id=programma_id,
         filtri_json=[f.model_dump() for f in payload.filtri_json],
         composizione_json=[item.model_dump() for item in composizione],
         is_composizione_manuale=payload.is_composizione_manuale,
-        materiale_tipo_codice=composizione[0].materiale_tipo_codice,
-        numero_pezzi=composizione[0].n_pezzi,
+        materiale_tipo_codice=materiale_tipo_codice_legacy,
+        numero_pezzi=numero_pezzi_legacy,
         priorita=payload.priorita,
         km_max_ciclo=payload.km_max_ciclo,
         localita_codice=payload.localita_codice,

@@ -125,12 +125,21 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
     e.preventDefault();
     setError(null);
 
-    if (composizione.length === 0) {
-      setError("Aggiungi almeno un materiale alla composizione.");
-      return;
-    }
-    if (composizione.some((c) => c.materiale_tipo_codice.trim() === "")) {
-      setError("Tutti i materiali devono essere selezionati.");
+    // MR γ: composizione opzionale ("ipotesi"). Se l'utente lascia tutte
+    // le righe senza materiale, la regola è creata senza ipotesi: il
+    // wizard pre-generazione obbligherà a sceglierla per il run e
+    // farà auto-save.
+    const composizioneCompilata = composizione.filter(
+      (c) => c.materiale_tipo_codice.trim() !== "",
+    );
+    if (
+      composizioneCompilata.length > 0 &&
+      composizioneCompilata.length !== composizione.length
+    ) {
+      setError(
+        "Hai righe di composizione parzialmente compilate. " +
+          "Seleziona un materiale in tutte oppure rimuovi le righe vuote.",
+      );
       return;
     }
 
@@ -163,7 +172,7 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
         programmaId,
         payload: {
           filtri_json: filtriPayload,
-          composizione: composizione.map((c) => ({
+          composizione: composizioneCompilata.map((c) => ({
             materiale_tipo_codice: c.materiale_tipo_codice,
             n_pezzi: c.n_pezzi,
           })),
@@ -211,7 +220,14 @@ export function RegolaEditor({ programmaId, open, onOpenChange }: RegolaEditorPr
           </section>
 
           <section className="flex flex-col gap-2">
-            <h3 className="text-sm font-semibold text-foreground">Composizione</h3>
+            <h3 className="text-sm font-semibold text-foreground">
+              Composizione (ipotesi opzionale)
+            </h3>
+            <p className="-mt-1 text-xs text-muted-foreground">
+              MR γ: dichiarare il materiale qui è opzionale. Se la lasci vuota, il wizard
+              pre-generazione ti chiederà di scegliere un &quot;materiale ipotesi&quot; al lancio
+              del builder e lo memorizzerà sulla regola.
+            </p>
             <div
               role="radiogroup"
               aria-label="Modalità composizione"

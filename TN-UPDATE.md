@@ -10,6 +10,95 @@
 
 ---
 
+## 2026-05-06 (182) — MR γ: composizione opzionale + materiale ipotesi nel wizard
+
+### Contesto
+
+Spec utente:
+
+> "Sull'editor regola lasci un materiale 'ipotesi' opzionale,
+> modificabile dopo."
+
+MR γ chiude la spec: la composizione sulla regola diventa **opzionale**.
+Il pianificatore può creare una regola con solo Linea + Tipo servizio
+e rimandare la scelta del materiale al wizard pre-generazione, dove un
+nuovo dropdown chiede esplicitamente il "materiale ipotesi" prima del
+lancio del builder. L'ipotesi scelta nel wizard viene auto-salvata
+sulla regola via PATCH (memo + override per run).
+
+### Modifiche backend
+
+**`backend/src/colazione/schemas/programmi.py`**:
+
+- ``ProgrammaRegolaAssegnazioneCreate.composizione``: rimosso
+  ``min_length=1``, default ``[]``. La regola può essere creata senza
+  ipotesi materiale.
+- ``ProgrammaRegolaAssegnazioneUpdate.composizione``: ``None`` =
+  non toccare; ``[]`` = rimuovi l'ipotesi; lista non vuota = aggiorna.
+
+**`backend/src/colazione/api/programmi.py`**:
+
+- ``add_regola``: se la composizione è vuota, ``materiale_tipo_codice``
+  e ``numero_pezzi`` legacy restano ``NULL``.
+- ``create_programma`` (regole nested): stessa logica.
+
+Il builder NON viene cambiato: continua a usare
+``regola.composizione_json`` come fonte autorevole. Il wizard
+pre-generazione (frontend) garantisce che ogni regola abbia
+composizione popolata via auto-save PATCH prima di lanciare
+``POST /genera-giri``.
+
+### Modifiche frontend
+
+**`frontend/src/routes/pianificatore-giro/regola/RegolaEditor.tsx`**:
+
+- Heading "Composizione" rinominata in
+  ``Composizione (ipotesi opzionale)`` con paragrafo esplicativo.
+- ``handleSubmit``: composizione vuota è valida. Righe parzialmente
+  compilate (alcune con materiale, altre senza) bloccano il submit
+  con messaggio chiarificatore.
+
+**`frontend/src/routes/pianificatore-giro/GeneraGiriDialog.tsx`**
+(refactor):
+
+- ``PerRegolaState`` guadagna ``materiale: string`` +
+  ``materiale_modificato: boolean``.
+- Pre-popolamento dal primo elemento di ``regola.composizione_json``;
+  se vuoto, dropdown mostra "scegli materiale" e l'utente DEVE
+  selezionarne uno per lanciare il builder.
+- Nuova colonna "Materiale" nella tabella regole, tra Regola e
+  Deposito. Dropdown con tutti i ``MaterialeTipo`` macro
+  dell'azienda (filtrati da ``famiglia != null``).
+- Auto-save al lancio: PATCH unico per regola che combina
+  ``localita_codice`` + ``composizione`` (singola, 1 pezzo). Se la
+  regola ha già una composizione multi-pezzo, il dropdown mostra il
+  primo materiale ma l'utente che vuole modificare strutture complesse
+  deve passare dall'editor regola (badge "composizione multi-pezzo"
+  come hint).
+- Il bottone "Avvia generazione" è disabilitato finché ogni regola
+  non ha sia sede sia materiale compilati.
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.test.tsx`**:
+heading match aggiornato a ``/^Composizione/i`` (cattura la nuova
+denominazione).
+
+### Verifiche
+
+- ✅ Backend: 38 passed, 1 skipped (test_anagrafiche_api +
+  test_aggregazione_a2 + test_builder_giri).
+- ✅ Frontend ``pnpm tsc -b --noEmit`` clean.
+- ✅ Frontend vitest pianificatore-giro: 11 passed, 1 skipped.
+
+### Stato
+
+- ✅ MR γ backend + frontend completo.
+- ⏳ Commit + push + Railway deploy.
+- ➡️ MR δ: filtro Linea + Tipo servizio combinato. Eventuale
+  integrazione Live ARTURO (``live.arturo.travel``) per arricchire la
+  mappatura linee.
+
+---
+
 ## 2026-05-06 (181) — MR β: wizard pre-generazione, sede su regola
 
 ### Contesto

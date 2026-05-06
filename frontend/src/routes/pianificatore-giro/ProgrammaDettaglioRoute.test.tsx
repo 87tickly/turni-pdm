@@ -170,7 +170,10 @@ describe("ProgrammaDettaglioRoute", () => {
       name: /Nuova regola di assegnazione/i,
     });
     expect(within(dialog).getByRole("heading", { name: /^Filtri$/i })).toBeInTheDocument();
-    expect(within(dialog).getByRole("heading", { name: /^Composizione$/i })).toBeInTheDocument();
+    // MR γ: heading rinominata in "Composizione (ipotesi opzionale)".
+    expect(
+      within(dialog).getByRole("heading", { name: /^Composizione/i }),
+    ).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /Aggiungi filtro/i })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: /Aggiungi regola/i })).toBeInTheDocument();
   });

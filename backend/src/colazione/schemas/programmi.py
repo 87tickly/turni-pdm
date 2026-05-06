@@ -303,7 +303,10 @@ class ProgrammaRegolaAssegnazioneCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     filtri_json: list[FiltroRegola] = Field(min_length=1)
-    composizione: list[ComposizioneItem] = Field(min_length=1)
+    # MR γ: composizione opzionale. `[]` = "ipotesi non ancora dichiarata",
+    # il wizard pre-generazione obbligherà l'utente a sceglierla per quel
+    # run e farà auto-save sulla regola via PATCH.
+    composizione: list[ComposizioneItem] = Field(default_factory=list)
     is_composizione_manuale: bool = False
     priorita: int = Field(default=60, ge=0, le=100)
     # Sprint 7.7 MR 1: cap km del ciclo specifico per questa regola
@@ -327,7 +330,9 @@ class ProgrammaRegolaAssegnazioneUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     filtri_json: list[FiltroRegola] | None = Field(default=None, min_length=1)
-    composizione: list[ComposizioneItem] | None = Field(default=None, min_length=1)
+    # MR γ: composizione opzionale anche in PATCH. Empty list valida (=
+    # rimuove ipotesi). None = non toccare il valore esistente.
+    composizione: list[ComposizioneItem] | None = None
     is_composizione_manuale: bool | None = None
     priorita: int | None = Field(default=None, ge=0, le=100)
     km_max_ciclo: int | None = Field(default=None, ge=1)

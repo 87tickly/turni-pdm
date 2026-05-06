@@ -12,10 +12,11 @@ import {
 } from "@/components/ui/Dialog";
 import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
-import { useLocalitaManutenzione } from "@/hooks/useAnagrafiche";
+import { useLocalitaManutenzione, useMateriali } from "@/hooks/useAnagrafiche";
 import { useGeneraGiri } from "@/hooks/useGiri";
 import { useProgramma, useUpdateRegola } from "@/hooks/useProgrammi";
 import { ApiError } from "@/lib/api/client";
+import type { MaterialeRead } from "@/lib/api/anagrafiche";
 import type { BuilderResult } from "@/lib/api/giri";
 import type { ProgrammaRegolaAssegnazioneRead } from "@/lib/api/programmi";
 import { cn } from "@/lib/utils";
@@ -61,8 +62,17 @@ interface PerRegolaState {
   regola: ProgrammaRegolaAssegnazioneRead;
   /** Codice sede scelto/modificato per questo run. */
   localita: string;
-  /** True se il valore differisce da `regola.localita_codice` (auto-save al lancio). */
-  modificato: boolean;
+  /** True se la sede differisce da `regola.localita_codice` (auto-save al lancio). */
+  localita_modificata: boolean;
+  /**
+   * MR γ: materiale "ipotesi" — codice del MaterialeTipo che il builder
+   * userà come composizione. Precompilato dal primo elemento di
+   * `regola.composizione_json` se presente, altrimenti vuoto (l'utente
+   * deve sceglierlo nel wizard, non si lancia builder senza).
+   */
+  materiale: string;
+  /** True se il materiale differisce da quello memorizzato sulla regola. */
+  materiale_modificato: boolean;
 }
 
 export interface AggregatedResult {
@@ -89,6 +99,7 @@ export function GeneraGiriDialog({
 }: GeneraGiriDialogProps) {
   const programmaQuery = useProgramma(open ? programmaId : undefined);
   const localitaQuery = useLocalitaManutenzione({ enabled: open });
+  const materialiQuery = useMateriali({ enabled: open });
   const generaMutation = useGeneraGiri();
   const updateRegolaMutation = useUpdateRegola();
 
@@ -105,6 +116,13 @@ export function GeneraGiriDialog({
 
   const regole = programmaQuery.data?.regole ?? [];
   const localita = localitaQuery.data ?? [];
+  const materialiMacro = useMemo(() => {
+    const data = materialiQuery.data;
+    if (!Array.isArray(data)) return [] as MaterialeRead[];
+    return data.filter(
+      (m) => m != null && m.famiglia != null && m.famiglia.length > 0,
+    );
+  }, [materialiQuery.data]);
 
   // Pre-popola lo state per regola quando il dialog si apre o le regole arrivano.
   useEffect(() => {
@@ -114,13 +132,20 @@ export function GeneraGiriDialog({
       for (const r of regole) {
         const esistente = prev[r.id];
         const localitaPrecompilata = esistente?.localita ?? r.localita_codice ?? "";
+        const materialeMemorizzato = r.composizione_json[0]?.materiale_tipo_codice ?? "";
+        const materialePrecompilato = esistente?.materiale ?? materialeMemorizzato;
         next[r.id] = {
           regola: r,
           localita: localitaPrecompilata,
-          modificato:
-            esistente?.modificato === true
+          localita_modificata:
+            esistente?.localita_modificata === true
               ? true
               : (r.localita_codice ?? "") !== localitaPrecompilata,
+          materiale: materialePrecompilato,
+          materiale_modificato:
+            esistente?.materiale_modificato === true
+              ? true
+              : materialeMemorizzato !== materialePrecompilato,
         };
       }
       return next;
@@ -150,7 +175,23 @@ export function GeneraGiriDialog({
         [regolaId]: {
           ...stato,
           localita: value,
-          modificato: value !== persistita,
+          localita_modificata: value !== persistita,
+        },
+      };
+    });
+  };
+
+  const cambiaMateriale = (regolaId: number, value: string) => {
+    setPerRegola((prev) => {
+      const stato = prev[regolaId];
+      if (stato === undefined) return prev;
+      const memorizzato = stato.regola.composizione_json[0]?.materiale_tipo_codice ?? "";
+      return {
+        ...prev,
+        [regolaId]: {
+          ...stato,
+          materiale: value,
+          materiale_modificato: value !== memorizzato,
         },
       };
     });
@@ -159,6 +200,11 @@ export function GeneraGiriDialog({
   const tutteSediCompilate = useMemo(() => {
     if (regole.length === 0) return false;
     return regole.every((r) => (perRegola[r.id]?.localita ?? "").length > 0);
+  }, [regole, perRegola]);
+
+  const tuttiMaterialiCompilati = useMemo(() => {
+    if (regole.length === 0) return false;
+    return regole.every((r) => (perRegola[r.id]?.materiale ?? "").length > 0);
   }, [regole, perRegola]);
 
   // Sedi uniche da processare (1 chiamata builder per sede).
@@ -172,7 +218,7 @@ export function GeneraGiriDialog({
   }, [regole, perRegola]);
 
   const avviaGenerazione = async () => {
-    if (!tutteSediCompilate) return;
+    if (!tutteSediCompilate || !tuttiMaterialiCompilati) return;
     setStep("running");
     setGlobalError(null);
     setSediTotali(sediUniche.length);
@@ -189,21 +235,37 @@ export function GeneraGiriDialog({
       per_sede: [],
     };
 
-    // Auto-save: per ogni regola modificata, persiste localita_codice
-    // sulla regola via PATCH. Non blocca il run su errore singolo.
+    // Auto-save: per ogni regola con sede o materiale modificato (o
+    // entrambi), un solo PATCH idempotente. Non blocca il run su errore
+    // singolo: il builder userà comunque i valori del payload (che
+    // sono coerenti con quelli appena scelti dall'utente).
     for (const stato of Object.values(perRegola)) {
-      if (!stato.modificato) continue;
+      if (!stato.localita_modificata && !stato.materiale_modificato) continue;
+      const patchPayload: {
+        localita_codice?: string | null;
+        composizione?: Array<{ materiale_tipo_codice: string; n_pezzi: number }>;
+      } = {};
+      if (stato.localita_modificata) {
+        patchPayload.localita_codice = stato.localita || null;
+      }
+      if (stato.materiale_modificato) {
+        // MR γ: il wizard scrive composizione "singola" di default
+        // (1 pezzo). Per doppia/personalizzata l'utente deve passare
+        // dall'editor regola.
+        patchPayload.composizione = stato.materiale
+          ? [{ materiale_tipo_codice: stato.materiale, n_pezzi: 1 }]
+          : [];
+      }
       try {
         await updateRegolaMutation.mutateAsync({
           programmaId,
           regolaId: stato.regola.id,
-          payload: { localita_codice: stato.localita || null },
+          payload: patchPayload,
         });
       } catch (err) {
-        // Salvataggio fallito ma il builder può comunque procedere col valore corrente.
         const msg = err instanceof ApiError ? err.message : (err as Error).message;
         aggregato_local.warnings.push(
-          `Auto-save sede regola #${stato.regola.id} fallito: ${msg}`,
+          `Auto-save regola #${stato.regola.id} fallito: ${msg}`,
         );
       }
     }
@@ -261,10 +323,13 @@ export function GeneraGiriDialog({
             regole={regole}
             perRegola={perRegola}
             cambiaLocalita={cambiaLocalita}
+            cambiaMateriale={cambiaMateriale}
             localita={localita}
+            materialiMacro={materialiMacro}
             confirmDeletePdc={confirmDeletePdc}
             setConfirmDeletePdc={setConfirmDeletePdc}
             tutteSediCompilate={tutteSediCompilate}
+            tuttiMaterialiCompilati={tuttiMaterialiCompilati}
             sediUniche={sediUniche}
             onAnnulla={() => handleClose(false)}
             onAvvia={avviaGenerazione}
@@ -293,10 +358,13 @@ function FormStep({
   regole,
   perRegola,
   cambiaLocalita,
+  cambiaMateriale,
   localita,
+  materialiMacro,
   confirmDeletePdc,
   setConfirmDeletePdc,
   tutteSediCompilate,
+  tuttiMaterialiCompilati,
   sediUniche,
   onAnnulla,
   onAvvia,
@@ -308,10 +376,13 @@ function FormStep({
   regole: ProgrammaRegolaAssegnazioneRead[];
   perRegola: Record<number, PerRegolaState>;
   cambiaLocalita: (regolaId: number, value: string) => void;
+  cambiaMateriale: (regolaId: number, value: string) => void;
   localita: ReturnType<typeof useLocalitaManutenzione>["data"];
+  materialiMacro: MaterialeRead[];
   confirmDeletePdc: boolean;
   setConfirmDeletePdc: (v: boolean) => void;
   tutteSediCompilate: boolean;
+  tuttiMaterialiCompilati: boolean;
   sediUniche: string[];
   onAnnulla: () => void;
   onAvvia: () => void;
@@ -343,7 +414,7 @@ function FormStep({
               <thead className="bg-muted text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 text-left">Regola</th>
-                  <th className="px-3 py-2 text-left">Composizione</th>
+                  <th className="px-3 py-2 text-left">Materiale</th>
                   <th className="px-3 py-2 text-left">Deposito</th>
                 </tr>
               </thead>
@@ -351,7 +422,9 @@ function FormStep({
                 {regole.map((r) => {
                   const stato = perRegola[r.id];
                   const sede = stato?.localita ?? "";
-                  const modificata = stato?.modificato === true;
+                  const sedeModificata = stato?.localita_modificata === true;
+                  const materiale = stato?.materiale ?? "";
+                  const materialeModificato = stato?.materiale_modificato === true;
                   return (
                     <tr key={r.id} className="bg-white">
                       <td className="px-3 py-2 align-top">
@@ -361,7 +434,37 @@ function FormStep({
                         <FiltriCompatti filtri={r.filtri_json} />
                       </td>
                       <td className="px-3 py-2 align-top">
-                        <ComposizioneCompatta composizione={r.composizione_json} />
+                        <Select
+                          value={materiale}
+                          onChange={(e) => cambiaMateriale(r.id, e.target.value)}
+                          aria-label={`Materiale ipotesi regola ${r.id}`}
+                          className={cn(
+                            materialeModificato &&
+                              materiale.length > 0 &&
+                              "border-amber-400 bg-amber-50",
+                          )}
+                        >
+                          <option value="">— scegli materiale —</option>
+                          {materialiMacro.map((m) => (
+                            <option key={m.codice} value={m.codice}>
+                              {m.codice}
+                              {m.nome_commerciale != null && m.nome_commerciale !== ""
+                                ? ` — ${m.nome_commerciale}`
+                                : ""}
+                            </option>
+                          ))}
+                        </Select>
+                        {materialeModificato && materiale.length > 0 && (
+                          <p className="mt-1 text-[11px] text-amber-700">
+                            ipotesi modificata · auto-save sulla regola
+                          </p>
+                        )}
+                        {r.composizione_json.length > 1 && (
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            composizione multi-pezzo:{" "}
+                            <ComposizioneCompatta composizione={r.composizione_json} />
+                          </p>
+                        )}
                       </td>
                       <td className="px-3 py-2 align-top">
                         <Select
@@ -369,7 +472,7 @@ function FormStep({
                           onChange={(e) => cambiaLocalita(r.id, e.target.value)}
                           aria-label={`Deposito regola ${r.id}`}
                           className={cn(
-                            modificata && sede.length > 0 && "border-amber-400 bg-amber-50",
+                            sedeModificata && sede.length > 0 && "border-amber-400 bg-amber-50",
                           )}
                         >
                           <option value="">— scegli sede —</option>
@@ -379,9 +482,9 @@ function FormStep({
                             </option>
                           ))}
                         </Select>
-                        {modificata && sede.length > 0 && (
+                        {sedeModificata && sede.length > 0 && (
                           <p className="mt-1 text-[11px] text-amber-700">
-                            sede modificata · auto-save sulla regola al lancio
+                            sede modificata · auto-save sulla regola
                           </p>
                         )}
                       </td>
@@ -433,13 +536,17 @@ function FormStep({
         <Button
           type="button"
           onClick={onAvvia}
-          disabled={!tutteSediCompilate || regole.length === 0}
+          disabled={
+            !tutteSediCompilate || !tuttiMaterialiCompilati || regole.length === 0
+          }
           title={
-            !tutteSediCompilate
-              ? "Compila il deposito per tutte le regole"
-              : `Lancia builder per ${sediUniche.length} ${
-                  sediUniche.length === 1 ? "sede" : "sedi"
-                }`
+            !tuttiMaterialiCompilati
+              ? "Compila il materiale per tutte le regole"
+              : !tutteSediCompilate
+                ? "Compila il deposito per tutte le regole"
+                : `Lancia builder per ${sediUniche.length} ${
+                    sediUniche.length === 1 ? "sede" : "sedi"
+                  }`
           }
         >
           <ChevronRight className="mr-1 h-4 w-4" aria-hidden /> Avvia generazione
