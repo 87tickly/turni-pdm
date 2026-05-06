@@ -42,7 +42,10 @@ from colazione.domain.builder_giro.builder import (
     carica_festivita_periodo,
     genera_giri,
 )
-from colazione.domain.builder_giro.etichetta import calcola_etichetta_variante
+from colazione.domain.builder_giro.etichetta import (
+    calcola_etichetta_variante,  # noqa: F401 — kept for backward compat
+    genera_etichetta_parlante,
+)
 from colazione.domain.builder_giro.persister import LocalitaNonTrovataError
 from colazione.domain.builder_giro.risolvi_corsa import (
     ComposizioneNonAmmessaError,
@@ -1080,13 +1083,23 @@ async def get_giro_dettaglio(
             metadata_json=dict(b.metadata_json or {}),
         )
 
-    # Sprint 7.7 MR 6: etichetta categorica calcolata server-side via
-    # ``calcola_etichetta_variante``. Carica le festività rilevanti
-    # con UNA sola query batch sul calendario aziendale (FestivitaUfficiale
-    # azienda + nazionali). Range esteso di +1 giorno rispetto a max_date
-    # per riconoscere il prefestivo dell'ultima data del giro
-    # (es. variante con ultima data 24/4/2026 = vigilia di Liberazione 25/4).
+    # Sprint 8.0 entry 205 (MR-1110 sotto-MR 6): etichetta calendariale
+    # parlante stile PDF Trenord, calcolata server-side via
+    # ``genera_etichetta_parlante`` (entry 202, MR-1110 sotto-MR 4).
+    # Sostituisce ``calcola_etichetta_variante`` v1 ("Lavorativo+Festivo
+    # (3 date)") con stringhe v2 tipo "LV 1:5", "F escluso FpF",
+    # "Si eff. 22/3, 12/4". L'etichetta non è persistita nel DB
+    # (decisione architetturale: sempre ricalcolata al request così le
+    # nuove festività ufficiali importate diventano visibili senza
+    # rigenerare i giri).
+    #
+    # Carica le festività rilevanti con UNA sola query batch sul
+    # calendario aziendale (FestivitaUfficiale azienda + nazionali).
+    # Range esteso di +1 giorno rispetto a max_date per riconoscere il
+    # prefestivo dell'ultima data del giro (es. variante con ultima
+    # data 24/4/2026 = vigilia di Liberazione 25/4).
     festivita: frozenset[date] = frozenset()
+    periodo_giro: tuple[date, date] | None = None
     if varianti_orm:
         date_tutte: list[date] = []
         for gv in varianti_orm:
@@ -1095,32 +1108,16 @@ async def get_giro_dettaglio(
                     date_tutte.append(date.fromisoformat(d_str))
         if date_tutte:
             min_date = min(date_tutte)
-            max_date_plus1 = date.fromordinal(max(date_tutte).toordinal() + 1)
+            max_date = max(date_tutte)
+            max_date_plus1 = date.fromordinal(max_date.toordinal() + 1)
             festivita = await carica_festivita_periodo(
                 session, user.azienda_id, min_date, max_date_plus1
             )
-
-    # Sprint 7.8 MR 3: per generare etichette stile Trenord
-    # (`Lv` / `F` / `P escl. 3/3, 4/3` / `Si eff. 3/3, 4/3, 5/3`),
-    # `calcola_etichetta_variante` ha bisogno del periodo per categoria
-    # della GIORNATA-PATTERN. Costruiamo un dizionario per giornata-K
-    # raccogliendo `dates_apply` di tutte le sue varianti, raggruppate
-    # per ``tipo_giorno_categoria``. Le varianti della stessa giornata
-    # hanno date disgiunte per costruzione del clustering A1+A2.
-    from colazione.domain.calendario import tipo_giorno_categoria
-
-    periodo_per_giornata: dict[int, dict[str, frozenset[date]]] = {}
-    for gv in varianti_orm:
-        dates_v: set[date] = set()
-        for d_str in gv.dates_apply_json or []:
-            if isinstance(d_str, str):
-                dates_v.add(date.fromisoformat(d_str))
-        periodo_per_giornata.setdefault(gv.giro_giornata_id, {})
-        for d in dates_v:
-            cat = tipo_giorno_categoria(d, festivita)
-            cat_set = set(periodo_per_giornata[gv.giro_giornata_id].get(cat, frozenset()))
-            cat_set.add(d)
-            periodo_per_giornata[gv.giro_giornata_id][cat] = frozenset(cat_set)
+            # Sprint 8.0 entry 205: il periodo per ``genera_etichetta_parlante``
+            # è il range coperto dalle varianti del giro. La funzione lo
+            # usa per partizionare in 4 categorie (lv_1_5/lv_6/sabato_festivo/
+            # festivo) e calcolare esclusioni vs. pattern esatto.
+            periodo_giro = (min_date, max_date)
 
     # Sprint 7.7 MR 5: blocchi raggruppati per variante.
     blocchi_per_variante: dict[int, list[GiroBloccoRead]] = {}
@@ -1154,9 +1151,15 @@ async def get_giro_dettaglio(
         for d_str in gv.dates_apply_json or []:
             if isinstance(d_str, str):
                 dates_var.append(date.fromisoformat(d_str))
-        etichetta = calcola_etichetta_variante(
-            dates_var, festivita, periodo_per_giornata.get(gv.giro_giornata_id)
-        )
+        # Sprint 8.0 entry 205 (MR-1110 sotto-MR 6): etichetta v2 stile
+        # PDF Trenord. Se il giro non ha date (variante vuota), fallback
+        # alla stringa documentata della funzione.
+        if periodo_giro is not None and dates_var:
+            etichetta = genera_etichetta_parlante(
+                frozenset(dates_var), periodo_giro, festivita
+            )
+        else:
+            etichetta = "(nessuna data)"
         varianti_per_giornata.setdefault(gv.giro_giornata_id, []).append(
             GiroVarianteRead(
                 id=gv.id,

@@ -10,6 +10,87 @@
 
 ---
 
+## 2026-05-06 (205) — MR-1110 sotto-MR 6: etichetta variante v2 nell'API read-side
+
+### Contesto
+
+Dopo il deploy del sotto-MR 9 (entry 204, Gantt nesting + per/km), il
+pianificatore ha osservato etichette poco utili tipo
+``"Lavorativo+Prefestivo (3 date)"`` e ``"Lavorativo+Festivo (3 date)"``.
+Era atteso: l'etichetta visibile veniva calcolata server-side via
+``calcola_etichetta_variante`` v1 (Sprint 7.7 MR 6), categorica
+generica. La funzione v2 ``genera_etichetta_parlante`` (entry 202,
+sotto-MR 4) — output stile PDF Trenord ``"LV 1:5"``,
+``"F escluso FpF ed escl. 22/3, 12/4"``, ``"Si eff. 3/3, 4/3"`` —
+era già nel codebase, testata, ma usata solo dal builder pipeline (e
+non persistita).
+
+Decisione: chiudere il sotto-MR 6 di MR-1110 ora invece di lasciarlo
+parcheggiato — è un cambio low-risk (1 swap di funzione, niente
+migration DB, firme già compatibili).
+
+### Modifiche
+
+**``backend/src/colazione/api/giri.py``** — endpoint ``GET /api/giri/{id}``:
+
+1. Import: aggiunto ``genera_etichetta_parlante`` accanto a
+   ``calcola_etichetta_variante`` (v1 mantenuta per backward compat
+   ma marcata ``# noqa: F401``).
+2. Rimosso il blocco di costruzione di ``periodo_per_giornata`` (dict
+   per categoria) — non serve più alla v2 (la nuova funzione partiziona
+   internamente). Rimosso anche l'import lazy di ``tipo_giorno_categoria``.
+3. Aggiunto ``periodo_giro: tuple[date, date]`` calcolato come ``(min,
+   max)`` delle date di tutte le varianti del giro.
+4. Sostituita la chiamata: invece di
+   ``calcola_etichetta_variante(dates_var, festivita, periodo_per_giornata.get(...))``
+   ora chiama ``genera_etichetta_parlante(frozenset(dates_var), periodo_giro, festivita)``.
+   Fallback ``"(nessuna data)"`` se la variante è vuota (caso edge).
+
+### Conseguenze visibili
+
+L'utente ora vede etichette v2 nel Gantt giro materiale:
+
+- ``"LV 1:5"`` (lunedì-venerdì 1°-5° giornata, pattern esatto)
+- ``"LV 6"`` (lunedì-venerdì 6° giornata)
+- ``"F"`` (tutti i festivi)
+- ``"F escluso FpF"`` (festivi tranne festivi-precedenti-festivo)
+- ``"LV 1:5 escl. 22/3, 12/4"`` (con esclusioni inline ≤ MAX_INLINE)
+- ``"F escluso FpF ed escl. 22/3, 12/4"`` (festivi meno FpF meno date)
+- ``"Si eff. 3/3, 4/3"`` (poche date elencate)
+- ``"Dal 3/3 al 5/3"`` (finestra continua)
+- ``"Solo 27/4/26"`` (singola data)
+- ``"Misto: ..."`` (fallback)
+
+Nessuna modifica al frontend Gantt (entry 204) — l'etichetta arriva
+già come stringa pronta dall'API, tooltip mostra la stringa intera.
+
+### Verifiche
+
+- ✅ ``mypy --strict src/colazione/api/giri.py`` clean.
+- ✅ ``ruff check src/colazione/api/giri.py`` clean.
+- ✅ ``pytest tests/test_genera_giri_api.py tests/test_etichetta_parlante.py
+  tests/test_etichetta.py`` → 63 passed (test ``test_get_giro_dettaglio``
+  con ``assert == "Solo 27/4/26"`` passa: v2 produce la stessa
+  stringa per N=1).
+- ⏳ pytest full in corso al momento del commit.
+
+### Stato
+
+- ✅ Sotto-MR 6 chiuso: l'API read-side serve etichette v2 stile PDF
+  Trenord. Decisione architetturale documentata: l'etichetta non è
+  persistita nel DB, sempre ricalcolata al request — così le nuove
+  festività ufficiali importate diventano visibili senza rigenerare
+  i giri.
+- ⏳ Commit + push + deploy backend Railway.
+
+### Sotto-MR rimanenti di MR-1110
+
+- **Sotto-MR 7**: deprecazione MR 12 (vecchio path).
+- **Sotto-MR 8**: integration test PdE 2026 reale.
+- **Sotto-MR 10**: backward compat ``builder_version``.
+
+---
+
 ## 2026-05-06 (204) — MR-1110 sotto-MR 9: UI Gantt varianti calendariali (Step A + Step B)
 
 ### Contesto
