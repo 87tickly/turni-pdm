@@ -10,6 +10,100 @@
 
 ---
 
+## 2026-05-06 (190) — Apertura MR-1110: design "turno = giornate-tipo concatenate + varianti calendariali ricche"
+
+### Contesto
+
+L'utente ha visto in produzione il giro 271 (Pianificatore Giro,
+programma Mortara, 7 giornate G1-G7 con etichette `Lv/Lv/Lv/Lv/Lv/P/F`
+mappate 1:1 sui giorni della settimana di partenza) e ha sollevato un
+dubbio sostanziale: *"la giornata 1 può girare tutti i giorni della
+settimana no? Oppure è una logica che io non capisco."*
+
+Diagnosi della sessione (regola 1 METODO-DI-LAVORO):
+
+1. Letto `multi_giornata.py` — il builder costruisce giri-tentativo
+   prendendo "giornate consecutive di calendario" partendo da una
+   data: G1=X, G2=X+1, …, GN=X+N-1. Il numero della giornata diventa
+   coincidente con il giorno della settimana di partenza.
+2. Letto `fusione_cluster_a1.py` MR 12 — la fusione Jaccard 0.7
+   assorbe le micro-varianti calendariali nel cluster principale,
+   distruggendo proprio l'informazione che l'utente vuole tenere
+   ("G1 variazione festiva", "G1 solo 25/12", ecc.).
+3. Letto `aggregazione_a2.py` — schema dati e aggregazione per chiave
+   `(materiale, sede, n_giornate)` supportano già "N giornate × M
+   varianti", ma la pipeline a monte non popola M > 1 nei casi
+   reali.
+4. Letto `data/turni_materiale_2026_dump.json` (54 turni Trenord 2026):
+   range giornate 1-17, sempre `n_giornate = n_pezzi/componente` →
+   conferma il modello "N giornate-tipo concatenate ↔ N convogli
+   paralleli sfasati".
+5. L'utente ha condiviso uno screenshot del PDF Trenord (turno 1110
+   pagina G6) come **riferimento concettuale**: 1 giornata-tipo G6
+   con 6 varianti calendariali ricche (`LV 1:5`, `F escluso FpF ed
+   escl. ...`, `LV 6`, `Circola Sabato Festivo`, `Si eff. 22/3,
+   12/4`, `Si eff. 1/5 e 2/6`).
+
+Decisione utente esplicita: *"NOI non dobbiamo estrarre niente,
+dobbiamo inventarlo noi il metodo, sulla base di e come esempio di
+ciò che avviene oggi tutto qui. Lo screen è un esempio."* + *"E
+poi si concatenano l'una con l'altra. Se no si usano troppi
+materiali."*
+
+Il manifesto greenfield (CLAUDE.md regola 6) ne è coerente: PDF
+Trenord = riferimento concettuale, non fonte da parsare.
+
+### Modifiche
+
+- **`docs/MR-1110-DESIGN.md`** (nuovo, ~530 righe): specifica
+  formale del nuovo modello "turno = N giornate-tipo concatenate
+  ciclicamente + M varianti calendariali per giornata-tipo".
+  Sezioni:
+  - §1 Premessa (cosa fa oggi, perché non basta più, numeri reali
+    Trenord).
+  - §2 Definizioni formali (giornata-tipo, variante calendariale,
+    concatenazione ciclica, turno materiale).
+  - §3 Confronto con builder attuale (cosa rimane / riscritto /
+    nuovo).
+  - §4 Algoritmo proposto a 5 step + deprecazione MR 12 Jaccard.
+  - §5 Etichette parlanti stile PDF Trenord (`LV 1:5`, `F escluso
+    FpF`, `Si eff. ...`, `Circola Sabato Festivo`).
+  - §6 Esempi acceptance: turno 1110/G6 (canonico, 6 varianti),
+    1104 (N=1 stagionale), 1125 (N=17 lungo).
+  - §7 Impatti UI Gantt (nesting varianti, etichette parlanti,
+    indicatore ciclo).
+  - §8 Decisioni aperte D1-D8 (chiave fase, cicli non-hamiltoniani,
+    soglia significatività, FpF, periodo di riferimento, vuoti
+    notturni di concatenazione, backward compat, fixture test).
+  - §9 Piano sotto-MR 0-10, stima ~30-50h.
+  - §10 Tracciabilità decisioni utente.
+
+- **Questa entry TN-UPDATE**.
+
+### Verifiche
+
+- Solo file `.md` toccati, niente migration/codice/test.
+- Documento di specifica, niente da buildare/eseguire.
+
+### Stato
+
+- ✅ Step 0 completato (questo documento + entry).
+- ⏳ Commit + push (solo `.md`, niente deploy Railway).
+- ⏸️ Step 1: risoluzione decisioni D1-D8 in chat con utente prima
+  di toccare codice.
+
+### Prossimo step
+
+In chat con l'utente: leggere il `MR-1110-DESIGN.md` insieme,
+risolvere le 8 decisioni aperte (§8 del documento), e SOLO DOPO
+aprire il sotto-MR 2 (`giornata_tipo.py`).
+
+Niente codice scritto su `domain/builder_giro/` finché le decisioni
+non sono chiuse — questo MR ridisegna il significato di "turno" nel
+builder, sbagliarsi ora costa giorni di rework.
+
+---
+
 ## 2026-05-06 (189) — Sub-MR 5.bis-impact frontend: alert nel dialog Carica variazione
 
 ### Contesto
