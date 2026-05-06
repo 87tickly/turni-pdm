@@ -10,6 +10,76 @@
 
 ---
 
+## 2026-05-06 (189) — Sub-MR 5.bis-impact frontend: alert nel dialog Carica variazione
+
+### Contesto
+
+Frontend dell'entry 188: il dialog "Carica variazione" mostra un
+alert post-success se la variazione applicata impatta giri/turni di
+programmi materiali esistenti. Senza alert, l'utente clicca chiudi
+inconsapevole.
+
+### Modifiche
+
+**`frontend/src/lib/api/pde.ts`**:
+
+- Nuovo tipo TS ``ProgrammaImpatto`` (mappa ``ProgrammaImpattoRead``
+  Pydantic).
+- ``ApplicaVariazioneResponse`` esteso con
+  ``programmi_impattati?: ProgrammaImpatto[]`` (opzionale per
+  retrocompat con backend pre-188).
+
+**`frontend/src/routes/pianificatore-giro/PdEAnnualeRoute.tsx`**:
+
+- ``CaricaVariazioneDialog``: nuovo state ``successImpatti``
+  popolato dopo ``applicaMutation.mutateAsync``.
+- Render condizionale ``<ProgrammiImpattatiAlert impatti={...}/>``
+  sotto la card di success.
+- Nuovo componente ``ProgrammiImpattatiAlert``:
+  - Severity tone: rosso (destructive) se ci sono assegnazioni PdC
+    impattate (lavoro Gestione Personale a rischio); amber se solo
+    giri/turni; nessun alert se ``impatti.length === 0``.
+  - Mostra totali aggregati (giri, turni, assegnazioni) +
+    breakdown per programma con nome + range validità + counter.
+  - Disclaimer sul prossimo MR: "La gestione (rigenerazione o
+    creazione di un programma di variazione) sarà disponibile nel
+    prossimo MR."
+
+### Decisioni di scope rinviate
+
+- **Badge timeline ``VariazioneItem``**: oggi il backend ``GET
+  /variazioni`` non porta i counter di impatto sulle righe del run.
+  Il badge nella timeline richiederebbe un endpoint separato
+  ``GET /variazioni/{run_id}/impatto`` o un campo aggregato sul run.
+  Naturalmente da fare nel sub-MR 5.bis-fork (entry successiva)
+  dove l'impatto sarà salvato come metadata sul run per supportare
+  il bottone "Crea programma di variazione".
+- **Drilldown programma impattato**: oggi solo nome + counter.
+  Cliccare sul programma per vederne i giri/turni impattati arriva
+  nel sub-MR fork.
+
+### Verifiche
+
+- ✅ ``pnpm tsc -b --noEmit``: clean.
+- ✅ Preview manuale: rinviato a deploy production (variazione
+  reale richiesta per testarlo end-to-end; il backend di produzione
+  ha già il deploy 188 attivo).
+
+### Stato
+
+- ✅ Codice 5.bis-impact frontend pronto: 1 tipo + 1 componente +
+  1 modifica al dialog success.
+- ⏳ Commit + push + deploy frontend Railway.
+
+### Prossimo step
+
+Sub-MR 5.bis-fork (entry 190+): migration ``programma_genitore_id``,
+endpoint creazione programma di variazione, UI bottone "Crea
+programma figlio" sull'alert dell'entry 188-189, convenzione "merge
+per data" lato consumer (vista PdC finale, builder).
+
+---
+
 ## 2026-05-06 (188) — Sub-MR 5.bis-impact: detection programmi impattati da variazioni
 
 ### Contesto

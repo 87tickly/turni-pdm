@@ -66,6 +66,16 @@ export interface RegistraVariazionePayload {
   note?: string | null;
 }
 
+export interface ProgrammaImpatto {
+  programma_id: number;
+  nome: string;
+  valido_da: string;
+  valido_a: string | null;
+  n_giri_impattati: number;
+  n_turni_pdc_impattati: number;
+  n_assegnazioni_impattate: number;
+}
+
 export interface ApplicaVariazioneResponse {
   run_id: number;
   tipo: string;
@@ -75,6 +85,10 @@ export interface ApplicaVariazioneResponse {
   n_warnings: number;
   warnings: string[];
   completed_at: string;
+  /** Sub-MR 5.bis-impact (entry 188): programmi con giri/turni che
+   * referenziano corse impattate dalla variazione. Lista vuota = niente
+   * impatto (caso comune per INTEGRAZIONE pura). */
+  programmi_impattati?: ProgrammaImpatto[];
 }
 
 // =====================================================================

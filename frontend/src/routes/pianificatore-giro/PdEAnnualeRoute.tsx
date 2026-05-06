@@ -50,6 +50,7 @@ import { ApiError } from "@/lib/api/client";
 import type {
   CorsaImportRun,
   PdEStatus,
+  ProgrammaImpatto,
   TipoVariazione,
 } from "@/lib/api/pde";
 
@@ -570,6 +571,7 @@ function CaricaVariazioneDialog({
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [successImpatti, setSuccessImpatti] = useState<ProgrammaImpatto[]>([]);
 
   const registraMutation = useRegistraVariazione();
   const applicaMutation = useApplicaVariazione();
@@ -580,6 +582,7 @@ function CaricaVariazioneDialog({
     setNote("");
     setError(null);
     setSuccess(null);
+    setSuccessImpatti([]);
   }
 
   function handleClose(next: boolean) {
@@ -596,6 +599,7 @@ function CaricaVariazioneDialog({
     e.preventDefault();
     setError(null);
     setSuccess(null);
+    setSuccessImpatti([]);
     if (file === null) {
       setError("Seleziona un file di variazione (.numbers o .xlsx)");
       return;
@@ -627,6 +631,7 @@ function CaricaVariazioneDialog({
         `Variazione applicata: ${summary}. ` +
           `${res.n_corse_lette_da_file} corse lette dal file.`,
       );
+      setSuccessImpatti(res.programmi_impattati ?? []);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -724,6 +729,9 @@ function CaricaVariazioneDialog({
               <span>{success}</span>
             </div>
           )}
+          {successImpatti.length > 0 && (
+            <ProgrammiImpattatiAlert impatti={successImpatti} />
+          )}
 
           <DialogFooter>
             <Button
@@ -809,4 +817,66 @@ function formatDateIt(iso: string): string {
     month: "short",
     year: "numeric",
   });
+}
+
+// =====================================================================
+// Alert programmi impattati (sub-MR 5.bis-impact, entry 188)
+// =====================================================================
+
+function ProgrammiImpattatiAlert({ impatti }: { impatti: ProgrammaImpatto[] }) {
+  const totGiri = impatti.reduce((s, p) => s + p.n_giri_impattati, 0);
+  const totTurni = impatti.reduce((s, p) => s + p.n_turni_pdc_impattati, 0);
+  const totAssegn = impatti.reduce(
+    (s, p) => s + p.n_assegnazioni_impattate,
+    0,
+  );
+  // Severity: rosso se ci sono assegnazioni (lavoro Gestione Personale
+  // perduto), amber se solo giri/turni, niente alert se tutto a 0.
+  const severo = totAssegn > 0;
+  const colorClass = severo
+    ? "border-destructive/40 bg-destructive/[0.04] text-destructive"
+    : "border-amber-300 bg-amber-50 text-amber-900";
+
+  return (
+    <div className={`rounded-md border p-3 text-sm ${colorClass}`}>
+      <div className="flex items-start gap-2">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+        <div className="flex-1">
+          <div className="font-semibold">
+            Attenzione: {impatti.length}{" "}
+            {impatti.length === 1 ? "programma impattato" : "programmi impattati"}
+          </div>
+          <div className="mt-0.5 text-xs">
+            Totale: <strong>{totGiri}</strong> giri ·{" "}
+            <strong>{totTurni}</strong> turni PdC
+            {totAssegn > 0 && (
+              <>
+                {" "}· <strong>{totAssegn}</strong> assegnazioni PdC
+              </>
+            )}
+          </div>
+          <ul className="mt-2 flex flex-col gap-1">
+            {impatti.map((p) => (
+              <li key={p.programma_id} className="text-xs">
+                <span className="font-medium">{p.nome}</span>{" "}
+                <span className="font-mono opacity-70">
+                  ({formatDateIt(p.valido_da)}
+                  {p.valido_a !== null && ` → ${formatDateIt(p.valido_a)}`})
+                </span>
+                : {p.n_giri_impattati} giri · {p.n_turni_pdc_impattati} turni
+                {p.n_assegnazioni_impattate > 0 && (
+                  <> · {p.n_assegnazioni_impattate} assegnazioni</>
+                )}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 text-xs italic opacity-80">
+            I giri e turni esistenti referenziano corse modificate. La gestione
+            (rigenerazione o creazione di un programma di variazione) sarà
+            disponibile nel prossimo MR.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
