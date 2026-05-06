@@ -42,6 +42,10 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from colazione.api.variazioni_impatto import (
+    calcola_impatto_su_programmi,
+    estrai_corse_ids_da_risultato_pianificazione,
+)
 from colazione.auth import require_admin, require_any_role, require_role
 from colazione.db import get_session
 from colazione.domain.calendario import festivita_italiane, tipo_giorno
@@ -326,6 +330,7 @@ async def create_programma(
         fascia_oraria_tolerance_min=payload.fascia_oraria_tolerance_min,
         strict_options_json=payload.strict_options_json.model_dump(),
         stazioni_sosta_extra_json=payload.stazioni_sosta_extra_json,
+        materiali_disponibili_codici_json=payload.materiali_disponibili_codici_json,
         created_by_user_id=user.user_id,
     )
     session.add(programma)
@@ -1924,6 +1929,16 @@ async def applica_variazione_pde(
     await session.commit()
     await session.refresh(run)
 
+    # Detection impatto su programmi esistenti (sub-MR 5.bis-impact,
+    # entry 179). Calcolato post-commit: lo stato delle corse riflette
+    # le mutazioni applicate, ma le FK su giro_blocco / turno_pdc_blocco
+    # restano valide (le corse impattate hanno solo cambiato campi /
+    # is_cancellata, non sono state hard-deletate).
+    corse_coinvolte = estrai_corse_ids_da_risultato_pianificazione(risultato)
+    impatti = await calcola_impatto_su_programmi(
+        session, corse_ids=corse_coinvolte, azienda_id=user.azienda_id
+    )
+
     completed_at = run.completed_at or datetime.now(UTC)
     return ApplicaVariazionePdEResponse(
         run_id=run.id,
@@ -1934,6 +1949,7 @@ async def applica_variazione_pde(
         n_warnings=len(risultato.warnings),
         warnings=risultato.warnings,
         completed_at=completed_at,
+        programmi_impattati=impatti,
     )
 
 
@@ -2264,6 +2280,25 @@ async def apply_variazione_pde(
     await session.commit()
     await session.refresh(run)
 
+    # Detection impatto su programmi esistenti (sub-MR 5.bis-impact,
+    # entry 179). Estraggo corse_ids dalle operazioni valide non-noop
+    # del RisultatoValidazione core. InsertCorsa skip (no corsa_id —
+    # nuova corsa, niente blocchi preesistenti la referenziano).
+    corse_coinvolte_apply: set[int] = set()
+    for normalizzata in risultato.operazioni_valide:
+        if normalizzata.is_no_op:
+            continue
+        op_dom = normalizzata.operazione
+        if isinstance(
+            op_dom, (UpdateOrario, RimuoviDateValidita, CancellaCorsa)
+        ):
+            corse_coinvolte_apply.add(op_dom.corsa_id)
+    impatti_apply = await calcola_impatto_su_programmi(
+        session,
+        corse_ids=corse_coinvolte_apply,
+        azienda_id=user.azienda_id,
+    )
+
     return ApplyVariazioneResponse(
         run_id=run.id,
         completed_at=run.completed_at,
@@ -2283,4 +2318,5 @@ async def apply_variazione_pde(
             )
             for e in risultato.errori
         ],
+        programmi_impattati=impatti_apply,
     )

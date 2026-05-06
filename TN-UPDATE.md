@@ -10,6 +10,132 @@
 
 ---
 
+## 2026-05-06 (180) — MR α: pannello "Materiali in flotta" sostituisce strict options
+
+### Contesto
+
+Apertura del refactor UX del Pianificatore Giro Materiale richiesto
+dall'utente nella sessione 2026-05-06. L'utente ha enumerato 7 issue
+sui 5 screen della creazione giro materiale e ha approvato il piano in
+7 MR (α…η). Questa entry chiude **MR α**: la sezione "Configurazione"
+del programma non mostra più le 6 chip ``strict_options`` (cripto-
+tecniche e poco utili) ma l'elenco dei materiali della dotazione
+azienda con i pezzi disponibili. Il `CreaProgrammaDialog` guadagna un
+multi-select dove il pianificatore dichiara il subset di MaterialeTipo
+ammissibili nel programma.
+
+Decisione utente:
+
+> "Lì dobbiamo inserire tutti i materiali che abbiamo a disposizione e
+> quando creo un giro lui scala dalla disponibilità."
+
+### Modifiche backend
+
+**`backend/alembic/versions/0035_programma_materiali_disponibili.py`**
+(nuovo, migration 0035): aggiunge colonna
+``programma_materiale.materiali_disponibili_codici_json`` (JSONB
+list[str], NOT NULL, default ``[]``). Semantica: `[]` = tutti i
+materiali della dotazione azienda (retrocompat); lista non vuota =
+subset esplicito dichiarato dal pianificatore.
+
+**`backend/src/colazione/models/programmi.py`**: aggiunto attributo
+``materiali_disponibili_codici_json`` a ``ProgrammaMateriale``.
+
+**`backend/src/colazione/schemas/programmi.py`**: 3 modifiche:
+
+- ``ProgrammaMaterialeRead``: nuovo campo
+  ``materiali_disponibili_codici_json: list[str]``.
+- ``ProgrammaMaterialeCreate``: nuovo campo con
+  ``Field(default_factory=list)``.
+- ``ProgrammaMaterialeUpdate``: nuovo campo
+  ``materiali_disponibili_codici_json: list[str] | None`` per supporto
+  PATCH (futuro MR ζ).
+
+**`backend/src/colazione/api/programmi.py`**: ``create_programma``
+passa il nuovo campo al constructor del modello. ``update_programma``
+non serve modifica perché usa ``setattr`` generico su tutti i campi
+del payload via ``model_dump(exclude_unset=True)``.
+
+**`strict_options_json`** resta nel DB come legacy (default ``{}``),
+sparisce solo dalla UI. I programmi esistenti continuano a funzionare.
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/programmi.ts`**: aggiunto campo a ``Programma
+MaterialeRead``, ``ProgrammaMaterialeCreate``, ``ProgrammaMateriale
+Update`` (string[]).
+
+**`frontend/src/hooks/useAnagrafiche.ts`**: ``useMateriali`` accetta
+ora ``options.enabled`` opzionale (default true) per supportare lazy
+loading nei dialog.
+
+**`frontend/src/routes/pianificatore-giro/CreaProgrammaDialog.tsx`**
+(rewrite parziale): nuovo pannello "Materiali a disposizione" con
+checkbox multi-select per ogni MaterialeTipo macro raggruppato per
+famiglia. Al submit: se l'utente ha lasciato tutti i materiali
+selezionati invia ``[]`` al backend (retrocompat); se ha deselezionato
+qualcosa invia la lista esplicita dei codici. ``useMateriali()``
+chiamato in modalità lazy (``enabled: open``) per non far partire
+fetch inutili dalla lista programmi. Filtro robusto a data malformati
+(``Array.isArray`` + null check) per non far crashare i dialog quando
+il mock di test ritorna shape inattesa.
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.tsx`**:
+``ConfigurazioneSection`` non mostra più le 6 chip strict options.
+Sostituite dal nuovo componente locale ``MaterialiFlottaPanel`` che
+mostra:
+
+- "tutti · N" se ``materiali_disponibili_codici_json === []`` (caso
+  retrocompat).
+- "M di N ammessi" altrimenti, con i chip di ogni materiale del subset
+  + dotazione (``× N`` o ``× ∞``).
+
+Rimosso il componente orfano ``StrictChip`` e la costante
+``STRICT_OPTION_KEYS``. Tooltip "Modifica configurazione" aggiornato a
+"MR ζ" come puntatore al prossimo MR.
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaDettaglioRoute.test.tsx`**
++ ``ProgrammiRoute.test.tsx``: aggiunto ``materiali_disponibili_codici
+_json: []`` ai mock per type-coerenza.
+
+### Verifiche
+
+- ✅ ``alembic upgrade head`` applicato al DB locale (0034 → 0035).
+- ✅ ``pnpm tsc -b --noEmit`` clean.
+- ✅ ``pnpm vitest run src/routes/pianificatore-giro``: 11 passed,
+  1 skipped.
+- ✅ Backend pytest su ``test_anagrafiche_api``,
+  ``test_aggregazione_a2``, ``test_builder_giri``,
+  ``test_api_programmi_conferma``: 93 passed, 1 skipped, 1 fallimento
+  order-dependent preesistente (passa in isolamento).
+
+### Stato
+
+- ✅ MR α frontend + backend completo.
+- ⏳ Commit + push + Railway deploy.
+- ➡️ MR β: wizard pre-generazione (sede + materiale per regola al
+  momento del "Genera giri").
+
+### Prossimo step
+
+MR β. Il `GeneraGiriDialog` oggi richiede un solo `localita_codice`
+e gira il builder per quella sede. La spec utente chiede invece:
+
+> "Quando schiaccio su genera giri, lui prima di farlo, mi apre una
+> pagina con tutte le linee che io ho deciso di voler generare, lì
+> assegno i materiali e il deposito e successivamente genero il giro."
+
+Quindi il dialog diventa multi-step:
+1. Lista delle regole del programma con materiale "ipotesi" + sede
+   pre-popolati dalla regola stessa (decisione utente: la regola
+   ricorda materiale + deposito, modificabile per quel run).
+2. Conferma → builder gira per ogni regola con la sua sede.
+
+Richiede cambio schema ``ProgrammaRegolaAssegnazione``
+(``localita_codice: str | None``) + migration + UI multi-step.
+
+---
+
 ## 2026-05-06 (178) — Sub-MR 5.bis-d frontend: pagina "PdE Annuale" + voce menu
 
 ### Contesto

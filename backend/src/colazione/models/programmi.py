@@ -113,6 +113,15 @@ class ProgrammaMateriale(Base):
         JSONB, default=list, server_default="[]"
     )
 
+    # MR α (migration 0035): subset di MaterialeTipo dichiarato dal
+    # pianificatore come "a disposizione del programma". `[]` = tutti i
+    # materiali della dotazione azienda (default, retrocompat). Lista non
+    # vuota = subset esplicito. Sostituisce visivamente i 6 chip
+    # strict_options nella dashboard ProgrammaDettaglio.
+    materiali_disponibili_codici_json: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default="[]"
+    )
+
     # Tracking
     created_by_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("app_user.id"))
     created_by: Mapped["AppUser | None"] = relationship(foreign_keys=[created_by_user_id])

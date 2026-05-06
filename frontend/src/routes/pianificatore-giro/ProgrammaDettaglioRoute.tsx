@@ -31,12 +31,12 @@ import {
   useSbloccaProgramma,
 } from "@/hooks/useProgrammi";
 import { ApiError } from "@/lib/api/client";
+import type { MaterialeRead } from "@/lib/api/anagrafiche";
 import type { GiroListItem } from "@/lib/api/giri";
 import {
   materialeFreezato,
   type ProgrammaDettaglioRead,
   type StatoPipelinePdc,
-  type StrictOptions,
 } from "@/lib/api/programmi";
 import { AuthContext } from "@/lib/auth/AuthContext";
 import { formatDateIt, formatPeriodo } from "@/lib/format";
@@ -45,14 +45,10 @@ import { RegoleInvioSostaSection } from "@/routes/pianificatore-giro/RegoleInvio
 import { RegolaCard } from "@/routes/pianificatore-giro/regola/RegolaCard";
 import { RegolaEditor } from "@/routes/pianificatore-giro/regola/RegolaEditor";
 
-const STRICT_OPTION_KEYS: ReadonlyArray<keyof StrictOptions> = [
-  "no_corse_residue",
-  "no_overcapacity",
-  "no_aggancio_non_validato",
-  "no_orphan_blocks",
-  "no_giro_appeso",
-  "no_km_eccesso",
-];
+// MR α (2026-05-06): le 6 strict options sono state rimosse dalla UI
+// (il campo `strict_options_json` resta nel DB come legacy, default `{}`).
+// Al loro posto la `ConfigurazioneSection` mostra il nuovo pannello
+// "Materiali in flotta" — vedi sotto.
 
 // Sprint 8.0 MR 1 (entry 165): label + tone per il banner pipeline.
 const PIPELINE_PDC_LABEL: Record<StatoPipelinePdc, string> = {
@@ -547,8 +543,6 @@ function ConfigurazioneSection({
   programma: ProgrammaDettaglioRead;
   editable: boolean;
 }) {
-  const strict = programma.strict_options_json;
-  const strictActive = STRICT_OPTION_KEYS.filter((k) => strict[k] === true).length;
   const sosta = programma.stazioni_sosta_extra_json;
 
   return (
@@ -563,7 +557,7 @@ function ConfigurazioneSection({
           disabled
           title={
             editable
-              ? "Modifica configurazione: dialog non ancora disponibile (TN-UPDATE residuo)"
+              ? "Modifica configurazione: dialog non ancora disponibile (MR ζ)"
               : "Programma archiviato: configurazione read-only"
           }
         >
@@ -606,18 +600,13 @@ function ConfigurazioneSection({
           />
         </div>
 
-        {/* Dx — strict options + stazioni sosta */}
+        {/* Dx — Materiali in flotta (MR α) + stazioni sosta */}
         <div>
-          <div className="mb-3 text-xs uppercase tracking-wide text-muted-foreground">
-            Strict options · {strictActive} di {STRICT_OPTION_KEYS.length} attive
-          </div>
-          <div className="mb-6 flex flex-wrap gap-2">
-            {STRICT_OPTION_KEYS.map((k) => (
-              <StrictChip key={k} name={k} active={strict[k] === true} />
-            ))}
-          </div>
+          <MaterialiFlottaPanel
+            codiciAmmessi={programma.materiali_disponibili_codici_json}
+          />
 
-          <div className="mb-3 text-xs uppercase tracking-wide text-muted-foreground">
+          <div className="mt-6 mb-3 text-xs uppercase tracking-wide text-muted-foreground">
             Stazioni sosta extra · {sosta.length}
           </div>
           {sosta.length === 0 ? (
@@ -637,6 +626,78 @@ function ConfigurazioneSection({
         </div>
       </div>
     </Card>
+  );
+}
+
+/**
+ * MR α (2026-05-06): pannello "Materiali in flotta" che sostituisce le
+ * 6 chip strict options nella sezione Configurazione.
+ *
+ * Mostra:
+ * - Se `codiciAmmessi` è `[]` (default retrocompat) → tutta la dotazione
+ *   azienda con etichetta "TUTTI".
+ * - Se `codiciAmmessi` non è vuoto → solo i materiali del subset, con
+ *   contatore "N di M ammessi".
+ *
+ * Ogni chip mostra `CODICE × DOTAZIONE` (o `× ∞` se capacity illimitata).
+ * Read-only: l'edit avviene in `CreaProgrammaDialog` per ora; la
+ * modifica post-creazione arriva con MR ζ (Modifica configurazione).
+ */
+function MaterialiFlottaPanel({ codiciAmmessi }: { codiciAmmessi: string[] }) {
+  const materialiQuery = useMateriali();
+  const macro = (materialiQuery.data ?? []).filter(
+    (m) => m.famiglia != null && m.famiglia.length > 0,
+  );
+  const tutti = codiciAmmessi.length === 0;
+  const ammessi: MaterialeRead[] = tutti
+    ? macro
+    : macro.filter((m) => codiciAmmessi.includes(m.codice));
+
+  return (
+    <>
+      <div className="mb-3 flex items-baseline gap-2">
+        <span className="text-xs uppercase tracking-wide text-muted-foreground">
+          Materiali in flotta
+        </span>
+        <span className="text-[11px] text-muted-foreground">
+          {tutti
+            ? `tutti · ${macro.length}`
+            : `${ammessi.length} di ${macro.length} ammessi`}
+        </span>
+      </div>
+      {materialiQuery.isLoading ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Spinner className="h-3.5 w-3.5" /> caricamento…
+        </div>
+      ) : ammessi.length === 0 ? (
+        <p className="text-xs italic text-muted-foreground">
+          Nessun materiale ammesso. Modifica la configurazione per abilitarne almeno uno.
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {ammessi.map((m) => {
+            const dot = m.pezzi_disponibili;
+            return (
+              <span
+                key={m.codice}
+                title={
+                  m.nome_commerciale !== null && m.nome_commerciale !== ""
+                    ? `${m.nome_commerciale} · ${m.famiglia ?? ""}`
+                    : (m.famiglia ?? "")
+                }
+                className="inline-flex items-center gap-1 rounded border border-border bg-muted px-2 py-0.5 font-mono text-xs text-foreground"
+              >
+                <span>{m.codice}</span>
+                <span className="opacity-50">×</span>
+                <span className="font-semibold tabular-nums">
+                  {dot === null ? "∞" : dot.toLocaleString("it-IT")}
+                </span>
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -669,19 +730,7 @@ function ScalarRow({
   );
 }
 
-function StrictChip({ name, active }: { name: string; active: boolean }) {
-  return (
-    <span
-      className={
-        active
-          ? "inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs text-emerald-800"
-          : "inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-xs text-muted-foreground"
-      }
-    >
-      <span aria-hidden>{active ? "✓" : "—"}</span> {name}
-    </span>
-  );
-}
+// MR α: rimosso `StrictChip` (orfano dopo sostituzione con MaterialiFlottaPanel).
 
 // =====================================================================
 // 2.5 · Convogli necessari (Sprint 7.8 MR 5)

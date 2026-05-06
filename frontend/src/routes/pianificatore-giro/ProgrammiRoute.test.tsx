@@ -31,6 +31,7 @@ function makeProgramma(over: Partial<ProgrammaMaterialeRead> = {}): ProgrammaMat
       no_km_eccesso: false,
     },
     stazioni_sosta_extra_json: [],
+    materiali_disponibili_codici_json: [],
     created_by_user_id: 1,
     created_by_username: "admin",
     created_at: "2026-04-25T10:00:00Z",

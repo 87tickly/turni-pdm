@@ -97,6 +97,13 @@ export interface ProgrammaMaterialeRead {
   fascia_oraria_tolerance_min: number;
   strict_options_json: StrictOptions;
   stazioni_sosta_extra_json: string[];
+  /**
+   * MR α (migration 0035): subset di codici MaterialeTipo "a disposizione"
+   * del programma. `[]` (default) = tutti i materiali della dotazione
+   * azienda. Lista non vuota = subset esplicito dichiarato in fase di
+   * creazione programma.
+   */
+  materiali_disponibili_codici_json: string[];
   created_by_user_id: number | null;
   /** Backend entry 88: popolato via JOIN con `app_user`, `null` se utente eliminato. */
   created_by_username: string | null;
@@ -158,6 +165,8 @@ export interface ProgrammaMaterialeCreate {
   fascia_oraria_tolerance_min?: number;
   strict_options_json?: Partial<StrictOptions>;
   stazioni_sosta_extra_json?: string[];
+  /** MR α: subset codici materiale "a disposizione". `[]` = tutti. */
+  materiali_disponibili_codici_json?: string[];
   regole?: ProgrammaRegolaAssegnazioneCreate[];
 }
 
@@ -175,6 +184,8 @@ export interface ProgrammaMaterialeUpdate {
   fascia_oraria_tolerance_min?: number;
   strict_options_json?: Partial<StrictOptions>;
   stazioni_sosta_extra_json?: string[];
+  /** MR α: aggiornamento subset codici materiale. */
+  materiali_disponibili_codici_json?: string[];
 }
 
 export interface ListProgrammiParams {

@@ -47,11 +47,14 @@ export function useStazioni(): UseQueryResult<StazioneRead[]> {
   });
 }
 
-export function useMateriali(): UseQueryResult<MaterialeRead[]> {
+export function useMateriali(
+  options: { enabled?: boolean } = {},
+): UseQueryResult<MaterialeRead[]> {
   return useQuery({
     queryKey: ["anagrafiche", "materiali"],
     queryFn: listMateriali,
     staleTime: FIVE_MIN,
+    enabled: options.enabled ?? true,
   });
 }
 

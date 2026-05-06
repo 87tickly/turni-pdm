@@ -263,6 +263,9 @@ class ProgrammaMaterialeRead(BaseModel):
     fascia_oraria_tolerance_min: int
     strict_options_json: dict[str, Any]
     stazioni_sosta_extra_json: list[str] = Field(default_factory=list)
+    # MR α (migration 0035): subset di codici MaterialeTipo "a disposizione"
+    # del programma. `[]` = tutti i materiali della dotazione azienda.
+    materiali_disponibili_codici_json: list[str] = Field(default_factory=list)
     created_by_user_id: int | None = None
     # Sprint dashboard 1° ruolo (entry 88): popolato via JOIN con `app_user`
     # quando la query usa `joinedload(ProgrammaMateriale.created_by)`.
@@ -324,6 +327,9 @@ class ProgrammaMaterialeCreate(BaseModel):
     fascia_oraria_tolerance_min: int = Field(default=30, ge=0, le=120)
     strict_options_json: StrictOptions = Field(default_factory=StrictOptions)
     stazioni_sosta_extra_json: list[str] = Field(default_factory=list)
+    # MR α: subset di codici MaterialeTipo dichiarato dal pianificatore.
+    # `[]` (default) = tutti i materiali della dotazione azienda.
+    materiali_disponibili_codici_json: list[str] = Field(default_factory=list)
     regole: list[ProgrammaRegolaAssegnazioneCreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -356,6 +362,8 @@ class ProgrammaMaterialeUpdate(BaseModel):
     fascia_oraria_tolerance_min: int | None = Field(default=None, ge=0, le=120)
     strict_options_json: StrictOptions | None = None
     stazioni_sosta_extra_json: list[str] | None = None
+    # MR α: aggiornamento subset codici materiale disponibili.
+    materiali_disponibili_codici_json: list[str] | None = None
 
 
 # =====================================================================
@@ -400,6 +408,10 @@ class ApplicaVariazionePdEResponse(BaseModel):
     - ``warnings``: lista di problemi non bloccanti (es. corse target
       non trovate, match ambigui). Persistite anche in ``run.note``
       per audit trail.
+    - ``programmi_impattati``: sub-MR 5.bis-impact (entry 179) — list
+      dei programmi materiali che hanno giri/turni PdC che referenziano
+      le corse coinvolte. Permette UI di alertare l'utente prima che
+      decida se forkare o lasciar proseguire.
 
     La run viene marcata ``completed_at != NULL`` dopo questa chiamata
     e diventa **non riapplicabile** (nuovo POST /applica → 409).
@@ -416,6 +428,11 @@ class ApplicaVariazionePdEResponse(BaseModel):
     n_warnings: int
     warnings: list[str]
     completed_at: datetime
+    programmi_impattati: list[ProgrammaImpattoRead] = Field(default_factory=list)
+    """Sub-MR 5.bis-impact (entry 179): programmi materiali con giri/
+    turni PdC che referenziano le corse coinvolte dalla variazione.
+    Lista vuota = nessun impatto (caso comune per INTEGRAZIONE pura).
+    Forward reference perché ``ProgrammaImpattoRead`` è definito sotto."""
 
 
 class SbloccaProgrammaRequest(BaseModel):
@@ -696,6 +713,10 @@ class ApplyVariazioneResponse(BaseModel):
     per le ``RimuoviDateValidita`` applicate (può essere < somma date
     richieste se alcune erano già fuori dalla validità)."""
     errori: list[ApplyVariazioneErroreRead]
+    programmi_impattati: list[ProgrammaImpattoRead] = Field(default_factory=list)
+    """Sub-MR 5.bis-impact (entry 179): programmi materiali con giri/
+    turni PdC che referenziano le corse coinvolte. Stesso campo di
+    ``ApplicaVariazionePdEResponse`` per coerenza tra i 2 endpoint."""
 
 
 # =====================================================================
@@ -782,3 +803,47 @@ class CaricaPdEBaseResponse(BaseModel):
     n_kept: int
     n_warnings: int
     duration_s: float
+
+
+# =====================================================================
+# Impatto variazioni su giri/turni esistenti (Sub-MR 5.bis-impact, entry 179)
+# =====================================================================
+#
+# Una variazione modifica/cancella corse del PdE. Le corse possono
+# essere già state consumate da giri materiali e turni PdC esistenti
+# (FK RESTRICT su ``giro_blocco.corsa_commerciale_id`` e
+# ``turno_pdc_blocco.corsa_commerciale_id``). Detection-only: il
+# response di ``/applica`` include la lista programmi impattati con
+# counter per UI alert. La gestione concreta (rigenerazione, fork)
+# è scope MR successivo.
+
+
+class ProgrammaImpattoRead(BaseModel):
+    """Riepilogo dell'impatto di una variazione su un programma materiale.
+
+    Un programma è "impattato" se almeno un suo ``giro_materiale`` o
+    ``turno_pdc`` ha blocchi che referenziano corse coinvolte dalla
+    variazione (UPDATE_ORARIO / RIMUOVI_DATE_VALIDITA / CANCELLAZIONE).
+    Le INTEGRAZIONI non producono impatto: aggiungono corse nuove che
+    nessun giro referenzia ancora.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    programma_id: int
+    nome: str
+    valido_da: date
+    valido_a: date | None
+    n_giri_impattati: int
+    """Conteggio ``giro_materiale`` distinti del programma con almeno
+    un ``giro_blocco`` che referenzia una corsa coinvolta."""
+    n_turni_pdc_impattati: int
+    """Conteggio ``turno_pdc`` distinti del programma con almeno un
+    ``turno_pdc_blocco`` che referenzia una corsa coinvolta. La
+    relazione turno→programma passa via
+    ``generation_metadata_json['giro_materiale_id']``."""
+    n_assegnazioni_impattate: int
+    """Conteggio ``assegnazione_giornata`` su giornate dei turni PdC
+    impattati. Approssimazione: una giornata può avere molti blocchi,
+    qui contiamo le assegnazioni delle giornate che hanno ALMENO un
+    blocco impattato."""
