@@ -2393,6 +2393,30 @@ function BloccoSegment({
           touchAction: "none",
         }}
       >
+        {/* Sprint 8.0 MR-B.3 (entry 233): badge ×N + sgancio anche su vuoti. */}
+        {(() => {
+          const m = blocco.metadata_json ?? {};
+          const np = typeof m.n_pezzi === "number" ? m.n_pezzi : 1;
+          if (np >= 2) {
+            return (
+              <span
+                className="absolute right-0.5 top-0.5 z-10 inline-flex items-center rounded bg-amber-500 px-1 py-px text-[9px] font-bold leading-none text-white shadow"
+                title={`Doppia composizione (${np} pezzi)`}
+              >
+                ×{np}
+              </span>
+            );
+          }
+          return null;
+        })()}
+        {(blocco.metadata_json?.is_sgancio === true) && (
+          <span
+            className="absolute -right-1 top-1/2 z-10 -translate-y-1/2 rounded-full bg-orange-600 p-0.5 text-white shadow"
+            title="Sgancio: il materiale si separa dopo questo blocco"
+          >
+            <Unlink className="h-2.5 w-2.5" aria-hidden />
+          </span>
+        )}
         {isUscitaCiclo && (
           <span
             className="absolute -top-3 left-0 z-10 whitespace-nowrap rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-semibold text-white"
@@ -2607,6 +2631,10 @@ function CommercialeBlocco({
   // 2-4 char (vedi `lib/stazioni-acronimi.ts`).
   const showStazioni = widthPx >= 30;
   const showOrari = widthPx >= 25;
+  // Sprint 8.0 MR-B.3 (entry 233): feedback visuale doppia composizione.
+  const meta = blocco.metadata_json ?? {};
+  const nPezzi = typeof meta.n_pezzi === "number" ? meta.n_pezzi : 1;
+  const isSgancio = meta.is_sgancio === true;
   return (
     <button
       type="button"
@@ -2637,6 +2665,15 @@ function CommercialeBlocco({
       ) : (
         <div className="h-[10px]" aria-hidden="true" />
       )}
+      {/* Badge ×2 in alto a destra se doppia composizione. */}
+      {nPezzi >= 2 && (
+        <span
+          className="absolute right-0.5 top-0.5 z-10 inline-flex items-center rounded bg-amber-500 px-1 py-px text-[9px] font-bold leading-none text-white shadow"
+          title={`Doppia composizione (${nPezzi} pezzi)`}
+        >
+          ×{nPezzi}
+        </span>
+      )}
       <div
         className={cn(
           "seg-line seg-comm relative mt-1.5 flex h-3 items-center justify-center rounded-sm",
@@ -2647,6 +2684,15 @@ function CommercialeBlocco({
         <span className="truncate px-1 font-mono text-[11px] font-semibold tabular-nums text-white">
           {arrow} {blocco.numero_treno ?? "—"}
         </span>
+        {/* Icona sgancio in fondo al blocco se is_sgancio. */}
+        {isSgancio && (
+          <span
+            className="absolute -right-1 top-1/2 z-10 -translate-y-1/2 rounded-full bg-orange-600 p-0.5 text-white shadow"
+            title="Sgancio: il materiale si separa dopo questo blocco"
+          >
+            <Unlink className="h-2.5 w-2.5" aria-hidden />
+          </span>
+        )}
       </div>
       {showOrari ? (
         <div className="mt-1 flex justify-between gap-1 font-mono text-[9px] leading-none tabular-nums text-muted-foreground">

@@ -10,6 +10,66 @@
 
 ---
 
+## 2026-05-07 (233) — MR-B.3: feedback visuale doppia composizione + sgancio nel Gantt
+
+### Contesto
+
+Decisione utente entry 230:
+> "questo è il passo definitivo per poter anche sistemare il problema
+> della doppia composizione che ancora oggi non funziona e non è
+> interagibile"
+
+L'investigazione ha mostrato che la **funzionalità esisteva già** (MR
+η-bis 2026-05-06): il pannello `BloccoConfigDoppiaSgancio` nel
+`BloccoDialog` permette di marcare `n_pezzi=2` + `is_sgancio=true` e
+salva via `PATCH /api/giri/{id}/blocchi/{id}` in `metadata_json`.
+
+**Il vero problema**: l'utente cliccava "Salva", il backend persisteva
+correttamente, ma **nel Gantt non compariva alcun indicatore visuale**
+→ esperienza "non funziona perché non vedo l'effetto".
+
+### Modifiche frontend
+
+**`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`**:
+
+- `CommercialeBlocco`: legge `metadata_json.n_pezzi` e
+  `metadata_json.is_sgancio`. Se `n_pezzi >= 2` mostra badge giallo
+  **"×2"** (top-right del blocco) con tooltip "Doppia composizione".
+  Se `is_sgancio` mostra icona arancione `Unlink` cerchiata sul lato
+  destro del segmento centrale.
+- Button vuoto (rendering `materiale_vuoto`): stessi badge +
+  icona, in posizioni analoghe.
+
+I badge sono renderizzati con `position: absolute` + `z-10` per
+sovrapporsi al contenuto del blocco senza disturbare le label
+stazione/orario.
+
+### Verifiche
+
+- ✅ `pnpm build` → bundle `index-BqjiBE1A.js`.
+- Niente cambiamenti backend (la funzionalità era già completa).
+
+### Stato
+
+- ✅ MR-B.3 chiuso. Solo modifica frontend, deploy frontend.
+
+### Per l'utente
+
+1. Click su un blocco nel Gantt (commerciale o vuoto).
+2. Nel dialog dettaglio, scorri fino a **"Configurazione operativa
+   (MR η-bis)"**.
+3. Spunta **"Doppia composizione"** e/o **"Sgancio"** → click "Salva".
+4. **Ora vedi**: badge giallo "×2" in alto a destra del blocco; icona
+   arancione di sgancio sul bordo destro. Persiste tra refresh.
+
+### Prossimo step
+
+- **MR-B.2.2**: aggiungi vuoto manuale (form orari + stazioni).
+- Eventuali rifiniture: count pezzi extra (×3, ×4) supportato fino a
+  `n_pezzi=4` lato backend; UI lo mostra automaticamente.
+
+---
+
 ## 2026-05-07 (232) — MR-B.2: elimina vuoto manuale dal Gantt
 
 ### Contesto
