@@ -10,6 +10,100 @@
 
 ---
 
+## 2026-05-07 (222) — MR-3: vincolo HARD soste diurne max 5h (intra-giornata + multi-giornata)
+
+### Contesto
+
+Decisione utente entry 221, dopo aver visto giro #567 con G1 sosta
+22h a Voghera (1h32 di servizio + 22h di stallo):
+
+> "almeno che non ci siano soste notturne, non voglio vedere soste
+> superiori alle 5 ore, soprattutto nei giorni feriali e nelle ore
+> diurne"
+
+Il builder oggi crea giri multi-giornata in cui il convoglio resta
+fermo in stazione per ore in fascia diurna feriale. Inaccettabile —
+il convoglio in quel caso deve **rientrare in deposito**, non
+restare fermo a Voghera per 22h.
+
+### Modifiche backend
+
+**`backend/src/colazione/domain/builder_giro/catena.py`**:
+
+- ``ParamCatena.gap_max`` default da **360 (6h)** a **300 (5h)**.
+  Le catene intra-giornata sono per definizione diurne (cross-notte
+  è gestito da multi-giornata); 5h è il cap canonico per evitare
+  soste prolungate fuori esercizio.
+
+**`backend/src/colazione/domain/builder_giro/multi_giornata.py`**:
+
+- Nuovo helper ``_minuti_diurni_sosta_intergiornata(t_arrivo,
+  t_partenza)``: calcola i minuti di sosta intergiornata che cadono
+  FUORI dalla fascia notturna ``[22:00, 06:00)``. Solo questi
+  contribuiscono al cap di 5h (i minuti notturni sono il pattern
+  multi-giornata fisiologico = il convoglio dorme in stazione).
+- Costante ``MAX_SOSTA_DIURNA_MIN = 300``.
+- Nel loop di estensione del giro multi-giornata: dopo aver trovato
+  ``prossima`` catena, calcola ``_minuti_diurni_sosta_intergiornata``
+  tra ``ultima_corsa.ora_arrivo`` e ``prossima.catena.corse[0].ora_partenza``.
+  Se diurno > 300 → ``break`` (il giro chiude lì, niente continuazione).
+
+### Modifiche test
+
+**`backend/tests/test_sosta_diurna_mr3.py`** (nuovo, 7 test puri
+Python — niente DB, niente fixture):
+
+- Sosta pura notte 22:00→06:00 → 0 diurni ✓
+- Sosta lunga 09:00→07:00 → 14h diurne (840 min) ✓
+- Sosta serale 21:00→05:00 → 60 min diurni (solo 21-22) ✓
+- Sosta mista 18:00→08:00 → 360 min (4h + 2h) ✓
+- Edge case 22:00→06:00 esatti → 0 ✓
+- Sosta patologica >24h 10:00→11:00 → 1020 min (17h diurne) ✓
+- Boundary 17:00→06:00 → 300 esatti (vincolo è ``> 300`` strict) ✓
+
+**Eseguito locally**: ``pytest tests/test_sosta_diurna_mr3.py`` → 7/7
+PASSED. Niente serve DB.
+
+### Verifiche
+
+- ✅ ``ruff check`` clean (catena.py + multi_giornata.py + test).
+- ✅ ``mypy --strict`` clean.
+- ✅ ``pytest tests/test_sosta_diurna_mr3.py`` → 7/7 passed.
+
+### Stato
+
+- ✅ MR-3 chiuso. Vincolo HARD applicato a default globale.
+- ⏳ Commit + push + deploy backend Railway.
+
+### Per l'utente
+
+Dopo deploy, **rigenera i giri** del programma (force=True). Il
+giro #567 con sosta 22h a Voghera dovrebbe diventare 2-3 giri più
+corti: il convoglio rientra al deposito ogni volta che la sosta
+intergiornata supererebbe le 5h diurne.
+
+**Conseguenze attese**:
+
+1. Più giri totali (giri più corti = più giri).
+2. Probabile aumento della richiesta di pezzi materiali (alcune
+   "isole" che oggi sono coperte con 1 convoglio multi-giornata
+   diventano 2 giri short separati = 2 pezzi).
+3. Le 189 corse ``linea_disgiunta`` restano comunque scoperte
+   (questo MR non risolve quel problema, è ortogonale). Per quelle
+   serve modificare la struttura delle regole o aggiungere materiali.
+
+### Iterazione 2
+
+- Configurazione ``max_sosta_diurna_min`` per programma (oggi è
+  default globale).
+- Estendere il vincolo a sabato/domenica (oggi feriale come default
+  globale; weekend potrebbe avere regole diverse).
+- Opzione "force coverage" che bypassa capacity check + segnala
+  pezzi necessari (richiesto dall'utente entry 222 ma rinviato a
+  MR successivo per non confondere con questo).
+
+---
+
 ## 2026-05-07 (221) — MR-2.7: "Genera-da-residue" — secondo run del builder su corse non coperte
 
 ### Contesto

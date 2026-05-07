@@ -72,7 +72,15 @@ class ParamCatena:
     """
 
     gap_min: int = 5
-    gap_max: int = 360
+    # Sprint 8.0 MR-3 (entry 222): da 360 (6h) a 300 (5h). Decisione
+    # utente 2026-05-07 entry 222: "almeno che non ci siano soste
+    # notturne, non voglio vedere soste superiori alle 5 ore,
+    # soprattutto nei giorni feriali e nelle ore diurne". Le catene
+    # intra-giornata sono per definizione diurne (cross-notte è in
+    # multi-giornata), quindi 5h è il massimo qui. Le soste notturne
+    # tra giornate restano libere via il check
+    # ``minuti_diurni_sosta_intergiornata`` in ``multi_giornata.py``.
+    gap_max: int = 300
 
 
 # Singleton condivisibile (frozen → safe come default arg).

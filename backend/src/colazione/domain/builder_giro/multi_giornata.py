@@ -227,6 +227,53 @@ def _km_giornata(cat_pos: CatenaPosizionata) -> float:
     return total
 
 
+def _minuti_diurni_sosta_intergiornata(t_arrivo: time, t_partenza: time) -> int:
+    """Sprint 8.0 MR-3 (entry 222): minuti di sosta intergiornata che
+    cadono FUORI dalla fascia notturna 22:00-06:00.
+
+    Decisione utente entry 222: "almeno che non ci siano soste notturne,
+    non voglio vedere soste superiori alle 5 ore, soprattutto nei giorni
+    feriali e nelle ore diurne". Solo i minuti DIURNI contano per il
+    cap di 5h — il convoglio fermo di notte in stazione è OK (è il
+    pattern multi-giornata fisiologico).
+
+    Definizione fascia notturna: ``[22:00, 24:00) ∪ [00:00, 06:00)``.
+
+    Sosta dal giorno K (``t_arrivo``) al giorno K+1 (``t_partenza``),
+    sempre cross-mezzanotte:
+    - Da ``t_arrivo`` a 24:00 (giorno K): contribuisce alla notte
+      la parte ≥ 22:00, al diurno la parte < 22:00.
+    - Da 00:00 a ``t_partenza`` (giorno K+1): contribuisce alla notte
+      la parte < 06:00, al diurno la parte ≥ 06:00.
+    """
+    NOTTE_INIZIO_MIN = 22 * 60  # 22:00 = 1320
+    NOTTE_FINE_MIN = 6 * 60  # 06:00 = 360
+    arrivo_min = t_arrivo.hour * 60 + t_arrivo.minute
+    partenza_min = t_partenza.hour * 60 + t_partenza.minute
+
+    # Sosta totale (cross-mezzanotte sempre).
+    sosta_totale = (1440 - arrivo_min) + partenza_min
+
+    # Notte parte K: la sosta inizia ad arrivo_min, finisce a 1440.
+    # La fascia notturna è [22:00, 24:00) → intersezione con [arrivo, 1440).
+    notte_k = max(0, 1440 - max(arrivo_min, NOTTE_INIZIO_MIN))
+
+    # Notte parte K+1: la sosta inizia a 0, finisce a partenza_min.
+    # La fascia notturna è [00:00, 06:00) → intersezione con [0, partenza).
+    notte_k1 = max(0, min(partenza_min, NOTTE_FINE_MIN))
+
+    notte_totale = notte_k + notte_k1
+    diurno = sosta_totale - notte_totale
+    return max(0, diurno)
+
+
+# Sprint 8.0 MR-3 (entry 222): cap dei minuti diurni di sosta
+# intergiornata. Sopra questa soglia il giro NON si estende — il
+# convoglio rientra in deposito invece di restare fermo in stazione
+# durante il diurno feriale.
+MAX_SOSTA_DIURNA_MIN = 300  # 5h
+
+
 def _trova_continuazione(
     catene_data: list[CatenaPosizionata],
     visitate: set[int],
@@ -497,6 +544,20 @@ def _costruisci_giri_per_data(
                     cat_pos.localita_codice,
                 )
                 if prossima is None:
+                    break
+
+                # Sprint 8.0 MR-3 (entry 222): se la sosta in stazione
+                # tra G_k (ultima_corsa.ora_arrivo) e G_{k+1}
+                # (prossima.catena.corse[0].ora_partenza) ha più di 5h
+                # diurne (fuori 22:00-06:00), NON estendere il giro.
+                # Il convoglio rientra deposito invece di restare fermo
+                # in stazione durante il diurno feriale.
+                ora_arrivo_g_k = ultima_corsa.ora_arrivo
+                ora_partenza_g_k1 = prossima.catena.corse[0].ora_partenza
+                diurno_sosta = _minuti_diurni_sosta_intergiornata(
+                    ora_arrivo_g_k, ora_partenza_g_k1
+                )
+                if diurno_sosta > MAX_SOSTA_DIURNA_MIN:
                     break
 
                 giornate.append(GiornataGiro(data=d_prossima, catena_posizionata=prossima))
