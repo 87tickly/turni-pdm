@@ -10,6 +10,114 @@
 
 ---
 
+## 2026-05-07 (218) — MR-2: corse non coperte vs PdE (perimetro programma)
+
+### Contesto
+
+Decisione utente 2026-05-07 (entry 214 §4): "una sezione persistente
+così non lo dimentichiamo". Decisione di scope **B3** sul perimetro:
+confronto contro corse PdE che cadono nelle **regole del programma**
++ **periodo programma** — niente confronto col PdE intero
+(eviterebbe rumore di altre direttrici).
+
+### Modifiche backend
+
+**`backend/src/colazione/api/giri.py`** — nuovo endpoint
+``GET /api/programmi/{id}/corse-non-coperte``:
+
+- Auth ``_authz_read`` (4 ruoli pipeline). Visibilità via
+  ``programma_visibile_per_ruoli`` → 404 se non vede.
+- Logica:
+  1. Carica programma (``valido_da``, ``valido_a``).
+  2. Carica regole del programma (filtri_json, priorità).
+  3. Carica corse commerciali attive dell'azienda (filtro
+     ``corse_attive_clause``).
+  4. Carica ID corse coperte: distinct
+     ``GiroBlocco.corsa_commerciale_id`` di blocchi nei giri di questo
+     programma.
+  5. Per ogni corsa NON coperta:
+     - Filtra date di ``valido_in_date_json`` ∩ periodo programma →
+       ``n_date_perimetro``. Se 0 → fuori periodo, skip.
+     - Verifica matching almeno 1 regola in almeno 1 ``giorno_tipo``
+       (``feriale``, ``sabato``, ``festivo``) via
+       ``matches_all`` (riuso esatto della funzione del builder).
+       Se nessuna regola matcha → fuori perimetro, skip.
+  6. Output ordinato per ``numero_treno``.
+
+Schemi Pydantic: ``RegolaMatchRef`` + ``CorsaNonCopertaItem``
+(stazioni, orari, ``n_date_perimetro``, lista ``regole_match``).
+
+**Iterazione 1** (decisione utente nel piano MR): solo corse con **0
+istanze coperte**. Copertura parziale (es. 10/15 date) → iterazione 2.
+
+### Modifiche test
+
+**`backend/tests/test_corse_non_coperte_api.py`** (nuovo, 4 test):
+
+- ``test_corse_non_coperte_senza_token_401``: 401 senza JWT.
+- ``test_corse_non_coperte_programma_inesistente_404``: 404 multi-tenant.
+- ``test_corse_non_coperte_zero_giri_ritorna_perimetro``: setup con
+  4 corse (TCNC_1+TCNC_2 in perimetro, TCNC_FUORI fuori filtri,
+  TCNC_1 secondaria fuori periodo). Senza giri generati → endpoint
+  ritorna almeno TCNC_1 + TCNC_2, MAI TCNC_FUORI. Verifica anche
+  shape della response.
+- ``test_corse_non_coperte_dopo_genera_giri_lista_vuota``: dopo
+  ``POST genera-giri``, le corse sono coperte → endpoint torna
+  vuoto (o quasi). TCNC_FUORI mai presente.
+- ``test_corse_non_coperte_programma_senza_regole_lista_vuota``:
+  edge case programma senza regole → ``[]``.
+
+⚠️ Test integration **non eseguito localmente** (Postgres Docker non
+attivo nel mio ambiente). Verifica E2E → CI Railway o Docker user-side.
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/giri.ts`**: tipi ``RegolaMatchRef`` +
+``CorsaNonCopertaItem`` + funzione ``listCorseNonCoperte()``.
+
+**`frontend/src/hooks/useGiri.ts`**: hook ``useCorseNonCoperte()``.
+La queryKey è dentro ``GIRI_KEY`` → ``useGeneraGiri.onSuccess``
+invalida automaticamente, refetch dopo rigenerazione.
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaGiriRoute.tsx`**:
+nuovo sub-componente ``CorseNonCoperteSection`` montato sotto la
+sezione "table giri + preview", **visibile solo quando ci sono
+giri** (con 0 giri sarebbe rumore = tutte le corse non coperte
+ovviamente).
+
+UI:
+- **Loading**: spinner "Verifica copertura PdE…".
+- **Errore**: card destructive con il messaggio.
+- **0 corse non coperte**: card emerald "✓ Tutte le corse del
+  perimetro coperte. Niente residue rispetto al PdE."
+- **≥ 1 corsa**: card amber con titolo + sottotitolo esplicativo +
+  tabella scrollabile (max-h 340px) con colonne: Treno, Da → A,
+  Orario, N° date (perimetro), Regole match (chip ``#id · pXX``).
+
+### Verifiche
+
+- ✅ ``ruff check`` clean (giri.py + test).
+- ✅ ``mypy --strict src/colazione/api/giri.py`` clean.
+- ✅ ``pnpm tsc --noEmit`` clean (frontend).
+- ✅ ``vite dev`` builda + serve, niente errori console.
+- ⚠️ Test pytest non eseguito localmente. Verifica E2E sul programma
+  reale "giugno 2026" da fare dopo deploy.
+
+### Stato
+
+- ✅ MR-2 chiuso. Backend + test + frontend (nuova sezione
+  persistente in ProgrammaGiriRoute).
+- ⏳ Commit + push + deploy backend + frontend Railway.
+
+### Prossimo step
+
+**MR-3** richiesto dall'utente (entry 218): aggregazione giri per
+materiale nella tabella "Giri generati" (es. 13 giri ATR803 collassati
+in 1 riga espandibile). Toggle "Raggruppa per materiale" + drilldown
+ai singoli giri. Pianificare dopo verifica MR-2 sul programma reale.
+
+---
+
 ## 2026-05-07 (217) — Hotfix UX MR-1: focus blocco con scroll + pulse highlight nel Gantt
 
 ### Bug UX

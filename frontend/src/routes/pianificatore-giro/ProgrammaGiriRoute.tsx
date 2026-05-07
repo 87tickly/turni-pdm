@@ -2,8 +2,10 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  CheckCircle2,
   Search,
   Users,
   X,
@@ -12,10 +14,15 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
-import { useGiriProgramma, useGiroDettaglio } from "@/hooks/useGiri";
+import {
+  useCorseNonCoperte,
+  useGiriProgramma,
+  useGiroDettaglio,
+} from "@/hooks/useGiri";
 import { useProgramma } from "@/hooks/useProgrammi";
 import { ApiError } from "@/lib/api/client";
 import type {
+  CorsaNonCopertaItem,
   GiroBlocco,
   GiroDettaglio,
   GiroGiornata,
@@ -234,6 +241,12 @@ export function ProgrammaGiriRoute() {
               </div>
             )}
           </section>
+
+          {/* Sprint 8.0 MR-2 (entry 218) — sezione persistente "Corse
+              non coperte" sotto la tabella giri. Visibile solo quando
+              ci sono giri (con 0 giri sarebbe rumore = tutte le corse
+              non coperte ovviamente). */}
+          <CorseNonCoperteSection programmaId={programmaId} />
         </>
       )}
 
@@ -1021,4 +1034,130 @@ function relativeShort(iso: string): string {
   if (diffD < 7) return `${diffD} g fa`;
   // fallback DD/MM
   return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// =====================================================================
+// Sprint 8.0 MR-2 (entry 218) — Sezione "Corse non coperte vs PdE"
+// =====================================================================
+
+/**
+ * Sezione persistente sotto la tabella giri: elenco delle corse del
+ * PdE che cadono nel **perimetro del programma** (matching almeno una
+ * regola + ``valido_in_date_json`` ∩ periodo programma) ma **NON sono
+ * coperte da nessun blocco** dei giri generati.
+ *
+ * - Stato di salute (verde) se 0 corse non coperte → invariante
+ *   "tutto il perimetro è coperto" rispettata.
+ * - Stato di alert (ambra) se ≥ 1 → tabella scrollabile con dettaglio.
+ *
+ * Iterazione 1 (entry 218): solo corse con 0 istanze coperte.
+ * Iterazione 2: copertura parziale per data + motivo specifico.
+ */
+function CorseNonCoperteSection({ programmaId }: { programmaId: number }) {
+  const query = useCorseNonCoperte(programmaId);
+  const items = query.data ?? [];
+
+  if (query.isLoading) {
+    return (
+      <Card className="grid place-items-center p-8">
+        <Spinner label="Verifica copertura PdE…" />
+      </Card>
+    );
+  }
+
+  if (query.isError) {
+    const msg =
+      query.error instanceof ApiError
+        ? query.error.message
+        : (query.error as Error).message;
+    return (
+      <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
+        <strong>Errore</strong> nel calcolo delle corse non coperte: {msg}
+      </Card>
+    );
+  }
+
+  // Stato OK — tutto il perimetro è coperto.
+  if (items.length === 0) {
+    return (
+      <Card className="flex items-center gap-3 border-emerald-300/60 bg-emerald-50 p-4 text-sm">
+        <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-700" aria-hidden />
+        <div className="text-emerald-900">
+          <strong>Tutte le corse del perimetro programma sono coperte.</strong>{" "}
+          Niente residue rispetto al PdE.
+        </div>
+      </Card>
+    );
+  }
+
+  // Stato alert — almeno 1 corsa non coperta.
+  return (
+    <Card className="overflow-hidden border-amber-300/70 bg-amber-50/40">
+      <div className="flex items-center gap-3 border-b border-amber-300/50 bg-amber-50 px-5 py-3">
+        <AlertTriangle className="h-5 w-5 shrink-0 text-amber-700" aria-hidden />
+        <div className="flex-1">
+          <h3 className="text-sm font-semibold text-amber-900">
+            {items.length} cors{items.length === 1 ? "a" : "e"} del perimetro non
+            copert{items.length === 1 ? "a" : "e"} dal builder
+          </h3>
+          <p className="mt-0.5 text-xs text-amber-800/80">
+            Treni del PdE che matchano almeno una regola del programma e
+            cadono nel periodo, ma non sono finiti in nessun giro generato.
+            Iterazione 1: solo corse con 0 istanze coperte.
+          </p>
+        </div>
+      </div>
+      <div className="max-h-[340px] overflow-y-auto">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-white text-[11px] uppercase tracking-wide text-muted-foreground">
+            <tr className="border-b border-border">
+              <th className="px-4 py-2 text-left font-medium">Treno</th>
+              <th className="px-4 py-2 text-left font-medium">Da → A</th>
+              <th className="px-4 py-2 text-left font-medium">Orario</th>
+              <th className="px-4 py-2 text-right font-medium">N° date</th>
+              <th className="px-4 py-2 text-left font-medium">Regole match</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it) => (
+              <CorsaNonCopertaRow key={it.corsa_id} item={it} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function CorsaNonCopertaRow({ item }: { item: CorsaNonCopertaItem }) {
+  const oraPart = item.ora_partenza.slice(0, 5);
+  const oraArr = item.ora_arrivo.slice(0, 5);
+  return (
+    <tr className="border-b border-border/60 last:border-0 hover:bg-amber-50">
+      <td className="px-4 py-2 font-mono text-sm font-semibold">
+        {item.numero_treno}
+      </td>
+      <td className="px-4 py-2 font-mono text-xs text-muted-foreground">
+        {item.stazione_da_codice}{" "}
+        <span className="text-foreground">→</span> {item.stazione_a_codice}
+      </td>
+      <td className="px-4 py-2 font-mono text-xs tabular-nums">
+        {oraPart} → {oraArr}
+      </td>
+      <td className="px-4 py-2 text-right font-mono tabular-nums">
+        {item.n_date_perimetro}
+      </td>
+      <td className="px-4 py-2 text-xs">
+        {item.regole_match.map((r, i) => (
+          <span key={r.regola_id}>
+            {i > 0 && ", "}
+            <span className="rounded bg-muted px-1.5 py-0.5 font-mono">
+              #{r.regola_id}
+              <span className="text-muted-foreground"> · p{r.priorita}</span>
+            </span>
+          </span>
+        ))}
+      </td>
+    </tr>
+  );
 }

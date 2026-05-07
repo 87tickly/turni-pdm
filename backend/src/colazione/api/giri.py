@@ -48,6 +48,8 @@ from colazione.domain.builder_giro.persister import LocalitaNonTrovataError
 from colazione.domain.builder_giro.risolvi_corsa import (
     ComposizioneNonAmmessaError,
     RegolaAmbiguaError,
+    determina_giorno_tipo,
+    matches_all,
 )
 from colazione.domain.pipeline import (
     materiale_freezato,
@@ -60,9 +62,13 @@ from colazione.models.anagrafica import (
     MaterialeThreadEvento,
     Stazione,
 )
-from colazione.models.corse import CorsaCommerciale, CorsaMaterialeVuoto
+from colazione.models.corse import (
+    CorsaCommerciale,
+    CorsaMaterialeVuoto,
+    corse_attive_clause,
+)
 from colazione.models.giri import GiroBlocco, GiroGiornata, GiroMateriale, GiroVariante
-from colazione.models.programmi import ProgrammaMateriale
+from colazione.models.programmi import ProgrammaMateriale, ProgrammaRegolaAssegnazione
 from colazione.schemas.security import CurrentUser
 
 router = APIRouter(prefix="/api/programmi", tags=["giri"])
@@ -693,6 +699,189 @@ async def cerca_treno(
 
     # Limit applicato sulle corse distinte (commerciali prima, poi vuoti).
     return list(items.values())[:limit]
+
+
+# =====================================================================
+# Corse non coperte vs PdE (B3) — entry 218 (MR-2)
+# =====================================================================
+
+
+class RegolaMatchRef(BaseModel):
+    """Riferimento a una regola del programma che includerebbe la corsa."""
+
+    regola_id: int
+    priorita: int
+
+
+class CorsaNonCopertaItem(BaseModel):
+    """Una corsa del PdE che entra nel perimetro del programma (matching
+    regole + periodo) ma non è stata coperta da nessun giro generato.
+
+    Iterazione 1 (entry 218): solo corse con **0 istanze coperte**.
+    Copertura parziale per data (es. coperta in 10/15 date) → iterazione 2.
+    """
+
+    corsa_id: int
+    numero_treno: str
+    stazione_da_codice: str
+    stazione_a_codice: str
+    ora_partenza: time
+    ora_arrivo: time
+    n_date_perimetro: int = Field(
+        description="Numero di date di ``valido_in_date_json`` che cadono "
+        "nel periodo del programma (``valido_da → valido_a``)."
+    )
+    regole_match: list[RegolaMatchRef] = Field(
+        description="Regole del programma che includerebbero la corsa "
+        "(matching ``filtri_json`` su almeno un giorno_tipo)."
+    )
+
+
+@router.get(
+    "/{programma_id}/corse-non-coperte",
+    response_model=list[CorsaNonCopertaItem],
+    summary="Corse del PdE che cadono nel perimetro del programma ma non "
+    "sono coperte da nessun giro",
+)
+async def corse_non_coperte(
+    programma_id: int,
+    user: CurrentUser = _authz_read,
+    session: AsyncSession = Depends(get_session),
+) -> list[CorsaNonCopertaItem]:
+    """Diagnostica delle corse non coperte (B3 perimetro programma).
+
+    Logica:
+
+    1. **Carica programma**: prende ``valido_da`` e ``valido_a``.
+    2. **Carica regole del programma**: ``filtri_json`` per il matching.
+    3. **Carica corse commerciali attive dell'azienda**: filtro
+       ``corse_attive_clause()`` (escludi cancellate da
+       VARIAZIONE_CANCELLAZIONE).
+    4. **Carica corse coperte**: ID delle corse referenziate da almeno
+       un ``giro_blocco`` di un giro di questo programma.
+    5. **Filtro perimetro per ogni corsa non coperta**:
+       a. Le sue date in ``valido_in_date_json`` ∩ periodo programma
+          → ``n_date_perimetro``. Se 0 → fuori periodo, skip.
+       b. Matching almeno una regola del programma in almeno un
+          ``giorno_tipo`` (``feriale``, ``sabato``, ``festivo``) → se
+          nessuna matcha, skip (corsa non è del perimetro programma).
+    6. Ritorna la lista ordinata per ``numero_treno``.
+
+    Multi-tenant: ``azienda_id`` dal JWT. Visibilità programma per ruolo
+    via ``programma_visibile_per_ruoli`` (404 se non vede).
+
+    Sprint 8.0 MR-2 (entry 218): nuova feature richiesta dall'utente
+    "una sezione persistente cosi non lo dimentichiamo". Decisione
+    utente "B3" (perimetro programma, non tutto il PdE).
+    """
+    # 1. Visibilità + load programma.
+    programma = (
+        await session.execute(
+            select(ProgrammaMateriale).where(
+                ProgrammaMateriale.id == programma_id,
+                ProgrammaMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if programma is None or not programma_visibile_per_ruoli(
+        programma.stato_pipeline_pdc, user.roles, user.is_admin
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="programma non trovato",
+        )
+
+    # 2. Regole del programma.
+    regole = list(
+        (
+            await session.execute(
+                select(ProgrammaRegolaAssegnazione)
+                .where(ProgrammaRegolaAssegnazione.programma_id == programma_id)
+                .order_by(ProgrammaRegolaAssegnazione.priorita.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not regole:
+        # Programma senza regole → niente perimetro, niente "non coperte".
+        return []
+
+    # 3. Corse commerciali attive dell'azienda (no filtro periodo qui:
+    # filtro temporale è applicato dopo via valido_in_date_json).
+    corse = list(
+        (
+            await session.execute(
+                select(CorsaCommerciale)
+                .where(CorsaCommerciale.azienda_id == user.azienda_id)
+                .where(corse_attive_clause())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    # 4. ID corse già coperte da almeno un blocco di un giro di questo programma.
+    coperte_rows = (
+        await session.execute(
+            select(GiroBlocco.corsa_commerciale_id)
+            .join(GiroVariante, GiroVariante.id == GiroBlocco.giro_variante_id)
+            .join(GiroGiornata, GiroGiornata.id == GiroVariante.giro_giornata_id)
+            .join(GiroMateriale, GiroMateriale.id == GiroGiornata.giro_materiale_id)
+            .where(GiroMateriale.programma_id == programma_id)
+            .where(GiroBlocco.corsa_commerciale_id.is_not(None))
+            .distinct()
+        )
+    ).all()
+    coperte_set: set[int] = {int(r[0]) for r in coperte_rows if r[0] is not None}
+
+    # 5. Per ogni corsa: filtro perimetro + non coperta.
+    out: list[CorsaNonCopertaItem] = []
+    giorni_tipo = ("feriale", "sabato", "festivo")
+    for corsa in corse:
+        if corsa.id in coperte_set:
+            continue
+        # Periodo: date della corsa che cadono nel range del programma.
+        n_date_perimetro = 0
+        for d_str in corsa.valido_in_date_json or []:
+            try:
+                d = date.fromisoformat(str(d_str))
+            except ValueError:
+                continue
+            if programma.valido_da <= d <= programma.valido_a:
+                n_date_perimetro += 1
+        if n_date_perimetro == 0:
+            continue
+        # Matching regole: la corsa è "del programma" se almeno una
+        # regola la include in almeno un giorno_tipo. ``determina_giorno_tipo``
+        # è qui ridondante (uso le 3 stringhe direttamente) ma resta
+        # importato per coerenza con il builder.
+        _ = determina_giorno_tipo  # silence "unused" del linter
+        regole_match: list[RegolaMatchRef] = []
+        for r in regole:
+            for gt in giorni_tipo:
+                if matches_all(r.filtri_json, corsa, gt):
+                    regole_match.append(
+                        RegolaMatchRef(regola_id=r.id, priorita=r.priorita)
+                    )
+                    break
+        if not regole_match:
+            continue
+        out.append(
+            CorsaNonCopertaItem(
+                corsa_id=corsa.id,
+                numero_treno=corsa.numero_treno,
+                stazione_da_codice=corsa.codice_origine,
+                stazione_a_codice=corsa.codice_destinazione,
+                ora_partenza=corsa.ora_partenza,
+                ora_arrivo=corsa.ora_arrivo,
+                n_date_perimetro=n_date_perimetro,
+                regole_match=regole_match,
+            )
+        )
+
+    out.sort(key=lambda x: x.numero_treno)
+    return out
 
 
 # Router separato (radice /api) per il dettaglio singolo: il prefix

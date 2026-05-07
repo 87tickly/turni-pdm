@@ -12,6 +12,7 @@ import {
   generaGiri,
   getGiroDettaglio,
   getThreadDettaglio,
+  listCorseNonCoperte,
   listGiriAzienda,
   listGiriProgramma,
   listThreadsGiro,
@@ -19,6 +20,7 @@ import {
   patchGiro,
   type BuilderResult,
   type CercaTrenoItem,
+  type CorsaNonCopertaItem,
   type DuplicaGiroResult,
   type GeneraGiriParams,
   type GiroBlocco,
@@ -162,6 +164,28 @@ export function useDuplicaGiro(): UseMutationResult<DuplicaGiroResult, Error, nu
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: GIRI_KEY });
     },
+  });
+}
+
+/**
+ * Sprint 8.0 MR-2 (entry 218) — corse del PdE nel perimetro del
+ * programma (matching regole + periodo) che NON sono state coperte
+ * da nessun giro generato. Iterazione 1: solo 0 istanze coperte.
+ *
+ * La query è invalidata da ``useGeneraGiri.onSuccess`` (entrambe
+ * caricano da ``GIRI_KEY``) → dopo una rigenerazione, la sezione
+ * "Corse non coperte" si aggiorna in automatico.
+ */
+export function useCorseNonCoperte(
+  programmaId: number | undefined,
+): UseQueryResult<CorsaNonCopertaItem[]> {
+  return useQuery({
+    queryKey: [...GIRI_KEY, "corse-non-coperte", programmaId],
+    queryFn: () => {
+      if (programmaId === undefined) throw new Error("programmaId mancante");
+      return listCorseNonCoperte(programmaId);
+    },
+    enabled: programmaId !== undefined,
   });
 }
 

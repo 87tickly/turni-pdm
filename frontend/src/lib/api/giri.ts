@@ -348,3 +348,40 @@ export async function cercaTreno(
     { method: "GET" },
   );
 }
+
+// =====================================================================
+// Sprint 8.0 MR-2 (entry 218) — corse non coperte vs PdE (B3)
+// =====================================================================
+
+/** Riferimento a una regola del programma che includerebbe la corsa. */
+export interface RegolaMatchRef {
+  regola_id: number;
+  priorita: number;
+}
+
+/**
+ * Una corsa del PdE che entra nel perimetro del programma (matching
+ * regole + periodo) ma non è stata coperta da nessun giro generato.
+ * Iterazione 1: solo 0 istanze coperte; copertura parziale → iterazione 2.
+ */
+export interface CorsaNonCopertaItem {
+  corsa_id: number;
+  numero_treno: string;
+  stazione_da_codice: string;
+  stazione_a_codice: string;
+  /** Formato ``HH:MM:SS``. */
+  ora_partenza: string;
+  ora_arrivo: string;
+  /** Date di ``valido_in_date_json`` che cadono nel periodo programma. */
+  n_date_perimetro: number;
+  regole_match: RegolaMatchRef[];
+}
+
+export async function listCorseNonCoperte(
+  programmaId: number,
+): Promise<CorsaNonCopertaItem[]> {
+  return apiJson<CorsaNonCopertaItem[]>(
+    `/api/programmi/${programmaId}/corse-non-coperte`,
+    { method: "GET" },
+  );
+}
