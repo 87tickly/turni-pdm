@@ -10,6 +10,130 @@
 
 ---
 
+## 2026-05-07 (235) — MR-B.2.2: aggiungi vuoto manuale (chiude Fase B)
+
+### Contesto
+
+Decisione utente entry 234: "termina il programma e poi testiamo".
+Ultimo MR di Fase B: aggiunta manuale di un blocco vuoto a una
+variante. Completa la trilogia interazione manuale (sposta — elimina —
+aggiungi) iniziata in MR-B.1/B.2.
+
+### Modifiche backend
+
+**`backend/src/colazione/api/giri.py`** — nuovo endpoint
+**`POST /api/giri/{giro_id}/blocchi/aggiungi-vuoto`**:
+
+- Schemi `AggiungiVuotoRequest` (giornata, variant, seq_target, stazioni
+  da/a, ora_inizio, ora_fine, descrizione, dry_run, force) +
+  `AggiungiVuotoResponse` (applied, blocco_id, nuovo_seq, violazioni).
+- Logica:
+  1. Lock pessimistico giro (Fausto entry 234 hardening).
+  2. Pipeline freeze check.
+  3. Parse orari `HH:MM`/`HH:MM:SS` → `time` (400 se invalido).
+  4. Verifica esistenza FK stazione_da/a (multi-tenant azienda).
+  5. Lookup variante target (404).
+  6. Crea `GiroBlocco` con:
+     - `tipo_blocco = "materiale_vuoto"`
+     - `corsa_materiale_vuoto_id = null` (manuale, distinto dai
+       vuoti del builder)
+     - `is_validato_utente = true`
+     - `metadata_json = {is_manuale, tipo_vuoto: "manuale",
+       creato_da_user_id, creato_at_iso}`
+  7. Simula sequenza post-inserimento + check fattibilità.
+  8. Se dry_run o errors-no-force → no commit.
+  9. Else: INSERT + re-numera seq con pattern offset negativo
+     (Fausto fix entry 234) per evitare unique violation.
+
+**`backend/tests/test_aggiungi_vuoto_api.py`** (nuovo, 4 test): 401,
+404, 422 (5 forme di payload invalido), 404 su orari invalidi (giro
+inesistente fa scattare il 404 prima del parse).
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/giri.ts`**: tipi `AggiungiVuotoPayload` +
+`AggiungiVuotoResponse` + funzione `aggiungiVuoto()`.
+
+**`frontend/src/hooks/useGiri.ts`**: hook `useAggiungiVuoto()`
+mutation; invalida `GIRI_KEY` + dettaglio giro `onSuccess.applied`.
+
+**`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`**:
+- Nuovo componente `<BloccoAggiungiVuotoDopo>`: pannello azzurro
+  inline nel `BloccoDialog`, sotto `BloccoEliminaVuoto`. Espandibile
+  (collassato di default per non bloatare il dialog).
+- Defaults intelligenti dal blocco corrente:
+  - `stazione_da_codice = blocco.stazione_a_codice` (continuità)
+  - `ora_inizio = blocco.ora_fine`
+  - `ora_fine = ora_inizio + 30 min` (cross-mezzanotte gestito)
+  - `seq_target = blocco.seq + 1`
+  - `giornata_target` + `variant_index_target` derivati dal blocco
+    selezionato (lookup nel giro)
+- Form: 2 select stazioni + 2 input `<input type="time">` + input
+  descrizione opzionale (200 char max).
+- Flusso identico a sposta-blocco/elimina:
+  - dry_run → se errors mostra dialog conferma con violazioni +
+    "Forza inserimento", altrimenti applica.
+  - Reset state al cambio blocco selezionato.
+
+### Verifiche
+
+- ✅ `ruff check` + `mypy --strict` clean.
+- ✅ `pytest --co` → 4 test collected.
+- ✅ `pnpm build` → bundle `index-E5UON1QU.js`, 1805 moduli.
+
+### Stato
+
+- ✅ MR-B.2.2 chiuso. **Fase B completa**: sposta + elimina +
+  aggiungi + doppia composizione + sgancio. Tutto interagibile.
+- ⏳ Commit + push + deploy.
+
+### Per l'utente
+
+1. Click su un blocco nel Gantt (commerciale o vuoto, qualsiasi).
+2. Nel dialog dettaglio scorri fino al pannello azzurro **"Aggiungi
+   vuoto dopo"**.
+3. Click "Apri form" → vedi precompilato:
+   - Stazione da: l'arrivo del blocco corrente (continuità).
+   - Ora inizio: l'arrivo del blocco corrente.
+   - Ora fine: +30 minuti.
+   - Stazione a: vuoto (scegli tu).
+   - Descrizione: opzionale (es. "Posizionamento Misr").
+4. Click "Aggiungi vuoto". Se l'inserimento crea discontinuità (la
+   stazione a non collega col blocco successivo, ad es.) → dialog
+   conferma con violazioni; "Forza inserimento" applica comunque.
+5. Il nuovo blocco è marcato `is_manuale: true` in metadata, può
+   essere eliminato in qualsiasi momento col pannello "Elimina vuoto".
+
+### Limitazioni iter 1
+
+- **Inserimento solo "dopo"**: il pannello inserisce sempre dopo il
+  blocco selezionato (`seq_target = blocco.seq + 1`). Per inserire
+  in altre posizioni (inizio variante, in mezzo, fine), iterazione
+  successiva con UI dedicata (es. drag dalla "palette").
+- **Drag dalla palette**: non implementato. Il flusso attuale è
+  "click blocco esistente → form aggiungi dopo". Iter 2: pulsante
+  "Aggiungi vuoto manuale" globale + drag&drop dalla palette in
+  qualsiasi posizione della timeline.
+
+### Fase B chiusa, riassunto
+
+| Sub-MR | Cosa | Entry |
+|---|---|---|
+| B.1 | Drag&drop blocchi tra giornate (Mac-like) | 230 |
+| B.2 | Elimina vuoto manuale | 232 |
+| B.3 | Feedback visuale doppia composizione + sgancio | 233 |
+| B.4 | Hardening post-Fausto (lock + a11y + FK pre-check) | 234 |
+| B.2.2 | Aggiungi vuoto manuale | 235 |
+
+Insieme a:
+- MR-A (231): vista aggregata + drag&drop cross-turno
+- MR-C (229): wizard "materiale + linee → giri"
+- MR-5 (228): aggregazione gruppo + edit batch chirurgico
+
+→ Sprint 8.0 Fase A+B+C **completa**. Tutto deployato.
+
+---
+
 ## 2026-05-07 (234) — MR-B.4: hardening post-Fausto su MR-A/B.2/B.3
 
 ### Contesto

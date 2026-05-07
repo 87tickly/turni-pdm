@@ -21,6 +21,7 @@ import {
   Maximize2,
   Minimize2,
   Pencil,
+  Plus,
   Search,
   Trash2,
   Unlink,
@@ -61,6 +62,7 @@ import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
 import { useMateriali } from "@/hooks/useAnagrafiche";
 import {
+  useAggiungiVuoto,
   useDuplicaGiro,
   useEliminaBlocco,
   useGiroDettaglio,
@@ -69,6 +71,7 @@ import {
   useSpostaBlocco,
   useThreadsGiro,
 } from "@/hooks/useGiri";
+import { useStazioni } from "@/hooks/useAnagrafiche";
 import { useTurniPdcGiro } from "@/hooks/useTurniPdc";
 import { ApiError } from "@/lib/api/client";
 import type {
@@ -3474,6 +3477,27 @@ function BloccoDialogBody({
           <BloccoEliminaVuoto giroId={giro.id} blocco={blocco} />
         )}
 
+        {/* Sprint 8.0 MR-B.2.2 (entry 235): aggiungi vuoto manuale
+            DOPO questo blocco. Disponibile per qualunque tipo blocco
+            (commerciale, vuoto, ecc.) — l'utente decide. */}
+        {location !== null && (
+          <BloccoAggiungiVuotoDopo
+            giroId={giro.id}
+            blocco={blocco}
+            giornataNumero={location.giornata}
+            variantIndex={(() => {
+              for (const g of giro.giornate) {
+                if (g.numero_giornata !== location.giornata) continue;
+                const idx = g.varianti.findIndex((v) =>
+                  v.blocchi.some((b) => b.id === blocco.id),
+                );
+                return idx >= 0 ? idx : 0;
+              }
+              return 0;
+            })()}
+          />
+        )}
+
         {/* Metadata */}
         <BloccoMetadata blocco={blocco} />
 
@@ -3796,6 +3820,358 @@ function BloccoEliminaVuoto({
               {eliminaMutation.isPending
                 ? "Elimino…"
                 : "Forza eliminazione"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/**
+ * Sprint 8.0 MR-B.2.2 (entry 235) — pannello inline "Aggiungi vuoto
+ * dopo questo blocco".
+ *
+ * Decisione utente entry 230: "io posso decidere di aggiungere un
+ * vuoto perchè può dormire". Defaults intelligenti dal blocco
+ * corrente: stazione_da = stazione_a del blocco precedente,
+ * ora_inizio = ora_fine del blocco precedente, ora_fine = +30min.
+ *
+ * Espandibile per tenere il dialog dettaglio compatto: di default
+ * collassato, l'utente clicca "Inserisci vuoto dopo" per espandere
+ * il form.
+ */
+function BloccoAggiungiVuotoDopo({
+  giroId,
+  blocco,
+  giornataNumero,
+  variantIndex,
+}: {
+  giroId: number;
+  blocco: GiroBlocco;
+  giornataNumero: number;
+  variantIndex: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const stazioniQuery = useStazioni();
+  const aggiungiMutation = useAggiungiVuoto();
+
+  // Defaults intelligenti dal blocco corrente.
+  const defaultStazioneDa =
+    blocco.stazione_a_codice ?? blocco.stazione_da_codice ?? "";
+  const defaultOraInizio = (blocco.ora_fine ?? "").slice(0, 5);
+  const defaultOraFine = (() => {
+    if (blocco.ora_fine === null) return "";
+    const m = blocco.ora_fine.slice(0, 5).match(/^(\d{2}):(\d{2})$/);
+    if (m === null) return "";
+    let mins = Number(m[1]) * 60 + Number(m[2]) + 30;
+    if (mins >= 24 * 60) mins -= 24 * 60;
+    const h = Math.floor(mins / 60);
+    const min = mins % 60;
+    return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+  })();
+
+  const [stazioneDa, setStazioneDa] = useState(defaultStazioneDa);
+  const [stazioneA, setStazioneA] = useState("");
+  const [oraInizio, setOraInizio] = useState(defaultOraInizio);
+  const [oraFine, setOraFine] = useState(defaultOraFine);
+  const [descrizione, setDescrizione] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [violazioni, setViolazioni] = useState<
+    ViolazioneFattibilita[] | null
+  >(null);
+
+  // Re-init defaults se cambia il blocco selezionato.
+  useEffect(() => {
+    setStazioneDa(defaultStazioneDa);
+    setStazioneA("");
+    setOraInizio(defaultOraInizio);
+    setOraFine(defaultOraFine);
+    setDescrizione("");
+    setError(null);
+    setViolazioni(null);
+    setExpanded(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocco.id]);
+
+  const canSubmit =
+    stazioneDa !== "" &&
+    stazioneA !== "" &&
+    /^\d{2}:\d{2}$/.test(oraInizio) &&
+    /^\d{2}:\d{2}$/.test(oraFine) &&
+    !aggiungiMutation.isPending;
+
+  const buildPayload = (
+    dryRun: boolean,
+    force: boolean,
+  ): Parameters<typeof aggiungiMutation.mutateAsync>[0]["payload"] => ({
+    giornata_target: giornataNumero,
+    variant_index_target: variantIndex,
+    seq_target: blocco.seq + 1,
+    stazione_da_codice: stazioneDa,
+    stazione_a_codice: stazioneA,
+    ora_inizio: oraInizio,
+    ora_fine: oraFine,
+    descrizione: descrizione.trim() === "" ? null : descrizione.trim(),
+    dry_run: dryRun,
+    force,
+  });
+
+  const onAggiungi = async () => {
+    if (!canSubmit) return;
+    setError(null);
+    try {
+      const dryRes = await aggiungiMutation.mutateAsync({
+        giroId,
+        payload: buildPayload(true, false),
+      });
+      const hasErrors = dryRes.violazioni.some(
+        (v) => v.severity === "error",
+      );
+      if (!hasErrors) {
+        await aggiungiMutation.mutateAsync({
+          giroId,
+          payload: buildPayload(false, false),
+        });
+        setExpanded(false);
+      } else {
+        setViolazioni(dryRes.violazioni);
+      }
+    } catch (err) {
+      const msg =
+        err instanceof ApiError ? err.message : (err as Error).message;
+      setError(msg);
+    }
+  };
+
+  const onForzaAggiungi = async () => {
+    setError(null);
+    try {
+      await aggiungiMutation.mutateAsync({
+        giroId,
+        payload: buildPayload(false, true),
+      });
+      setExpanded(false);
+    } catch (err) {
+      const msg =
+        err instanceof ApiError ? err.message : (err as Error).message;
+      setError(msg);
+    } finally {
+      setViolazioni(null);
+    }
+  };
+
+  return (
+    <>
+      <div className="mt-4 rounded-md border border-blue-300/50 bg-blue-50/40 p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-xs font-semibold uppercase tracking-wide text-blue-800">
+            Aggiungi vuoto dopo
+          </div>
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="text-xs text-blue-700 underline hover:text-blue-900"
+          >
+            {expanded ? "Chiudi" : "Apri form"}
+          </button>
+        </div>
+        {!expanded ? (
+          <p className="text-xs text-blue-900/80">
+            Inserisci un blocco vuoto dopo il blocco seq #{blocco.seq}{" "}
+            (es. posizionamento, rientro, manovra). Default precompilati
+            dal blocco corrente.
+          </p>
+        ) : (
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <div>
+              <Label
+                htmlFor="vuoto-staz-da"
+                className="text-xs text-blue-900"
+              >
+                Stazione da
+              </Label>
+              <select
+                id="vuoto-staz-da"
+                value={stazioneDa}
+                onChange={(e) => setStazioneDa(e.target.value)}
+                className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                disabled={
+                  stazioniQuery.isLoading || aggiungiMutation.isPending
+                }
+              >
+                <option value="">— scegli —</option>
+                {stazioniQuery.data?.map((s) => (
+                  <option key={s.codice} value={s.codice}>
+                    {s.codice} · {s.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label
+                htmlFor="vuoto-staz-a"
+                className="text-xs text-blue-900"
+              >
+                Stazione a
+              </Label>
+              <select
+                id="vuoto-staz-a"
+                value={stazioneA}
+                onChange={(e) => setStazioneA(e.target.value)}
+                className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                disabled={
+                  stazioniQuery.isLoading || aggiungiMutation.isPending
+                }
+              >
+                <option value="">— scegli —</option>
+                {stazioniQuery.data?.map((s) => (
+                  <option key={s.codice} value={s.codice}>
+                    {s.codice} · {s.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label
+                htmlFor="vuoto-ora-inizio"
+                className="text-xs text-blue-900"
+              >
+                Ora inizio (HH:MM)
+              </Label>
+              <input
+                id="vuoto-ora-inizio"
+                type="time"
+                value={oraInizio}
+                onChange={(e) => setOraInizio(e.target.value)}
+                className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm tabular-nums"
+                disabled={aggiungiMutation.isPending}
+              />
+            </div>
+            <div>
+              <Label
+                htmlFor="vuoto-ora-fine"
+                className="text-xs text-blue-900"
+              >
+                Ora fine (HH:MM)
+              </Label>
+              <input
+                id="vuoto-ora-fine"
+                type="time"
+                value={oraFine}
+                onChange={(e) => setOraFine(e.target.value)}
+                className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm tabular-nums"
+                disabled={aggiungiMutation.isPending}
+              />
+            </div>
+            <div className="col-span-2">
+              <Label
+                htmlFor="vuoto-desc"
+                className="text-xs text-blue-900"
+              >
+                Descrizione (opzionale)
+              </Label>
+              <input
+                id="vuoto-desc"
+                type="text"
+                value={descrizione}
+                onChange={(e) => setDescrizione(e.target.value)}
+                placeholder="es. Posizionamento Misr"
+                maxLength={200}
+                className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                disabled={aggiungiMutation.isPending}
+              />
+            </div>
+            {error !== null && (
+              <p
+                role="alert"
+                className="col-span-2 rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1 text-xs text-destructive"
+              >
+                {error}
+              </p>
+            )}
+            <div className="col-span-2 flex justify-end">
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => void onAggiungi()}
+                disabled={!canSubmit}
+              >
+                <Plus
+                  className="mr-1.5 h-3.5 w-3.5"
+                  aria-hidden
+                />
+                {aggiungiMutation.isPending
+                  ? "Aggiungo…"
+                  : "Aggiungi vuoto"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Dialog conferma se violazioni */}
+      <Dialog
+        open={violazioni !== null}
+        onOpenChange={(o) => !o && setViolazioni(null)}
+      >
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle
+                className="h-5 w-5 text-amber-600"
+                aria-hidden
+              />
+              Inserimento con violazioni
+            </DialogTitle>
+            <DialogDescription>
+              L'aggiunta di questo vuoto genera{" "}
+              {violazioni?.length ?? 0} segnalazioni nella variante.
+              Verifica e conferma se vuoi forzare comunque.
+            </DialogDescription>
+          </DialogHeader>
+          {violazioni !== null && (
+            <ul className="max-h-72 space-y-1.5 overflow-y-auto rounded-md border border-border bg-muted/20 p-3 text-sm">
+              {violazioni.map((v, i) => (
+                <li
+                  key={i}
+                  className={cn(
+                    "flex items-start gap-2 rounded px-2 py-1.5",
+                    v.severity === "error"
+                      ? "bg-destructive/5 text-destructive"
+                      : "bg-amber-50 text-amber-900",
+                  )}
+                >
+                  <span className="mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-bold uppercase">
+                    {v.severity === "error" ? "!" : "i"}
+                  </span>
+                  <div className="flex-1">
+                    <div className="text-xs font-medium uppercase tracking-wide">
+                      {v.codice} · {v.variante_label}
+                    </div>
+                    <div className="text-[13px] leading-snug">
+                      {v.descrizione}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setViolazioni(null)}
+              disabled={aggiungiMutation.isPending}
+            >
+              Annulla
+            </Button>
+            <Button
+              onClick={() => void onForzaAggiungi()}
+              disabled={aggiungiMutation.isPending}
+            >
+              {aggiungiMutation.isPending
+                ? "Aggiungo…"
+                : "Forza inserimento"}
             </Button>
           </DialogFooter>
         </DialogContent>

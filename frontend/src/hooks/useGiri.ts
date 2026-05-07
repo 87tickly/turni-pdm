@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 
 import {
+  aggiungiVuoto,
   aggregaModifica,
   cercaTreno,
   duplicaGiro,
@@ -25,6 +26,8 @@ import {
   riempiGap,
   spostaBlocco,
   wizardDaLinee,
+  type AggiungiVuotoPayload,
+  type AggiungiVuotoResponse,
   type AggregaModificaPayload,
   type AggregaModificaResponse,
   type BuilderResult,
@@ -343,6 +346,35 @@ export function useEliminaBlocco(): UseMutationResult<
   return useMutation({
     mutationFn: ({ giroId, bloccoId, dryRun, force }) =>
       eliminaBlocco(giroId, bloccoId, { dryRun, force }),
+    onSuccess: (data, vars) => {
+      if (data.applied) {
+        void qc.invalidateQueries({
+          queryKey: [...GIRI_KEY, "dettaglio", vars.giroId],
+        });
+        void qc.invalidateQueries({ queryKey: GIRI_KEY });
+      }
+    },
+  });
+}
+
+interface AggiungiVuotoArgs {
+  giroId: number;
+  payload: AggiungiVuotoPayload;
+}
+
+/**
+ * Sprint 8.0 MR-B.2.2 (entry 235) — aggiungi vuoto manuale.
+ * `corsa_materiale_vuoto_id=null` lo distingue dai vuoti del builder.
+ * Sull'apply (data.applied) invalida `GIRI_KEY` + dettaglio giro.
+ */
+export function useAggiungiVuoto(): UseMutationResult<
+  AggiungiVuotoResponse,
+  Error,
+  AggiungiVuotoArgs
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ giroId, payload }) => aggiungiVuoto(giroId, payload),
     onSuccess: (data, vars) => {
       if (data.applied) {
         void qc.invalidateQueries({

@@ -655,3 +655,38 @@ export async function eliminaBlocco(
     { method: "DELETE" },
   );
 }
+
+// =====================================================================
+// Sprint 8.0 MR-B.2.2 (entry 235) — aggiungi vuoto manuale
+// =====================================================================
+
+export interface AggiungiVuotoPayload {
+  giornata_target: number;
+  variant_index_target: number;
+  seq_target?: number | null;
+  stazione_da_codice: string;
+  stazione_a_codice: string;
+  /** Formato `HH:MM` o `HH:MM:SS`. */
+  ora_inizio: string;
+  ora_fine: string;
+  descrizione?: string | null;
+  dry_run: boolean;
+  force: boolean;
+}
+
+export interface AggiungiVuotoResponse {
+  applied: boolean;
+  blocco_id: number | null;
+  nuovo_seq: number | null;
+  violazioni: ViolazioneFattibilita[];
+}
+
+export async function aggiungiVuoto(
+  giroId: number,
+  payload: AggiungiVuotoPayload,
+): Promise<AggiungiVuotoResponse> {
+  return apiJson<AggiungiVuotoResponse>(
+    `/api/giri/${giroId}/blocchi/aggiungi-vuoto`,
+    { method: "POST", body: payload },
+  );
+}

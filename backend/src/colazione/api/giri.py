@@ -3085,6 +3085,260 @@ async def sposta_blocco(
 
 
 # =====================================================================
+# Sprint 8.0 MR-B.2.2 (entry 235): aggiungi blocco vuoto manuale
+# =====================================================================
+# Decisione utente entry 230 + 234: "io posso decidere di aggiungere
+# un vuoto". L'aggiunta crea un `giro_blocco` con
+# `tipo_blocco='materiale_vuoto'` e `corsa_materiale_vuoto_id=null`
+# (vuoto MANUALE, distinto dai vuoti generati dal builder).
+# Validazione fattibilità + re-numerazione seq + lock pessimistico
+# riusano i pattern di MR-B.1/B.2.
+
+
+class AggiungiVuotoRequest(BaseModel):
+    """Payload per aggiungere un vuoto manuale a una variante."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    giornata_target: int = Field(..., ge=1)
+    variant_index_target: int = Field(..., ge=0)
+    seq_target: int | None = Field(
+        default=None,
+        ge=1,
+        description="1-based. Se None, append in coda alla variante.",
+    )
+    stazione_da_codice: str = Field(..., min_length=1, max_length=20)
+    stazione_a_codice: str = Field(..., min_length=1, max_length=20)
+    ora_inizio: str = Field(
+        ..., description="Formato HH:MM o HH:MM:SS."
+    )
+    ora_fine: str = Field(..., description="Formato HH:MM o HH:MM:SS.")
+    descrizione: str | None = Field(default=None, max_length=200)
+    dry_run: bool = Field(default=False)
+    force: bool = Field(default=False)
+
+
+class AggiungiVuotoResponse(BaseModel):
+    applied: bool
+    blocco_id: int | None
+    nuovo_seq: int | None
+    violazioni: list[ViolazioneFattibilita]
+
+
+def _parse_time_input(s: str) -> time:
+    """Parsa 'HH:MM' o 'HH:MM:SS' in `time`. Lancia ValueError altrimenti."""
+    parts = s.split(":")
+    if len(parts) < 2 or len(parts) > 3:
+        raise ValueError(f"orario non valido: {s!r}")
+    h = int(parts[0])
+    m = int(parts[1])
+    sec = int(parts[2]) if len(parts) == 3 else 0
+    if not (0 <= h < 24 and 0 <= m < 60 and 0 <= sec < 60):
+        raise ValueError(f"orario fuori range: {s!r}")
+    return time(h, m, sec)
+
+
+@giri_dettaglio_router.post(
+    "/{giro_id}/blocchi/aggiungi-vuoto",
+    response_model=AggiungiVuotoResponse,
+    status_code=status.HTTP_200_OK,
+    summary=(
+        "Sprint 8.0 MR-B.2.2 (entry 235): aggiungi un vuoto manuale "
+        "a una variante. corsa_materiale_vuoto_id=null lo distingue "
+        "dai vuoti generati dal builder."
+    ),
+)
+async def aggiungi_vuoto(
+    giro_id: int,
+    payload: AggiungiVuotoRequest,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> AggiungiVuotoResponse:
+    """Sprint 8.0 MR-B.2.2 (entry 235).
+
+    Flusso:
+    1. Lock pessimistico giro.
+    2. Pipeline freeze check.
+    3. Validazione orari + esistenza stazioni (FK implicita).
+    4. Lookup variante target (404 se non trovata).
+    5. Carica blocchi variante e simula post-inserimento.
+    6. Check fattibilità (continuità stazioni + gap orari).
+    7. Se dry_run o errors-no-force → no commit.
+    8. Else: INSERT blocco + re-numera seq con pattern offset negativo
+       (MR-B.4 entry 234) per evitare unique violation.
+    """
+    giro = (
+        await session.execute(
+            select(GiroMateriale)
+            .where(
+                GiroMateriale.id == giro_id,
+                GiroMateriale.azienda_id == user.azienda_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if giro is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="giro non trovato",
+        )
+
+    stato_pipeline = (
+        await session.execute(
+            select(ProgrammaMateriale.stato_pipeline_pdc).where(
+                ProgrammaMateriale.id == giro.programma_id
+            )
+        )
+    ).scalar_one_or_none()
+    if stato_pipeline is not None and materiale_freezato(stato_pipeline):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"programma freezato (pipeline {stato_pipeline!r}): "
+                "blocco read-only."
+            ),
+        )
+
+    # Parse orari
+    try:
+        ora_inizio_t = _parse_time_input(payload.ora_inizio)
+        ora_fine_t = _parse_time_input(payload.ora_fine)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"orario invalido: {exc}",
+        ) from exc
+
+    # Verifica esistenza stazioni (FK implicita su giro_blocco).
+    staz_codici = (
+        (
+            await session.execute(
+                select(Stazione.codice).where(
+                    Stazione.codice.in_(
+                        [
+                            payload.stazione_da_codice,
+                            payload.stazione_a_codice,
+                        ]
+                    ),
+                    Stazione.azienda_id == user.azienda_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    staz_set = set(staz_codici)
+    if payload.stazione_da_codice not in staz_set:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"stazione_da_codice {payload.stazione_da_codice!r} non trovata",
+        )
+    if payload.stazione_a_codice not in staz_set:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"stazione_a_codice {payload.stazione_a_codice!r} non trovata",
+        )
+
+    # Lookup variante target.
+    variante_target = (
+        await session.execute(
+            select(GiroVariante)
+            .join(GiroGiornata, GiroGiornata.id == GiroVariante.giro_giornata_id)
+            .where(
+                GiroGiornata.giro_materiale_id == giro_id,
+                GiroGiornata.numero_giornata == payload.giornata_target,
+                GiroVariante.variant_index == payload.variant_index_target,
+            )
+        )
+    ).scalar_one_or_none()
+    if variante_target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"variante non trovata: giornata={payload.giornata_target}, "
+                f"variant_index={payload.variant_index_target}"
+            ),
+        )
+
+    # Carica blocchi esistenti.
+    blocchi_esistenti = list(
+        (
+            await session.execute(
+                select(GiroBlocco)
+                .where(GiroBlocco.giro_variante_id == variante_target.id)
+                .order_by(GiroBlocco.seq)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    pos_inserimento = (
+        len(blocchi_esistenti)
+        if payload.seq_target is None
+        else max(0, min(payload.seq_target - 1, len(blocchi_esistenti)))
+    )
+
+    # Crea il nuovo blocco vuoto manuale (in memoria, no flush ancora).
+    nuovo = GiroBlocco(
+        giro_variante_id=variante_target.id,
+        seq=-1_000_000,  # placeholder, riassegnato dopo
+        tipo_blocco="materiale_vuoto",
+        corsa_commerciale_id=None,
+        corsa_materiale_vuoto_id=None,
+        stazione_da_codice=payload.stazione_da_codice,
+        stazione_a_codice=payload.stazione_a_codice,
+        ora_inizio=ora_inizio_t,
+        ora_fine=ora_fine_t,
+        descrizione=payload.descrizione,
+        is_validato_utente=True,
+        metadata_json={
+            "is_manuale": True,
+            "tipo_vuoto": "manuale",
+            "creato_da_user_id": user.user_id,
+            "creato_at_iso": datetime.now(UTC).isoformat(),
+        },
+    )
+
+    # Simula sequenza post-inserimento (per check fattibilità).
+    sim_post = (
+        blocchi_esistenti[:pos_inserimento]
+        + [nuovo]
+        + blocchi_esistenti[pos_inserimento:]
+    )
+    label = f"G{payload.giornata_target} V{payload.variant_index_target}"
+    violazioni = _check_fattibilita_variante(sim_post, variante_target.id, label)
+    has_errors = any(v.severity == "error" for v in violazioni)
+
+    if payload.dry_run or (has_errors and not payload.force):
+        return AggiungiVuotoResponse(
+            applied=False,
+            blocco_id=None,
+            nuovo_seq=None,
+            violazioni=violazioni,
+        )
+
+    # Applica: INSERT + re-numera seq.
+    session.add(nuovo)
+    await session.flush()  # ottiene nuovo.id
+
+    # Re-numera con pattern offset negativo (Fausto fix entry 234).
+    for idx, b in enumerate(sim_post, start=1):
+        b.seq = -idx
+    await session.flush()
+    for idx, b in enumerate(sim_post, start=1):
+        b.seq = idx
+    await session.commit()
+    await session.refresh(nuovo)
+
+    return AggiungiVuotoResponse(
+        applied=True,
+        blocco_id=nuovo.id,
+        nuovo_seq=nuovo.seq,
+        violazioni=violazioni,
+    )
+
+
+# =====================================================================
 # Sprint 8.0 MR-B.2 (entry 232): elimina blocco vuoto manuale
 # =====================================================================
 # Decisione utente entry 230: "io posso decidere di eliminare un vuoto
