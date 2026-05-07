@@ -10,6 +10,122 @@
 
 ---
 
+## 2026-05-07 (224) — MR-4 unificato: 2 vincoli soste configurabili per programma
+
+### Contesto
+
+Decisione utente entry 223:
+
+> "metti i primi due vincoli, e successivamente, continua con il
+> programma di sommare le giornate insieme per il tipo di materiale
+> e applicare la modalità modifica e interagire modificandola"
+
+I 2 vincoli (entry 222 default fisso → entry 223 rollback → entry 224
+configurabili per programma):
+
+- ``max_sosta_diurna_min``: minuti DIURNI massimi di sosta intergiornata
+  (fuori 22:00–06:00). ``NULL`` = OFF (retrocompat). Tipico 300 (5h).
+- ``min_servizio_giornata_pct``: % minima di servizio per ogni
+  giornata aggiunta in estensione del giro multi-giornata. Calcolata
+  come ``somma_minuti_corse / 1440 × 100``. ``NULL`` = OFF. Tipico
+  30 (= 30% di un giorno in servizio). Intercetta il caso "G1 ETR421
+  con 1h32 di servizio in 24h = 6%".
+
+### Modifiche backend
+
+**Migration `0039_programma_vincoli_soste.py`** (nuovo): aggiunge le
+2 colonne nullable a ``programma_materiale``. Tutti i programmi
+esistenti partono con ``NULL`` (= vincoli OFF), nessuna logica
+esistente si rompe.
+
+**`backend/src/colazione/models/programmi.py`**: 2 nuovi campi
+``Mapped[int | None]`` + commenti.
+
+**`backend/src/colazione/schemas/programmi.py`**:
+- ``ProgrammaMaterialeRead``: 2 campi opzionali.
+- ``ProgrammaMaterialeCreate``: 2 ``Field(default=None, ge=0, le=...)``.
+- ``ProgrammaMaterialeUpdate``: idem.
+
+**`backend/src/colazione/domain/builder_giro/multi_giornata.py`**:
+- ``ParamMultiGiornata`` esteso con i 2 nuovi parametri ``None``-default.
+- Nuovo helper ``_pct_servizio_catena(cat_pos)`` → calcola % servizio
+  da ``somma minuti corse / 1440``.
+- Nel loop di estensione del giro multi-giornata, **dopo aver trovato
+  ``prossima``**:
+  - Se ``params.max_sosta_diurna_min`` non-null:
+    ``_minuti_diurni_sosta_intergiornata > max`` → ``break``.
+  - Se ``params.min_servizio_giornata_pct`` non-null:
+    ``_pct_servizio_catena(prossima) < min`` → ``break``.
+
+**`backend/src/colazione/domain/builder_giro/builder.py`**: passa i
+2 parametri da ``programma`` a ``ParamMultiGiornata`` quando
+costruisce il giro multi-giornata.
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/programmi.ts`**: tipi
+``ProgrammaMaterialeRead/Create/Update`` estesi con i 2 campi
+opzionali (``number | null``).
+
+**`frontend/src/routes/pianificatore-giro/ModificaConfigurazioneDialog.tsx`**:
+- 2 nuovi state ``maxSostaDiurnaMin`` + ``minServizioGiornataPct``
+  (stringa vuota = NULL).
+- Re-init nello ``useEffect`` quando il dialog si riapre.
+- Validazione: ``[0, 1440]`` per max_sosta, ``[0, 100]`` per min_serv.
+- Form: 2 input grid su 2 colonne in nuova sezione, con placeholder
+  "vuoto = nessun limite" e descrizione testuale del vincolo.
+- Payload UPDATE: passa i 2 valori (null se vuoti).
+
+### Verifiche
+
+- ✅ ``ruff check src/colazione/`` (3 errori B008 preesistenti in
+  ``api/anagrafiche.py`` + ``api/pianificatore_pdc.py``, non miei).
+- ✅ ``mypy --strict`` clean (39 source files).
+- ✅ ``pnpm tsc --noEmit`` clean.
+- ✅ ``vite dev`` builda + serve senza errori console.
+- ✅ ``pytest tests/test_sosta_diurna_mr3.py`` (entry 222) → 7/7
+  PASSED. L'helper ``_minuti_diurni_sosta_intergiornata`` resta
+  testato.
+
+### Stato
+
+- ✅ MR-4 unificato chiuso. Backend + frontend pronti.
+- ⏳ Commit + push + deploy backend + frontend Railway.
+
+### Per l'utente
+
+Dopo deploy:
+
+1. Apri il programma → "Modifica configurazione".
+2. Vedi 2 nuovi input nella sezione vincoli:
+   - **Max sosta diurna intergiornata (min)**: lascia vuoto per OFF,
+     o metti un valore (es. 360 = 6h, 300 = 5h).
+   - **Min servizio giornata (%)**: lascia vuoto per OFF, o metti
+     una soglia (es. 30 = 30%).
+3. Salva → rigenera giri (force=true).
+4. I giri vengono creati rispettando i 2 vincoli (se attivi).
+
+**Strategia consigliata** per il programma giugno 2026 (vedi G1 ETR421
+con 1h32 di servizio):
+
+- Inizia con ``min_servizio_giornata_pct = 25`` (= 25% del giorno,
+  quindi ~6h di servizio per giornata). Le giornate "morte" tipo G1
+  ETR421 6% vengono rifiutate → il giro chiude prima.
+- Lascia ``max_sosta_diurna_min`` OFF inizialmente. Se il problema
+  persiste, attivalo a 480 (8h) come compromesso.
+
+### Prossimo step
+
+**MR-5 "Aggregazione giri per materiale + modalità modifica"**:
+- Toggle "Raggruppa per materiale" nella tabella giri.
+- Vista aggregata: 1 riga per ``materiale_tipo_codice`` con somma
+  turni, km cumulato, pezzi.
+- Click espande lista giri singoli.
+- Modalità modifica batch: cambiare materiale/deposito di tutti i
+  giri di un gruppo in 1 dialog.
+
+---
+
 ## 2026-05-07 (223) — Rollback parziale MR-3: il check multi-giornata era troppo restrittivo
 
 ### Bug

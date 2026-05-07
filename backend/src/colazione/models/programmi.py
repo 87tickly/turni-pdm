@@ -102,6 +102,27 @@ class ProgrammaMateriale(Base):
     n_giornate_max: Mapped[int] = mapped_column(Integer, default=12, server_default="12")
     fascia_oraria_tolerance_min: Mapped[int] = mapped_column(Integer, default=30)
 
+    # Sprint 8.0 MR-4 (entry 224, migration 0039): vincoli soste configurabili
+    # per programma. Default ``None`` = nessun vincolo (retrocompat).
+    #
+    # ``max_sosta_diurna_min`` (entry 224a): minuti diurni MAX di sosta
+    # intergiornata. Soste che hanno più di N minuti fuori dalla fascia
+    # ``[22:00, 06:00)`` causano la chiusura del giro a quel punto. ``None`` =
+    # vincolo disattivato. Tipico 300 (5h). Verificato sulla sosta tra
+    # G_k.ora_arrivo e G_{k+1}.ora_partenza.
+    max_sosta_diurna_min: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    # ``min_servizio_giornata_pct`` (entry 224b): percentuale MINIMA di
+    # servizio richiesta per ogni giornata di un giro multi-giornata.
+    # Calcolata come ``(somma_minuti_corse_giornata / 1440) × 100``.
+    # Giornate con percentuale inferiore vengono considerate "sottoutilizzate"
+    # e il giro si spezza prima di includerle. ``None`` = disattivato.
+    # Tipico 30 (= almeno il 30% del giorno in servizio).
+    min_servizio_giornata_pct: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+
     # Strict mode granulare (vedi PROGRAMMA-MATERIALE.md §2.7)
     strict_options_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 

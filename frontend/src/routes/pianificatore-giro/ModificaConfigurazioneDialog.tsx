@@ -70,6 +70,18 @@ export function ModificaConfigurazioneDialog({
   const [fasciaToler, setFasciaToler] = useState(
     String(programma.fascia_oraria_tolerance_min),
   );
+  // Sprint 8.0 MR-4 (entry 224): vincoli soste configurabili. Stringa
+  // vuota = NULL = vincolo disattivato.
+  const [maxSostaDiurnaMin, setMaxSostaDiurnaMin] = useState(
+    programma.max_sosta_diurna_min === null
+      ? ""
+      : String(programma.max_sosta_diurna_min),
+  );
+  const [minServizioGiornataPct, setMinServizioGiornataPct] = useState(
+    programma.min_servizio_giornata_pct === null
+      ? ""
+      : String(programma.min_servizio_giornata_pct),
+  );
   const [materialiSelezionati, setMaterialiSelezionati] = useState<Set<string>>(
     new Set(programma.materiali_disponibili_codici_json),
   );
@@ -87,6 +99,16 @@ export function ModificaConfigurazioneDialog({
       programma.km_max_giornaliero === null ? "" : String(programma.km_max_giornaliero),
     );
     setFasciaToler(String(programma.fascia_oraria_tolerance_min));
+    setMaxSostaDiurnaMin(
+      programma.max_sosta_diurna_min === null
+        ? ""
+        : String(programma.max_sosta_diurna_min),
+    );
+    setMinServizioGiornataPct(
+      programma.min_servizio_giornata_pct === null
+        ? ""
+        : String(programma.min_servizio_giornata_pct),
+    );
     setMaterialiSelezionati(new Set(programma.materiali_disponibili_codici_json));
     setError(null);
   }, [open, programma]);
@@ -107,6 +129,20 @@ export function ModificaConfigurazioneDialog({
   const kmMaxNum = kmMaxGiornaliero.trim() === "" ? null : Number(kmMaxGiornaliero);
   const kmMaxOk = kmMaxNum === null || (Number.isFinite(kmMaxNum) && kmMaxNum >= 1);
 
+  // Sprint 8.0 MR-4 (entry 224): validazione vincoli soste.
+  const maxSostaNum =
+    maxSostaDiurnaMin.trim() === "" ? null : Number(maxSostaDiurnaMin);
+  const maxSostaOk =
+    maxSostaNum === null ||
+    (Number.isFinite(maxSostaNum) && maxSostaNum >= 0 && maxSostaNum <= 1440);
+  const minServPctNum =
+    minServizioGiornataPct.trim() === "" ? null : Number(minServizioGiornataPct);
+  const minServPctOk =
+    minServPctNum === null ||
+    (Number.isFinite(minServPctNum) &&
+      minServPctNum >= 0 &&
+      minServPctNum <= 100);
+
   const materialiMacro = useMemo(() => {
     const data = materialiQuery.data;
     if (!Array.isArray(data)) return [];
@@ -123,6 +159,8 @@ export function ModificaConfigurazioneDialog({
     rangeOk &&
     fasciaOk &&
     kmMaxOk &&
+    maxSostaOk &&
+    minServPctOk &&
     (materialiMacro.length === 0 || materialiSelezionati.size > 0);
 
   const toggleMateriale = (codice: string) => {
@@ -168,6 +206,8 @@ export function ModificaConfigurazioneDialog({
           n_giornate_max: maxN,
           km_max_giornaliero: kmMaxNum,
           fascia_oraria_tolerance_min: fasciaTolNum,
+          max_sosta_diurna_min: maxSostaNum,
+          min_servizio_giornata_pct: minServPctNum,
           materiali_disponibili_codici_json,
         },
       });
@@ -288,6 +328,48 @@ export function ModificaConfigurazioneDialog({
                 onChange={(e) => setFasciaToler(e.target.value)}
                 disabled={updateMutation.isPending}
               />
+            </div>
+          </div>
+
+          {/* Sprint 8.0 MR-4 (entry 224): vincoli soste configurabili. */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="mod-max-sosta">
+                Max sosta diurna intergiornata (min)
+              </Label>
+              <Input
+                id="mod-max-sosta"
+                type="number"
+                min={0}
+                max={1440}
+                value={maxSostaDiurnaMin}
+                onChange={(e) => setMaxSostaDiurnaMin(e.target.value)}
+                disabled={updateMutation.isPending}
+                placeholder="vuoto = nessun limite"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Minuti DIURNI massimi (fuori 22:00–06:00) di sosta tra
+                giornate del giro. Es. 300 = 5h. Sopra → giro chiuso.
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="mod-min-serv">
+                Min servizio giornata (%)
+              </Label>
+              <Input
+                id="mod-min-serv"
+                type="number"
+                min={0}
+                max={100}
+                value={minServizioGiornataPct}
+                onChange={(e) => setMinServizioGiornataPct(e.target.value)}
+                disabled={updateMutation.isPending}
+                placeholder="vuoto = nessun limite"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                % minima di servizio per giornata (somma minuti corse /
+                1440). Es. 30 = giornate sotto 30% scartate.
+              </p>
             </div>
           </div>
 

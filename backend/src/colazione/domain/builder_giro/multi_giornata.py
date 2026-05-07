@@ -126,6 +126,19 @@ class ParamMultiGiornata:
     n_giornate_min: int = 4
     km_max_ciclo: float | None = None
     whitelist_sede: frozenset[str] = field(default_factory=frozenset)
+    # Sprint 8.0 MR-4 (entry 224): vincoli soste configurabili per
+    # programma. ``None`` = vincolo disattivato (retrocompat).
+    max_sosta_diurna_min: int | None = None
+    """Minuti DIURNI massimi (fuori 22:00-06:00) di sosta intergiornata.
+    Se la sosta tra ``G_k.ora_arrivo`` e ``G_{k+1}.ora_partenza`` ha
+    più di N minuti diurni, il giro chiude in G_k. ``None`` = niente
+    cap (retrocompat). Tipico 300 (5h)."""
+    min_servizio_giornata_pct: int | None = None
+    """Percentuale MINIMA di servizio richiesta per ogni giornata
+    aggiunta in estensione del giro multi-giornata. Calcolata come
+    ``somma_minuti_corse / 1440 × 100``. Sotto soglia, la giornata
+    viene rifiutata e il giro chiude in G_k. ``None`` = niente check.
+    Tipico 30 (= 30% di un giorno in servizio)."""
 
 
 _DEFAULT_PARAM = ParamMultiGiornata()
@@ -272,6 +285,30 @@ def _minuti_diurni_sosta_intergiornata(t_arrivo: time, t_partenza: time) -> int:
 # convoglio rientra in deposito invece di restare fermo in stazione
 # durante il diurno feriale.
 MAX_SOSTA_DIURNA_MIN = 300  # 5h
+
+
+def _pct_servizio_catena(cat_pos: CatenaPosizionata) -> int:
+    """Sprint 8.0 MR-4 (entry 224): percentuale di servizio di una
+    giornata = ``somma_minuti_corse / 1440 × 100``.
+
+    Esempio giro #422 G1 (ETR421): 1 corsa di 92 min → pct = 6%.
+    Sotto qualunque soglia ragionevole (es. 30%) → giornata
+    sottoutilizzata, il convoglio dovrebbe rientrare deposito invece
+    di estendere il giro.
+
+    Considera solo le corse commerciali e i materiali vuoti della
+    catena (gli eventi composizione hanno durata 0).
+    """
+    total_min = 0
+    for c in cat_pos.catena.corse:
+        partenza = _time_to_min(c.ora_partenza)
+        arrivo = _time_to_min(c.ora_arrivo)
+        if arrivo >= partenza:
+            total_min += arrivo - partenza
+        else:
+            # Cross-mezzanotte
+            total_min += (1440 - partenza) + arrivo
+    return int(total_min * 100 / 1440)
 
 
 def _trova_continuazione(
@@ -546,18 +583,29 @@ def _costruisci_giri_per_data(
                 if prossima is None:
                     break
 
-                # MR-3 entry 223 (rollback parziale di entry 222): il
-                # check ``_minuti_diurni_sosta_intergiornata > 300`` era
-                # troppo restrittivo per la realtà operativa: treni
-                # regionali finiscono fine pomeriggio (~16:00) e
-                # ricominciano mattina (~09:00) → sosta intergiornata
-                # ~9h diurni → spezza sempre. Risultato: tutti giri di
-                # 1 giornata. L'utente ha confermato che è inaccettabile.
-                # Rimosso il check qui — il vincolo 5h ora vale solo
-                # per soste INTRA-giornata (gap_max in catena.py).
-                # ``_minuti_diurni_sosta_intergiornata`` resta come
-                # helper esposto per usi futuri (potrebbe servire come
-                # soglia configurabile per programma in iterazione 2).
+                # Sprint 8.0 MR-4 (entry 224): vincoli soste configurabili
+                # per programma. ``None`` = check disattivato (retrocompat
+                # default). Entry 222/223: il default globale a 300 min
+                # diurni era troppo restrittivo — ora il pianificatore
+                # sceglie esplicitamente il valore.
+                if params.max_sosta_diurna_min is not None:
+                    diurno_sosta = _minuti_diurni_sosta_intergiornata(
+                        ultima_corsa.ora_arrivo,
+                        prossima.catena.corse[0].ora_partenza,
+                    )
+                    if diurno_sosta > params.max_sosta_diurna_min:
+                        break
+
+                # Sprint 8.0 MR-4 (entry 224b): vincolo "giornata
+                # sottoutilizzata". Se la prossima giornata avrebbe meno
+                # del N% di tempo in servizio, il convoglio dovrebbe
+                # rientrare deposito invece che estendere il giro su una
+                # giornata quasi vuota (es. G1 ETR421 con 1h32 di servizio
+                # in 24h = 6%).
+                if params.min_servizio_giornata_pct is not None:
+                    pct = _pct_servizio_catena(prossima)
+                    if pct < params.min_servizio_giornata_pct:
+                        break
 
                 giornate.append(GiornataGiro(data=d_prossima, catena_posizionata=prossima))
                 visitate.add(id(prossima))

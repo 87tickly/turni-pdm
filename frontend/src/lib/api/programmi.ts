@@ -95,6 +95,16 @@ export interface ProgrammaMaterialeRead {
   /** Sprint 7.8: lunghezza massima dei giri (hard cap). */
   n_giornate_max: number;
   fascia_oraria_tolerance_min: number;
+  /**
+   * Sprint 8.0 MR-4 (entry 224): minuti DIURNI massimi (fuori 22:00-06:00)
+   * di sosta intergiornata. ``null`` = vincolo disattivato.
+   */
+  max_sosta_diurna_min: number | null;
+  /**
+   * Sprint 8.0 MR-4 (entry 224): % MINIMA di servizio per giornata
+   * (somma_minuti_corse / 1440). ``null`` = disattivato. Tipico 30.
+   */
+  min_servizio_giornata_pct: number | null;
   strict_options_json: StrictOptions;
   stazioni_sosta_extra_json: string[];
   /**
@@ -188,6 +198,10 @@ export interface ProgrammaMaterialeCreate {
   /** Sprint 7.8: default 12. */
   n_giornate_max?: number;
   fascia_oraria_tolerance_min?: number;
+  /** Sprint 8.0 MR-4 (entry 224): vincolo soste diurne. ``null`` = OFF. */
+  max_sosta_diurna_min?: number | null;
+  /** Sprint 8.0 MR-4 (entry 224): % min servizio giornata. ``null`` = OFF. */
+  min_servizio_giornata_pct?: number | null;
   strict_options_json?: Partial<StrictOptions>;
   stazioni_sosta_extra_json?: string[];
   /** MR α: subset codici materiale "a disposizione". `[]` = tutti. */
@@ -207,6 +221,10 @@ export interface ProgrammaMaterialeUpdate {
   /** Sprint 7.8: aggiorna lunghezza massima (hard) dei giri. */
   n_giornate_max?: number;
   fascia_oraria_tolerance_min?: number;
+  /** Sprint 8.0 MR-4 (entry 224). */
+  max_sosta_diurna_min?: number | null;
+  /** Sprint 8.0 MR-4 (entry 224). */
+  min_servizio_giornata_pct?: number | null;
   strict_options_json?: Partial<StrictOptions>;
   stazioni_sosta_extra_json?: string[];
   /** MR α: aggiornamento subset codici materiale. */

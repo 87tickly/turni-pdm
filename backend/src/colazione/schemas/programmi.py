@@ -264,6 +264,9 @@ class ProgrammaMaterialeRead(BaseModel):
     n_giornate_min: int = 4
     n_giornate_max: int = 12
     fascia_oraria_tolerance_min: int
+    # Sprint 8.0 MR-4 (entry 224): vincoli soste configurabili per programma.
+    max_sosta_diurna_min: int | None = None
+    min_servizio_giornata_pct: int | None = None
     strict_options_json: dict[str, Any]
     stazioni_sosta_extra_json: list[str] = Field(default_factory=list)
     # MR α (migration 0035): subset di codici MaterialeTipo "a disposizione"
@@ -363,6 +366,9 @@ class ProgrammaMaterialeCreate(BaseModel):
     n_giornate_min: int = Field(default=4, ge=1, le=30)
     n_giornate_max: int = Field(default=12, ge=1, le=30)
     fascia_oraria_tolerance_min: int = Field(default=30, ge=0, le=120)
+    # Sprint 8.0 MR-4 (entry 224): vincoli soste configurabili.
+    max_sosta_diurna_min: int | None = Field(default=None, ge=0, le=1440)
+    min_servizio_giornata_pct: int | None = Field(default=None, ge=0, le=100)
     strict_options_json: StrictOptions = Field(default_factory=StrictOptions)
     stazioni_sosta_extra_json: list[str] = Field(default_factory=list)
     # MR α: subset di codici MaterialeTipo dichiarato dal pianificatore.
@@ -404,6 +410,9 @@ class ProgrammaMaterialeUpdate(BaseModel):
     n_giornate_min: int | None = Field(default=None, ge=1, le=30)
     n_giornate_max: int | None = Field(default=None, ge=1, le=30)
     fascia_oraria_tolerance_min: int | None = Field(default=None, ge=0, le=120)
+    # Sprint 8.0 MR-4 (entry 224): vincoli soste configurabili.
+    max_sosta_diurna_min: int | None = Field(default=None, ge=0, le=1440)
+    min_servizio_giornata_pct: int | None = Field(default=None, ge=0, le=100)
     strict_options_json: StrictOptions | None = None
     stazioni_sosta_extra_json: list[str] | None = None
     # MR α: aggiornamento subset codici materiale disponibili.

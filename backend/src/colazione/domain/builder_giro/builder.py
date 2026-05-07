@@ -1636,6 +1636,9 @@ async def genera_giri(
             n_giornate_min=programma.n_giornate_min,
             km_max_ciclo=cap_effettivo,
             whitelist_sede=whitelist,
+            # Sprint 8.0 MR-4 (entry 224): vincoli soste configurabili.
+            max_sosta_diurna_min=programma.max_sosta_diurna_min,
+            min_servizio_giornata_pct=programma.min_servizio_giornata_pct,
         )
         giri_regola = costruisci_giri_multigiornata(catene_per_d, param_mg)
 
