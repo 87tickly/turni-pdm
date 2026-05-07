@@ -28,6 +28,7 @@ import {
 import {
   DndContext,
   DragOverlay,
+  KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
@@ -204,10 +205,13 @@ export function TurnoAggregatoRoute() {
   } | null>(null);
   const spostaMutation = useSpostaBlocco();
 
+  // Sprint 8.0 MR-B.4 (entry 233 fix Fausto #4 #5): distance 10px +
+  // KeyboardSensor per accessibility.
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 },
+      activationConstraint: { distance: 10 },
     }),
+    useSensor(KeyboardSensor),
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {

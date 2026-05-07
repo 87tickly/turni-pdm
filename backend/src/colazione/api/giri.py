@@ -3037,17 +3037,40 @@ async def sposta_blocco(
         )
 
     # 8. Applica lo spostamento.
-    # 8a. Re-numera seq nella variante origine (post rimozione).
-    if variante_target.id != variante_origine_id:
-        for idx, b in enumerate(sim_origine, start=1):
-            if b.seq != idx:
-                b.seq = idx
+    # Sprint 8.0 MR-B.4 entry 233 (Fausto review #3): l'unique
+    # constraint `(giro_variante_id, seq)` può violarsi durante il
+    # flush se SQLAlchemy invia gli UPDATE in ordine non-favorevole
+    # (es. UPDATE b3.seq=2 prima di spostare via b2 al nuovo
+    # giro_variante_id). Pattern: 2-passate con seq negativi
+    # temporanei (intero signed, niente collisione coi positivi),
+    # flush in mezzo, poi assegnazione finale positiva.
 
-    # 8b. Aggiorna FK + re-numera seq nella variante target.
+    # 8a. Sposta via il blocco PRIMA di rinumerare la variante origine.
     blocco.giro_variante_id = variante_target.id
-    for idx, b in enumerate(sim_target, start=1):
-        if b.seq != idx:
+    # Seq temporaneo negativo per il blocco trasferito così non
+    # collide con i seq esistenti nella variante target.
+    blocco.seq = -1_000_000
+    await session.flush()
+
+    # 8b. Re-numera origine (sim_origine = blocchi che restano).
+    if variante_target.id != variante_origine_id:
+        # Step 1: seq negativi temporanei
+        for idx, b in enumerate(sim_origine, start=1):
+            b.seq = -idx
+        await session.flush()
+        # Step 2: seq finali positivi
+        for idx, b in enumerate(sim_origine, start=1):
             b.seq = idx
+        await session.flush()
+
+    # 8c. Re-numera target (sim_target include il blocco appena spostato).
+    # Step 1: seq negativi temporanei
+    for idx, b in enumerate(sim_target, start=1):
+        b.seq = -idx
+    await session.flush()
+    # Step 2: seq finali positivi
+    for idx, b in enumerate(sim_target, start=1):
+        b.seq = idx
 
     await session.commit()
     await session.refresh(blocco)
@@ -3181,6 +3204,36 @@ async def elimina_blocco(
                 f"blocco di tipo {blocco.tipo_blocco!r} non eliminabile: "
                 "solo `materiale_vuoto` è ammesso."
             ),
+        )
+
+    # Sprint 8.0 MR-B.4 entry 233 (Fausto review #1 HIGH): pre-check
+    # FK `turno_pdc_blocco.giro_blocco_id` (ondelete RESTRICT). Senza
+    # questo pre-check il `session.delete()` esploderebbe con
+    # `IntegrityError` (500) — restituiamo invece un 409 chiaro che
+    # l'utente può capire (servono PdC rigenerati prima).
+    from colazione.models.turni_pdc import TurnoPdcBlocco
+
+    n_pdc_dipendenti = int(
+        (
+            await session.execute(
+                select(func.count(TurnoPdcBlocco.id)).where(
+                    TurnoPdcBlocco.giro_blocco_id == blocco.id
+                )
+            )
+        ).scalar_one()
+    )
+    if n_pdc_dipendenti > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "pdc_dipendenti",
+                "message": (
+                    f"{n_pdc_dipendenti} blocchi PdC dipendono da "
+                    "questo blocco vuoto. Rigenera o elimina prima i "
+                    "turni PdC, poi riprova."
+                ),
+                "n_pdc_dipendenti": n_pdc_dipendenti,
+            },
         )
 
     # Carica blocchi della variante e simula post-eliminazione.

@@ -10,6 +10,87 @@
 
 ---
 
+## 2026-05-07 (234) — MR-B.4: hardening post-Fausto su MR-A/B.2/B.3
+
+### Contesto
+
+Decisione utente entry 233 finale: "fatti aiutare da fausto". Code
+review indipendente con `mcp__grok__code_review` su 2 fronti:
+1. Backend (cross-turno + DELETE blocco)
+2. Frontend (TurnoAggregatoRoute)
+
+3 fix HIGH/MEDIUM applicati pre-deploy come hardening.
+
+### Fix backend
+
+**`backend/src/colazione/api/giri.py`**:
+
+**Fausto #1 HIGH — pre-check FK `turno_pdc_blocco`** in `elimina_blocco`:
+- Senza il pre-check, `session.delete(blocco)` su un blocco vuoto con
+  `turno_pdc_blocco.giro_blocco_id` → `IntegrityError` (HTTP 500).
+- Aggiunto count su `TurnoPdcBlocco` prima del delete; se > 0 →
+  HTTP 409 con detail JSON `{code: "pdc_dipendenti", n_pdc_dipendenti,
+  message}` per UX informata.
+
+**Fausto #3 MEDIUM — unique violation seq durante flush** in
+`sposta_blocco`:
+- Con UPDATE multipli su `(giro_variante_id, seq)` SQLAlchemy non
+  garantisce ordine d'invio → possibile temporary unique violation
+  durante il flush.
+- Pattern 2-passate con seq negativi temporanei:
+  1. Sposta blocco a giro_variante_id target con `seq = -1_000_000`
+     (placeholder).
+  2. `flush()`.
+  3. Re-numera variante origine: prima passata seq negativi
+     (`-1, -2, -3, ...`), `flush()`, seconda passata seq positivi
+     finali.
+  4. Stessa cosa per variante target.
+  - I seq negativi non collidono con quelli positivi (Postgres Integer
+    signed) → niente violazione anche con flush ordering avverso.
+
+### Fix frontend
+
+**`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`** +
+**`TurnoAggregatoRoute.tsx`**:
+
+**Fausto #5 HIGH — accessibility**: aggiunto `useSensor(KeyboardSensor)`
+ai sensors di entrambi i `DndContext`. Ora utenti tastiera-only possono
+fare drag&drop (WCAG compliance).
+
+**Fausto #4 MEDIUM — distance 5px → 10px**: alzata
+`activationConstraint.distance` per ridurre drag accidentali durante
+scroll/touch su mobile/trackpad.
+
+### Fix non applicati (rinviati)
+
+- **Fausto #6 MEDIUM virtualization** (`react-window`): per `>100`
+  righe nella vista aggregata. Soglia non ancora raggiunta in
+  produzione → rinviato.
+- **Fausto frontend #3 stale state**: già coperto — `useSpostaBlocco`
+  invalida `GIRI_KEY` solo `onSuccess` con `applied=true` (i `dry_run`
+  non triggherano invalidate, lo stato resta consistente).
+
+### Verifiche
+
+- ✅ `ruff check` + `mypy --strict` clean.
+- ✅ `pnpm build` → bundle `index-Do03y2bn.js`, 1805 moduli.
+
+### Stato
+
+- ✅ MR-B.4 chiuso. Solo modifiche additive a sicurezza (no
+  comportamento utente cambiato).
+- ⏳ Commit + push + deploy backend + frontend.
+
+### Per l'utente
+
+- Niente cambiamento visibile diretto. Hardening invisibile:
+  l'eliminazione di un vuoto con PdC dipendenti restituisce un
+  messaggio chiaro (409) invece di un errore 500.
+- Drag&drop più resistente a click/scroll accidentali (10px invece
+  di 5px). Tastiera ora supportata (Tab + Space + arrows).
+
+---
+
 ## 2026-05-07 (233) — MR-B.3: feedback visuale doppia composizione + sgancio nel Gantt
 
 ### Contesto

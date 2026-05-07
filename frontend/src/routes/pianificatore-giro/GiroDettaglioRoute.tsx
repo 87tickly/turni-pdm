@@ -29,6 +29,7 @@ import {
 import {
   DndContext,
   DragOverlay,
+  KeyboardSensor,
   PointerSensor,
   useDraggable,
   useDroppable,
@@ -269,12 +270,15 @@ export function GiroDettaglioRoute() {
   } | null>(null);
   const spostaMutation = useSpostaBlocco();
 
-  // Sensors dnd-kit: PointerSensor con activation distance 5px → click
-  // puro non triggera drag (utile per onClick selezione blocco).
+  // Sensors dnd-kit: PointerSensor con activation distance 10px → click
+  // puro non triggera drag (Fausto review #4 entry 233: alzato da 5 a
+  // 10 per evitare drag accidentale durante scroll/touch). KeyboardSensor
+  // per accessibility (Fausto review #5 HIGH a11y).
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 },
+      activationConstraint: { distance: 10 },
     }),
+    useSensor(KeyboardSensor),
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
