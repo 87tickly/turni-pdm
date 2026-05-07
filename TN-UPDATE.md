@@ -10,6 +10,116 @@
 
 ---
 
+## 2026-05-07 (212) — 3 bug fix dopo screenshot utente del programma "giugno 2026"
+
+### Contesto
+
+Dopo il deploy entry 211, l'utente ha segnalato 3 bug rigenerando i
+giri del programma reale "giugno 2026":
+
+1. **Wizard genera giri** non scrolla (regola #27 con 4 linee elencate
+   verticalmente prende tanto spazio).
+2. **Etichette varianti** = ``"Misto: Lv+Lv6 (6 date)"`` /
+   ``"Misto: Lv (9 date)"`` invece dei pattern parlanti stile Trenord.
+3. **GRAVE**: alcuni giri ETR522 finiscono nella sede CRE quando la
+   regola #27 (ETR522) ha sede FIO. Visibile nella lista giri:
+   ``G-CRE-014-ETR522-12g``, ``G-CRE-015-ETR522-12g``.
+
+### Bug 3 — sede del run non filtra le regole
+
+Il pool per materiale di entry 211 caricava TUTTE le corse del
+programma (qualsiasi regola), poi il loop step 3 le posizionava sulla
+sede del run corrente. Le corse della linea Mantova-Cremona-Lodi-Milano
+(regola #27, sede FIO) avevano stazioni nella whitelist CRE → catene
+posizionate su CRE → giri ``G-CRE-...-ETR522-...``.
+
+**Fix**: filtrare le regole per ``localita_codice == localita_codice``
+del run all'inizio dello step 3. Le altre regole (sedi diverse) vengono
+processate dal loro run dedicato (il wizard fa già un loop per sede
+unica).
+
+```python
+# Prima (entry 211):
+corse_perimetro = [c for c in corse if any(matches_all(r, c) for r in regole)]
+
+# Dopo (entry 212):
+regole_della_sede = [
+    r for r in regole
+    if r.localita_codice == localita_codice or r.localita_codice is None
+]
+corse_perimetro = [c for c in corse if any(
+    matches_all(r, c) for r in regole_della_sede
+)]
+```
+
+Retrocompat: regole con sede ``None`` (ipotesi non configurata o test
+legacy) si applicano a qualsiasi sede del run. Tutti i 20 test
+``test_builder_giri.py`` continuano a passare.
+
+Propagato anche al ``_genera_giri_v2`` (entry 210) e al lookup
+``_trova_regola_dominante`` post-fatto (riga ~1542).
+
+### Bug 2 — etichette "Misto:" troppo frequenti
+
+``_MAX_DATE_INLINE = 5`` era troppo basso. Su programmi mensili
+(~22 giorni) le varianti tipiche hanno 6-10 date e cadono sempre
+nel fallback "Misto: Lv+Lv6 (6 date)". L'algoritmo
+``genera_etichetta_parlante`` aveva già priorità per pattern con
+esclusioni inline (``"LV 1:5 escl. <date>"``) e date elencate
+(``"Si eff. <date>"``), ma a soglia 5 quasi nessuna variante reale
+qualificava.
+
+**Fix**: alzato a ``_MAX_DATE_INLINE = 10``. Copre l'80% dei pattern
+reali Trenord 2026 mantenendo l'etichetta leggibile. Per N>10 resta
+il fallback breve ``"<sigla> (N date)"``.
+
+Test ``test_periodo_categoria_troppe_da_elencare_conteggio`` aggiornato
+per ricreare la condizione "troppe inline" con la nuova soglia
+(13 incluse / 7 escluse → ``"Lv esclusi 21/5, 22/5, 25/5, 26/5,
+27/5, 28/5, 29/5"``).
+
+### Bug 1 — wizard non scrolla
+
+Il fix entry 203 (``flex max-h-[90vh] max-w-3xl flex-col``) sul
+``DialogContent`` non bastava: senza ``overflow-hidden`` il flex
+container si espande oltre la viewport quando il contenuto interno
+(la sezione tabella con ``max-h-[55vh]``) non vincola tutta la
+crescita.
+
+**Fix**:
+- ``DialogContent``: aggiunto ``overflow-hidden``.
+- Sezione tabella: cambiato ``max-h-[55vh]`` in ``flex-1 min-h-0``.
+  La sezione ora cresce per occupare lo spazio rimanente del Dialog
+  (header e footer fissi) e scrolla internamente. Niente più
+  altezza arbitraria.
+
+### Verifiche
+
+- ✅ ``mypy --strict src/`` clean.
+- ✅ ``pytest tests/test_builder_giri.py tests/test_etichetta.py
+  tests/test_etichetta_parlante.py`` → 66 passed, 1 skipped.
+- ✅ ``tsc --noEmit`` frontend clean.
+- ⏳ pytest full in corso al momento del commit.
+
+### Stato
+
+- ✅ 3 bug chiusi.
+- ⏳ Commit + push + deploy backend + frontend Railway.
+
+### Lessons learned
+
+Il bug 3 era latente già pre-entry 203 ma non si manifestava perché
+il pool unico mescolava le sedi. Entry 203 (pool per regola) lo
+nascondeva a livello di assegnazione regola dominante. Entry 211
+(pool per materiale) lo ha rivelato. Entry 212 lo chiude
+definitivamente filtrando esplicitamente per sede del run all'inizio
+dello step 3.
+
+Aggiungere nel prossimo MR un test integration: 2 regole con sedi
+diverse, run per sede X non deve produrre giri di sede Y.
+
+---
+
 ## 2026-05-07 (211) — Fix di entry 203: pool corse PER MATERIALE invece che per regola
 
 ### Contesto

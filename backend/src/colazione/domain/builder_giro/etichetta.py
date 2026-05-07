@@ -56,8 +56,13 @@ _ORDINE_CATEGORIE: tuple[str, ...] = ("lavorativo", "prefestivo", "festivo")
 # Sprint 7.8 MR 3: max numero di date elencate inline nelle etichette
 # stile Trenord ("Si eff. 3-4-5/3" o "P escl. 21-28/3, 11/4"). Sopra
 # questa soglia, l'etichetta degrada a `{Sigla} ({n} date)` per non
-# saturare l'UI. Trenord usa tipicamente 3-5 date inline.
-_MAX_DATE_INLINE: int = 5
+# saturare l'UI.
+#
+# Sprint 8.0 entry 212 (decisione utente 2026-05-07): alzato da 5 a 10.
+# Su programmi mensili (~22 giorni), varianti tipiche hanno 6-10 date
+# → cadevano sempre in "Misto: ..." per N>5. Soglia 10 copre l'80%
+# dei pattern reali Trenord 2026 mantenendo l'etichetta leggibile.
+_MAX_DATE_INLINE: int = 10
 
 
 def calcola_etichetta_giro(

@@ -279,14 +279,18 @@ class TestCalcolaEtichettaVariante:
         assert out == "Solo 4/5/26"
 
     def test_periodo_categoria_troppe_da_elencare_conteggio(self) -> None:
-        # 20 lavorativi nel periodo, 8 nella variante → 12 esclusi
-        # (>MAX=5) e 8 incluse (>MAX) → fallback conteggio.
-        # Date scelte tra lavorativi maggio 2026 (lun-ven, no festivi).
+        # 20 lavorativi nel periodo, 13 nella variante → 7 esclusi
+        # (≤MAX=10 quindi entra in "Lv escl. ...") ma 13 incluse
+        # (>MAX=10) → fallback "Lv (13 di 20 date)".
+        # Sprint 8.0 entry 212: alzato MAX_INLINE da 5 a 10 (decisione
+        # utente, programma mensile reale Trenord ha varianti 6-10
+        # date e cadevano sempre in fallback). Test aggiornato per
+        # ricreare la condizione "troppe inline" con la nuova soglia.
         lavorativi_maggio_2026 = [
             date(2026, 5, d) for d in
             (4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22, 25, 26, 27, 28, 29)
         ]
-        variante = lavorativi_maggio_2026[:8]
+        variante = lavorativi_maggio_2026[:13]  # 13 incluse, 7 escluse
         periodo_cat = {"lavorativo": frozenset(lavorativi_maggio_2026)}
         out = calcola_etichetta_variante(variante, _festivita_2026(), periodo_cat)
-        assert out == "Lv (8 di 20 date)"  # noqa: con periodo definito uso ancora la sigla
+        assert out == "Lv esclusi 21/5, 22/5, 25/5, 26/5, 27/5, 28/5, 29/5"

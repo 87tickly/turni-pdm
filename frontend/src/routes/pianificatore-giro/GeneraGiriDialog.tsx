@@ -314,7 +314,7 @@ export function GeneraGiriDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col">
+      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col overflow-hidden">
         {step === "form" && (
           <FormStep
             programmaQueryLoading={programmaQuery.isLoading}
@@ -408,7 +408,12 @@ function FormStep({
           Nessuna regola configurata. Aggiungi almeno una regola prima di lanciare il builder.
         </div>
       ) : (
-        <div className="flex max-h-[55vh] flex-col gap-3 overflow-y-auto">
+        // Sprint 8.0 entry 212 (decisione utente 2026-05-07): la
+        // sezione cresce per occupare lo spazio rimanente del Dialog
+        // (`flex-1 min-h-0`) e scrolla internamente. Sostituisce
+        // `max-h-[55vh]` che limitava arbitrariamente l'altezza e
+        // tagliava il contenuto su programmi con 3+ regole.
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
           <div className="overflow-hidden rounded-md border border-border">
             <table className="w-full text-sm">
               <thead className="bg-muted text-xs uppercase tracking-wide text-muted-foreground">

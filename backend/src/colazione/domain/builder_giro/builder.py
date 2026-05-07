@@ -1325,45 +1325,72 @@ async def genera_giri(
         await _wipe_giri_programma(session, programma_id, localita_id=localita.id)
 
     # 3. Pipeline: carica corse + costruisci catene per data, isolate
-    #    PER MATERIALE (Sprint 8.0 entry 211 — fix di entry 203 troppo
-    #    restrittivo).
+    #    PER MATERIALE (Sprint 8.0 entry 211 + entry 212 sede filter).
     #
     #    Storia:
     #    - Pre-entry 203: pool unico per programma. BUG: catene cross
     #      materiale (ETR522 + ETR526 nello stesso giro).
-    #    - Entry 203: pool isolato PER REGOLA. BUG SECONDARIO: una
-    #      regola multi-linea non concatena cross-notte tra linee
-    #      diverse → giri di 1 giornata invece di N.
-    #    - Entry 211 (questo): pool isolato PER MATERIALE. Le catene si
-    #      formano dentro lo stesso materiale (anche tra regole diverse
-    #      con stesso materiale), MAI cross-materiale. Ripristina i
-    #      giri multi-giornata mantenendo la garanzia "ETR522 non
-    #      contiene corse ETR526".
+    #    - Entry 203: pool isolato PER REGOLA. BUG SECONDARIO: regole
+    #      multi-linea non concatenano cross-notte → giri 1 giornata.
+    #    - Entry 211: pool PER MATERIALE. Catene cross-regola con stesso
+    #      materiale OK. Cross-materiale NO. BUG TERZIARIO emerso:
+    #      corse di ETR522 della regola #27 (sede FIO) finivano in
+    #      giri sede CRE perché alcune linee (Mantova-Cremona-Lodi-Milano)
+    #      avevano stazioni nella whitelist CRE.
+    #    - Entry 212 (questo): aggiungi filtro per SEDE DELLA REGOLA.
+    #      Solo regole con `regola.localita_codice == localita_codice`
+    #      del run vengono processate. Le altre vengono ignorate (= il
+    #      loro run dedicato per la propria sede le coprirà).
     #
-    #    Decisione utente 2026-05-07 (riferimento giro 403, 5 giornate
-    #    × 10 varianti che è il modello atteso PDF Trenord 1134).
+    #    Decisione utente 2026-05-07 (riferimento bug screenshot
+    #    G-CRE-027-ETR522-1g: ETR522 della regola FIO finito in run CRE).
     date_range = [data_inizio_eff + timedelta(days=i) for i in range(n_giornate_eff)]
     corse = await _carica_corse(session, azienda_id, date_range[0], date_range[-1])
 
-    # Pool perimetro (= corse coperte da ALMENO UNA regola del programma).
-    # Stesso comportamento di Sprint 5.6 pre-entry 203.
+    # Entry 212: filtra le regole per la sede del run corrente. Le
+    # regole con sede diversa NON vengono processate qui (saranno
+    # gestite dal loro run dedicato). Regole con sede NULL (= ipotesi
+    # sede non ancora configurata, o test legacy senza sede esplicita)
+    # vengono incluse: si applicano a qualsiasi sede del run, in
+    # retrocompat. Quando il pianificatore promuove la regola
+    # impostando una sede esplicita, il filtro diventa stretto.
+    regole_della_sede = [
+        r
+        for r in regole
+        if r.localita_codice == localita_codice or r.localita_codice is None
+    ]
+    if not regole_della_sede:
+        warnings: list[str] = [
+            f"Nessuna regola del programma ha sede '{localita_codice}'. "
+            "Il run terminerà senza giri. Verifica la configurazione "
+            "delle regole o lancia il run sulla sede corretta."
+        ]
+    else:
+        warnings = []
+
+    # Pool perimetro (= corse coperte da ALMENO UNA regola DELLA SEDE).
+    # Stesso comportamento di Sprint 5.6 ma scoped per sede del run.
     from colazione.domain.builder_giro.risolvi_corsa import matches_all
 
     def _corsa_in_perimetro(c: Any) -> bool:
-        return any(matches_all(r.filtri_json, c, "feriale") for r in regole)
+        return any(
+            matches_all(r.filtri_json, c, "feriale") for r in regole_della_sede
+        )
 
     corse_perimetro = [c for c in corse if _corsa_in_perimetro(c)]
 
     # Annota ogni corsa con il MATERIALE (derivato dalla regola
-    # dominante per quella corsa). Le corse senza regola dominante sono
+    # dominante DELLA SEDE per quella corsa). La regola dominante usa
+    # solo le regole_della_sede così non assegnamo materiali di altre
+    # sedi. Le corse senza regola dominante in questa sede sono
     # escluse dal builder ma contate come orfane.
     materiale_per_corsa: dict[int, str] = {}
     regola_per_corsa_id: dict[int, ProgrammaRegolaAssegnazione] = {}
     materiale_per_regola: dict[int, str] = {
-        r.id: _materiale_da_regola(r) for r in regole
+        r.id: _materiale_da_regola(r) for r in regole_della_sede
     }
     for c in corse_perimetro:
-        regola_dom = _trova_regola_dominante_per_corsa(c, regole)
+        regola_dom = _trova_regola_dominante_per_corsa(c, regole_della_sede)
         if regola_dom is None:
             continue
         mat = materiale_per_regola.get(regola_dom.id, "")
@@ -1373,7 +1400,8 @@ async def genera_giri(
         regola_per_corsa_id[int(c.id)] = regola_dom
 
     # Raggruppa corse per MATERIALE (non per regola). Catene si possono
-    # incrociare tra regole diverse purché lo stesso materiale.
+    # incrociare tra regole diverse della SAME SEDE, purché stesso
+    # materiale.
     corse_per_materiale: dict[str, list[CorsaCommerciale]] = {}
     for c in corse_perimetro:
         mat_corsa: str | None = materiale_per_corsa.get(int(c.id))
@@ -1381,14 +1409,14 @@ async def genera_giri(
             continue
         corse_per_materiale.setdefault(mat_corsa, []).append(c)
 
-    warnings: list[str] = []
     n_corse_orfane = len(corse_perimetro) - sum(
         len(v) for v in corse_per_materiale.values()
     )
     if n_corse_orfane > 0:
         warnings.append(
             f"{n_corse_orfane} corse del periodo non coperte da nessuna "
-            "regola con materiale assegnato — escluse dalla generazione."
+            f"regola con materiale assegnato per la sede '{localita_codice}' "
+            "— escluse dalla generazione."
         )
 
     # Sprint 5.6 Feature 3: attiva il vincolo finestra uscita deposito
@@ -1448,7 +1476,9 @@ async def genera_giri(
                     # Identifica la regola dominante della catena
                     # (post-fatto dalla prima corsa) per il warning.
                     regola_dom_pre = (
-                        _trova_regola_dominante_per_corsa(cat.corse[0], regole)
+                        _trova_regola_dominante_per_corsa(
+                            cat.corse[0], regole_della_sede
+                        )
                         if cat.corse
                         else None
                     )
@@ -1492,8 +1522,11 @@ async def genera_giri(
             azienda_id=azienda_id,
             session=session,
             istanze_v2=istanze_v2,
-            regole=regole,
-            corse=corse,
+            # Entry 212: propaga solo le regole della sede del run.
+            # Le altre regole sono di altre sedi e i loro giri saranno
+            # generati dal loro run dedicato.
+            regole=regole_della_sede,
+            corse=corse_perimetro,
             warnings_esistenti=warnings,
             catene_scartate_per_regola=catene_scartate_per_regola,
             n_corse_orfane=n_corse_orfane,
@@ -1515,7 +1548,10 @@ async def genera_giri(
     catene_orphane = 0
     for d_iter, catene_pos_iter in catene_per_data.items():
         for cp in catene_pos_iter:
-            regola_dom = _trova_regola_dominante(cp, regole)
+            # Entry 212: ricerca regola dominante solo nelle regole DELLA
+            # SEDE del run. Le altre regole sono di altre sedi e i loro
+            # giri saranno generati dal run dedicato.
+            regola_dom = _trova_regola_dominante(cp, regole_della_sede)
             if regola_dom is None:
                 catene_orphane += 1
                 continue
@@ -1527,10 +1563,14 @@ async def genera_giri(
         )
 
     # Entry 197/198 — diagnostico bug "regola senza giri". Per ogni
-    # regola del programma che non ha attribuito nessuna catena, emit
+    # regola della SEDE che non ha attribuito nessuna catena, emit
     # warning esplicito che spieghi la causa più probabile basata sui
     # contatori raccolti (catene scartate per posizionamento, ecc.).
-    regole_senza_catene = [r for r in regole if r.id not in catene_per_regola]
+    # Entry 212: itera solo regole della sede del run (le altre sedi
+    # hanno il loro run).
+    regole_senza_catene = [
+        r for r in regole_della_sede if r.id not in catene_per_regola
+    ]
     for r in regole_senza_catene:
         materiale_regola: str | None = (
             r.composizione_json[0].get("materiale_tipo_codice")
