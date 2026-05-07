@@ -10,6 +10,159 @@
 
 ---
 
+## 2026-05-07 (219) — MR-2.5: "Riempi gap" — fill delle corse non coperte nei gap dei giri esistenti
+
+### Contesto
+
+Decisione utente 2026-05-07 entry 218 (dopo aver visto 198 corse non
+coperte sul programma giugno 2026): "io farei cosi, quando li mette
+li, inventiamo un tasto, con scritto mettili in turno materiale e
+lui sulla base di quelli che ha generato li riprende e cerca in
+qualche modo di rimetterli. ci sono parecchi giri con soste
+materiali inutili sono certo che la soluzione la trova".
+
+Idea: secondo passaggio del builder che usa i giri esistenti come
+scaffold e prova a riempire i gap intra-giornata con le corse
+scartate al primo passaggio.
+
+### Decisioni di scope (3 domande poste, 3 risposte)
+
+1. **Livello A** (match esatto stazioni): la corsa entra solo se
+   stazione_arrivo == stazione_arrivo_blocco_prec E stazione_partenza
+   == stazione_partenza_blocco_succ. NO inventa blocchi vuoti
+   (escalation B → iterazione 2).
+2. **Conferma utente** prima di applicare: dry_run dialog con
+   anteprima corse inseribili, poi tasto "Conferma e applica".
+3. **PdC**: utente "se non abbiamo un buon turno materiale non
+   generiamo turno pdc" — niente check PdC. In più rifinitura mia:
+   l'operazione è solo INSERT (non distruttiva), quindi i PdC
+   eventualmente esistenti restano coerenti — niente 409, niente
+   wipe. Documentato.
+
+### Modifiche backend
+
+**`backend/src/colazione/api/giri.py`** — nuovo endpoint
+``POST /api/programmi/{id}/riempi-gap?dry_run=true|false``:
+
+- Auth ``_authz`` (PIANIFICATORE_GIRO scrittura).
+- Logica:
+  1. Carica programma + regole + corse non coperte (riproduce inline
+     logica di entry 218 perché i 2 endpoint hanno scope diverso).
+  2. Per ogni corsa non coperta determina ``materiale`` dalla regola
+     dominante (prima regola con ``matches_all`` vero in almeno 1
+     ``giorno_tipo``, primo elemento di ``composizione_json``).
+  3. Carica i giri completi del programma con wide-join SQL (1 query
+     per Giro+Giornata+Variante+Blocco), raggruppati in dict
+     ``varianti: dict[variante_id, _Variante]`` con blocchi ordinati
+     per ``seq``.
+  4. Per ogni corsa: scan ``varianti`` con stesso materiale + date
+     subset (``c.valido_in_date_json ⊆ v.dates_apply``), cerca gap
+     fra blocchi consecutivi con match esatto stazioni + tempo
+     sufficiente (``c.ora_partenza >= prev.ora_fine`` e
+     ``c.ora_arrivo <= next.ora_inizio``). Primo match → candidato
+     inserimento.
+  5. ``dry_run=true`` (default): ritorna ``FillGapResult`` con
+     ``inserimenti`` ma ``applied=False``, niente DB write.
+  6. ``dry_run=false``: per ogni inserimento (in ordine seq desc per
+     non conflittare con shift) → ``UPDATE giro_blocco SET seq=seq+1
+     WHERE giro_variante_id=? AND seq>=?`` + INSERT nuovo
+     ``GiroBlocco`` con ``tipo_blocco='corsa_commerciale'`` +
+     ``metadata_json={"origine": "fill_gap_mr_2_5"}`` per audit.
+
+Schemi: ``FillGapInsert`` (corsa_id, numero_treno, giro_id,
+numero_turno, giornata, variante_index, seq_inserito) +
+``FillGapResult`` (applied, n_inserite, n_ancora_scoperte,
+inserimenti).
+
+### Modifiche test
+
+**`backend/tests/test_riempi_gap_api.py`** (nuovo, 4 test minimi):
+
+- 401 senza token.
+- 404 programma inesistente.
+- Programma senza regole → ``applied=False, n=0`` (anche con
+  ``dry_run=false``).
+- ``dry_run`` default ``true`` (verifica esplicita comportamento
+  default).
+
+⚠️ **Test happy-path "fill effettivo"** (programma con giri + corsa
+con gap esatto coprible) richiederebbe setup manuale dei blocchi DB
+(o builder reale che lascia residue su scenario sintetico) → non
+banale, rinviato a iterazione 2 quando si farà anche il livello B
+(blocchi vuoti di posizionamento).
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/giri.ts`**: tipi ``FillGapInsert`` +
+``FillGapResult`` + funzione ``riempiGap(programmaId, dryRun)``.
+
+**`frontend/src/hooks/useGiri.ts`**: hook ``useRiempiGap()`` come
+mutation. ``onSuccess``: invalida ``GIRI_KEY`` solo se ``applied=true``
+(il dry_run non modifica nulla).
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaGiriRoute.tsx`**:
+- Bottone primary **"🔧 Riempi gap"** nell'header della
+  ``CorseNonCoperteSection`` (visibile quando ≥ 1 corsa non coperta).
+- Stato ``previewResult: FillGapResult | null``: click bottone →
+  mutation dry_run → onSuccess setta ``previewResult`` → apre dialog.
+- Nuovo sub-componente ``RiempiGapConfirmDialog``:
+  - 2 KPI in alto (corse inseribili / restano scoperte).
+  - Tabella scrollabile con dettaglio inserimenti (Treno, Inserito
+    in [numero_turno · G\<n\> · V\<i\>], Seq).
+  - Footer Annulla / Conferma e applica.
+  - Apply: stessa mutation con ``dry_run=false`` → ``onSuccess``
+    chiude dialog e cache invalidata (sezione corse non coperte +
+    lista giri si aggiornano automaticamente).
+
+### Verifiche
+
+- ✅ ``ruff check`` clean (giri.py + test).
+- ✅ ``mypy --strict src/colazione/api/giri.py`` clean.
+- ✅ ``pnpm tsc --noEmit`` clean.
+- ✅ ``vite dev`` builda + serve, niente errori console.
+- ⚠️ Test pytest non eseguito locally. E2E sul programma reale
+  giugno 2026 da fare dopo deploy.
+
+### Bug fix in fase di sviluppo (catturati da ruff/mypy/preview)
+
+- Indici tuple invertiti (a[4]=ora_inizio, a[5]=ora_fine) fixati
+  prima del commit.
+- Doppio import ``useState`` in ``ProgrammaGiriRoute.tsx`` (avevo
+  aggiunto una riga import nuova invece di estendere quella
+  esistente) — bloccato da vite/babel ma tsc accettava → catturato
+  dal preview, fixato.
+
+### Stato
+
+- ✅ MR-2.5 chiuso. Backend + test minimi + frontend con dialog
+  conferma.
+- ⏳ Commit + push + deploy backend + frontend Railway.
+
+### Note operative per l'utente
+
+Sul programma reale (es. giugno 2026 con 198 corse non coperte):
+1. Apri pagina "Giri generati" del programma.
+2. Scrolla in fondo → vedi sezione amber con lista 198 corse.
+3. Click **"🔧 Riempi gap"** → si apre dialog con anteprima ("X
+   corse possono essere inserite, Y restano scoperte").
+4. Se l'anteprima ti convince → "Conferma e applica" → i giri si
+   aggiornano in automatico, la sezione si ricarica con N corse
+   ridotte.
+5. Le corse rimaste scoperte richiedono iterazione 2 (livello B con
+   posizionamenti vuoti) o splittare la regola del programma.
+
+### Iterazione 2 prevista
+
+- **Livello B**: inserire blocchi vuoti di posizionamento prima/dopo
+  la corsa per allineare stazioni che non matchano esattamente.
+- **Cross-giornata**: anche pernotti tra giornata K e K+1 come gap.
+- **Motivo specifico** per ogni corsa scartata (no_concatenazione,
+  fuori_whitelist, capacity_overflow, ecc.) — preview "perché non
+  posso fare il fill" sulla riga.
+- Test happy-path con scenario sintetico stabile.
+
+---
+
 ## 2026-05-07 (218) — MR-2: corse non coperte vs PdE (perimetro programma)
 
 ### Contesto

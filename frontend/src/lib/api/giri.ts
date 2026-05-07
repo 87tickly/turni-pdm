@@ -385,3 +385,35 @@ export async function listCorseNonCoperte(
     { method: "GET" },
   );
 }
+
+// =====================================================================
+// Sprint 8.0 MR-2.5 (entry 219) — riempi gap
+// =====================================================================
+
+export interface FillGapInsert {
+  corsa_id: number;
+  numero_treno: string;
+  giro_id: number;
+  numero_turno: string;
+  giornata: number;
+  variante_index: number;
+  seq_inserito: number;
+}
+
+export interface FillGapResult {
+  applied: boolean;
+  n_corse_inserite: number;
+  n_corse_ancora_scoperte: number;
+  inserimenti: FillGapInsert[];
+}
+
+export async function riempiGap(
+  programmaId: number,
+  dryRun: boolean,
+): Promise<FillGapResult> {
+  const search = new URLSearchParams({ dry_run: String(dryRun) });
+  return apiJson<FillGapResult>(
+    `/api/programmi/${programmaId}/riempi-gap?${search.toString()}`,
+    { method: "POST" },
+  );
+}

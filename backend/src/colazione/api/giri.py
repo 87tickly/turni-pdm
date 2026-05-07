@@ -21,12 +21,13 @@ Modalità di generazione (decisione utente):
   obbligatorio. Per N località il pianificatore lancia N chiamate.
 """
 
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.auth import require_any_role, require_role
@@ -882,6 +883,434 @@ async def corse_non_coperte(
 
     out.sort(key=lambda x: x.numero_treno)
     return out
+
+
+# =====================================================================
+# Riempi gap — entry 219 (MR-2.5)
+# =====================================================================
+
+
+class FillGapInsert(BaseModel):
+    """Anteprima/log di un singolo inserimento corsa → gap."""
+
+    corsa_id: int
+    numero_treno: str
+    giro_id: int
+    numero_turno: str
+    giornata: int
+    variante_index: int
+    seq_inserito: int
+    """Posizione in cui la corsa viene inserita (i blocchi successivi
+    shiftano di +1)."""
+
+
+class FillGapResult(BaseModel):
+    """Risposta di ``POST /riempi-gap``: anteprima (dry_run=true) o
+    apply (dry_run=false)."""
+
+    applied: bool
+    n_corse_inserite: int
+    n_corse_ancora_scoperte: int
+    inserimenti: list[FillGapInsert]
+
+
+def _minuti(t: time) -> int:
+    return t.hour * 60 + t.minute
+
+
+def _date_set_from_json(j: list[Any]) -> set[date]:
+    out: set[date] = set()
+    for s in j:
+        try:
+            out.add(date.fromisoformat(str(s)))
+        except ValueError:
+            continue
+    return out
+
+
+@router.post(
+    "/{programma_id}/riempi-gap",
+    response_model=FillGapResult,
+    summary="Riprende le corse non coperte e prova a inserirle nei gap "
+    "intra-giornata dei giri esistenti del programma",
+)
+async def riempi_gap(
+    programma_id: int,
+    dry_run: bool = Query(
+        True,
+        description="Se True (default): anteprima senza modifiche al DB. "
+        "Se False: applica gli inserimenti.",
+    ),
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> FillGapResult:
+    """Sprint 8.0 MR-2.5 (entry 219): "Fill gap" delle corse non
+    coperte sui giri esistenti.
+
+    Logica (livello A — "match esatto stazioni"):
+
+    1. Carica programma + regole + corse non coperte (riuso logica di
+       ``corse-non-coperte`` ma inline per autonomia).
+    2. Carica i giri del programma con giornate, varianti, blocchi.
+    3. **Indicizza i gap intra-giornata** per ogni variante: per ogni
+       coppia di blocchi consecutivi (ordinati per ``seq``) calcola
+       ``(stazione_a_blocco_prec, stazione_da_blocco_succ,
+       minuti_liberi)``. Skip se uno dei due blocchi non ha stazione
+       o orario (es. blocchi di tipo ``aggancio``/``sgancio`` senza
+       orari espliciti).
+    4. Per ogni corsa non coperta:
+       - Determina materiale (regola dominante che la matcha → primo
+         elemento di ``composizione_json``).
+       - Skip giri con materiale diverso.
+       - Per ogni variante con ``valido_in_date_json ⊆ dates_apply_json``:
+         cerca un gap ``(c.codice_origine, c.codice_destinazione,
+         tempo_libero >= durata_corsa)``.
+       - Primo match → inserimento candidato.
+
+    5. **dry_run=true** (default): ritorna l'anteprima senza modificare.
+    6. **dry_run=false**: per ogni inserimento:
+       - Shifta seq dei blocchi successivi (``UPDATE giro_blocco SET
+         seq=seq+1 WHERE giro_variante_id=? AND seq>=?``).
+       - INSERT del nuovo ``GiroBlocco`` con ``tipo_blocco="corsa_commerciale"``.
+
+    **PdC**: l'operazione è non distruttiva (solo INSERT), quindi i
+    PdC esistenti restano coerenti (FK ``giro_blocco_id`` SET NULL).
+    L'utente eventualmente rigenererà i PdC per coprire le nuove
+    corse aggiunte (decisione utente entry 219).
+    """
+    # 1. Visibilità + load programma.
+    programma = (
+        await session.execute(
+            select(ProgrammaMateriale).where(
+                ProgrammaMateriale.id == programma_id,
+                ProgrammaMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if programma is None or not programma_visibile_per_ruoli(
+        programma.stato_pipeline_pdc, user.roles, user.is_admin
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="programma non trovato",
+        )
+
+    # 2. Regole + corse non coperte (riproduzione locale della logica di
+    # corse_non_coperte).
+    regole = list(
+        (
+            await session.execute(
+                select(ProgrammaRegolaAssegnazione)
+                .where(ProgrammaRegolaAssegnazione.programma_id == programma_id)
+                .order_by(ProgrammaRegolaAssegnazione.priorita.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not regole:
+        return FillGapResult(
+            applied=False,
+            n_corse_inserite=0,
+            n_corse_ancora_scoperte=0,
+            inserimenti=[],
+        )
+
+    corse = list(
+        (
+            await session.execute(
+                select(CorsaCommerciale)
+                .where(CorsaCommerciale.azienda_id == user.azienda_id)
+                .where(corse_attive_clause())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    coperte_rows = (
+        await session.execute(
+            select(GiroBlocco.corsa_commerciale_id)
+            .join(GiroVariante, GiroVariante.id == GiroBlocco.giro_variante_id)
+            .join(GiroGiornata, GiroGiornata.id == GiroVariante.giro_giornata_id)
+            .join(GiroMateriale, GiroMateriale.id == GiroGiornata.giro_materiale_id)
+            .where(GiroMateriale.programma_id == programma_id)
+            .where(GiroBlocco.corsa_commerciale_id.is_not(None))
+            .distinct()
+        )
+    ).all()
+    coperte_set: set[int] = {int(r[0]) for r in coperte_rows if r[0] is not None}
+
+    giorni_tipo = ("feriale", "sabato", "festivo")
+
+    @dataclass(frozen=True)
+    class _CorsaCandidata:
+        corsa: CorsaCommerciale
+        materiale: str  # codice materiale primo della regola
+
+    candidate: list[_CorsaCandidata] = []
+    for c in corse:
+        if c.id in coperte_set:
+            continue
+        # Periodo
+        date_in_periodo = _date_set_from_json(c.valido_in_date_json or [])
+        date_in_periodo = {
+            d for d in date_in_periodo if programma.valido_da <= d <= programma.valido_a
+        }
+        if not date_in_periodo:
+            continue
+        # Matching regola → materiale
+        materiale: str | None = None
+        for r in regole:
+            for gt in giorni_tipo:
+                if matches_all(r.filtri_json, c, gt):
+                    if r.composizione_json:
+                        try:
+                            materiale = str(r.composizione_json[0]["materiale_tipo_codice"])
+                        except (KeyError, IndexError, TypeError):
+                            materiale = None
+                    break
+            if materiale is not None:
+                break
+        if materiale is None:
+            continue
+        candidate.append(_CorsaCandidata(corsa=c, materiale=materiale))
+
+    # 3. Carica giri completi per il programma + tutti i blocchi (single
+    # wide-join query, raggruppata in Python). ``wide_rows`` annotato
+    # come ``list[Any]`` per disambiguare mypy nel narrowing dei tipi
+    # SQLAlchemy Row con multi-column select (vs ``corse`` che è
+    # ``list[CorsaCommerciale]``).
+    wide_rows: list[Any] = list(
+        (
+            await session.execute(
+                select(
+                    GiroMateriale.id.label("giro_id"),
+                    GiroMateriale.numero_turno,
+                    GiroMateriale.materiale_tipo_codice,
+                    GiroGiornata.id.label("giornata_id"),
+                    GiroGiornata.numero_giornata,
+                    GiroVariante.id.label("variante_id"),
+                    GiroVariante.variant_index,
+                    GiroVariante.dates_apply_json,
+                    GiroBlocco.id.label("blocco_id"),
+                    GiroBlocco.seq,
+                    GiroBlocco.tipo_blocco,
+                    GiroBlocco.stazione_da_codice,
+                    GiroBlocco.stazione_a_codice,
+                    GiroBlocco.ora_inizio,
+                    GiroBlocco.ora_fine,
+                )
+                .join(GiroGiornata, GiroGiornata.giro_materiale_id == GiroMateriale.id)
+                .join(GiroVariante, GiroVariante.giro_giornata_id == GiroGiornata.id)
+                .outerjoin(
+                    GiroBlocco, GiroBlocco.giro_variante_id == GiroVariante.id
+                )
+                .where(GiroMateriale.programma_id == programma_id)
+                .where(GiroMateriale.azienda_id == user.azienda_id)
+                .order_by(
+                    GiroMateriale.id,
+                    GiroGiornata.numero_giornata,
+                    GiroVariante.variant_index,
+                    GiroBlocco.seq,
+                )
+            )
+        ).all()
+    )
+
+    @dataclass
+    class _Variante:
+        variante_id: int
+        giro_id: int
+        numero_turno: str
+        materiale: str | None
+        giornata_numero: int
+        variant_index: int
+        dates_set: set[date]
+        # blocchi ordinati per seq, con orari validi (esclusi blocchi
+        # senza ora_inizio/ora_fine come aggancio/sgancio "puri").
+        blocchi: list[tuple[int, int, str | None, str | None, time, time]]
+        # (blocco_id, seq, stazione_da, stazione_a, ora_inizio, ora_fine)
+
+    varianti: dict[int, _Variante] = {}
+    for r in wide_rows:
+        v_id = int(r.variante_id)
+        v = varianti.get(v_id)
+        if v is None:
+            v = _Variante(
+                variante_id=v_id,
+                giro_id=int(r.giro_id),
+                numero_turno=str(r.numero_turno),
+                materiale=r.materiale_tipo_codice,
+                giornata_numero=int(r.numero_giornata),
+                variant_index=int(r.variant_index),
+                dates_set=_date_set_from_json(list(r.dates_apply_json or [])),
+                blocchi=[],
+            )
+            varianti[v_id] = v
+        if r.blocco_id is None or r.ora_inizio is None or r.ora_fine is None:
+            continue
+        v.blocchi.append(
+            (
+                int(r.blocco_id),
+                int(r.seq),
+                r.stazione_da_codice,
+                r.stazione_a_codice,
+                r.ora_inizio,
+                r.ora_fine,
+            )
+        )
+
+    # 4. Per ogni corsa candidata: cerca gap compatibile (primo match).
+    inserimenti: list[FillGapInsert] = []
+    # Trackiamo gli inserimenti pendenti per variante, così se 2 corse
+    # vogliono lo stesso gap la seconda si adatta correttamente
+    # (semplificazione iterazione 1: ogni gap riempito al massimo da
+    # 1 corsa per chiamata).
+    gap_consumati: set[tuple[int, int]] = set()  # (variante_id, seq_target)
+
+    for cand in candidate:
+        c = cand.corsa
+        durata = _minuti(c.ora_arrivo) - _minuti(c.ora_partenza)
+        if durata <= 0:
+            # Cross-mezzanotte: per iterazione 1 skip.
+            continue
+        match: FillGapInsert | None = None
+        for v in varianti.values():
+            if v.materiale != cand.materiale:
+                continue
+            # Date subset: tutte le date_corsa devono essere in dates_apply
+            date_corsa = _date_set_from_json(c.valido_in_date_json or [])
+            date_corsa = {
+                d for d in date_corsa if programma.valido_da <= d <= programma.valido_a
+            }
+            if not date_corsa.issubset(v.dates_set):
+                continue
+            if not v.blocchi:
+                continue
+            # Cerca gap intra-giornata tra blocchi consecutivi.
+            blocchi_sorted = sorted(v.blocchi, key=lambda b: b[1])  # by seq
+            for i in range(len(blocchi_sorted) - 1):
+                a = blocchi_sorted[i]
+                b = blocchi_sorted[i + 1]
+                a_staz_arr = a[3]
+                b_staz_par = b[2]
+                a_ora_fine = a[5]
+                b_ora_inizio = b[4]
+                if a_staz_arr is None or b_staz_par is None:
+                    continue
+                # Match esatto livello A.
+                if a_staz_arr != c.codice_origine:
+                    continue
+                if b_staz_par != c.codice_destinazione:
+                    continue
+                # Tempo: usa ora_inizio del blocco successivo come fine
+                # del gap (più safe: vincolo che la corsa entri prima
+                # dell'inizio del prossimo blocco).
+                gap_min_disponibili = _minuti(b_ora_inizio) - _minuti(a_ora_fine)
+                if gap_min_disponibili < durata:
+                    continue
+                # Tempo: la corsa deve poter partire dopo a.ora_fine
+                # con ``ora_partenza == a.ora_fine`` ammesso o successivo.
+                if _minuti(c.ora_partenza) < _minuti(a_ora_fine):
+                    continue
+                if _minuti(c.ora_arrivo) > _minuti(b_ora_inizio):
+                    continue
+                # Gap già consumato in questa chiamata?
+                seq_target = int(b[1])
+                key = (v.variante_id, seq_target)
+                if key in gap_consumati:
+                    continue
+                # MATCH!
+                gap_consumati.add(key)
+                match = FillGapInsert(
+                    corsa_id=int(c.id),
+                    numero_treno=str(c.numero_treno),
+                    giro_id=v.giro_id,
+                    numero_turno=v.numero_turno,
+                    giornata=v.giornata_numero,
+                    variante_index=v.variant_index,
+                    seq_inserito=seq_target,
+                )
+                break
+            if match is not None:
+                break
+        if match is not None:
+            inserimenti.append(match)
+
+    n_inseriti = len(inserimenti)
+    n_ancora = len(candidate) - n_inseriti
+
+    if dry_run:
+        return FillGapResult(
+            applied=False,
+            n_corse_inserite=n_inseriti,
+            n_corse_ancora_scoperte=n_ancora,
+            inserimenti=inserimenti,
+        )
+
+    # 5. Apply: per ogni inserimento → SHIFT seq + INSERT giro_blocco.
+    # Raggruppa per (variante_id, seq_target) per shiftare correttamente:
+    # se inserisco in seq=3 e seq=5 della stessa variante, devo shiftare
+    # seq>=5 prima (di +1), poi seq>=3 (di +1, che però NON deve toccare
+    # il blocco appena inserito a seq=3). Per semplicità faccio gli
+    # inserimenti in ordine seq desc, così ogni shift non conflitta.
+    inserimenti_sorted = sorted(
+        inserimenti, key=lambda i: (i.giro_id, -i.seq_inserito)
+    )
+    # Mappa rapida corsa_id → CorsaCommerciale per leggere stazioni/orari.
+    corsa_by_id = {c.id: c for c in corse}
+
+    for ins in inserimenti_sorted:
+        # Shift seq+=1 dei blocchi successivi.
+        await session.execute(
+            update(GiroBlocco)
+            .where(GiroBlocco.giro_variante_id == _variante_id_from_ins(ins, varianti))
+            .where(GiroBlocco.seq >= ins.seq_inserito)
+            .values(seq=GiroBlocco.seq + 1)
+        )
+        c = corsa_by_id[ins.corsa_id]
+        nuovo = GiroBlocco(
+            giro_variante_id=_variante_id_from_ins(ins, varianti),
+            seq=ins.seq_inserito,
+            tipo_blocco="corsa_commerciale",
+            corsa_commerciale_id=c.id,
+            stazione_da_codice=c.codice_origine,
+            stazione_a_codice=c.codice_destinazione,
+            ora_inizio=c.ora_partenza,
+            ora_fine=c.ora_arrivo,
+            is_validato_utente=False,
+            metadata_json={"origine": "fill_gap_mr_2_5"},
+        )
+        session.add(nuovo)
+
+    await session.flush()
+
+    return FillGapResult(
+        applied=True,
+        n_corse_inserite=n_inseriti,
+        n_corse_ancora_scoperte=n_ancora,
+        inserimenti=inserimenti,
+    )
+
+
+def _variante_id_from_ins(
+    ins: FillGapInsert, varianti: "dict[int, Any]"
+) -> int:
+    """Lookup variante_id partendo da (giro_id, giornata, variant_index)
+    nel dict ``varianti`` indicizzato per ``variante_id``.
+    """
+    for v in varianti.values():
+        if (
+            v.giro_id == ins.giro_id
+            and v.giornata_numero == ins.giornata
+            and v.variant_index == ins.variante_index
+        ):
+            return int(v.variante_id)
+    raise RuntimeError(
+        f"variante non trovata per inserimento {ins.giro_id}/"
+        f"{ins.giornata}/{ins.variante_index}"
+    )
 
 
 # Router separato (radice /api) per il dettaglio singolo: il prefix

@@ -8,21 +8,32 @@ import {
   CheckCircle2,
   Search,
   Users,
+  Wrench,
   X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/Dialog";
 import { Spinner } from "@/components/ui/Spinner";
 import {
   useCorseNonCoperte,
   useGiriProgramma,
   useGiroDettaglio,
+  useRiempiGap,
 } from "@/hooks/useGiri";
 import { useProgramma } from "@/hooks/useProgrammi";
 import { ApiError } from "@/lib/api/client";
 import type {
   CorsaNonCopertaItem,
+  FillGapResult,
   GiroBlocco,
   GiroDettaglio,
   GiroGiornata,
@@ -1048,7 +1059,9 @@ function relativeShort(iso: string): string {
  *
  * - Stato di salute (verde) se 0 corse non coperte → invariante
  *   "tutto il perimetro è coperto" rispettata.
- * - Stato di alert (ambra) se ≥ 1 → tabella scrollabile con dettaglio.
+ * - Stato di alert (ambra) se ≥ 1 → tabella scrollabile con dettaglio
+ *   + bottone **"Riempi gap"** (entry 219, MR-2.5) che lancia dry_run
+ *   → dialog conferma → apply.
  *
  * Iterazione 1 (entry 218): solo corse con 0 istanze coperte.
  * Iterazione 2: copertura parziale per data + motivo specifico.
@@ -1056,6 +1069,32 @@ function relativeShort(iso: string): string {
 function CorseNonCoperteSection({ programmaId }: { programmaId: number }) {
   const query = useCorseNonCoperte(programmaId);
   const items = query.data ?? [];
+
+  // Sprint 8.0 MR-2.5 (entry 219): stato per dialog "Riempi gap".
+  const [previewResult, setPreviewResult] = useState<FillGapResult | null>(null);
+  const riempiGapMutation = useRiempiGap();
+
+  const onClickRiempiGap = () => {
+    riempiGapMutation.mutate(
+      { programmaId, dryRun: true },
+      {
+        onSuccess: (data) => {
+          setPreviewResult(data);
+        },
+      },
+    );
+  };
+
+  const onConfermaApply = () => {
+    riempiGapMutation.mutate(
+      { programmaId, dryRun: false },
+      {
+        onSuccess: () => {
+          setPreviewResult(null);
+        },
+      },
+    );
+  };
 
   if (query.isLoading) {
     return (
@@ -1092,40 +1131,181 @@ function CorseNonCoperteSection({ programmaId }: { programmaId: number }) {
 
   // Stato alert — almeno 1 corsa non coperta.
   return (
-    <Card className="overflow-hidden border-amber-300/70 bg-amber-50/40">
-      <div className="flex items-center gap-3 border-b border-amber-300/50 bg-amber-50 px-5 py-3">
-        <AlertTriangle className="h-5 w-5 shrink-0 text-amber-700" aria-hidden />
-        <div className="flex-1">
-          <h3 className="text-sm font-semibold text-amber-900">
-            {items.length} cors{items.length === 1 ? "a" : "e"} del perimetro non
-            copert{items.length === 1 ? "a" : "e"} dal builder
-          </h3>
-          <p className="mt-0.5 text-xs text-amber-800/80">
-            Treni del PdE che matchano almeno una regola del programma e
-            cadono nel periodo, ma non sono finiti in nessun giro generato.
-            Iterazione 1: solo corse con 0 istanze coperte.
-          </p>
+    <>
+      <Card className="overflow-hidden border-amber-300/70 bg-amber-50/40">
+        <div className="flex items-start gap-3 border-b border-amber-300/50 bg-amber-50 px-5 py-3">
+          <AlertTriangle
+            className="mt-0.5 h-5 w-5 shrink-0 text-amber-700"
+            aria-hidden
+          />
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-amber-900">
+              {items.length} cors{items.length === 1 ? "a" : "e"} del perimetro
+              non copert{items.length === 1 ? "a" : "e"} dal builder
+            </h3>
+            <p className="mt-0.5 text-xs text-amber-800/80">
+              Treni del PdE che matchano almeno una regola del programma e
+              cadono nel periodo, ma non sono finiti in nessun giro generato.
+              Iterazione 1: solo corse con 0 istanze coperte.
+            </p>
+          </div>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={onClickRiempiGap}
+            disabled={riempiGapMutation.isPending}
+          >
+            <Wrench className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            {riempiGapMutation.isPending && previewResult === null
+              ? "Calcolo…"
+              : "Riempi gap"}
+          </Button>
         </div>
-      </div>
-      <div className="max-h-[340px] overflow-y-auto">
-        <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-white text-[11px] uppercase tracking-wide text-muted-foreground">
-            <tr className="border-b border-border">
-              <th className="px-4 py-2 text-left font-medium">Treno</th>
-              <th className="px-4 py-2 text-left font-medium">Da → A</th>
-              <th className="px-4 py-2 text-left font-medium">Orario</th>
-              <th className="px-4 py-2 text-right font-medium">N° date</th>
-              <th className="px-4 py-2 text-left font-medium">Regole match</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((it) => (
-              <CorsaNonCopertaRow key={it.corsa_id} item={it} />
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
+        <div className="max-h-[340px] overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-white text-[11px] uppercase tracking-wide text-muted-foreground">
+              <tr className="border-b border-border">
+                <th className="px-4 py-2 text-left font-medium">Treno</th>
+                <th className="px-4 py-2 text-left font-medium">Da → A</th>
+                <th className="px-4 py-2 text-left font-medium">Orario</th>
+                <th className="px-4 py-2 text-right font-medium">N° date</th>
+                <th className="px-4 py-2 text-left font-medium">Regole match</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it) => (
+                <CorsaNonCopertaRow key={it.corsa_id} item={it} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      {/* Dialog conferma "Riempi gap" — anteprima dry_run prima di apply. */}
+      <RiempiGapConfirmDialog
+        result={previewResult}
+        applying={riempiGapMutation.isPending && previewResult !== null}
+        onCancel={() => setPreviewResult(null)}
+        onConferma={onConfermaApply}
+      />
+    </>
+  );
+}
+
+function RiempiGapConfirmDialog({
+  result,
+  applying,
+  onCancel,
+  onConferma,
+}: {
+  result: FillGapResult | null;
+  applying: boolean;
+  onCancel: () => void;
+  onConferma: () => void;
+}) {
+  const open = result !== null;
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o && !applying) onCancel();
+      }}
+    >
+      <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col overflow-hidden">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Wrench className="h-5 w-5" />
+            Riempi gap — anteprima
+          </DialogTitle>
+          <DialogDescription>
+            Il builder ha simulato il fill. Verifica gli inserimenti
+            proposti, poi conferma per applicarli ai giri esistenti.
+          </DialogDescription>
+        </DialogHeader>
+        {result !== null && (
+          <>
+            <div className="grid grid-cols-2 gap-3 px-1 pb-2">
+              <Card className="border-emerald-300/60 bg-emerald-50 p-3">
+                <div className="text-xs uppercase tracking-wide text-emerald-800">
+                  Corse inseribili
+                </div>
+                <div className="mt-1 text-2xl font-semibold tabular-nums text-emerald-900">
+                  {result.n_corse_inserite}
+                </div>
+              </Card>
+              <Card className="border-amber-300/60 bg-amber-50 p-3">
+                <div className="text-xs uppercase tracking-wide text-amber-800">
+                  Restano scoperte
+                </div>
+                <div className="mt-1 text-2xl font-semibold tabular-nums text-amber-900">
+                  {result.n_corse_ancora_scoperte}
+                </div>
+              </Card>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-1">
+              {result.inserimenti.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  Nessun gap compatibile trovato. Le corse scoperte
+                  richiedono modifiche più aggressive (posizionamenti
+                  vuoti) — iterazione 2.
+                </p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-background text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <tr className="border-b border-border">
+                      <th className="px-3 py-2 text-left font-medium">
+                        Treno
+                      </th>
+                      <th className="px-3 py-2 text-left font-medium">
+                        Inserito in
+                      </th>
+                      <th className="px-3 py-2 text-right font-medium">Seq</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.inserimenti.map((ins) => (
+                      <tr
+                        key={`${ins.giro_id}-${ins.seq_inserito}-${ins.corsa_id}`}
+                        className="border-b border-border/60 last:border-0"
+                      >
+                        <td className="px-3 py-2 font-mono font-semibold">
+                          {ins.numero_treno}
+                        </td>
+                        <td className="px-3 py-2 text-xs">
+                          <span className="font-mono">{ins.numero_turno}</span>
+                          <span className="text-muted-foreground">
+                            {" · "}G{ins.giornata}
+                            {ins.variante_index > 0 && ` · V${ins.variante_index}`}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">
+                          {ins.seq_inserito}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel} disabled={applying}>
+            Annulla
+          </Button>
+          <Button
+            variant="primary"
+            onClick={onConferma}
+            disabled={
+              applying ||
+              result === null ||
+              result.inserimenti.length === 0
+            }
+          >
+            {applying ? "Applico…" : "Conferma e applica"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

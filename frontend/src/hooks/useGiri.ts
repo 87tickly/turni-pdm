@@ -18,10 +18,12 @@ import {
   listThreadsGiro,
   patchBlocco,
   patchGiro,
+  riempiGap,
   type BuilderResult,
   type CercaTrenoItem,
   type CorsaNonCopertaItem,
   type DuplicaGiroResult,
+  type FillGapResult,
   type GeneraGiriParams,
   type GiroBlocco,
   type GiroDettaglio,
@@ -163,6 +165,41 @@ export function useDuplicaGiro(): UseMutationResult<DuplicaGiroResult, Error, nu
     mutationFn: (giroId: number) => duplicaGiro(giroId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: GIRI_KEY });
+    },
+  });
+}
+
+interface RiempiGapArgs {
+  programmaId: number;
+  dryRun: boolean;
+}
+
+/**
+ * Sprint 8.0 MR-2.5 (entry 219) — "Fill gap": riprende le corse non
+ * coperte e prova a inserirle nei gap intra-giornata dei giri
+ * esistenti del programma.
+ *
+ * Mutation in 2 fasi (UX):
+ *  1. ``dry_run=true`` → anteprima per dialog conferma utente.
+ *  2. ``dry_run=false`` → apply (INSERT giro_blocco + shift seq).
+ *
+ * Sull'apply invalida ``GIRI_KEY`` → si riaggiornano lista giri,
+ * dettagli giro, corse non coperte.
+ */
+export function useRiempiGap(): UseMutationResult<
+  FillGapResult,
+  Error,
+  RiempiGapArgs
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ programmaId, dryRun }) => riempiGap(programmaId, dryRun),
+    onSuccess: (data) => {
+      // Solo apply (applied=true) invalida la cache: il dry_run è
+      // anteprima, non modifica nulla.
+      if (data.applied) {
+        void qc.invalidateQueries({ queryKey: GIRI_KEY });
+      }
     },
   });
 }
