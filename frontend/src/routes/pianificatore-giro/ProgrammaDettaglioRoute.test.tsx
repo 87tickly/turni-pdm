@@ -46,6 +46,8 @@ function makeProgramma(over: Partial<ProgrammaDettaglioRead> = {}): ProgrammaDet
     n_giornate_min: 4,
     n_giornate_max: 12,
     fascia_oraria_tolerance_min: 30,
+    max_sosta_diurna_min: null,
+    min_servizio_giornata_pct: null,
     strict_options_json: {
       no_corse_residue: false,
       no_overcapacity: false,
