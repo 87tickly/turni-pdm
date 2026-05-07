@@ -375,6 +375,19 @@ export interface CorsaNonCopertaItem {
   /** Date di ``valido_in_date_json`` che cadono nel periodo programma. */
   n_date_perimetro: number;
   regole_match: RegolaMatchRef[];
+  /**
+   * Diagnostica MR-2.5-bis (entry 220):
+   * - ``linea_disgiunta``: nessuna stazione della corsa appare nei giri
+   *   esistenti → serve nuovo giro/materiale (MR-2.7).
+   * - ``sovrapposizione_stazioni``: almeno una stazione coincide → la
+   *   corsa potrebbe inserirsi durante una sosta del giro (MR-2.6
+   *   smart fill su soste).
+   * - ``indeterminato``: caso default.
+   */
+  motivo_presunto:
+    | "linea_disgiunta"
+    | "sovrapposizione_stazioni"
+    | "indeterminato";
 }
 
 export async function listCorseNonCoperte(

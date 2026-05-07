@@ -1129,6 +1129,16 @@ function CorseNonCoperteSection({ programmaId }: { programmaId: number }) {
     );
   }
 
+  // MR-2.5-bis (entry 220): conteggio per motivo per il riepilogo
+  // sopra la tabella → l'utente vede subito quante sono "salvabili"
+  // con MR-2.6 (sosta condivisa) vs richiedono MR-2.7 (nuovo giro).
+  const nLineaDisgiunta = items.filter(
+    (it) => it.motivo_presunto === "linea_disgiunta",
+  ).length;
+  const nSostaCondivisa = items.filter(
+    (it) => it.motivo_presunto === "sovrapposizione_stazioni",
+  ).length;
+
   // Stato alert — almeno 1 corsa non coperta.
   return (
     <>
@@ -1148,6 +1158,26 @@ function CorseNonCoperteSection({ programmaId }: { programmaId: number }) {
               cadono nel periodo, ma non sono finiti in nessun giro generato.
               Iterazione 1: solo corse con 0 istanze coperte.
             </p>
+            {(nLineaDisgiunta > 0 || nSostaCondivisa > 0) && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
+                {nSostaCondivisa > 0 && (
+                  <span
+                    className="rounded bg-sky-100 px-1.5 py-0.5 text-sky-900 ring-1 ring-inset ring-sky-200"
+                    title="Almeno una stazione coincide con i giri esistenti — fillabile durante una sosta (MR-2.6)."
+                  >
+                    {nSostaCondivisa} sosta condivisa
+                  </span>
+                )}
+                {nLineaDisgiunta > 0 && (
+                  <span
+                    className="rounded bg-rose-100 px-1.5 py-0.5 text-rose-900 ring-1 ring-inset ring-rose-200"
+                    title="Né origine né destinazione nei giri esistenti — serve nuovo giro su materiale libero (MR-2.7)."
+                  >
+                    {nLineaDisgiunta} linea disgiunta
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <Button
             variant="primary"
@@ -1169,7 +1199,8 @@ function CorseNonCoperteSection({ programmaId }: { programmaId: number }) {
                 <th className="px-4 py-2 text-left font-medium">Da → A</th>
                 <th className="px-4 py-2 text-left font-medium">Orario</th>
                 <th className="px-4 py-2 text-right font-medium">N° date</th>
-                <th className="px-4 py-2 text-left font-medium">Regole match</th>
+                <th className="px-4 py-2 text-left font-medium">Regole</th>
+                <th className="px-4 py-2 text-left font-medium">Motivo</th>
               </tr>
             </thead>
             <tbody>
@@ -1309,6 +1340,26 @@ function RiempiGapConfirmDialog({
   );
 }
 
+const MOTIVO_LABEL: Record<CorsaNonCopertaItem["motivo_presunto"], string> = {
+  linea_disgiunta: "Linea disgiunta",
+  sovrapposizione_stazioni: "Sosta condivisa",
+  indeterminato: "Indeterminato",
+};
+
+const MOTIVO_TOOLTIP: Record<CorsaNonCopertaItem["motivo_presunto"], string> = {
+  linea_disgiunta:
+    "Né origine né destinazione della corsa appaiono nei giri esistenti del programma. Il convoglio non passa mai da queste stazioni → serve un nuovo giro su un materiale ancora libero della dotazione (MR-2.7 'genera-da-residue').",
+  sovrapposizione_stazioni:
+    "Almeno una delle 2 stazioni della corsa è già toccata dai giri esistenti → la corsa potrebbe essere inserita durante una sosta del giro che passa da quella stazione (MR-2.6 'smart fill su soste').",
+  indeterminato: "Motivo non classificato.",
+};
+
+const MOTIVO_CLASSI: Record<CorsaNonCopertaItem["motivo_presunto"], string> = {
+  linea_disgiunta: "bg-rose-100 text-rose-900 ring-rose-200",
+  sovrapposizione_stazioni: "bg-sky-100 text-sky-900 ring-sky-200",
+  indeterminato: "bg-muted text-muted-foreground ring-border",
+};
+
 function CorsaNonCopertaRow({ item }: { item: CorsaNonCopertaItem }) {
   const oraPart = item.ora_partenza.slice(0, 5);
   const oraArr = item.ora_arrivo.slice(0, 5);
@@ -1337,6 +1388,17 @@ function CorsaNonCopertaRow({ item }: { item: CorsaNonCopertaItem }) {
             </span>
           </span>
         ))}
+      </td>
+      <td className="px-4 py-2 text-xs">
+        <span
+          className={cn(
+            "rounded px-1.5 py-0.5 ring-1 ring-inset",
+            MOTIVO_CLASSI[item.motivo_presunto],
+          )}
+          title={MOTIVO_TOOLTIP[item.motivo_presunto]}
+        >
+          {MOTIVO_LABEL[item.motivo_presunto]}
+        </span>
       </td>
     </tr>
   );

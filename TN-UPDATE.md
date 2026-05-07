@@ -10,6 +10,120 @@
 
 ---
 
+## 2026-05-07 (220) — MR-2.5-bis: diagnostica `motivo_presunto` per ogni corsa non coperta
+
+### Contesto
+
+Decisione utente entry 219, dopo aver visto "0 corse inseribili / 198
+restano scoperte" del fill gap livello A:
+
+> "ma io credo che il problema sia da inserire anche nella gestione
+> dei materiali, come ti ho detto materiali ne abbiamo, quindi primo
+> check capire come posso risolvere il problema [...] guarda quante
+> soste inutili, rigenero il turno inserendo i treni nuovi?
+> successivamente cerco altri materiali. ma la soluzione non sono i
+> materiali vuoti"
+
+L'utente ha ragione su 2 punti:
+
+1. **Cancellata l'iterazione B "vuoti di posizionamento"** che avevo
+   ipotizzato — non è la strada giusta. Nel programma reale (es.
+   giro #567 con sosta 22h a Voghera per un ETR522 della linea
+   Tirano), inventarsi vuoti per agganciare corse di linee disgiunte
+   è economicamente assurdo.
+
+2. **Le 2 strade vere sono:**
+   - **MR-2.6 "Smart fill su soste"**: durante la sosta nel giro,
+     cerca corse del PdE che partono **E tornano** alla stessa
+     stazione di sosta (anche catene di 2+ corse). Senza inventare
+     vuoti.
+   - **MR-2.7 "Genera-da-residue"**: secondo run del builder con
+     pool=corse non coperte e dotazione=materiali ancora liberi
+     dell'azienda → nuovi giri che coprono il gap.
+
+3. **MR-2.5-bis (questa entry)**: prima di scrivere altro algoritmo,
+   diagnostica veloce per capire DOVE sono le 198 corse: linee
+   disgiunte dai giri esistenti (MR-2.7 candidate) o stazioni
+   condivise (MR-2.6 candidate)?
+
+### Modifiche backend
+
+**`backend/src/colazione/api/giri.py`** — endpoint
+``GET /api/programmi/{id}/corse-non-coperte`` esteso (entry 218):
+
+- Nuovo campo ``motivo_presunto`` su ``CorsaNonCopertaItem``:
+  ``Literal["linea_disgiunta", "sovrapposizione_stazioni", "indeterminato"]``.
+- Logica: query aggiuntiva una-tantum per calcolare
+  ``stazioni_giri: set[str]`` = tutte le stazioni toccate dai blocchi
+  dei giri del programma (da ``stazione_da_codice`` e ``stazione_a_codice``).
+- Per ogni corsa scoperta:
+  - Se né ``codice_origine`` né ``codice_destinazione`` ∈
+    ``stazioni_giri`` → ``"linea_disgiunta"``.
+  - Se almeno una delle 2 stazioni ∈ ``stazioni_giri`` →
+    ``"sovrapposizione_stazioni"``.
+  - Altrimenti → ``"indeterminato"`` (caso default, non dovrebbe
+    raggiungersi).
+
+Niente check sulla dotazione materiali in questo MR — caso
+``"materiale_pieno"`` rinviato a iterazione successiva (forse parte
+di MR-2.7 dove la dotazione conta direttamente).
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/giri.ts`**: ``CorsaNonCopertaItem`` esteso
+con ``motivo_presunto`` (literal type).
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaGiriRoute.tsx`**:
+
+- **Header amber**: aggiunto riepilogo conteggio sotto il sottotitolo
+  → 2 chip ``{n} sosta condivisa`` (sky) e ``{n} linea disgiunta``
+  (rose), con tooltip esplicativo della strategia di soluzione
+  futura (MR-2.6 vs MR-2.7).
+- **Tabella corse non coperte**: nuova colonna **Motivo** (6° col)
+  con badge colorato:
+  - ``"Linea disgiunta"`` (rose) → "serve nuovo giro/materiale"
+  - ``"Sosta condivisa"`` (sky) → "fillabile durante una sosta"
+  - ``"Indeterminato"`` (muted) → fallback
+- Tooltip su badge: spiegazione utente del motivo + indicazione MR
+  che lo risolverà.
+- 3 mappe constanti ``MOTIVO_LABEL`` / ``MOTIVO_TOOLTIP`` /
+  ``MOTIVO_CLASSI`` per il rendering.
+
+### Verifiche
+
+- ✅ ``ruff check`` clean.
+- ✅ ``mypy --strict src/colazione/api/giri.py`` clean (dopo rename
+  variabile loop ``r`` → ``sg_row`` per non confondersi col loop
+  successivo su ``regole``).
+- ✅ ``pnpm tsc --noEmit`` clean.
+- ✅ ``vite dev`` builda + serve, niente errori console.
+
+### Stato
+
+- ✅ MR-2.5-bis chiuso. Diagnostica visibile sulla pagina "Giri
+  generati".
+- ⏳ Commit + push + deploy backend + frontend Railway.
+
+### Per l'utente
+
+Sul programma reale "giugno 2026" dopo deploy + hard reload:
+
+- Sezione "198 corse del perimetro non coperte" → 2 chip nel header
+  con i conteggi per motivo (es. "150 linea disgiunta + 48 sosta
+  condivisa").
+- Tabella con nuova colonna "Motivo" → vedi per ogni treno se è
+  candidato MR-2.6 (sky/sosta condivisa) o MR-2.7 (rose/linea
+  disgiunta).
+
+In base ai numeri decidiamo la priorità del prossimo MR:
+
+- Se prevalgono **sosta condivisa** → priorità MR-2.6 (smart fill).
+- Se prevalgono **linea disgiunta** → priorità MR-2.7 (nuovi giri
+  su materiali liberi).
+- Se sono ~50/50 → entrambi serviranno; partiamo dal più impattante.
+
+---
+
 ## 2026-05-07 (219) — MR-2.5: "Riempi gap" — fill delle corse non coperte nei gap dei giri esistenti
 
 ### Contesto

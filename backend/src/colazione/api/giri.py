@@ -736,6 +736,21 @@ class CorsaNonCopertaItem(BaseModel):
         description="Regole del programma che includerebbero la corsa "
         "(matching ``filtri_json`` su almeno un giorno_tipo)."
     )
+    motivo_presunto: Literal[
+        "linea_disgiunta",
+        "sovrapposizione_stazioni",
+        "indeterminato",
+    ] = Field(
+        description="Diagnostica MR-2.5-bis (entry 220):\n"
+        "- ``linea_disgiunta``: né origine né destinazione della corsa "
+        "compaiono nelle stazioni toccate dai giri del programma → il "
+        "convoglio non passa mai da queste stazioni → fill smart non è "
+        "fattibile, serve nuovo giro con materiale libero (MR-2.7).\n"
+        "- ``sovrapposizione_stazioni``: almeno una delle 2 stazioni "
+        "compare nei giri esistenti → potrebbe essere fillabile durante "
+        "una sosta del giro (MR-2.6 smart fill).\n"
+        "- ``indeterminato``: caso default."
+    )
 
 
 @router.get(
@@ -836,6 +851,26 @@ async def corse_non_coperte(
     ).all()
     coperte_set: set[int] = {int(r[0]) for r in coperte_rows if r[0] is not None}
 
+    # MR-2.5-bis (entry 220): set delle stazioni toccate dai giri del
+    # programma per la diagnostica ``motivo_presunto`` di ogni corsa
+    # scoperta. Una stazione è "toccata" se compare come ``stazione_da``
+    # o ``stazione_a`` di un blocco di un giro.
+    stazioni_giri_rows = (
+        await session.execute(
+            select(GiroBlocco.stazione_da_codice, GiroBlocco.stazione_a_codice)
+            .join(GiroVariante, GiroVariante.id == GiroBlocco.giro_variante_id)
+            .join(GiroGiornata, GiroGiornata.id == GiroVariante.giro_giornata_id)
+            .join(GiroMateriale, GiroMateriale.id == GiroGiornata.giro_materiale_id)
+            .where(GiroMateriale.programma_id == programma_id)
+        )
+    ).all()
+    stazioni_giri: set[str] = set()
+    for sg_row in stazioni_giri_rows:
+        if sg_row[0] is not None:
+            stazioni_giri.add(str(sg_row[0]))
+        if sg_row[1] is not None:
+            stazioni_giri.add(str(sg_row[1]))
+
     # 5. Per ogni corsa: filtro perimetro + non coperta.
     out: list[CorsaNonCopertaItem] = []
     giorni_tipo = ("feriale", "sabato", "festivo")
@@ -868,6 +903,26 @@ async def corse_non_coperte(
                     break
         if not regole_match:
             continue
+        # MR-2.5-bis: motivo presunto. Se né origine né destinazione
+        # compaiono nelle stazioni toccate dai giri → linea totalmente
+        # disgiunta dai giri esistenti (serve nuovo giro/materiale,
+        # MR-2.7). Altrimenti almeno un endpoint coincide → la corsa
+        # potrebbe essere fillabile durante una sosta (MR-2.6 smart
+        # fill su soste). Niente check sulla dotazione qui — iterazione
+        # successiva.
+        motivo: Literal[
+            "linea_disgiunta",
+            "sovrapposizione_stazioni",
+            "indeterminato",
+        ]
+        origine_in_giri = corsa.codice_origine in stazioni_giri
+        destinazione_in_giri = corsa.codice_destinazione in stazioni_giri
+        if not origine_in_giri and not destinazione_in_giri:
+            motivo = "linea_disgiunta"
+        elif origine_in_giri or destinazione_in_giri:
+            motivo = "sovrapposizione_stazioni"
+        else:
+            motivo = "indeterminato"
         out.append(
             CorsaNonCopertaItem(
                 corsa_id=corsa.id,
@@ -878,6 +933,7 @@ async def corse_non_coperte(
                 ora_arrivo=corsa.ora_arrivo,
                 n_date_perimetro=n_date_perimetro,
                 regole_match=regole_match,
+                motivo_presunto=motivo,
             )
         )
 
