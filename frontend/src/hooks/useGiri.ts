@@ -17,10 +17,12 @@ import {
   listCorseNonCoperte,
   listGiriAzienda,
   listGiriProgramma,
+  listLineeDistinct,
   listThreadsGiro,
   patchBlocco,
   patchGiro,
   riempiGap,
+  wizardDaLinee,
   type AggregaModificaPayload,
   type AggregaModificaResponse,
   type BuilderResult,
@@ -33,11 +35,14 @@ import {
   type GiroBlocco,
   type GiroDettaglio,
   type GiroListItem,
+  type LineaDistinct,
   type ListGiriAziendaParams,
   type MaterialeThreadDettaglio,
   type MaterialeThreadListItem,
   type PatchBloccoPayload,
   type PatchGiroPayload,
+  type WizardDaLineePayload,
+  type WizardDaLineeResponse,
 } from "@/lib/api/giri";
 
 const GIRI_KEY = ["giri"] as const;
@@ -223,6 +228,54 @@ export function useAggregaModifica(): UseMutationResult<
   return useMutation({
     mutationFn: ({ programmaId, payload }) =>
       aggregaModifica(programmaId, payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: GIRI_KEY });
+    },
+  });
+}
+
+/**
+ * Sprint 8.0 MR-C (entry 229) — linee distinte del PdE per il wizard.
+ * Read-only, abilitato solo quando il dialog è aperto.
+ */
+export function useLineeDistinct(
+  programmaId: number | undefined,
+  options: { enabled?: boolean } = {},
+): UseQueryResult<LineaDistinct[]> {
+  return useQuery({
+    queryKey: [...GIRI_KEY, "linee-distinct", programmaId],
+    queryFn: () => {
+      if (programmaId === undefined) throw new Error("programmaId mancante");
+      return listLineeDistinct(programmaId);
+    },
+    enabled:
+      programmaId !== undefined && (options.enabled ?? true),
+    staleTime: 60_000,
+  });
+}
+
+interface WizardDaLineeArgs {
+  programmaId: number;
+  payload: WizardDaLineePayload;
+}
+
+/**
+ * Sprint 8.0 MR-C (entry 229) — wizard "materiale + linee → giri".
+ * Crea/aggiorna regole `programma_regola_assegnazione` (priorità 90)
+ * e rigenera (force=True) i giri della sede target.
+ *
+ * Sull'apply invalida ``GIRI_KEY`` → si aggiornano lista giri, dettagli,
+ * corse non coperte (la coverage è ricalcolata).
+ */
+export function useWizardDaLinee(): UseMutationResult<
+  WizardDaLineeResponse,
+  Error,
+  WizardDaLineeArgs
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ programmaId, payload }) =>
+      wizardDaLinee(programmaId, payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: GIRI_KEY });
     },

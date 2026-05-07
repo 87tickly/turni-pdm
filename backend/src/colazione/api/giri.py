@@ -27,7 +27,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.auth import require_any_role, require_role
@@ -1882,6 +1882,370 @@ async def aggrega_modifica(
         n_giri_totali_creati=n_giri_totali,
         risultati_per_sede=risultati,
     )
+
+
+# =====================================================================
+# Sprint 8.0 MR-C (entry 229): wizard "materiale + linee → giri"
+# =====================================================================
+# Decisione utente entry 228+: il problema vero non è solo cosmetico —
+# il builder produce turni mono-giornata mono-corsa quando non riesce
+# a concatenare. Il wizard rovescia il paradigma: l'utente sceglie un
+# materiale + le linee da coprire, il builder pesca tutte le corse di
+# quelle linee e prova ad aggregarle in giri lunghi prima di rinunciare.
+# Niente vuoti di posizionamento (regola utente).
+#
+# Implementazione "chirurgica": il wizard CREA regole
+# `programma_regola_assegnazione` (priorità 90, una per linea) e poi
+# rigenera (force=True) la sede target. Resta nel modello attuale, le
+# regole sono modificabili dalla UI.
+
+
+class LineaDistinct(BaseModel):
+    """Linea del PdE con conteggio corse nel periodo del programma."""
+
+    codice_linea: str
+    n_corse: int
+
+
+@router.get(
+    "/{programma_id}/linee-distinct",
+    response_model=list[LineaDistinct],
+    summary=(
+        "Linee distinte (codice_linea) delle corse PdE che cadono nel "
+        "periodo del programma, con conteggio corse per linea. Usato "
+        "dal wizard 'materiale + linee → giri'."
+    ),
+)
+async def list_linee_distinct(
+    programma_id: int,
+    user: CurrentUser = _authz_read,
+    session: AsyncSession = Depends(get_session),
+) -> list[LineaDistinct]:
+    """Sprint 8.0 MR-C (entry 229).
+
+    Filtro periodo: intersezione tra `[corsa.valido_da, corsa.valido_a]`
+    e `[programma.valido_da, programma.valido_a]`. Esclude corse
+    cancellate (`corse_attive_clause`).
+
+    Solo `codice_linea is not null` (le corse senza linea non sono
+    selezionabili dal wizard — restano gestibili dalle regole standard).
+    """
+    programma = (
+        await session.execute(
+            select(ProgrammaMateriale).where(
+                ProgrammaMateriale.id == programma_id,
+                ProgrammaMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if programma is None or not programma_visibile_per_ruoli(
+        programma.stato_pipeline_pdc, user.roles, user.is_admin
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="programma non trovato",
+        )
+
+    rows = (
+        await session.execute(
+            select(
+                CorsaCommerciale.codice_linea,
+                func.count(CorsaCommerciale.id).label("n"),
+            )
+            .where(CorsaCommerciale.azienda_id == user.azienda_id)
+            .where(corse_attive_clause())
+            .where(CorsaCommerciale.codice_linea.is_not(None))
+            .where(CorsaCommerciale.valido_da <= programma.valido_a)
+            .where(CorsaCommerciale.valido_a >= programma.valido_da)
+            .group_by(CorsaCommerciale.codice_linea)
+            .order_by(CorsaCommerciale.codice_linea)
+        )
+    ).all()
+
+    return [
+        LineaDistinct(codice_linea=str(r[0]), n_corse=int(r[1]))
+        for r in rows
+    ]
+
+
+class WizardDaLineeRequest(BaseModel):
+    """Payload del wizard: materiale + sede + linee."""
+
+    materiale_tipo_codice: str = Field(
+        ...,
+        min_length=1,
+        description="Codice materiale (es. 'ETR522').",
+    )
+    localita_codice: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Codice della località manutentiva sede del materiale "
+            "(es. 'IMPMAN_MILANO_FIORENZA')."
+        ),
+    )
+    linee: list[str] = Field(
+        ...,
+        min_length=1,
+        description="Lista di `codice_linea` da coprire con il materiale.",
+    )
+    confirm_delete_pdc: bool = Field(
+        default=False,
+        description=(
+            "Conferma cancellazione PdC dipendenti dei giri rigenerati."
+        ),
+    )
+
+
+class WizardDaLineeResponse(BaseModel):
+    """Risposta del wizard."""
+
+    n_regole_create: int
+    n_regole_aggiornate: int
+    n_giri_creati: int
+    giri_ids: list[int]
+    n_corse_processate: int
+    n_corse_residue: int
+    warnings: list[str]
+    errore: str | None = Field(
+        default=None,
+        description=(
+            "Se non None, la rigenerazione è fallita. Le regole sono "
+            "comunque state create/aggiornate e l'utente può ritentare "
+            "il rigenera dalla UI standard."
+        ),
+    )
+
+
+@router.post(
+    "/{programma_id}/giri/wizard-da-linee",
+    response_model=WizardDaLineeResponse,
+    summary=(
+        "Sprint 8.0 MR-C (entry 229): wizard 'materiale + linee → giri'. "
+        "Crea regole programma_regola_assegnazione (1 per linea, "
+        "priorità 90) e rigenera force=True i giri della sede."
+    ),
+)
+async def wizard_da_linee(
+    programma_id: int,
+    payload: WizardDaLineeRequest,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> WizardDaLineeResponse:
+    """Sprint 8.0 MR-C (entry 229).
+
+    Decisione utente: "imposto un materiale, scrivo uno per scriverne
+    100, e gli do le linee, lui prende tutti i treni presenti sul PdE
+    per quelle linee e crea tutti i giri materiali per quelle linee
+    con il treno che ho impostato".
+
+    Flusso:
+
+    1. Validazione: programma visibile + attivo + non freezato; almeno
+       1 linea richiesta.
+    2. Per ogni linea: cerca regola esistente match (filtri =
+       `[{campo: "codice_linea", op: "eq", valore: linea}]`,
+       localita_codice = sede). Se trovata, aggiorna composizione +
+       priorità a 90; altrimenti crea nuova regola.
+    3. Rigenera (`force=True`) per la sede.
+
+    Errori HTTP:
+
+    - **404**: programma non visibile / inesistente.
+    - **400**: programma non attivo, lista linee vuota.
+    - **409**: pipeline freezata (>= MATERIALE_CONFERMATO).
+    - **409**: PdC dipendenti senza `confirm_delete_pdc=true`.
+    """
+    # 1. Visibilità + load programma con LOCK pessimistico
+    # (`SELECT ... FOR UPDATE`) per serializzare 2+ wizard concorrenti
+    # sullo stesso programma. Il lock viene rilasciato a fine request
+    # (commit/rollback). Senza, 2 utenti potrebbero creare regole
+    # duplicate o causare race sul rigenera force=True.
+    programma = (
+        await session.execute(
+            select(ProgrammaMateriale)
+            .where(
+                ProgrammaMateriale.id == programma_id,
+                ProgrammaMateriale.azienda_id == user.azienda_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if programma is None or not programma_visibile_per_ruoli(
+        programma.stato_pipeline_pdc, user.roles, user.is_admin
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="programma non trovato",
+        )
+    if programma.stato != "attivo":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="programma non attivo",
+        )
+    if materiale_freezato(programma.stato_pipeline_pdc):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"programma in stato pipeline "
+                f"{programma.stato_pipeline_pdc!r} "
+                "(>= MATERIALE_CONFERMATO): giri read-only. Per "
+                "rigenerare richiedi a un admin "
+                "POST /api/programmi/{id}/sblocca."
+            ),
+        )
+
+    # 2. Dedupe + normalizza linee (no stringhe vuote, no duplicati).
+    linee_norm = sorted({lin.strip() for lin in payload.linee if lin.strip()})
+    if not linee_norm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="lista linee vuota dopo normalizzazione",
+        )
+
+    # 3. Carica regole esistenti del programma per match incrementale.
+    regole_esistenti = (
+        (
+            await session.execute(
+                select(ProgrammaRegolaAssegnazione).where(
+                    ProgrammaRegolaAssegnazione.programma_id == programma_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    def _trova_regola_per_linea(
+        linea: str,
+    ) -> ProgrammaRegolaAssegnazione | None:
+        """Match conservativo (Fausto review #4 + #5 entry 229):
+
+        - Match SOLO se `filtri_json` è ESATTAMENTE una singola clausola
+          `[{"campo":"codice_linea","op":"eq","valore":<linea>}]`, niente
+          filtri AND extra (fascia_oraria, giorno_tipo). Se la regola ha
+          filtri compositi, è considerata "non match" → il wizard crea
+          una NUOVA regola affiancata, lasciando intatta quella manuale.
+        - Salta anche regole multi-material (composizione_json con > 1
+          voce): non vogliamo distruggere info di composizioni miste
+          (es. ETR526+ETR425). Anche qui, "non match" → crea nuova.
+        - `localita_codice == sede passed` resta requisito.
+        """
+        for r in regole_esistenti:
+            if r.localita_codice != payload.localita_codice:
+                continue
+            filtri = r.filtri_json or []
+            if len(filtri) != 1:
+                continue
+            f = filtri[0]
+            if not isinstance(f, dict):
+                continue
+            if (
+                f.get("campo") != "codice_linea"
+                or f.get("op") != "eq"
+                or f.get("valore") != linea
+            ):
+                continue
+            comp = r.composizione_json or []
+            if len(comp) > 1:
+                # Multi-material: non sovrascriviamo, creiamo nuova.
+                continue
+            return r
+        return None
+
+    composizione_singola: list[Any] = [
+        {
+            "materiale_tipo_codice": payload.materiale_tipo_codice,
+            "n_pezzi": 1,
+        }
+    ]
+
+    n_create = 0
+    n_aggiornate = 0
+    for linea in linee_norm:
+        match = _trova_regola_per_linea(linea)
+        if match is None:
+            nuova = ProgrammaRegolaAssegnazione(
+                programma_id=programma_id,
+                filtri_json=[
+                    {"campo": "codice_linea", "op": "eq", "valore": linea}
+                ],
+                composizione_json=composizione_singola,
+                materiale_tipo_codice=payload.materiale_tipo_codice,
+                numero_pezzi=1,
+                priorita=90,
+                localita_codice=payload.localita_codice,
+                note=(
+                    "Creata da wizard 'materiale + linee → giri' "
+                    "(MR-C entry 229)."
+                ),
+            )
+            session.add(nuova)
+            n_create += 1
+        else:
+            match.composizione_json = composizione_singola
+            match.materiale_tipo_codice = payload.materiale_tipo_codice
+            match.numero_pezzi = 1
+            match.priorita = 90
+            n_aggiornate += 1
+
+    await session.flush()
+
+    # 4. Rigenera giri (force=True) per la sede.
+    try:
+        res: BuilderResult = await genera_giri(
+            programma_id=programma_id,
+            localita_codice=payload.localita_codice,
+            session=session,
+            azienda_id=user.azienda_id,
+            force=True,
+            confirm_delete_pdc=payload.confirm_delete_pdc,
+            eseguito_da_user_id=user.user_id,
+        )
+        return WizardDaLineeResponse(
+            n_regole_create=n_create,
+            n_regole_aggiornate=n_aggiornate,
+            n_giri_creati=res.n_giri_creati,
+            giri_ids=res.giri_ids,
+            n_corse_processate=res.n_corse_processate,
+            n_corse_residue=res.n_corse_residue,
+            warnings=res.warnings,
+        )
+    except PdcDipendentiError as exc:
+        # Le regole sono già state create — il rollback completo non è
+        # semantico (l'utente vuole le regole comunque). Ritorna 409
+        # con conteggio regole create per UX informata.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "pdc_dipendenti",
+                "message": str(exc),
+                "n_regole_create": n_create,
+                "n_regole_aggiornate": n_aggiornate,
+            },
+        ) from exc
+    except (
+        ProgrammaNonTrovatoError,
+        ProgrammaNonAttivoError,
+        LocalitaNonTrovataError,
+        BuilderVersionNonSupportata,
+        ComposizioneNonAmmessaError,
+        RegolaAmbiguaError,
+        StrictModeViolation,
+        PeriodoFuoriProgrammaError,
+        GiriEsistentiError,
+        ValueError,
+    ) as exc:
+        return WizardDaLineeResponse(
+            n_regole_create=n_create,
+            n_regole_aggiornate=n_aggiornate,
+            n_giri_creati=0,
+            giri_ids=[],
+            n_corse_processate=0,
+            n_corse_residue=0,
+            warnings=[],
+            errore=f"{type(exc).__name__}: {exc}",
+        )
 
 
 def _variante_id_from_ins(

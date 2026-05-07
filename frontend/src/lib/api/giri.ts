@@ -509,3 +509,57 @@ export async function aggregaModifica(
     { method: "POST", body: payload },
   );
 }
+
+// =====================================================================
+// Sprint 8.0 MR-C (entry 229) — wizard "materiale + linee → giri"
+// =====================================================================
+
+/** Linea del PdE con conteggio corse nel periodo del programma. */
+export interface LineaDistinct {
+  codice_linea: string;
+  n_corse: number;
+}
+
+export async function listLineeDistinct(
+  programmaId: number,
+): Promise<LineaDistinct[]> {
+  return apiJson<LineaDistinct[]>(
+    `/api/programmi/${programmaId}/linee-distinct`,
+    { method: "GET" },
+  );
+}
+
+/**
+ * Payload del wizard "materiale + linee → giri".
+ *
+ * Il backend crea/aggiorna le regole `programma_regola_assegnazione`
+ * (1 per linea, priorità 90, composizione single-material) e poi
+ * rigenera (`force=True`) i giri della sede target.
+ */
+export interface WizardDaLineePayload {
+  materiale_tipo_codice: string;
+  localita_codice: string;
+  linee: string[];
+  confirm_delete_pdc: boolean;
+}
+
+export interface WizardDaLineeResponse {
+  n_regole_create: number;
+  n_regole_aggiornate: number;
+  n_giri_creati: number;
+  giri_ids: number[];
+  n_corse_processate: number;
+  n_corse_residue: number;
+  warnings: string[];
+  errore: string | null;
+}
+
+export async function wizardDaLinee(
+  programmaId: number,
+  payload: WizardDaLineePayload,
+): Promise<WizardDaLineeResponse> {
+  return apiJson<WizardDaLineeResponse>(
+    `/api/programmi/${programmaId}/giri/wizard-da-linee`,
+    { method: "POST", body: payload },
+  );
+}

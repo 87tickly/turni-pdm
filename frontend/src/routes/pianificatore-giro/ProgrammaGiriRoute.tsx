@@ -12,6 +12,7 @@ import {
   Plus,
   Search,
   Users,
+  Wand2,
   Wrench,
   X,
 } from "lucide-react";
@@ -52,6 +53,7 @@ import { cn } from "@/lib/utils";
 import { CercaTrenoDialog } from "@/routes/pianificatore-giro/CercaTrenoDialog";
 import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdcDialog";
 import { ModificaGruppoDialog } from "@/routes/pianificatore-giro/ModificaGruppoDialog";
+import { WizardDaLineeDialog } from "@/routes/pianificatore-giro/WizardDaLineeDialog";
 
 /**
  * Schermata 4 — Lista giri generati di un programma.
@@ -116,6 +118,8 @@ export function ProgrammaGiriRoute() {
   // Sprint 8.0 MR-1 (entry 214/215): popup cerca treno scoped al
   // programma corrente.
   const [cercaTrenoOpen, setCercaTrenoOpen] = useState(false);
+  // Sprint 8.0 MR-C (entry 229): wizard "materiale + linee → giri".
+  const [wizardLineeOpen, setWizardLineeOpen] = useState(false);
   // Sprint 8.0 MR-5 (entry 228): gruppo in editing + set espansi nella
   // vista aggregata. La chiave del gruppo è `${materiale}|${sede}`.
   const [editingGroup, setEditingGroup] = useState<
@@ -184,6 +188,15 @@ export function ProgrammaGiriRoute() {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => setWizardLineeOpen(true)}
+            title="Wizard: imposta un materiale + linee → genera tutti i giri necessari per coprire le corse del PdE"
+          >
+            <Wand2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            Wizard linee → materiale
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setCercaTrenoOpen(true)}
             disabled={giri.length === 0}
             title={
@@ -215,6 +228,13 @@ export function ProgrammaGiriRoute() {
             `/pianificatore-giro/giri/${b.giro_id}?focusBlocco=${b.blocco_id}`,
           );
         }}
+      />
+
+      {/* Sprint 8.0 MR-C (entry 229) — wizard "materiale + linee → giri". */}
+      <WizardDaLineeDialog
+        programmaId={programmaId}
+        open={wizardLineeOpen}
+        onOpenChange={setWizardLineeOpen}
       />
 
       {/* Body */}

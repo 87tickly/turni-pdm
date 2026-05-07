@@ -10,6 +10,145 @@
 
 ---
 
+## 2026-05-07 (229) — MR-C: wizard "materiale + linee → giri" (paradigma rovesciato)
+
+### Contesto
+
+Decisione utente entry 228 finale + screenshot live: il programma giugno
+2026 mostra **17 turni single-day** (G-FIO-001..016 ETR522/E464 con
+`numero_giornate=1`), molti con 1 sola corsa commerciale (es.
+G-FIO-016-ETR522-1g: 1 treno BE→MiC + 1 rientro vuoto). Spreco totale
+di convogli + 189 corse non coperte.
+
+> "imposto un materiale, scrivo uno per scriverne 100, e gli do le linee,
+> lui prende tutti i treni presenti sul PdE per quelle linee e crea
+> tutti i giri materiali per quelle linee con il treno che ho impostato"
+
+Strategia: paradigma rovesciato. L'utente sceglie un materiale + le
+linee da coprire → il backend forza tutte le corse di quelle linee
+sotto quel materiale, dando al builder un pool ampio per concatenare
+giri lunghi.
+
+### Modifiche backend
+
+**`backend/src/colazione/api/giri.py`**:
+
+- Nuovo endpoint **`GET /api/programmi/{id}/linee-distinct`**: lista
+  `codice_linea` distinct delle corse PdE che intersecano il periodo
+  del programma, con conteggio corse per linea. Usato dal wizard UI.
+- Nuovo endpoint **`POST /api/programmi/{id}/giri/wizard-da-linee`**:
+  - Schema `WizardDaLineeRequest` (materiale, sede, linee, confirm
+    PdC) e `WizardDaLineeResponse` (n_create, n_aggiornate, giri,
+    corse, warnings, errore).
+  - Logica chirurgica:
+    1. Lock pessimistico `with_for_update()` su `ProgrammaMateriale`
+       (Fausto review #2 CRITICAL: serializza wizard concorrenti).
+    2. Visibilità multi-tenant + check stato attivo + freeze pipeline.
+    3. Dedup linee (no whitespace, no duplicati).
+    4. Per ogni linea, match conservativo regola esistente: filtri_json
+       deve essere ESATTAMENTE `[{codice_linea eq linea}]` E composizione
+       single-material (Fausto review #4 + #5 IMPORTANT: niente
+       sovrascritture su filtri AND multipli o composizioni miste).
+       Se match → aggiorna composizione + priorità 90; altrimenti
+       crea nuova regola.
+    5. Rigenera `force=True` per la sede.
+  - Errori: 404 programma, 400 bozza/linee vuote, 409 freeze, 409 PdC
+    dipendenti senza confirm.
+
+**`backend/tests/test_wizard_da_linee_api.py`** (nuovo, 8 test
+integration): auth (401), 404, 400 (bozza, linee normalizzate vuote),
+422 (payload invalido in 3 forme), `linee-distinct` lista corretta.
+
+### Code review indipendente (Fausto)
+
+3 fix critici applicati prima del commit:
+- **#2 CRITICAL** race condition → `with_for_update()` su programma.
+- **#4 IMPORTANT** match troppo liberale → ora richiede match esatto
+  filtri_json (1 sola clausola codice_linea eq).
+- **#5 IMPORTANT** composizione multi-material → skip match se
+  composizione esistente ha > 1 voce (preserva ETR526+ETR425 ecc.).
+
+3 minor accettati (filtro periodo `valido_da/valido_a` overlap senza
+controllo `valido_in_date_json`, validazione linee vs PdE non strict,
+audit logging già presente in BuilderRun).
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/giri.ts`**: tipi `LineaDistinct`,
+`WizardDaLineePayload`, `WizardDaLineeResponse` + funzioni
+`listLineeDistinct()`, `wizardDaLinee()`.
+
+**`frontend/src/hooks/useGiri.ts`**: hook `useLineeDistinct()` query
+(staleTime 60s, abilitato solo a dialog aperto) + `useWizardDaLinee()`
+mutation che invalida `GIRI_KEY`.
+
+**`frontend/src/routes/pianificatore-giro/WizardDaLineeDialog.tsx`**
+(nuovo): wizard 3-step:
+1. **Materiale**: select dalla dotazione (`useMateriali`, mostra pezzi
+   disponibili).
+2. **Sede**: select da anagrafica (`useLocalitaManutenzione`).
+3. **Linee**: multi-select con search, "seleziona/deseleziona tutte",
+   counter "N selezionate · M corse totali", checkbox conferma PdC.
+
+Step indicator visivo (1/2/3 con check verde sui completati).
+Gestisce:
+- 409 con `code: "pdc_dipendenti"` → banner amber.
+- Errore generico → banner rosso.
+- Success → summary con n. regole/giri/corse + warnings.
+- Errore "regole salvate ma rigenera fallito" → banner amber con
+  istruzioni per ritentare.
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaGiriRoute.tsx`**:
+nuovo state `wizardLineeOpen`, bottone **"Wizard linee → materiale"**
+(icona Wand2) accanto a "Cerca treno" nell'header, dialog mountato
+a livello pagina.
+
+### Verifiche
+
+- ✅ `ruff check src/colazione/api/giri.py
+  tests/test_wizard_da_linee_api.py` clean.
+- ✅ `mypy --strict src/colazione/api/giri.py` clean.
+- ✅ `pytest tests/test_wizard_da_linee_api.py --co` → 8 test collected
+  senza errori (DB locale spento → run integration in CI).
+- ✅ `pnpm build` (intero) → bundle `index-huw0wXcO.js`, 1801 moduli
+  trasformati, nessun errore.
+
+### Stato
+
+- ✅ MR-C chiuso. Backend + frontend pronti.
+- ⏳ Commit + push + deploy backend + frontend Railway.
+
+### Per l'utente
+
+1. Apri il programma → "Giri generati" → bottone **"Wizard linee →
+   materiale"** in alto.
+2. Step 1: scegli materiale (es. ETR522).
+3. Step 2: scegli la sede manutentiva (es. FIORENZA).
+4. Step 3: spunta le linee da coprire (con search e count corse).
+5. Conferma cancellazione PdC se serve, click "Crea regole + rigenera
+   giri".
+6. Il backend crea/aggiorna le regole + rigenera la sede. Vedi summary
+   con n. regole/giri/corse coperte/residue.
+
+### Limitazioni iterazione 1
+
+- **Capacity check**: il builder applica la dotazione registrata; se
+  i giri richiesti eccedono i pezzi disponibili, il warning del builder
+  lo segnala ma non blocca. Iterazione 2: override dotazione esplicito.
+- **Test happy-path con DB seedato**: solo collect, integration in CI.
+- **Composizioni multi-material**: il wizard salta le regole esistenti
+  con composizione mista → crea nuove single-material affiancate.
+  L'utente deve poi decidere manualmente quale tenere.
+
+### Prossimo step
+
+**Fase B — drag&drop Mac-like** (interazione manuale del turno):
+spostare blocchi tra giornate, aggiungere/eliminare vuoti, marcare
+doppia composizione via UI, fattibilità in real-time. Framework:
+`dnd-kit`.
+
+---
+
 ## 2026-05-07 (228) — MR-5: aggregazione giri per materiale + edit batch chirurgico
 
 ### Contesto
