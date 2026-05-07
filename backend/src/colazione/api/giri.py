@@ -1562,6 +1562,328 @@ async def genera_da_residue(
     )
 
 
+# =====================================================================
+# Sprint 8.0 MR-5 (entry 228): aggrega-modifica giri per gruppo
+# (materiale, sede). Chirurgico: modifica regole + rigenera force.
+# =====================================================================
+
+
+class AggregaModificaRequest(BaseModel):
+    """Payload MR-5: identifica un gruppo `(materiale_tipo_codice_old,
+    localita_codice_old)` e specifica i nuovi valori (uno o entrambi).
+
+    Decisione utente entry 224: edit batch chirurgico = aggiorna le
+    regole `programma_regola_assegnazione` del gruppo + rigenera
+    `force=True` per le sedi toccate. NON modifica direttamente i giri.
+    """
+
+    materiale_tipo_codice_old: str = Field(
+        ...,
+        min_length=1,
+        description="Materiale del gruppo da modificare (es. 'ATR803').",
+    )
+    localita_codice_old: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Codice località manutentiva del gruppo "
+            "(es. 'IMPMAN_MILANO_FIORENZA')."
+        ),
+    )
+    materiale_tipo_codice_new: str | None = Field(
+        default=None,
+        description="Nuovo materiale. None = invariato.",
+    )
+    localita_codice_new: str | None = Field(
+        default=None,
+        description="Nuova località. None = invariata.",
+    )
+    confirm_delete_pdc: bool = Field(
+        default=False,
+        description=(
+            "Conferma cancellazione PdC dipendenti dei giri rigenerati. "
+            "Senza questa conferma, il rigenera force restituisce 409 "
+            "se ci sono PdC dipendenti."
+        ),
+    )
+
+
+class AggregaModificaSedeResult(BaseModel):
+    """Risultato per singola sede rigenerata."""
+
+    localita_codice: str
+    n_giri_creati: int
+    giri_ids: list[int]
+    n_corse_processate: int
+    n_corse_residue: int
+    warnings: list[str]
+    errore: str | None = Field(
+        default=None,
+        description=(
+            "Se non None, la rigenerazione per questa sede è fallita. "
+            "L'aggiornamento delle regole è comunque stato applicato."
+        ),
+    )
+
+
+class AggregaModificaResponse(BaseModel):
+    """Risposta MR-5."""
+
+    n_regole_aggiornate: int
+    n_giri_totali_creati: int
+    risultati_per_sede: list[AggregaModificaSedeResult]
+
+
+@router.post(
+    "/{programma_id}/giri/aggrega-modifica",
+    response_model=AggregaModificaResponse,
+    summary=(
+        "Sprint 8.0 MR-5: modifica chirurgica di un gruppo "
+        "(materiale + sede). Aggiorna le regole "
+        "programma_regola_assegnazione e rigenera (force=True) i giri "
+        "delle sedi toccate."
+    ),
+)
+async def aggrega_modifica(
+    programma_id: int,
+    payload: AggregaModificaRequest,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> AggregaModificaResponse:
+    """Sprint 8.0 MR-5 (entry 228).
+
+    Flusso chirurgico:
+
+    1. Trova le regole con `localita_codice == OLD` e `composizione_json`
+       che contiene voce `materiale_tipo_codice == mat_old`.
+    2. Aggiorna `composizione_json` (sostituisce voce mat_old → mat_new
+       se diverso) e/o `localita_codice` (se diverso). Tiene in sync il
+       campo legacy `materiale_tipo_codice` quando è single-material.
+    3. Rigenera i giri (force=True) per OLD e per NEW (se diverse).
+
+    Errori HTTP:
+
+    - **404**: programma non visibile / inesistente.
+    - **400**: programma non attivo, nessuna modifica specificata, o
+      nessuna regola corrisponde al gruppo `(mat_old, loc_old)`.
+    - **409**: pipeline freezata (`stato_pipeline_pdc >=
+      MATERIALE_CONFERMATO`) — chiedi a un admin di sbloccare.
+    - **409**: PdC dipendenti senza `confirm_delete_pdc=true`.
+
+    Errori del builder per singola sede (es. `LocalitaNonTrovataError`,
+    `RegolaAmbiguaError`) vengono catturati e tornati nel campo
+    `errore` della sede corrispondente — l'aggiornamento delle regole
+    resta comunque applicato (rollback completo non semantico per
+    edit cross-sede).
+    """
+    # 1. Visibilità + load programma.
+    programma = (
+        await session.execute(
+            select(ProgrammaMateriale).where(
+                ProgrammaMateriale.id == programma_id,
+                ProgrammaMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if programma is None or not programma_visibile_per_ruoli(
+        programma.stato_pipeline_pdc, user.roles, user.is_admin
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="programma non trovato",
+        )
+    if programma.stato != "attivo":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="programma non attivo",
+        )
+    if materiale_freezato(programma.stato_pipeline_pdc):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"programma in stato pipeline "
+                f"{programma.stato_pipeline_pdc!r} "
+                "(>= MATERIALE_CONFERMATO): giri read-only. Per "
+                "modificare richiedi a un admin "
+                "POST /api/programmi/{id}/sblocca."
+            ),
+        )
+
+    # 2. Validazione: deve esserci almeno un cambio reale.
+    cambia_mat = (
+        payload.materiale_tipo_codice_new is not None
+        and payload.materiale_tipo_codice_new
+        != payload.materiale_tipo_codice_old
+    )
+    cambia_loc = (
+        payload.localita_codice_new is not None
+        and payload.localita_codice_new != payload.localita_codice_old
+    )
+    if not cambia_mat and not cambia_loc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "nessuna modifica richiesta: specifica "
+                "materiale_tipo_codice_new e/o localita_codice_new "
+                "diversi dai _old"
+            ),
+        )
+
+    # 3. Trova le regole del gruppo (loc_old + comp contiene mat_old).
+    regole_loc = (
+        (
+            await session.execute(
+                select(ProgrammaRegolaAssegnazione).where(
+                    ProgrammaRegolaAssegnazione.programma_id == programma_id,
+                    ProgrammaRegolaAssegnazione.localita_codice
+                    == payload.localita_codice_old,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    regole_aggiornabili: list[ProgrammaRegolaAssegnazione] = []
+    for r in regole_loc:
+        comp = r.composizione_json or []
+        for item in comp:
+            if (
+                isinstance(item, dict)
+                and item.get("materiale_tipo_codice")
+                == payload.materiale_tipo_codice_old
+            ):
+                regole_aggiornabili.append(r)
+                break
+
+    if not regole_aggiornabili:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"nessuna regola trovata per gruppo "
+                f"({payload.materiale_tipo_codice_old}, "
+                f"{payload.localita_codice_old})"
+            ),
+        )
+
+    # 4. Aggiorna le regole. Il SET su mapped attribute basta —
+    # il flush avviene quando genera_giri fa il proprio commit/flush.
+    new_mat = payload.materiale_tipo_codice_new
+    new_loc = payload.localita_codice_new
+    n_aggiornate = 0
+    for r in regole_aggiornabili:
+        if cambia_mat and new_mat is not None:
+            new_comp: list[Any] = []
+            for item in r.composizione_json or []:
+                if (
+                    isinstance(item, dict)
+                    and item.get("materiale_tipo_codice")
+                    == payload.materiale_tipo_codice_old
+                ):
+                    new_comp.append(
+                        {**item, "materiale_tipo_codice": new_mat}
+                    )
+                else:
+                    new_comp.append(item)
+            r.composizione_json = new_comp
+            # Sync legacy field se single-material.
+            if (
+                r.materiale_tipo_codice
+                == payload.materiale_tipo_codice_old
+            ):
+                r.materiale_tipo_codice = new_mat
+        if cambia_loc and new_loc is not None:
+            r.localita_codice = new_loc
+        n_aggiornate += 1
+
+    await session.flush()
+
+    # 5. Sedi da rigenerare = {old} se sede invariata, altrimenti {old, new}.
+    sedi_da_rigenerare: set[str] = {payload.localita_codice_old}
+    if cambia_loc and new_loc is not None:
+        sedi_da_rigenerare.add(new_loc)
+
+    # 6. Rigenera per ciascuna sede.
+    risultati: list[AggregaModificaSedeResult] = []
+    n_giri_totali = 0
+    for sede in sorted(sedi_da_rigenerare):
+        try:
+            res: BuilderResult = await genera_giri(
+                programma_id=programma_id,
+                localita_codice=sede,
+                session=session,
+                azienda_id=user.azienda_id,
+                force=True,
+                confirm_delete_pdc=payload.confirm_delete_pdc,
+                eseguito_da_user_id=user.user_id,
+            )
+            risultati.append(
+                AggregaModificaSedeResult(
+                    localita_codice=sede,
+                    n_giri_creati=res.n_giri_creati,
+                    giri_ids=res.giri_ids,
+                    n_corse_processate=res.n_corse_processate,
+                    n_corse_residue=res.n_corse_residue,
+                    warnings=res.warnings,
+                )
+            )
+            n_giri_totali += res.n_giri_creati
+        except PdcDipendentiError as exc:
+            # 409 per PdC dipendenti — l'utente deve passare
+            # confirm_delete_pdc=true. Le regole sono GIA' aggiornate
+            # ma nessun giro è stato cancellato/rigenerato (il check
+            # PdC è prima del wipe).
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "pdc_dipendenti",
+                    "sede": sede,
+                    "message": str(exc),
+                    "n_regole_aggiornate": n_aggiornate,
+                },
+            ) from exc
+        except GiriEsistentiError as exc:
+            # Difensivo: non dovrebbe mai capitare con force=True.
+            risultati.append(
+                AggregaModificaSedeResult(
+                    localita_codice=sede,
+                    n_giri_creati=0,
+                    giri_ids=[],
+                    n_corse_processate=0,
+                    n_corse_residue=0,
+                    warnings=[],
+                    errore=f"{type(exc).__name__}: {exc}",
+                )
+            )
+        except (
+            ProgrammaNonTrovatoError,
+            ProgrammaNonAttivoError,
+            LocalitaNonTrovataError,
+            BuilderVersionNonSupportata,
+            ComposizioneNonAmmessaError,
+            RegolaAmbiguaError,
+            StrictModeViolation,
+            PeriodoFuoriProgrammaError,
+            ValueError,
+        ) as exc:
+            risultati.append(
+                AggregaModificaSedeResult(
+                    localita_codice=sede,
+                    n_giri_creati=0,
+                    giri_ids=[],
+                    n_corse_processate=0,
+                    n_corse_residue=0,
+                    warnings=[],
+                    errore=f"{type(exc).__name__}: {exc}",
+                )
+            )
+
+    return AggregaModificaResponse(
+        n_regole_aggiornate=n_aggiornate,
+        n_giri_totali_creati=n_giri_totali,
+        risultati_per_sede=risultati,
+    )
+
+
 def _variante_id_from_ins(
     ins: FillGapInsert, varianti: "dict[int, Any]"
 ) -> int:

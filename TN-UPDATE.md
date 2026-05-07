@@ -10,6 +10,159 @@
 
 ---
 
+## 2026-05-07 (228) — MR-5: aggregazione giri per materiale + edit batch chirurgico
+
+### Contesto
+
+Decisione utente entry 224 finale + chiarimento di scope sessione
+2026-05-07 ("inizia a fare tutto con B"):
+
+> "Edit materiale di un gruppo: chirurgico. e anche l altro confermo.
+> e inizia a fare tutto con B"
+
+Quindi MR-5 = **lettura aggregata + edit batch unico**, e per entrambe
+le modifiche (materiale, deposito) la strategia è **chirurgica**:
+aggiorni le regole `programma_regola_assegnazione` del gruppo e
+rigeneri (`force=True`) i giri delle sedi toccate. Niente UPDATE
+diretto sui giri esistenti (sarebbe sporco: si scollerebbero le
+regole, capacity check, km_media, vincoli composizione).
+
+### Modifiche backend
+
+**`backend/src/colazione/api/giri.py`** — nuovo endpoint
+`POST /api/programmi/{id}/giri/aggrega-modifica`:
+
+- Schemi: `AggregaModificaRequest` (mat_old, loc_old + new opzionali +
+  confirm_delete_pdc), `AggregaModificaSedeResult`,
+  `AggregaModificaResponse`.
+- Auth: `_authz` (PIANIFICATORE_GIRO scrittura).
+- Logica chirurgica:
+  1. Visibilità multi-tenant + freeze pipeline check (409 se
+     `MATERIALE_CONFERMATO`).
+  2. Validazione: deve esserci almeno un cambio reale (mat_new ≠
+     mat_old o loc_new ≠ loc_old).
+  3. Trova regole `programma_regola_assegnazione` con `localita_codice
+     == loc_old` E `composizione_json` che contiene voce
+     `materiale_tipo_codice == mat_old`. Se 0 → 400.
+  4. Aggiorna `composizione_json` (sostituzione voce mat_old →
+     mat_new lasciando intatte le altre voci di composizione mista) e
+     `localita_codice`. Sync legacy field `materiale_tipo_codice` se
+     single-material.
+  5. Sedi da rigenerare = `{loc_old}` se sede invariata, altrimenti
+     `{loc_old, loc_new}`.
+  6. Per ogni sede: `genera_giri(force=True,
+     confirm_delete_pdc=...)`.
+- Errori 409 PdC dipendenti: l'endpoint restituisce
+  `{ "code": "pdc_dipendenti", "sede", "message",
+  "n_regole_aggiornate" }` come `detail` per UX informata.
+
+**`backend/tests/test_aggrega_modifica_api.py`** (nuovo, 6 test
+integration):
+
+- `senza_token_401`, `programma_inesistente_404`, `programma_in_bozza_400`,
+  `nessun_cambio_400` (entrambi i casi: new=None e new=old),
+  `gruppo_inesistente_400`, `payload_invalido_422` (mat_old mancante +
+  mat_old vuoto).
+
+Test happy-path "le regole si aggiornano + i giri si rigenerano per le
+sedi toccate" richiede setup esteso (programma con regole +
+composizione + DB seedato di corse + dotazione pezzi reale) →
+iterazione 2 (stesso pattern di `test_genera_da_residue_api.py`).
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/giri.ts`**: tipi `AggregaModificaPayload`,
+`AggregaModificaSedeResult`, `AggregaModificaResponse` + funzione
+`aggregaModifica()`.
+
+**`frontend/src/hooks/useGiri.ts`**: hook `useAggregaModifica()` con
+mutation che invalida `GIRI_KEY` `onSuccess` (lista giri, dettagli,
+corse non coperte si aggiornano automaticamente).
+
+**`frontend/src/routes/pianificatore-giro/ModificaGruppoDialog.tsx`**
+(nuovo): dialog form con select materiale (`useMateriali`), select
+deposito (`useLocalitaManutenzione`), checkbox "Conferma cancellazione
+PdC". Gestisce:
+
+- 409 con `code: "pdc_dipendenti"` → banner amber con istruzioni.
+- Success summary con `n_regole_aggiornate`, giri rigenerati,
+  warnings per sede.
+- Disabilita Submit se nessun cambio reale è specificato.
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaGiriRoute.tsx`**:
+
+- `FiltersState` esteso con `raggruppaPerMateriale: boolean`.
+- Nuovo state `editingGroup` + `expandedGroups: Set<string>`.
+- `useLocalitaManutenzione()` per risolvere sede breve (estratta da
+  `numero_turno`) → `LocalitaManutenzione.codice` completo richiesto
+  dall'endpoint.
+- Helper `aggregateGiri()` raggruppa per `(materiale_tipo_codice, sede)`
+  con `kmGiornoCumulato` e `nNonChiusi`.
+- Toggle "Raggruppa per materiale" nella `FiltersBar`.
+- Nuovo componente `GiriTableAggregata` + `GruppoRows`: header
+  espandibile con bottone "Modifica gruppo"; quando espanso renderizza
+  la `GiriTable` standard come sub-tabella in `<tr colspan>`.
+- `ModificaGruppoDialogResolved` wrapper risolve la sede breve al
+  `codice` completo prima di passarlo al dialog; fallback chiaro se
+  non trova match in anagrafica.
+
+### Verifiche
+
+- ✅ `ruff check src/colazione/api/giri.py
+  tests/test_aggrega_modifica_api.py` clean.
+- ✅ `mypy --strict src/colazione/api/giri.py` clean.
+- ✅ `pytest tests/test_aggrega_modifica_api.py --co` → 6 test
+  collected senza errori (DB locale spento → run integration in CI).
+- ✅ Smoke schema Pydantic: costruzione + validazione `min_length=1`
+  funzionano.
+- ✅ `pnpm build` (intero, NON solo `tsc --noEmit`) → bundle
+  `index-D0p9BMAz.js`, 1800 moduli trasformati, nessun errore.
+
+### Stato
+
+- ✅ MR-5 chiuso. Backend + frontend pronti.
+- ⏳ Commit + push + deploy backend + frontend Railway.
+
+### Per l'utente
+
+1. Apri il programma → "Giri generati" → spunta toggle **"Raggruppa
+   per materiale"** nella barra filtri.
+2. La tabella mostra una riga per gruppo `(materiale, sede)` con n.
+   turni, km/giorno cumulato, conteggio non chiusi.
+3. Click sulla riga del gruppo → si espande la lista dei giri sotto.
+4. Bottone **"Modifica gruppo"** → dialog con due select (materiale,
+   deposito) + checkbox per la conferma PdC. Almeno un cambio reale è
+   richiesto.
+5. Apply → backend aggiorna le regole + rigenera i giri delle sedi
+   toccate; il dialog mostra il riassunto.
+
+### Limitazioni iterazione 1
+
+- **Composizioni miste**: se una regola è multi-materiale (es.
+  ETR526+ETR425) e modifichi una delle due voci, viene sostituita
+  solo quella. Il check `materiale_accoppiamento_ammesso` viene
+  riapplicato dal builder al rigenera; se la nuova combinazione non
+  è ammessa il rigenera fallirà con `ComposizioneNonAmmessaError`
+  catturato e tornato nel campo `errore` per quella sede (le regole
+  sono già aggiornate — l'utente vedrà il warning e potrà tornare
+  indietro manualmente).
+- **Test happy-path**: solo 6 test minimi (auth + validazioni). Il
+  test "le regole si aggiornano + i giri si rigenerano" richiede DB
+  seedato → iterazione 2.
+
+### Prossimo step
+
+Decisione utente:
+
+- (a) Test happy-path con DB seedato per l'endpoint `aggrega-modifica`
+  (chiude residuo iterazione 1).
+- (b) Idea radicale stand-by: paradigma rovesciato "input linee +
+  materiali → output 100% coverage con report pezzi necessari" (entry
+  221+).
+- (c) Altri MR su feedback.
+
+---
+
 ## 2026-05-07 (224) — MR-4 unificato: 2 vincoli soste configurabili per programma
 
 ### Contesto

@@ -6,6 +6,9 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Pencil,
   Plus,
   Search,
   Users,
@@ -24,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/Dialog";
 import { Spinner } from "@/components/ui/Spinner";
+import { useLocalitaManutenzione } from "@/hooks/useAnagrafiche";
 import {
   useCorseNonCoperte,
   useGeneraDaResidue,
@@ -33,6 +37,7 @@ import {
 } from "@/hooks/useGiri";
 import { useProgramma } from "@/hooks/useProgrammi";
 import { ApiError } from "@/lib/api/client";
+import type { LocalitaManutenzioneRead } from "@/lib/api/anagrafiche";
 import type {
   CorsaNonCopertaItem,
   FillGapResult,
@@ -46,6 +51,7 @@ import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { CercaTrenoDialog } from "@/routes/pianificatore-giro/CercaTrenoDialog";
 import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdcDialog";
+import { ModificaGruppoDialog } from "@/routes/pianificatore-giro/ModificaGruppoDialog";
 
 /**
  * Schermata 4 — Lista giri generati di un programma.
@@ -59,6 +65,13 @@ interface FiltersState {
   materiale: string;
   motivo: string;
   soloNonChiusi: boolean;
+  /**
+   * Sprint 8.0 MR-5 (entry 228): toggle vista aggregata per gruppo
+   * `(materiale_tipo_codice, sede)`. Quando true, la tabella mostra
+   * un header espandibile per ogni gruppo + bottone "Modifica gruppo"
+   * che apre il dialog chirurgico.
+   */
+  raggruppaPerMateriale: boolean;
 }
 
 const EMPTY_FILTERS: FiltersState = {
@@ -67,7 +80,20 @@ const EMPTY_FILTERS: FiltersState = {
   materiale: "",
   motivo: "",
   soloNonChiusi: false,
+  raggruppaPerMateriale: false,
 };
+
+/** Identificatore di un gruppo aggregato (materiale, sede breve). */
+interface GruppoKey {
+  materiale: string;
+  sede: string;
+}
+
+interface GruppoAggregato extends GruppoKey {
+  giri: GiroListItem[];
+  kmGiornoCumulato: number;
+  nNonChiusi: number;
+}
 
 export function ProgrammaGiriRoute() {
   const { programmaId: programmaIdParam } = useParams<{ programmaId: string }>();
@@ -76,6 +102,10 @@ export function ProgrammaGiriRoute() {
 
   const programmaQuery = useProgramma(programmaId);
   const giriQuery = useGiriProgramma(programmaId);
+  // Sprint 8.0 MR-5 (entry 228): mappa codice_breve → LocalitaManutenzione
+  // necessaria per risolvere "FIO" estratto da numero_turno al
+  // `codice` completo richiesto dall'endpoint aggrega-modifica.
+  const localitaQuery = useLocalitaManutenzione();
 
   const [filters, setFilters] = useState<FiltersState>(EMPTY_FILTERS);
   const [selectedGiroId, setSelectedGiroId] = useState<number | null>(null);
@@ -86,18 +116,37 @@ export function ProgrammaGiriRoute() {
   // Sprint 8.0 MR-1 (entry 214/215): popup cerca treno scoped al
   // programma corrente.
   const [cercaTrenoOpen, setCercaTrenoOpen] = useState(false);
+  // Sprint 8.0 MR-5 (entry 228): gruppo in editing + set espansi nella
+  // vista aggregata. La chiave del gruppo è `${materiale}|${sede}`.
+  const [editingGroup, setEditingGroup] = useState<
+    | { materiale: string; sede: string; nGiri: number }
+    | null
+  >(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const giri = useMemo(() => giriQuery.data ?? [], [giriQuery.data]);
 
   const distinct = useMemo(() => buildDistinctOptions(giri), [giri]);
   const filtered = useMemo(() => applyFilters(giri, filters), [giri, filters]);
   const stats = useMemo(() => computeStats(giri), [giri]);
+  const gruppi = useMemo(
+    () =>
+      filters.raggruppaPerMateriale ? aggregateGiri(filtered) : null,
+    [filters.raggruppaPerMateriale, filtered],
+  );
+  const localitaByCodiceBreve = useMemo(
+    () => buildLocalitaByCodiceBreve(localitaQuery.data ?? []),
+    [localitaQuery.data],
+  );
   const hasFilters =
     filters.search !== "" ||
     filters.sede !== "" ||
     filters.materiale !== "" ||
     filters.motivo !== "" ||
-    filters.soloNonChiusi;
+    filters.soloNonChiusi ||
+    filters.raggruppaPerMateriale;
 
   const showPreview = previewOpen && selectedGiroId !== null;
 
@@ -218,6 +267,27 @@ export function ProgrammaGiriRoute() {
             >
               {filtered.length === 0 ? (
                 <FilteredEmptyState onReset={() => setFilters(EMPTY_FILTERS)} />
+              ) : gruppi !== null ? (
+                <GiriTableAggregata
+                  gruppi={gruppi}
+                  expanded={expandedGroups}
+                  onToggleGroup={(key) => {
+                    setExpandedGroups((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(key)) next.delete(key);
+                      else next.add(key);
+                      return next;
+                    });
+                  }}
+                  onModificaGruppo={(g) => setEditingGroup(g)}
+                  selectedId={selectedGiroId}
+                  onSelect={(id) => {
+                    setSelectedGiroId(id);
+                    setPreviewOpen(true);
+                  }}
+                  onOpenFull={(id) => navigate(`/pianificatore-giro/giri/${id}`)}
+                  onGeneraPdc={(id) => setGeneraPdcGiroId(id)}
+                />
               ) : (
                 <GiriTable
                   giri={filtered}
@@ -276,7 +346,72 @@ export function ProgrammaGiriRoute() {
           }}
         />
       )}
+
+      {/* Sprint 8.0 MR-5 (entry 228) — dialog "Modifica gruppo" della
+          vista aggregata. Risolve la sede breve (estratta da numero_turno)
+          al `codice` completo richiesto dall'endpoint backend. */}
+      {editingGroup !== null && (
+        <ModificaGruppoDialogResolved
+          programmaId={programmaId}
+          editingGroup={editingGroup}
+          localitaByCodiceBreve={localitaByCodiceBreve}
+          onClose={() => setEditingGroup(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Wrapper che risolve la sede breve (`"FIO"` estratta da numero_turno)
+ * al `LocalitaManutenzione.codice` completo (`"IMPMAN_MILANO_FIORENZA"`)
+ * richiesto dall'endpoint `aggrega-modifica`. Se la mappa non è ancora
+ * caricata o non trova il match, mostra fallback chiaro all'utente.
+ */
+function ModificaGruppoDialogResolved({
+  programmaId,
+  editingGroup,
+  localitaByCodiceBreve,
+  onClose,
+}: {
+  programmaId: number;
+  editingGroup: { materiale: string; sede: string; nGiri: number };
+  localitaByCodiceBreve: Map<string, LocalitaManutenzioneRead>;
+  onClose: () => void;
+}) {
+  const localita = localitaByCodiceBreve.get(editingGroup.sede);
+  if (localita === undefined) {
+    return (
+      <Dialog open onOpenChange={(o) => !o && onClose()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Modifica gruppo</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Impossibile risolvere la sede{" "}
+            <span className="font-mono">{editingGroup.sede}</span> nei
+            depositi configurati. Aggiorna l'anagrafica località e
+            riprova.
+          </p>
+          <DialogFooter>
+            <Button onClick={onClose}>Chiudi</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+  return (
+    <ModificaGruppoDialog
+      programmaId={programmaId}
+      materialeOld={editingGroup.materiale}
+      localitaCodiceOld={localita.codice}
+      nGiri={editingGroup.nGiri}
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+      onSuccess={() => onClose()}
+    />
   );
 }
 
@@ -458,6 +593,55 @@ function applyFilters(giri: GiroListItem[], f: FiltersState): GiroListItem[] {
   });
 }
 
+/**
+ * Sprint 8.0 MR-5 (entry 228): aggregazione giri per
+ * `(materiale_tipo_codice, sede)`. La sede è il codice breve estratto
+ * da `numero_turno` (es. `"FIO"`). Ordinamento stabile: materiale ASC
+ * → sede ASC.
+ */
+function aggregateGiri(giri: GiroListItem[]): GruppoAggregato[] {
+  const map = new Map<string, GruppoAggregato>();
+  for (const g of giri) {
+    const materiale = g.materiale_tipo_codice ?? g.tipo_materiale;
+    const sede = parseSede(g.numero_turno) ?? "—";
+    const key = `${materiale}|${sede}`;
+    let agg = map.get(key);
+    if (agg === undefined) {
+      agg = {
+        materiale,
+        sede,
+        giri: [],
+        kmGiornoCumulato: 0,
+        nNonChiusi: 0,
+      };
+      map.set(key, agg);
+    }
+    agg.giri.push(g);
+    agg.kmGiornoCumulato += g.km_media_giornaliera ?? 0;
+    if (!g.chiuso) agg.nNonChiusi += 1;
+  }
+  return Array.from(map.values()).sort((a, b) => {
+    if (a.materiale !== b.materiale)
+      return a.materiale.localeCompare(b.materiale);
+    return a.sede.localeCompare(b.sede);
+  });
+}
+
+/**
+ * Sprint 8.0 MR-5 (entry 228): mappa `codice_breve` → `LocalitaManutenzione`
+ * per risolvere la sede estratta da `numero_turno` (codice breve) al
+ * `codice` completo richiesto dall'endpoint backend.
+ */
+function buildLocalitaByCodiceBreve(
+  localita: LocalitaManutenzioneRead[],
+): Map<string, LocalitaManutenzioneRead> {
+  const m = new Map<string, LocalitaManutenzioneRead>();
+  for (const l of localita) {
+    if (l.codice_breve !== null) m.set(l.codice_breve, l);
+  }
+  return m;
+}
+
 function FiltersBar({
   filters,
   distinct,
@@ -531,6 +715,22 @@ function FiltersBar({
             className="h-4 w-4 rounded border-border accent-primary"
           />
           Solo non chiusi
+        </label>
+
+        {/* Sprint 8.0 MR-5 (entry 228) — toggle vista aggregata. */}
+        <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground">
+          <input
+            type="checkbox"
+            checked={filters.raggruppaPerMateriale}
+            onChange={(e) =>
+              onChange({
+                ...filters,
+                raggruppaPerMateriale: e.target.checked,
+              })
+            }
+            className="h-4 w-4 rounded border-border accent-primary"
+          />
+          Raggruppa per materiale
         </label>
 
         {hasFilters && (
@@ -649,6 +849,177 @@ function GiriTable({
         ))}
       </tbody>
     </table>
+  );
+}
+
+/**
+ * Sprint 8.0 MR-5 (entry 228) — vista aggregata per gruppo
+ * `(materiale_tipo_codice, sede)`.
+ *
+ * Layout: 1 riga header colorata per gruppo, click espande la lista
+ * dei giri sotto (riusa `GiroRow`). Bottone "Modifica gruppo" apre
+ * il dialog chirurgico al livello pagina.
+ */
+function GiriTableAggregata({
+  gruppi,
+  expanded,
+  onToggleGroup,
+  onModificaGruppo,
+  selectedId,
+  onSelect,
+  onOpenFull,
+  onGeneraPdc,
+}: {
+  gruppi: GruppoAggregato[];
+  expanded: Set<string>;
+  onToggleGroup: (key: string) => void;
+  onModificaGruppo: (g: {
+    materiale: string;
+    sede: string;
+    nGiri: number;
+  }) => void;
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+  onOpenFull: (id: number) => void;
+  onGeneraPdc: (id: number) => void;
+}) {
+  return (
+    <table className="w-full text-sm">
+      <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+        <tr>
+          <th className="w-10 px-3 py-2.5"></th>
+          <th className="px-3 py-2.5 text-left font-medium">Gruppo</th>
+          <th className="px-3 py-2.5 text-right font-medium">Turni</th>
+          <th className="px-3 py-2.5 text-right font-medium">
+            km/g cumul.
+          </th>
+          <th className="px-3 py-2.5 text-right font-medium">Non chiusi</th>
+          <th className="px-3 py-2.5 text-right font-medium">Azioni</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-border">
+        {gruppi.map((g) => {
+          const key = `${g.materiale}|${g.sede}`;
+          const isExpanded = expanded.has(key);
+          return (
+            <GruppoRows
+              key={key}
+              gruppo={g}
+              gruppoKey={key}
+              isExpanded={isExpanded}
+              onToggle={() => onToggleGroup(key)}
+              onModifica={() =>
+                onModificaGruppo({
+                  materiale: g.materiale,
+                  sede: g.sede,
+                  nGiri: g.giri.length,
+                })
+              }
+              selectedId={selectedId}
+              onSelect={onSelect}
+              onOpenFull={onOpenFull}
+              onGeneraPdc={onGeneraPdc}
+            />
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function GruppoRows({
+  gruppo,
+  gruppoKey,
+  isExpanded,
+  onToggle,
+  onModifica,
+  selectedId,
+  onSelect,
+  onOpenFull,
+  onGeneraPdc,
+}: {
+  gruppo: GruppoAggregato;
+  gruppoKey: string;
+  isExpanded: boolean;
+  onToggle: () => void;
+  onModifica: () => void;
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+  onOpenFull: (id: number) => void;
+  onGeneraPdc: (id: number) => void;
+}) {
+  return (
+    <>
+      <tr
+        className={cn(
+          "cursor-pointer bg-primary/5 hover:bg-primary/10",
+          isExpanded && "border-b border-primary/20",
+        )}
+        onClick={onToggle}
+        data-testid={`gruppo-row-${gruppoKey}`}
+      >
+        <td className="px-3 py-2.5 text-muted-foreground">
+          {isExpanded ? (
+            <ChevronDown className="h-4 w-4" aria-hidden />
+          ) : (
+            <ChevronRight className="h-4 w-4" aria-hidden />
+          )}
+        </td>
+        <td className="px-3 py-2.5">
+          <span className="inline-flex items-center gap-2">
+            <span className="rounded bg-foreground/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-foreground">
+              {gruppo.materiale}
+            </span>
+            <span className="text-xs text-muted-foreground">·</span>
+            <span className="font-mono text-xs text-foreground">
+              {gruppo.sede}
+            </span>
+          </span>
+        </td>
+        <td className="px-3 py-2.5 text-right font-semibold tabular-nums">
+          {gruppo.giri.length}
+        </td>
+        <td className="px-3 py-2.5 text-right tabular-nums">
+          {formatNumber(Math.round(gruppo.kmGiornoCumulato))}
+        </td>
+        <td className="px-3 py-2.5 text-right tabular-nums">
+          {gruppo.nNonChiusi > 0 ? (
+            <span className="text-amber-700">{gruppo.nNonChiusi}</span>
+          ) : (
+            <span className="text-muted-foreground">0</span>
+          )}
+        </td>
+        <td className="px-3 py-2.5 text-right">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onModifica();
+            }}
+            title="Modifica materiale o deposito di tutto il gruppo"
+          >
+            <Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            Modifica gruppo
+          </Button>
+        </td>
+      </tr>
+      {isExpanded && (
+        <tr>
+          <td colSpan={6} className="bg-background p-0">
+            <div className="border-l-2 border-primary/30 bg-muted/10">
+              <GiriTable
+                giri={gruppo.giri}
+                selectedId={selectedId}
+                onSelect={onSelect}
+                onOpenFull={onOpenFull}
+                onGeneraPdc={onGeneraPdc}
+              />
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 
 import {
+  aggregaModifica,
   cercaTreno,
   duplicaGiro,
   generaDaResidue,
@@ -20,6 +21,8 @@ import {
   patchBlocco,
   patchGiro,
   riempiGap,
+  type AggregaModificaPayload,
+  type AggregaModificaResponse,
   type BuilderResult,
   type CercaTrenoItem,
   type CorsaNonCopertaItem,
@@ -189,6 +192,37 @@ export function useGeneraDaResidue(): UseMutationResult<
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (programmaId: number) => generaDaResidue(programmaId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: GIRI_KEY });
+    },
+  });
+}
+
+interface AggregaModificaArgs {
+  programmaId: number;
+  payload: AggregaModificaPayload;
+}
+
+/**
+ * Sprint 8.0 MR-5 (entry 228) — modifica chirurgica di un gruppo
+ * `(materiale_tipo_codice, localita_codice)`.
+ *
+ * Backend aggiorna le regole `programma_regola_assegnazione` del
+ * gruppo + rigenera (`force=true`) i giri delle sedi toccate.
+ *
+ * Sull'apply invalida ``GIRI_KEY`` → si aggiornano lista giri,
+ * dettagli, corse non coperte (la composizione delle regole è cambiata
+ * → la coverage è ricalcolata).
+ */
+export function useAggregaModifica(): UseMutationResult<
+  AggregaModificaResponse,
+  Error,
+  AggregaModificaArgs
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ programmaId, payload }) =>
+      aggregaModifica(programmaId, payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: GIRI_KEY });
     },

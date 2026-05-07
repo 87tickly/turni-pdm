@@ -459,3 +459,53 @@ export async function generaDaResidue(
     { method: "POST" },
   );
 }
+
+// =====================================================================
+// Sprint 8.0 MR-5 (entry 228) — aggrega-modifica giri per gruppo
+// =====================================================================
+
+/**
+ * Payload per `POST /api/programmi/{id}/giri/aggrega-modifica`.
+ *
+ * Identifica un gruppo `(materiale_tipo_codice_old, localita_codice_old)`
+ * e specifica i nuovi valori. Almeno uno dei due `_new` deve differire
+ * dal corrispondente `_old`.
+ *
+ * Il backend è chirurgico: aggiorna le regole
+ * `programma_regola_assegnazione` del gruppo + rigenera (`force=true`)
+ * i giri delle sedi toccate (1 sede se cambia solo il materiale, 2 se
+ * cambia anche la sede).
+ */
+export interface AggregaModificaPayload {
+  materiale_tipo_codice_old: string;
+  localita_codice_old: string;
+  materiale_tipo_codice_new: string | null;
+  localita_codice_new: string | null;
+  confirm_delete_pdc: boolean;
+}
+
+export interface AggregaModificaSedeResult {
+  localita_codice: string;
+  n_giri_creati: number;
+  giri_ids: number[];
+  n_corse_processate: number;
+  n_corse_residue: number;
+  warnings: string[];
+  errore: string | null;
+}
+
+export interface AggregaModificaResponse {
+  n_regole_aggiornate: number;
+  n_giri_totali_creati: number;
+  risultati_per_sede: AggregaModificaSedeResult[];
+}
+
+export async function aggregaModifica(
+  programmaId: number,
+  payload: AggregaModificaPayload,
+): Promise<AggregaModificaResponse> {
+  return apiJson<AggregaModificaResponse>(
+    `/api/programmi/${programmaId}/giri/aggrega-modifica`,
+    { method: "POST", body: payload },
+  );
+}
