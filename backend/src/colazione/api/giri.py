@@ -3061,6 +3061,183 @@ async def sposta_blocco(
     )
 
 
+# =====================================================================
+# Sprint 8.0 MR-B.2 (entry 232): elimina blocco vuoto manuale
+# =====================================================================
+# Decisione utente entry 230: "io posso decidere di eliminare un vuoto
+# perchè può dormire a milano centrale". Solo vuoti (`materiale_vuoto`)
+# possono essere eliminati: i blocchi commerciali rappresentano corse
+# del PdE e non sono cancellabili da UI (richiederebbe annullamento
+# corsa). Re-numerazione seq + check fattibilità riuso del MR-B.1.
+
+
+class EliminaBloccoResponse(BaseModel):
+    """Esito dell'eliminazione di un blocco vuoto."""
+
+    applied: bool
+    blocco_id: int
+    violazioni: list[ViolazioneFattibilita]
+
+
+@giri_dettaglio_router.delete(
+    "/{giro_id}/blocchi/{blocco_id}",
+    response_model=EliminaBloccoResponse,
+    summary=(
+        "Sprint 8.0 MR-B.2 (entry 232): elimina un blocco vuoto del "
+        "giro. Solo blocchi `materiale_vuoto` sono ammessi; i "
+        "commerciali sono protetti."
+    ),
+)
+async def elimina_blocco(
+    giro_id: int,
+    blocco_id: int,
+    dry_run: bool = Query(
+        False,
+        description=(
+            "Se true, calcola le violazioni post-eliminazione ma NON "
+            "applica."
+        ),
+    ),
+    force: bool = Query(
+        False,
+        description=(
+            "Se true, applica anche se ci sono violazioni `severity=error`."
+        ),
+    ),
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> EliminaBloccoResponse:
+    """Sprint 8.0 MR-B.2 (entry 232).
+
+    Flusso:
+    1. Lock pessimistico giro.
+    2. Pipeline freeze check.
+    3. Carica blocco + valida tipo `materiale_vuoto` (else 400).
+    4. Simula sequenza variante senza il blocco.
+    5. Check fattibilità: se errors e `not force` → no commit.
+    6. Else: DELETE blocco + re-numera seq variante + commit.
+
+    Errori:
+    - 404 giro/blocco non trovato.
+    - 400 blocco non eliminabile (tipo non vuoto).
+    - 409 pipeline freezata.
+    """
+    giro = (
+        await session.execute(
+            select(GiroMateriale)
+            .where(
+                GiroMateriale.id == giro_id,
+                GiroMateriale.azienda_id == user.azienda_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if giro is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="giro non trovato",
+        )
+
+    stato_pipeline = (
+        await session.execute(
+            select(ProgrammaMateriale.stato_pipeline_pdc).where(
+                ProgrammaMateriale.id == giro.programma_id
+            )
+        )
+    ).scalar_one_or_none()
+    if stato_pipeline is not None and materiale_freezato(stato_pipeline):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"programma freezato (pipeline {stato_pipeline!r}): "
+                "blocco read-only."
+            ),
+        )
+
+    blocco = (
+        await session.execute(
+            select(GiroBlocco)
+            .join(GiroVariante, GiroVariante.id == GiroBlocco.giro_variante_id)
+            .join(GiroGiornata, GiroGiornata.id == GiroVariante.giro_giornata_id)
+            .where(
+                GiroBlocco.id == blocco_id,
+                GiroGiornata.giro_materiale_id == giro_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if blocco is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="blocco non trovato per questo giro",
+        )
+
+    # Solo i vuoti sono eliminabili da UI (decisione utente entry 232).
+    # I blocchi commerciali rappresentano corse del PdE: non sono
+    # cancellabili senza un'annullamento dichiarato della corsa.
+    if blocco.tipo_blocco != "materiale_vuoto":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"blocco di tipo {blocco.tipo_blocco!r} non eliminabile: "
+                "solo `materiale_vuoto` è ammesso."
+            ),
+        )
+
+    # Carica blocchi della variante e simula post-eliminazione.
+    variante_id = blocco.giro_variante_id
+    variante_blocchi = list(
+        (
+            await session.execute(
+                select(GiroBlocco)
+                .where(GiroBlocco.giro_variante_id == variante_id)
+                .order_by(GiroBlocco.seq)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    sim_post = [b for b in variante_blocchi if b.id != blocco.id]
+
+    # Lookup label variante (giornata + variant_index).
+    variante_info = (
+        await session.execute(
+            select(GiroVariante.variant_index, GiroGiornata.numero_giornata)
+            .join(GiroGiornata, GiroGiornata.id == GiroVariante.giro_giornata_id)
+            .where(GiroVariante.id == variante_id)
+        )
+    ).first()
+    variante_label = (
+        f"G{variante_info[1]} V{variante_info[0]}"
+        if variante_info is not None
+        else f"variante {variante_id}"
+    )
+
+    violazioni = _check_fattibilita_variante(sim_post, variante_id, variante_label)
+    has_errors = any(v.severity == "error" for v in violazioni)
+
+    if dry_run or (has_errors and not force):
+        return EliminaBloccoResponse(
+            applied=False,
+            blocco_id=blocco.id,
+            violazioni=violazioni,
+        )
+
+    # Applica: cancella blocco + re-numera seq.
+    blocco_id_to_delete = blocco.id
+    await session.delete(blocco)
+    await session.flush()
+    for idx, b in enumerate(sim_post, start=1):
+        if b.seq != idx:
+            b.seq = idx
+    await session.commit()
+
+    return EliminaBloccoResponse(
+        applied=True,
+        blocco_id=blocco_id_to_delete,
+        violazioni=violazioni,
+    )
+
+
 @giri_dettaglio_router.post(
     "/{giro_id}/duplica",
     response_model=DuplicaGiroResponse,

@@ -22,6 +22,7 @@ import {
   Minimize2,
   Pencil,
   Search,
+  Trash2,
   Unlink,
   Users,
 } from "lucide-react";
@@ -60,6 +61,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useMateriali } from "@/hooks/useAnagrafiche";
 import {
   useDuplicaGiro,
+  useEliminaBlocco,
   useGiroDettaglio,
   usePatchBlocco,
   usePatchGiro,
@@ -3417,6 +3419,11 @@ function BloccoDialogBody({
         {/* MR η-bis: configurazione doppia/sgancio sul blocco. */}
         <BloccoConfigDoppiaSgancio giroId={giro.id} blocco={blocco} />
 
+        {/* Sprint 8.0 MR-B.2 (entry 232): elimina blocco vuoto. */}
+        {blocco.tipo_blocco === "materiale_vuoto" && (
+          <BloccoEliminaVuoto giroId={giro.id} blocco={blocco} />
+        )}
+
         {/* Metadata */}
         <BloccoMetadata blocco={blocco} />
 
@@ -3567,6 +3574,183 @@ function BloccoConfigDoppiaSgancio({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Sprint 8.0 MR-B.2 (entry 232) — pannello inline "Elimina vuoto".
+ *
+ * Decisione utente entry 230: "io posso decidere di eliminare un
+ * vuoto perchè può dormire a milano centrale". Solo blocchi
+ * `materiale_vuoto` mostrano questo pannello.
+ *
+ * Flusso 2 fasi:
+ *  1. dry_run → anteprima violazioni di fattibilità.
+ *  2. apply (con `force` se l'utente conferma le violazioni).
+ */
+function BloccoEliminaVuoto({
+  giroId,
+  blocco,
+}: {
+  giroId: number;
+  blocco: GiroBlocco;
+}) {
+  const eliminaMutation = useEliminaBlocco();
+  const [violazioni, setViolazioni] = useState<
+    ViolazioneFattibilita[] | null
+  >(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const onElimina = async () => {
+    setError(null);
+    try {
+      const dryRes = await eliminaMutation.mutateAsync({
+        giroId,
+        bloccoId: blocco.id,
+        dryRun: true,
+      });
+      const hasErrors = dryRes.violazioni.some(
+        (v) => v.severity === "error",
+      );
+      if (!hasErrors) {
+        // Anche con violazioni warning, applichiamo direttamente.
+        await eliminaMutation.mutateAsync({
+          giroId,
+          bloccoId: blocco.id,
+          dryRun: false,
+          force: false,
+        });
+      } else {
+        // Mostra dialog di conferma con violazioni.
+        setViolazioni(dryRes.violazioni);
+      }
+    } catch (err) {
+      const msg =
+        err instanceof ApiError ? err.message : (err as Error).message;
+      setError(msg);
+    }
+  };
+
+  const onForzaElimina = async () => {
+    setError(null);
+    try {
+      await eliminaMutation.mutateAsync({
+        giroId,
+        bloccoId: blocco.id,
+        dryRun: false,
+        force: true,
+      });
+    } catch (err) {
+      const msg =
+        err instanceof ApiError ? err.message : (err as Error).message;
+      setError(msg);
+    } finally {
+      setViolazioni(null);
+    }
+  };
+
+  return (
+    <>
+      <div className="mt-4 rounded-md border border-rose-300/50 bg-rose-50/40 p-3">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-800">
+          Elimina vuoto
+        </div>
+        <p className="mb-2 text-sm text-rose-900/80">
+          Rimuovi questo blocco se il convoglio non deve fare il
+          posizionamento (es. "dorme" qui). I seq successivi vengono
+          ricompattati automaticamente.
+        </p>
+        {error !== null && (
+          <p
+            role="alert"
+            className="mb-2 rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1 text-xs text-destructive"
+          >
+            {error}
+          </p>
+        )}
+        <div className="flex justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void onElimina()}
+            disabled={eliminaMutation.isPending}
+          >
+            <Trash2
+              className="mr-1.5 h-3.5 w-3.5 text-rose-600"
+              aria-hidden
+            />
+            {eliminaMutation.isPending ? "Elimino…" : "Elimina vuoto"}
+          </Button>
+        </div>
+      </div>
+
+      {/* Dialog conferma se violazioni */}
+      <Dialog
+        open={violazioni !== null}
+        onOpenChange={(o) => !o && setViolazioni(null)}
+      >
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle
+                className="h-5 w-5 text-amber-600"
+                aria-hidden
+              />
+              Eliminazione con violazioni
+            </DialogTitle>
+            <DialogDescription>
+              Eliminando questo vuoto si genereranno{" "}
+              {violazioni?.length ?? 0} segnalazioni nella variante.
+              Verifica e conferma se vuoi forzare comunque.
+            </DialogDescription>
+          </DialogHeader>
+          {violazioni !== null && (
+            <ul className="max-h-72 space-y-1.5 overflow-y-auto rounded-md border border-border bg-muted/20 p-3 text-sm">
+              {violazioni.map((v, i) => (
+                <li
+                  key={i}
+                  className={cn(
+                    "flex items-start gap-2 rounded px-2 py-1.5",
+                    v.severity === "error"
+                      ? "bg-destructive/5 text-destructive"
+                      : "bg-amber-50 text-amber-900",
+                  )}
+                >
+                  <span className="mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-bold uppercase">
+                    {v.severity === "error" ? "!" : "i"}
+                  </span>
+                  <div className="flex-1">
+                    <div className="text-xs font-medium uppercase tracking-wide">
+                      {v.codice} · {v.variante_label}
+                    </div>
+                    <div className="text-[13px] leading-snug">
+                      {v.descrizione}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setViolazioni(null)}
+              disabled={eliminaMutation.isPending}
+            >
+              Annulla
+            </Button>
+            <Button
+              onClick={() => void onForzaElimina()}
+              disabled={eliminaMutation.isPending}
+            >
+              {eliminaMutation.isPending
+                ? "Elimino…"
+                : "Forza eliminazione"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

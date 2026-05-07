@@ -10,6 +10,94 @@
 
 ---
 
+## 2026-05-07 (232) — MR-B.2: elimina vuoto manuale dal Gantt
+
+### Contesto
+
+Decisione utente entry 230:
+> "io posso decidere di aggiungere un vuoto o eliminarlo perchè può
+> 'dormire' a milano centrale"
+
+Primo step della Fase B.2: elimina vuoto. L'aggiungi-vuoto richiede
+form orari/stazioni complessa → iter successiva.
+
+### Modifiche backend
+
+**`backend/src/colazione/api/giri.py`** — nuovo endpoint
+**`DELETE /api/giri/{id}/blocchi/{blocco_id}`**:
+
+- Schema `EliminaBloccoResponse` (applied, blocco_id, violazioni).
+- Query params `dry_run`, `force` (analoghi a sposta-blocco).
+- Logica:
+  1. Lock pessimistico giro.
+  2. Pipeline freeze check.
+  3. Carica blocco; valida `tipo_blocco == "materiale_vuoto"` (else
+     400 — i commerciali sono protetti, rappresentano corse PdE).
+  4. Simula sequenza variante post-rimozione → check fattibilità
+     `_check_fattibilita_variante` (riuso MR-B.1).
+  5. Se `dry_run=true` o errors senza force → no commit.
+  6. Else: `session.delete(blocco)` + re-numerazione seq variante.
+
+**`backend/tests/test_elimina_blocco_api.py`** (nuovo, 3 test):
+401 auth, 404 giro inesistente, 200 schema OK su query params.
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/giri.ts`**: tipo `EliminaBloccoResponse` +
+funzione `eliminaBlocco(giroId, bloccoId, options)`.
+
+**`frontend/src/hooks/useGiri.ts`**: hook `useEliminaBlocco()`
+mutation; `onSuccess` invalida dettaglio giro + `GIRI_KEY`.
+
+**`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`**:
+- Nuovo componente `<BloccoEliminaVuoto>`: pannello rosso chiaro
+  inline nel `BloccoDialogBody`, visibile solo se
+  `tipo_blocco === "materiale_vuoto"`. Mostra:
+  - Spiegazione "Rimuovi se il convoglio dorme qui".
+  - Bottone "Elimina vuoto" → click triggera dry_run, poi:
+    - Senza errors → applica direttamente.
+    - Con errors → dialog conferma con violazioni + "Forza eliminazione".
+
+### Verifiche
+
+- ✅ `ruff check` + `mypy --strict` clean.
+- ✅ `pytest --co` → 3 test collected.
+- ✅ `pnpm build` → bundle `index-DtsTT1pO.js`, 1805 moduli.
+
+### Stato
+
+- ✅ MR-B.2.1 (elimina) chiuso. Backend + frontend pronti.
+- ⏳ Commit + push + deploy.
+
+### Per l'utente
+
+1. Apri il Gantt di un giro. Click su un blocco vuoto (rosso chiaro).
+2. Si apre il dialog dettaglio blocco. Scorri fino al pannello rosa
+   chiaro **"Elimina vuoto"**.
+3. Click "Elimina vuoto". Se la rimozione genera violazioni
+   (discontinuità stazioni dopo, gap orari) si apre dialog conferma
+   con la lista delle violazioni; click "Forza eliminazione" per
+   applicare comunque.
+
+### Note
+
+- I blocchi commerciali (corse del PdE) NON sono eliminabili: il
+  backend rifiuta con 400. Per annullare una corsa va usato il
+  meccanismo PdE (`is_cancellata` su `corsa_commerciale`).
+- L'**aggiungi vuoto manuale** (drag dalla "palette" o form) richiede
+  più scaffolding (creazione `corsa_materiale_vuoto`, validazione
+  orari/stazioni) → MR-B.2.2 successivo.
+
+### Prossimo step
+
+- **MR-B.3**: investigare il problema utente "doppia composizione non
+  funziona". L'UI esiste (`BloccoConfigDoppiaSgancio` MR η-bis nel
+  dialog blocco), ma l'utente la segnala broken. Da verificare:
+  visibilità rendering nel Gantt, persistenza salvataggio, accessibilità.
+- **MR-B.2.2**: aggiungi vuoto manuale.
+
+---
+
 ## 2026-05-07 (231) — MR-A: vista aggregata "1 turno N giornate" + drag&drop cross-turno
 
 ### Contesto

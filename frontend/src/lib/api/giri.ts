@@ -625,3 +625,33 @@ export async function spostaBlocco(
     { method: "POST", body: payload },
   );
 }
+
+// =====================================================================
+// Sprint 8.0 MR-B.2 (entry 232) — elimina blocco vuoto
+// =====================================================================
+
+export interface EliminaBloccoResponse {
+  applied: boolean;
+  blocco_id: number;
+  violazioni: ViolazioneFattibilita[];
+}
+
+/**
+ * Elimina un blocco vuoto del giro (solo `tipo_blocco='materiale_vuoto'`
+ * sono ammessi; commerciali non eliminabili). Re-numerazione seq +
+ * check fattibilità riuso del MR-B.1.
+ */
+export async function eliminaBlocco(
+  giroId: number,
+  bloccoId: number,
+  options: { dryRun?: boolean; force?: boolean } = {},
+): Promise<EliminaBloccoResponse> {
+  const search = new URLSearchParams();
+  if (options.dryRun === true) search.set("dry_run", "true");
+  if (options.force === true) search.set("force", "true");
+  const qs = search.toString();
+  return apiJson<EliminaBloccoResponse>(
+    `/api/giri/${giroId}/blocchi/${bloccoId}${qs ? `?${qs}` : ""}`,
+    { method: "DELETE" },
+  );
+}

@@ -17,6 +17,7 @@ import {
   listCorseNonCoperte,
   listGiriAzienda,
   listGiriProgramma,
+  eliminaBlocco,
   listLineeDistinct,
   listThreadsGiro,
   patchBlocco,
@@ -30,6 +31,7 @@ import {
   type CercaTrenoItem,
   type CorsaNonCopertaItem,
   type DuplicaGiroResult,
+  type EliminaBloccoResponse,
   type FillGapResult,
   type GeneraDaResidueResponse,
   type GeneraGiriParams,
@@ -309,6 +311,38 @@ export function useSpostaBlocco(): UseMutationResult<
   return useMutation({
     mutationFn: ({ giroId, bloccoId, payload }) =>
       spostaBlocco(giroId, bloccoId, payload),
+    onSuccess: (data, vars) => {
+      if (data.applied) {
+        void qc.invalidateQueries({
+          queryKey: [...GIRI_KEY, "dettaglio", vars.giroId],
+        });
+        void qc.invalidateQueries({ queryKey: GIRI_KEY });
+      }
+    },
+  });
+}
+
+interface EliminaBloccoArgs {
+  giroId: number;
+  bloccoId: number;
+  dryRun?: boolean;
+  force?: boolean;
+}
+
+/**
+ * Sprint 8.0 MR-B.2 (entry 232) — elimina blocco vuoto (DELETE).
+ * Solo `materiale_vuoto`. Backend rifiuta blocchi commerciali.
+ * Sull'apply invalida `GIRI_KEY` + dettaglio giro.
+ */
+export function useEliminaBlocco(): UseMutationResult<
+  EliminaBloccoResponse,
+  Error,
+  EliminaBloccoArgs
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ giroId, bloccoId, dryRun, force }) =>
+      eliminaBlocco(giroId, bloccoId, { dryRun, force }),
     onSuccess: (data, vars) => {
       if (data.applied) {
         void qc.invalidateQueries({
