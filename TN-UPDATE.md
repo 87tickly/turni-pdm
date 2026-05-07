@@ -10,6 +10,76 @@
 
 ---
 
+## 2026-05-07 (210) — Code review completa repo (sprint 7.9 + 8.0 finale)
+
+### Contesto
+
+Review senior dell'intero repo commissionata dall'utente dopo la chiusura
+di MR-1110 (entry 209). Scope: backend/src/, backend/tests/, models,
+migrations, auth, domain. Documenti letti prima della review:
+CLAUDE.md, TN-UPDATE.md (prime 5 entry), METODO-DI-LAVORO.md,
+NORMATIVA-PDC.md (intero), MODELLO-DATI.md.
+
+### Modifiche
+
+**`docs/CODE-REVIEW-2026-05-07.md`** — nuovo file con 23 finding
+classificati per gravità. Nessuna modifica al codice di produzione
+(istruzione esplicita utente: "voglio leggere prima").
+
+### Finding summary
+
+**5 CRITICI:**
+- C1: PK generato per gap > 0 min — viola minimo normativo 20' (§4.4).
+  Ogni turno con treni ravvicinati ha blocchi PK fisicamente impossibili.
+- C2: `datetime.utcnow()` deprecated in Python 3.12, timezone-naive
+  nel metadata JSONB (builder_pdc/builder.py:997). Fix: 5 min.
+- C3: Anti-rigenerazione carica TUTTI i TurnoPdc azienda in memoria,
+  poi filtra in Python — OOM risk con N giri crescenti (builder_pdc/builder.py:710).
+- C4: Preriscaldo ACCp 80' (dic-feb) non implementato. `ACCESSORI_MIN_STANDARD`
+  fisso a 40', `is_accessori_maggiorati` sempre False — turni invernali
+  sistematicamente sbagliati sulla prestazione (builder_pdc/builder.py:57).
+- C5: `assert _session_factory is not None` in produzione (db.py:58) — no-op
+  con `python -O`, crash opaco.
+
+**10 IMPORTANTI:**
+- I1: JWT secret default non validato in produzione (config.py:34).
+- I2: Access token 72h — finestra di intercettazione eccessiva.
+- I3: `updated_at` senza `onupdate` su 5 modelli — timestamp stale.
+- I4: `is_notturno` builder più ampio della normativa §11.5 — 16h riposo
+  applicato a turni che ne richiedono 11h.
+- I5: 7 `assert` in codice dominio (builder.py + multi_turno.py).
+- I6: `TurnoPdcBlocco.corsa_commerciale_id` con `ondelete=RESTRICT` —
+  blocca variazioni PdE su corse storiche.
+- I7: `multi_turno.py` importa 6 simboli privati (`_*`) da builder.py —
+  accoppiamento eccessivo.
+- I8: `STAZIONI_CV_DEROGA` hardcoded globale — non configurabile per programma.
+- I9: `ciclo_giorni` cappato a 14 senza motivazione normativa esplicita.
+- I10: `get_session()` senza rollback esplicito — commit mancato silente.
+
+**8 MINORI:** troncamento VARCHAR(20) variante_calendario, `assert` in db.py,
+stale docstring, builder_version narrativa, buchi test `_aggiungi_dormite_fr`.
+
+### Quick wins immediati (< 30 min, 0 decisioni utente)
+
+- C2: `datetime.utcnow()` → `datetime.now(UTC)` — 1 riga
+- C5: `assert` → `raise RuntimeError` in db.py — 3 righe
+- I5: replace 7 `assert` in dominio con eccezioni esplicite
+
+### Stato
+
+- ✅ Review scritta in `docs/CODE-REVIEW-2026-05-07.md`.
+- ✅ TN-UPDATE aggiornato.
+- ⏳ Commit + push su branch `claude/zen-babbage-cCToG`.
+- ⏸️ Nessun fix al codice — utente legge prima e decide ordine interventi.
+
+### Prossimo step
+
+Utente legge review e decide: (a) quali critici aprire come MR immediati,
+(b) se intercalare quick wins prima del prossimo sprint, (c) se il C4
+(preriscaldo) richiede analisi aggiuntiva per stagionalità dei programmi reali.
+
+---
+
 ## 2026-05-07 (209) — Cleanup post-MR-1110: review Fausto + 2 fix di pulizia
 
 ### Contesto
