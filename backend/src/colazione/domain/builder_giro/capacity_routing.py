@@ -44,13 +44,11 @@ from colazione.domain.builder_giro.composizione import (
     GiroAssegnato,
 )
 from colazione.domain.builder_giro.risolvi_corsa import (
-    AssegnazioneRisolta,
     ComposizioneItem,
     IsAccoppiamentoAmmesso,
     _RegolaLike,
     risolvi_corsa,
 )
-
 
 # =====================================================================
 # Helpers

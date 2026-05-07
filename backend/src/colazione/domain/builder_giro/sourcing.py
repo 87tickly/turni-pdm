@@ -52,14 +52,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import date, time
-from typing import Any
 
 from colazione.domain.builder_giro.composizione import (
     EventoComposizione,
     GiornataAssegnata,
     GiroAssegnato,
 )
-
 
 # =====================================================================
 # Indici interni

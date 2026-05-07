@@ -10,6 +10,65 @@
 
 ---
 
+## 2026-05-07 (213) — Cleanup linter sui 4 moduli builder_giro pendenti
+
+### Contesto
+
+Ad inizio sessione il working tree aveva 4 file modificati non
+committati nel modulo ``backend/src/colazione/domain/builder_giro/``:
+``aggregazione_a2.py``, ``capacity_routing.py``, ``sourcing.py``,
+``thread_proiezione.py``. Decisione utente: chiudere il pendente
+prima di iniziare la nuova feature (cerca treno + check corse non
+coperte vs PdE).
+
+### Modifiche
+
+Solo cleanup linter (zero impatto funzionale):
+
+- ``aggregazione_a2.py`` — rimossa una riga vuota in eccesso
+- ``capacity_routing.py`` — rimosso import morto
+  ``AssegnazioneRisolta`` + riga vuota
+- ``sourcing.py`` — rimosso ``from typing import Any`` non usato
+  + riga vuota
+- ``thread_proiezione.py`` — rimossi ``Any`` e ``select`` non
+  usati + riga vuota; rinominata ``giornata`` → ``_giornata`` nel
+  loop ``for giornata, variante, b in blocchi_canonici`` (B007:
+  loop control variable non usata nel body, solo ``variante`` e
+  ``b`` sono referenziate)
+
+### Verifiche
+
+- ✅ ``ruff check src/colazione/domain/builder_giro/`` clean
+- ✅ ``mypy --strict src/colazione/domain/builder_giro/`` clean
+  (19 source files)
+- ⚠️ ``pytest tests/test_builder_giri.py`` non eseguito: PostgreSQL
+  locale non attivo (dev container Docker da avviare). Il diff è
+  cleanup-only, non tocca logica → rischio regressione = 0
+
+### Stato
+
+- ✅ Working tree pulito, pronto per la nuova feature.
+- ⏳ Commit + push + deploy backend Railway.
+
+### Prossimo step
+
+Implementare le 2 feature concordate (decisione utente 2026-05-07):
+
+1. **Cerca treno**: search-bar in dashboard pianificatore +
+   replicata in pagina dettaglio giro. Popup mostra tutti i treni
+   matchanti + giro di appartenenza. Per ora solo treni assegnati
+   a un giro (i non-assegnati saranno aggiunti in iterazione 2).
+2. **Check corse non coperte vs PdE**: sezione persistente nella
+   dashboard del programma. Confronto contro il **perimetro del
+   programma** (B3): corse del PdE che cadono nelle regole +
+   periodo del programma. Niente confronto con tutto il PdE
+   azienda → niente rumore di altre direttrici.
+
+Pianificazione in 2 MR separati per applicare regola 3 METODO
+("un passo alla volta, completato bene").
+
+---
+
 ## 2026-05-07 (212) — 3 bug fix dopo screenshot utente del programma "giugno 2026"
 
 ### Contesto

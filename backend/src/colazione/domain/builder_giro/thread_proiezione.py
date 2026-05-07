@@ -45,7 +45,6 @@ from __future__ import annotations
 
 from datetime import date as date_t
 from decimal import Decimal
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,7 +53,6 @@ from colazione.models.anagrafica import (
     MaterialeThreadEvento,
 )
 from colazione.models.giri import GiroBlocco, GiroGiornata, GiroVariante
-
 
 # =====================================================================
 # Helpers
@@ -187,7 +185,7 @@ async def proietta_thread_giro(
     Returns:
         Lista degli ``id`` dei nuovi thread creati.
     """
-    from sqlalchemy import delete, select
+    from sqlalchemy import delete
 
     # Cleanup thread esistenti per questo giro (idempotenza).
     await session.execute(
@@ -230,7 +228,7 @@ async def proietta_thread_giro(
             km_tot = Decimal("0")
             min_tot = 0
             n_corse = 0
-            for giornata, variante, b in blocchi_canonici:
+            for _giornata, variante, b in blocchi_canonici:
                 evento_tipo: str | None = None
                 if b.tipo_blocco == "corsa_commerciale":
                     comp = _composizione_da_blocco(b)

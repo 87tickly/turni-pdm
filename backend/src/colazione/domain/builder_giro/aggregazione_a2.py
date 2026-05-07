@@ -66,7 +66,6 @@ from colazione.domain.builder_giro.composizione import (
 from colazione.domain.builder_giro.multi_giornata import MotivoChiusura
 from colazione.domain.builder_giro.posizionamento import CatenaPosizionata
 
-
 # =====================================================================
 # Output dataclass
 # =====================================================================
