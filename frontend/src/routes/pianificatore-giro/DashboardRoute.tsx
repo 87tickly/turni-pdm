@@ -1,5 +1,6 @@
-import { Link } from "react-router-dom";
-import { ArrowRight } from "lucide-react";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { ArrowRight, Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -13,6 +14,7 @@ import type { GiroListItem } from "@/lib/api/giri";
 import type { ProgrammaMaterialeRead } from "@/lib/api/programmi";
 import { formatPeriodo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { CercaTrenoDialog } from "@/routes/pianificatore-giro/CercaTrenoDialog";
 
 /**
  * Dashboard Pianificatore Giro Materiale (schermata 1).
@@ -40,6 +42,7 @@ const TIME_FMT = new Intl.DateTimeFormat("it-IT", {
 
 export function DashboardRoute() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const programmiQuery = useProgrammi({ stato: "attivo" });
   // Cross-azienda: alimenta sia banda alert (giri non chiusi) sia "Ultimo run".
   const giriAziendaQuery = useGiriAzienda();
@@ -50,6 +53,10 @@ export function DashboardRoute() {
 
   const now = new Date();
   const showAlert = giriNonChiusi > 0;
+
+  // Sprint 8.0 MR-1 (entry 214): popup cerca treno scoped al programma
+  // selezionato dalla card. Stato a livello root per evitare N dialog.
+  const [searchProgrammaId, setSearchProgrammaId] = useState<number | undefined>(undefined);
 
   return (
     <div className="flex flex-col gap-6">
@@ -93,7 +100,11 @@ export function DashboardRoute() {
           ) : (
             <div className="flex flex-col gap-3">
               {programmi.map((p) => (
-                <ProgrammaAttivoCard key={p.id} programma={p} />
+                <ProgrammaAttivoCard
+                  key={p.id}
+                  programma={p}
+                  onCercaTreno={() => setSearchProgrammaId(p.id)}
+                />
               ))}
             </div>
           )}
@@ -114,6 +125,22 @@ export function DashboardRoute() {
         <SectionHeader title="Attività recenti" />
         <ActivityFeedPlaceholder />
       </section>
+
+      <CercaTrenoDialog
+        programmaId={searchProgrammaId}
+        open={searchProgrammaId !== undefined}
+        onOpenChange={(o) => {
+          if (!o) setSearchProgrammaId(undefined);
+        }}
+        onSelect={(_it, b) => {
+          setSearchProgrammaId(undefined);
+          // Naviga al Gantt del giro con focusBlocco — l'effetto al
+          // mount evidenzia il blocco e attiva la variante giusta.
+          navigate(
+            `/pianificatore-giro/giri/${b.giro_id}?focusBlocco=${b.blocco_id}`,
+          );
+        }}
+      />
     </div>
   );
 }
@@ -186,7 +213,13 @@ function AlertMetric({ value, label }: { value: number; label: string }) {
   );
 }
 
-function ProgrammaAttivoCard({ programma }: { programma: ProgrammaMaterialeRead }) {
+function ProgrammaAttivoCard({
+  programma,
+  onCercaTreno,
+}: {
+  programma: ProgrammaMaterialeRead;
+  onCercaTreno: () => void;
+}) {
   const detailQuery = useProgramma(programma.id);
   const giriQuery = useGiriProgramma(programma.id);
 
@@ -216,6 +249,20 @@ function ProgrammaAttivoCard({ programma }: { programma: ProgrammaMaterialeRead 
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onCercaTreno}
+            disabled={totaleGiri === 0}
+            title={
+              totaleGiri === 0
+                ? "Genera prima i giri per poter cercare un treno"
+                : "Cerca un treno tra i giri di questo programma"
+            }
+          >
+            <Search className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            Cerca treno
+          </Button>
           <Link to={`/pianificatore-giro/programmi/${programma.id}`}>
             <Button variant="outline" size="sm">
               Apri

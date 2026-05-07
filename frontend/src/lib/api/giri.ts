@@ -303,3 +303,48 @@ export async function listGiriAzienda(
   const qs = search.toString();
   return apiJson<GiroListItem[]>(`/api/giri${qs ? `?${qs}` : ""}`, { method: "GET" });
 }
+
+// =====================================================================
+// Sprint 8.0 MR-1 (entry 214) — cerca treno
+// =====================================================================
+
+/** Riferimento a un blocco giro che usa il treno cercato. */
+export interface CercaTrenoBloccoRef {
+  blocco_id: number;
+  giro_id: number;
+  numero_turno: string;
+  giornata: number;
+  variante_index: number;
+  /** ``GiroVariante.validita_testo`` (es. "LV 1:5"), nullabile. */
+  variante_etichetta: string | null;
+  seq: number;
+}
+
+/** Risultato cerca-treno raggruppato per (tipo, corsa_id). */
+export interface CercaTrenoItem {
+  corsa_id: number;
+  tipo: "commerciale" | "vuoto";
+  numero_treno: string;
+  stazione_da_codice: string;
+  stazione_a_codice: string;
+  /** Formato ``HH:MM:SS``. */
+  ora_partenza: string;
+  ora_arrivo: string;
+  blocchi: CercaTrenoBloccoRef[];
+}
+
+/**
+ * Cerca treni (commerciali + vuoti) per ``numero_treno`` partial
+ * case-insensitive nei giri persistiti del programma.
+ */
+export async function cercaTreno(
+  programmaId: number,
+  q: string,
+  limit = 50,
+): Promise<CercaTrenoItem[]> {
+  const search = new URLSearchParams({ q, limit: String(limit) });
+  return apiJson<CercaTrenoItem[]>(
+    `/api/programmi/${programmaId}/cerca-treno?${search.toString()}`,
+    { method: "GET" },
+  );
+}

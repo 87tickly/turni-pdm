@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowLeft,
@@ -19,10 +19,10 @@ import {
   Maximize2,
   Minimize2,
   Pencil,
+  Search,
   Unlink,
   Users,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -61,6 +61,7 @@ import type {
 import { formatDateIt, formatNumber } from "@/lib/format";
 import { stazioneAcronimo } from "@/lib/stazioni-acronimi";
 import { cn } from "@/lib/utils";
+import { CercaTrenoDialog } from "@/routes/pianificatore-giro/CercaTrenoDialog";
 import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdcDialog";
 
 /**
@@ -197,6 +198,9 @@ export function GiroDettaglioRoute() {
   const [pdcDialogOpen, setPdcDialogOpen] = useState(false);
   // MR η: dialog di modifica materiale del giro post-generazione.
   const [editMaterialeOpen, setEditMaterialeOpen] = useState(false);
+  // Sprint 8.0 MR-1 (entry 214): popup cerca treno + focus blocco da URL.
+  const [cercaTrenoOpen, setCercaTrenoOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   /**
    * Per ogni giornata l'utente sceglie quale variante mostrare. Default:
    * indice 0 (canonica). Stato esposto qui per resilienza ai re-render
@@ -213,6 +217,32 @@ export function GiroDettaglioRoute() {
   const [selectedClusterA1Ids, setSelectedClusterA1Ids] = useState<
     Set<number> | null
   >(null);
+
+  // Sprint 8.0 MR-1 (entry 214): se presente ``?focusBlocco=<id>`` in
+  // URL (arrivo dal popup Cerca treno), trovo il blocco nel giro
+  // caricato e lo evidenzio (attiva la variante giusta + side panel).
+  // Pulisco il param dall'URL così il refresh non riapplica il focus.
+  useEffect(() => {
+    const focusBloccoStr = searchParams.get("focusBlocco");
+    if (focusBloccoStr === null) return;
+    const target = Number(focusBloccoStr);
+    if (Number.isNaN(target)) return;
+    if (query.data === undefined) return;
+    for (const g of query.data.giornate) {
+      for (let vi = 0; vi < g.varianti.length; vi += 1) {
+        const v = g.varianti[vi];
+        const b = v.blocchi.find((x) => x.id === target);
+        if (b !== undefined) {
+          setSelectedBlocco(b);
+          setActiveVariantByGiornata((prev) => ({ ...prev, [g.id]: vi }));
+          const next = new URLSearchParams(searchParams);
+          next.delete("focusBlocco");
+          setSearchParams(next, { replace: true });
+          return;
+        }
+      }
+    }
+  }, [searchParams, query.data, setSearchParams]);
 
   if (giroId === undefined || Number.isNaN(giroId)) {
     return <ErrorBlock message="ID giro non valido nell'URL." />;
@@ -242,16 +272,57 @@ export function GiroDettaglioRoute() {
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <Link
-        to={
-          programmaId !== null
-            ? `/pianificatore-giro/programmi/${programmaId}/giri`
-            : "/pianificatore-giro/programmi"
-        }
-        className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-primary"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Lista giri
-      </Link>
+      <div className="flex items-center justify-between gap-2">
+        <Link
+          to={
+            programmaId !== null
+              ? `/pianificatore-giro/programmi/${programmaId}/giri`
+              : "/pianificatore-giro/programmi"
+          }
+          className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-primary"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Lista giri
+        </Link>
+        {programmaId !== null && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCercaTrenoOpen(true)}
+            title="Cerca treno tra i giri di questo programma"
+          >
+            <Search className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            Cerca treno
+          </Button>
+        )}
+      </div>
+
+      <CercaTrenoDialog
+        programmaId={programmaId ?? undefined}
+        open={cercaTrenoOpen}
+        onOpenChange={setCercaTrenoOpen}
+        onSelect={(_it, b) => {
+          setCercaTrenoOpen(false);
+          // Stesso giro: imposto subito il blocco. Giro diverso:
+          // navigo passando ``focusBlocco`` come query param —
+          // l'effetto al mount lo evidenzierà.
+          if (b.giro_id === giro.id) {
+            for (const g of giro.giornate) {
+              for (let vi = 0; vi < g.varianti.length; vi += 1) {
+                const found = g.varianti[vi].blocchi.find((x) => x.id === b.blocco_id);
+                if (found !== undefined) {
+                  setSelectedBlocco(found);
+                  setActiveVariantByGiornata((prev) => ({ ...prev, [g.id]: vi }));
+                  return;
+                }
+              }
+            }
+          } else {
+            navigate(
+              `/pianificatore-giro/giri/${b.giro_id}?focusBlocco=${b.blocco_id}`,
+            );
+          }
+        }}
+      />
 
       <HeroSection
         giro={giro}

@@ -10,6 +10,148 @@
 
 ---
 
+## 2026-05-07 (214) — MR-1: cerca treno (commerciale + vuoto) tra i giri del programma
+
+### Contesto
+
+Decisione utente 2026-05-07: due nuove feature alla dashboard del
+Pianificatore Giro Materiale (1° ruolo):
+
+1. **Cerca treno**: durante la consultazione di un turno materiale,
+   l'utente cerca un numero treno e vede in popup tutti i match con
+   indicazione del giro di appartenenza.
+2. **Check corse non coperte vs PdE**: dopo la generazione, sezione
+   persistente con la lista delle corse del PdE (perimetro programma)
+   non finite in nessun giro.
+
+Pianificate in 2 MR separati per applicare regola 3 METODO ("un passo
+alla volta, completato bene"). Questa entry chiude **MR-1**.
+
+### Decisioni utente di scope (poste 4 domande, raccolte 4 risposte)
+
+1. ✅ Search-bar in **dashboard pianificatore** + replicata in **pagina
+   dettaglio giro** (entrambe le UI).
+2. ✅ Cerca-treno trova **solo treni assegnati a un giro** (per ora —
+   "iniziamo con la tua proposta poi vediamo"). Iterazione 2: anche
+   treni del PdE non assegnati a nessun giro.
+3. ✅ **B3 sul check non coperte** (perimetro del programma): scope MR-2.
+4. ✅ Sezione persistente: scope MR-2.
+
+Sotto-decisioni MR-1:
+- Match **partial case-insensitive** (``ILIKE %q%``): digiti ``28``
+  vedi ``28335``, ``28301``, ``92811``.
+- **Vuoti inclusi** (``CorsaMaterialeVuoto.numero_treno_vuoto``,
+  formato ``9{commerciale}`` per i rientri sede).
+- Click sul risultato: **navigazione al Gantt giro con focus blocco**
+  (``?focusBlocco={blocco_id}`` → effetto al mount evidenzia + attiva
+  variante giusta).
+
+### Modifiche backend
+
+**`backend/src/colazione/api/giri.py`** — nuovo endpoint
+``GET /api/programmi/{id}/cerca-treno``:
+
+- Query params: ``q`` (numero treno o sottostringa, 1-20 chars),
+  ``limit`` (1-200, default 50).
+- Auth ``_authz_read`` (4 ruoli pipeline). Check visibilità programma
+  via ``programma_visibile_per_ruoli`` (404 multi-tenant).
+- 2 query SQLAlchemy (commerciali + vuoti) join
+  ``giro_blocco → giro_variante → giro_giornata → giro_materiale``.
+  Filtro per ``programma_id + azienda_id``. Ordinamento stabile per
+  ``numero_treno + numero_turno + giornata + variant_index + seq``.
+- **No filtro** ``corse_attive_clause()``: per docstring del clause è
+  un lookup di numero treno per blocchi esistenti (audit storico).
+- Output ``list[CercaTrenoItem]`` raggruppato per ``(tipo, corsa_id)``:
+  ogni corsa appare una volta sola con la lista dei blocchi che la
+  usano (giornata + variante + seq + giro).
+
+Schemi Pydantic: ``CercaTrenoBloccoRef`` (riferimento per navigazione)
+e ``CercaTrenoItem`` (raggruppamento per corsa).
+
+### Modifiche test
+
+**`backend/tests/test_cerca_treno_api.py`** (nuovo, 6 test):
+
+- ``test_cerca_treno_senza_token_401``: 401 senza JWT.
+- ``test_cerca_treno_programma_inesistente_404``: 404 multi-tenant.
+- ``test_cerca_treno_partial_match_trova_corse``: ``q=TCRC_2833``
+  matcha 2 corse (TCRC_28335 + TCRC_28336).
+- ``test_cerca_treno_case_insensitive``: ``q=tcrc_28335`` matcha
+  ``TCRC_28335``.
+- ``test_cerca_treno_no_match_lista_vuota``: ``q=INESISTENTE`` → ``[]``.
+- ``test_cerca_treno_response_shape``: verifica struttura completa
+  ``{corsa_id, tipo, numero_treno, stazione_da, stazione_a, ora_*,
+  blocchi[]}`` e ``blocchi[]`` sub-shape.
+
+⚠️ Test integration **non eseguito localmente**: PostgreSQL Docker
+non attivo nel mio ambiente. Verifica end-to-end → CI Railway o
+``docker compose up postgres + pytest`` lato utente.
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/giri.ts`**: tipi ``CercaTrenoBloccoRef`` +
+``CercaTrenoItem`` + funzione ``cercaTreno(programmaId, q, limit)``.
+
+**`frontend/src/hooks/useGiri.ts`**: hook ``useCercaTreno(programmaId, q)``
+con ``staleTime: 10s``. Hook attivo solo se ``programmaId`` definito
+e ``q`` non vuoto. Debounce gestito dal componente chiamante.
+
+**`frontend/src/routes/pianificatore-giro/CercaTrenoDialog.tsx`**
+(nuovo, 165 righe): popup ``Dialog`` shadcn/ui con:
+- Input autofocus + debounce locale ``250ms`` (``setTimeout`` cleanup).
+- Reset query alla chiusura (UX: riapertura pulita).
+- Stati: idle / loading / error / no-match / risultati.
+- Risultati raggruppati per ``(tipo, corsa_id)``: card per corsa con
+  numero treno + badge ``vuoto`` + tratta + orari + lista chip per
+  ogni blocco (``G-XXX-NNN · G3 · V1``). Click chip → ``onSelect``.
+
+**`DashboardRoute.tsx`**:
+- Bottone ``[🔍 Cerca treno]`` su ogni ``ProgrammaAttivoCard``,
+  disabilitato se ``totaleGiri === 0`` con tooltip esplicativo.
+- Stato ``searchProgrammaId`` a livello root (1 dialog condiviso).
+- ``onSelect`` chiude dialog + ``navigate(\`/giri/${id}?focusBlocco=${b}\`)``.
+
+**`GiroDettaglioRoute.tsx`**:
+- Bottone ``[🔍 Cerca treno]`` nell'header (a destra del link "Lista giri").
+- ``useEffect`` legge ``focusBlocco`` da ``useSearchParams``: trova
+  il blocco nel ``giro.giornate[].varianti[].blocchi[]``, setta
+  ``selectedBlocco`` + attiva la variante giusta + pulisce il param
+  da URL (replace).
+- ``onSelect`` del dialog: stesso giro → setta blocco direttamente;
+  giro diverso → ``navigate(...?focusBlocco=...)`` + effetto al mount.
+
+### Verifiche
+
+- ✅ ``ruff check src/colazione/api/giri.py`` clean.
+- ✅ ``mypy --strict src/colazione/api/giri.py`` clean.
+- ✅ ``ruff check tests/test_cerca_treno_api.py`` clean. mypy 2 errori
+  di tipo "AsyncGenerator" su fixture pytest — pattern preesistente in
+  ``test_genera_giri_api.py`` (mypy strict in CI gira solo su ``src/``).
+- ✅ ``pnpm tsc --noEmit`` clean (frontend).
+- ✅ ``vite dev`` builda + serve. Login screen render senza errori
+  console.
+- ⚠️ Verifica end-to-end del dialog (apertura, ricerca, navigazione,
+  focus blocco) richiede backend + DB attivi. Da fare su Railway
+  production dopo deploy, oppure localmente con
+  ``docker compose up postgres + uvicorn``.
+
+### Stato
+
+- ✅ MR-1 chiuso. Backend + test + frontend (dialog + 2 integrazioni)
+  + tsc/ruff/mypy clean.
+- ⏳ Commit + push + deploy backend + frontend Railway.
+
+### Prossimo step
+
+**MR-2**: ``GET /api/programmi/{id}/corse-non-coperte`` + sezione
+persistente nella dashboard del programma. Logica: espandi corse PdE
+che matchano almeno una regola del programma + periodo, sottrai le
+corse già coperte da ``giro_blocco.corsa_commerciale_id``. Output
+filtrato per "0 istanze coperte" (la copertura parziale resta
+iterazione 2, vedi decisione utente B3).
+
+---
+
 ## 2026-05-07 (213) — Cleanup linter sui 4 moduli builder_giro pendenti
 
 ### Contesto

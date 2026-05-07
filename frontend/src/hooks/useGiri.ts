@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 
 import {
+  cercaTreno,
   duplicaGiro,
   generaGiri,
   getGiroDettaglio,
@@ -17,6 +18,7 @@ import {
   patchBlocco,
   patchGiro,
   type BuilderResult,
+  type CercaTrenoItem,
   type DuplicaGiroResult,
   type GeneraGiriParams,
   type GiroBlocco,
@@ -160,5 +162,35 @@ export function useDuplicaGiro(): UseMutationResult<DuplicaGiroResult, Error, nu
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: GIRI_KEY });
     },
+  });
+}
+
+/**
+ * Sprint 8.0 MR-1 (entry 214) — cerca treno (commerciale o vuoto)
+ * tra i giri persistiti del programma.
+ *
+ * Match partial case-insensitive su ``numero_treno``. Hook attivo
+ * solo se ``programmaId`` definito e ``q`` non vuoto/spazi.
+ *
+ * Convenzione UX: il chiamante deve già aver applicato il debounce
+ * (es. ~250ms) sulla query — questo hook non lo fa, perché vive
+ * dentro React Query (cache + stale time bastano).
+ */
+export function useCercaTreno(
+  programmaId: number | undefined,
+  q: string,
+): UseQueryResult<CercaTrenoItem[]> {
+  const qTrim = q.trim();
+  return useQuery({
+    queryKey: [...GIRI_KEY, "cerca-treno", programmaId, qTrim],
+    queryFn: () => {
+      if (programmaId === undefined) throw new Error("programmaId mancante");
+      return cercaTreno(programmaId, qTrim);
+    },
+    enabled: programmaId !== undefined && qTrim.length >= 1,
+    // Risultati stabili per ~10s — l'utente che digita più volte
+    // beneficia della cache, riapertura del popup è instant se la
+    // query è la stessa.
+    staleTime: 10_000,
   });
 }

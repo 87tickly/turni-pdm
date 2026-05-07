@@ -22,7 +22,7 @@ Modalità di generazione (decisione utente):
 """
 
 from datetime import UTC, date, datetime, time
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -475,6 +475,224 @@ async def list_giri_programma(
             )
         )
     return out
+
+
+# =====================================================================
+# Cerca treno — entry 214 (MR-1)
+# =====================================================================
+
+
+class CercaTrenoBloccoRef(BaseModel):
+    """Riferimento a un blocco giro che usa il treno cercato.
+
+    Permette al frontend di navigare al Gantt del giro corretto e
+    scrollare/evidenziare il blocco specifico (giornata + variante +
+    seq).
+    """
+
+    blocco_id: int
+    giro_id: int
+    numero_turno: str
+    giornata: int
+    variante_index: int
+    variante_etichetta: str | None = Field(
+        description="``GiroVariante.validita_testo`` (es. 'LV 1:5')."
+    )
+    seq: int
+
+
+class CercaTrenoItem(BaseModel):
+    """Risultato cerca-treno raggruppato per corsa/vuoto.
+
+    Una corsa (commerciale o vuoto) può apparire in più ``GiroBlocco``
+    perché il builder la replica per giornate/varianti del ciclo.
+    Tutti i blocchi confluiscono nella lista ``blocchi``.
+    """
+
+    corsa_id: int
+    tipo: Literal["commerciale", "vuoto"]
+    numero_treno: str
+    stazione_da_codice: str
+    stazione_a_codice: str
+    ora_partenza: time
+    ora_arrivo: time
+    blocchi: list[CercaTrenoBloccoRef]
+
+
+@router.get(
+    "/{programma_id}/cerca-treno",
+    response_model=list[CercaTrenoItem],
+    summary="Cerca treno (commerciale o vuoto) tra i giri del programma",
+)
+async def cerca_treno(
+    programma_id: int,
+    q: str = Query(
+        ...,
+        min_length=1,
+        max_length=20,
+        description="Numero treno o sottostringa (case-insensitive). "
+        "Es. ``28`` matcha ``28335``, ``28301``, ``92811`` ecc.",
+    ),
+    limit: int = Query(
+        50,
+        ge=1,
+        le=200,
+        description="Max corse distinte ritornate. Ogni corsa può "
+        "avere N blocchi.",
+    ),
+    user: CurrentUser = _authz_read,
+    session: AsyncSession = Depends(get_session),
+) -> list[CercaTrenoItem]:
+    """Cerca treni per ``numero_treno`` tra i giri persistiti del
+    programma. Match partial case-insensitive (``ILIKE %q%``).
+
+    Include sia treni commerciali (``CorsaCommerciale.numero_treno``)
+    sia vuoti (``CorsaMaterialeVuoto.numero_treno_vuoto``, formato
+    ``9{commerciale}`` per i rientri sede — memoria
+    ``project_rientro_sede_9XXXX``).
+
+    Output raggruppato per ``(corsa_id, tipo)``: ogni corsa appare
+    una volta sola, con la lista dei blocchi giro che la usano
+    (giornata + variante + seq + giro). Il frontend usa
+    ``blocchi[0]`` per navigazione di default + tutti i blocchi
+    per highlight multi.
+
+    Sprint 8.0 (entry 214): MR-1 nuova feature ricerca treno
+    richiesta dall'utente. Per ora solo treni *assegnati* a un
+    giro; i treni del PdE non assegnati a nessun giro saranno una
+    iterazione 2 (decisione utente "iniziamo con la tua proposta
+    poi vediamo").
+    """
+    # Check visibilità programma (404 multi-tenant + ruolo).
+    stato_pipeline = (
+        await session.execute(
+            select(ProgrammaMateriale.stato_pipeline_pdc).where(
+                ProgrammaMateriale.id == programma_id,
+                ProgrammaMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if stato_pipeline is None or not programma_visibile_per_ruoli(
+        stato_pipeline, user.roles, user.is_admin
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="programma non trovato",
+        )
+
+    pattern = f"%{q.strip()}%"
+
+    # Query 1 — treni commerciali. Niente filtro ``corse_attive_clause``:
+    # qui è un lookup di numero treno per blocchi esistenti (audit
+    # storico ammesso, vedi docstring di ``corse_attive_clause``).
+    stmt_comm = (
+        select(
+            CorsaCommerciale.id.label("corsa_id"),
+            CorsaCommerciale.numero_treno,
+            CorsaCommerciale.codice_origine,
+            CorsaCommerciale.codice_destinazione,
+            CorsaCommerciale.ora_partenza,
+            CorsaCommerciale.ora_arrivo,
+            GiroBlocco.id.label("blocco_id"),
+            GiroBlocco.seq,
+            GiroVariante.variant_index,
+            GiroVariante.validita_testo,
+            GiroGiornata.numero_giornata,
+            GiroMateriale.id.label("giro_id"),
+            GiroMateriale.numero_turno,
+        )
+        .join(GiroBlocco, GiroBlocco.corsa_commerciale_id == CorsaCommerciale.id)
+        .join(GiroVariante, GiroBlocco.giro_variante_id == GiroVariante.id)
+        .join(GiroGiornata, GiroVariante.giro_giornata_id == GiroGiornata.id)
+        .join(GiroMateriale, GiroGiornata.giro_materiale_id == GiroMateriale.id)
+        .where(GiroMateriale.programma_id == programma_id)
+        .where(GiroMateriale.azienda_id == user.azienda_id)
+        .where(CorsaCommerciale.numero_treno.ilike(pattern))
+        .order_by(
+            CorsaCommerciale.numero_treno,
+            GiroMateriale.numero_turno,
+            GiroGiornata.numero_giornata,
+            GiroVariante.variant_index,
+            GiroBlocco.seq,
+        )
+    )
+
+    # Query 2 — treni vuoti.
+    stmt_vuo = (
+        select(
+            CorsaMaterialeVuoto.id.label("corsa_id"),
+            CorsaMaterialeVuoto.numero_treno_vuoto.label("numero_treno"),
+            CorsaMaterialeVuoto.codice_origine,
+            CorsaMaterialeVuoto.codice_destinazione,
+            CorsaMaterialeVuoto.ora_partenza,
+            CorsaMaterialeVuoto.ora_arrivo,
+            GiroBlocco.id.label("blocco_id"),
+            GiroBlocco.seq,
+            GiroVariante.variant_index,
+            GiroVariante.validita_testo,
+            GiroGiornata.numero_giornata,
+            GiroMateriale.id.label("giro_id"),
+            GiroMateriale.numero_turno,
+        )
+        .join(
+            GiroBlocco,
+            GiroBlocco.corsa_materiale_vuoto_id == CorsaMaterialeVuoto.id,
+        )
+        .join(GiroVariante, GiroBlocco.giro_variante_id == GiroVariante.id)
+        .join(GiroGiornata, GiroVariante.giro_giornata_id == GiroGiornata.id)
+        .join(GiroMateriale, GiroGiornata.giro_materiale_id == GiroMateriale.id)
+        .where(GiroMateriale.programma_id == programma_id)
+        .where(GiroMateriale.azienda_id == user.azienda_id)
+        .where(CorsaMaterialeVuoto.numero_treno_vuoto.ilike(pattern))
+        .order_by(
+            CorsaMaterialeVuoto.numero_treno_vuoto,
+            GiroMateriale.numero_turno,
+            GiroGiornata.numero_giornata,
+            GiroVariante.variant_index,
+            GiroBlocco.seq,
+        )
+    )
+
+    rows_comm = (await session.execute(stmt_comm)).all()
+    rows_vuo = (await session.execute(stmt_vuo)).all()
+
+    # Raggruppa per (tipo, corsa_id). Ordine inserimento = ordine
+    # SQL → numero_treno asc, prima commerciali poi vuoti.
+    items: dict[tuple[str, int], CercaTrenoItem] = {}
+
+    def _add_rows(rows: Any, tipo: Literal["commerciale", "vuoto"]) -> None:
+        for r in rows:
+            key = (tipo, int(r.corsa_id))
+            blocco = CercaTrenoBloccoRef(
+                blocco_id=int(r.blocco_id),
+                giro_id=int(r.giro_id),
+                numero_turno=str(r.numero_turno),
+                giornata=int(r.numero_giornata),
+                variante_index=int(r.variante_index),
+                variante_etichetta=r.validita_testo,
+                seq=int(r.seq),
+            )
+            if key in items:
+                items[key].blocchi.append(blocco)
+            else:
+                items[key] = CercaTrenoItem(
+                    corsa_id=int(r.corsa_id),
+                    tipo=tipo,
+                    numero_treno=str(r.numero_treno),
+                    stazione_da_codice=str(r.codice_origine),
+                    stazione_a_codice=str(r.codice_destinazione),
+                    ora_partenza=r.ora_partenza,
+                    ora_arrivo=r.ora_arrivo,
+                    blocchi=[blocco],
+                )
+                # Limit precoce: smetto quando ho ``limit`` corse
+                # distinte. Il taglio definitivo è dopo il merge sotto.
+
+    _add_rows(rows_comm, "commerciale")
+    _add_rows(rows_vuo, "vuoto")
+
+    # Limit applicato sulle corse distinte (commerciali prima, poi vuoti).
+    return list(items.values())[:limit]
 
 
 # Router separato (radice /api) per il dettaglio singolo: il prefix
