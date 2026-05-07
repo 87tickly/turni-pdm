@@ -563,3 +563,58 @@ export async function wizardDaLinee(
     { method: "POST", body: payload },
   );
 }
+
+// =====================================================================
+// Sprint 8.0 MR-B.1 (entry 230) — sposta blocco tra giornate/varianti
+// =====================================================================
+
+/**
+ * Singola violazione di fattibilità rilevata dal check post-sposta.
+ *
+ * - `discontinuita_stazione`: blocchi consecutivi non hanno
+ *   `stazione_a == stazione_da` matching.
+ * - `gap_negativo`: l'orario di fine del blocco precedente eccede di
+ *   troppo l'inizio del successivo (probabile bug, non cross-mezzanotte).
+ * - `gap_eccessivo`: gap diurno > 5h tra blocchi consecutivi (soft).
+ * - `pdc_stale`: lo spostamento rende stale i turni PdC dipendenti.
+ */
+export interface ViolazioneFattibilita {
+  severity: "error" | "warning";
+  codice:
+    | "discontinuita_stazione"
+    | "gap_negativo"
+    | "gap_eccessivo"
+    | "pdc_stale";
+  variante_id: number;
+  variante_label: string;
+  seq_blocco_a: number;
+  seq_blocco_b: number;
+  descrizione: string;
+}
+
+export interface SpostaBloccoPayload {
+  giornata_target: number;
+  variant_index_target: number;
+  seq_target?: number | null;
+  dry_run: boolean;
+  force: boolean;
+}
+
+export interface SpostaBloccoResponse {
+  applied: boolean;
+  blocco_id: number;
+  nuovo_giro_variante_id: number | null;
+  nuovo_seq: number | null;
+  violazioni: ViolazioneFattibilita[];
+}
+
+export async function spostaBlocco(
+  giroId: number,
+  bloccoId: number,
+  payload: SpostaBloccoPayload,
+): Promise<SpostaBloccoResponse> {
+  return apiJson<SpostaBloccoResponse>(
+    `/api/giri/${giroId}/blocchi/${bloccoId}/sposta`,
+    { method: "POST", body: payload },
+  );
+}

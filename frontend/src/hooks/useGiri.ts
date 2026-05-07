@@ -22,6 +22,7 @@ import {
   patchBlocco,
   patchGiro,
   riempiGap,
+  spostaBlocco,
   wizardDaLinee,
   type AggregaModificaPayload,
   type AggregaModificaResponse,
@@ -41,6 +42,8 @@ import {
   type MaterialeThreadListItem,
   type PatchBloccoPayload,
   type PatchGiroPayload,
+  type SpostaBloccoPayload,
+  type SpostaBloccoResponse,
   type WizardDaLineePayload,
   type WizardDaLineeResponse,
 } from "@/lib/api/giri";
@@ -278,6 +281,41 @@ export function useWizardDaLinee(): UseMutationResult<
       wizardDaLinee(programmaId, payload),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: GIRI_KEY });
+    },
+  });
+}
+
+interface SpostaBloccoArgs {
+  giroId: number;
+  bloccoId: number;
+  payload: SpostaBloccoPayload;
+}
+
+/**
+ * Sprint 8.0 MR-B.1 (entry 230) — sposta un blocco tra giornate/varianti
+ * dello stesso giro. Mutation in 2 fasi:
+ *  1. `dry_run=true` per ottenere violazioni prima del commit (anteprima).
+ *  2. `dry_run=false` per applicare. Se ci sono violazioni `severity=error`
+ *     e `force=false` il backend ritorna `applied=false`.
+ *
+ * Sull'apply invalida ``GIRI_KEY`` → si aggiorna il dettaglio giro.
+ */
+export function useSpostaBlocco(): UseMutationResult<
+  SpostaBloccoResponse,
+  Error,
+  SpostaBloccoArgs
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ giroId, bloccoId, payload }) =>
+      spostaBlocco(giroId, bloccoId, payload),
+    onSuccess: (data, vars) => {
+      if (data.applied) {
+        void qc.invalidateQueries({
+          queryKey: [...GIRI_KEY, "dettaglio", vars.giroId],
+        });
+        void qc.invalidateQueries({ queryKey: GIRI_KEY });
+      }
     },
   });
 }

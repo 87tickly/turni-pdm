@@ -2601,6 +2601,410 @@ async def patch_blocco(
     )
 
 
+# =====================================================================
+# Sprint 8.0 MR-B.1 (entry 230): sposta blocco tra giornate/varianti
+# =====================================================================
+# Decisione utente entry 229: "drag&drop deve essere fluido come un
+# desktop Mac". Backend: endpoint che sposta un blocco tra giornate/
+# varianti dello stesso giro, calcolando le violazioni di fattibilità
+# (continuità stazioni + tempi) e ritornandole. Se l'utente forza
+# l'operazione (force=True), la mossa viene applicata anche con
+# violazioni.
+
+
+class ViolazioneFattibilita(BaseModel):
+    """Singola violazione di fattibilità trovata dal check post-sposta."""
+
+    severity: Literal["error", "warning"]
+    codice: str  # "discontinuita_stazione" | "gap_negativo" | "gap_eccessivo"
+    variante_id: int
+    variante_label: str  # "G2 V0" per UI
+    seq_blocco_a: int
+    seq_blocco_b: int
+    descrizione: str
+
+
+class SpostaBloccoRequest(BaseModel):
+    """Payload per spostare un blocco tra giornate/varianti dello
+    stesso giro.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    giornata_target: int = Field(
+        ..., ge=1, description="Numero giornata destinazione."
+    )
+    variant_index_target: int = Field(
+        ...,
+        ge=0,
+        description="Indice variante destinazione (0 = canonica).",
+    )
+    seq_target: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Posizione seq nella variante destinazione (1-based). "
+            "Se None, append in coda."
+        ),
+    )
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "Se true, calcola le violazioni ma NON applica lo "
+            "spostamento."
+        ),
+    )
+    force: bool = Field(
+        default=False,
+        description=(
+            "Se true, applica anche se ci sono violazioni "
+            "(severity=error)."
+        ),
+    )
+
+
+class SpostaBloccoResponse(BaseModel):
+    """Esito dello spostamento."""
+
+    applied: bool
+    blocco_id: int
+    nuovo_giro_variante_id: int | None
+    nuovo_seq: int | None
+    violazioni: list[ViolazioneFattibilita]
+
+
+def _check_fattibilita_variante(
+    blocchi_ordinati: list[GiroBlocco],
+    variante_id: int,
+    variante_label: str,
+) -> list[ViolazioneFattibilita]:
+    """Calcola le violazioni di fattibilità di una sequenza di blocchi.
+
+    Regole:
+    - **Continuità stazione** (severity=error): per blocchi consecutivi
+      con stazione_a/da definita, deve essere `block[i].stazione_a ==
+      block[i+1].stazione_da`. Salta i blocchi senza stazioni (es. soste
+      pure, alcuni accessori).
+    - **Gap negativo** (severity=error): `block[i].ora_fine` deve essere
+      ≤ `block[i+1].ora_inizio`. Cross-mezzanotte consentito (l'ora di
+      fine può essere "minore" se il blocco successivo è il giorno
+      dopo); modello semplificato: consideriamo violazione solo se gap
+      ≤ -360 min (6h indietro = quasi certo bug).
+    - **Gap eccessivo** (severity=warning): gap > 5h diurni
+      intra-giornata (allineato con MR-3 entry 222). Solo warning, non
+      error.
+    """
+    violazioni: list[ViolazioneFattibilita] = []
+    for i in range(len(blocchi_ordinati) - 1):
+        a = blocchi_ordinati[i]
+        b = blocchi_ordinati[i + 1]
+        # Continuità stazione.
+        if (
+            a.stazione_a_codice is not None
+            and b.stazione_da_codice is not None
+            and a.stazione_a_codice != b.stazione_da_codice
+        ):
+            violazioni.append(
+                ViolazioneFattibilita(
+                    severity="error",
+                    codice="discontinuita_stazione",
+                    variante_id=variante_id,
+                    variante_label=variante_label,
+                    seq_blocco_a=a.seq,
+                    seq_blocco_b=b.seq,
+                    descrizione=(
+                        f"Discontinuità: blocco seq={a.seq} arriva a "
+                        f"{a.stazione_a_codice}, blocco seq={b.seq} "
+                        f"parte da {b.stazione_da_codice}."
+                    ),
+                )
+            )
+        # Gap orari.
+        if a.ora_fine is not None and b.ora_inizio is not None:
+            min_a = a.ora_fine.hour * 60 + a.ora_fine.minute
+            min_b = b.ora_inizio.hour * 60 + b.ora_inizio.minute
+            gap = min_b - min_a  # may be negative (cross-mezzanotte)
+            # Cross-mezzanotte: se gap < 0, normalizziamo +1440.
+            if gap < -360:
+                violazioni.append(
+                    ViolazioneFattibilita(
+                        severity="error",
+                        codice="gap_negativo",
+                        variante_id=variante_id,
+                        variante_label=variante_label,
+                        seq_blocco_a=a.seq,
+                        seq_blocco_b=b.seq,
+                        descrizione=(
+                            f"Gap negativo eccessivo tra seq={a.seq} "
+                            f"(fine {a.ora_fine}) e seq={b.seq} "
+                            f"(inizio {b.ora_inizio}): {gap} min."
+                        ),
+                    )
+                )
+            elif gap > 300:  # > 5h diurni
+                # Warning soft (intra-giornata > 5h è atipico).
+                violazioni.append(
+                    ViolazioneFattibilita(
+                        severity="warning",
+                        codice="gap_eccessivo",
+                        variante_id=variante_id,
+                        variante_label=variante_label,
+                        seq_blocco_a=a.seq,
+                        seq_blocco_b=b.seq,
+                        descrizione=(
+                            f"Gap > 5h tra seq={a.seq} (fine "
+                            f"{a.ora_fine}) e seq={b.seq} (inizio "
+                            f"{b.ora_inizio}): {gap} min."
+                        ),
+                    )
+                )
+    return violazioni
+
+
+@giri_dettaglio_router.post(
+    "/{giro_id}/blocchi/{blocco_id}/sposta",
+    response_model=SpostaBloccoResponse,
+    summary=(
+        "Sprint 8.0 MR-B.1 (entry 230): sposta un blocco tra "
+        "giornate/varianti dello stesso giro. Calcola le violazioni "
+        "di fattibilità (continuità stazioni + gap orari)."
+    ),
+)
+async def sposta_blocco(
+    giro_id: int,
+    blocco_id: int,
+    payload: SpostaBloccoRequest,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> SpostaBloccoResponse:
+    """Sprint 8.0 MR-B.1 (entry 230).
+
+    Flusso:
+
+    1. Valida ownership: giro+blocco appartengono all'azienda corrente.
+    2. Pipeline freeze check.
+    3. Trova variante destinazione (nello stesso giro: `numero_giornata
+       == giornata_target`, `variant_index == variant_index_target`).
+       404 se non esiste.
+    4. Calcola la sequenza variante origine (post-rimozione del blocco)
+       e variante destinazione (post-inserimento in `seq_target`).
+    5. `_check_fattibilita_variante` su entrambe le sequenze.
+    6. Se violazioni con `severity=="error"` e `not force` → ritorna
+       `applied=False` con la lista violazioni (no commit).
+    7. Altrimenti applica:
+       - Aggiorna FK `giro_variante_id` del blocco al target.
+       - Re-numera seq nella variante origine (compattazione).
+       - Re-numera seq nella variante destinazione (shift in mezzo).
+       - Commit.
+
+    Errori HTTP:
+    - 404: giro/blocco/giornata-variante target non trovati.
+    - 409: pipeline freezata.
+    """
+    # 1. Ownership giro + LOCK pessimistico (Fausto review #3+#5
+    # CRITICAL entry 230): serializza drag&drop concorrenti sullo
+    # stesso giro evitando corruzione di `seq` (unique
+    # `(giro_variante_id, seq)`). Il lock è rilasciato a fine request.
+    giro = (
+        await session.execute(
+            select(GiroMateriale)
+            .where(
+                GiroMateriale.id == giro_id,
+                GiroMateriale.azienda_id == user.azienda_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if giro is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="giro non trovato",
+        )
+
+    # 2. Pipeline freeze.
+    stato_pipeline = (
+        await session.execute(
+            select(ProgrammaMateriale.stato_pipeline_pdc).where(
+                ProgrammaMateriale.id == giro.programma_id
+            )
+        )
+    ).scalar_one_or_none()
+    if stato_pipeline is not None and materiale_freezato(stato_pipeline):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"programma freezato (pipeline {stato_pipeline!r}): "
+                "blocco read-only."
+            ),
+        )
+
+    # 3. Carica blocco con variante origine.
+    blocco = (
+        await session.execute(
+            select(GiroBlocco)
+            .join(GiroVariante, GiroVariante.id == GiroBlocco.giro_variante_id)
+            .join(GiroGiornata, GiroGiornata.id == GiroVariante.giro_giornata_id)
+            .where(
+                GiroBlocco.id == blocco_id,
+                GiroGiornata.giro_materiale_id == giro_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if blocco is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="blocco non trovato per questo giro",
+        )
+
+    variante_origine_id = blocco.giro_variante_id
+
+    # 4. Trova variante destinazione.
+    variante_target = (
+        await session.execute(
+            select(GiroVariante)
+            .join(GiroGiornata, GiroGiornata.id == GiroVariante.giro_giornata_id)
+            .where(
+                GiroGiornata.giro_materiale_id == giro_id,
+                GiroGiornata.numero_giornata == payload.giornata_target,
+                GiroVariante.variant_index == payload.variant_index_target,
+            )
+        )
+    ).scalar_one_or_none()
+    if variante_target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"variante target non trovata: giornata="
+                f"{payload.giornata_target}, variant_index="
+                f"{payload.variant_index_target}"
+            ),
+        )
+
+    # 5. Carica blocchi della variante origine + destinazione (escludi
+    # il blocco da spostare nelle simulazioni).
+    async def _blocchi_variante(var_id: int) -> list[GiroBlocco]:
+        return list(
+            (
+                await session.execute(
+                    select(GiroBlocco)
+                    .where(GiroBlocco.giro_variante_id == var_id)
+                    .order_by(GiroBlocco.seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    origine_blocchi = await _blocchi_variante(variante_origine_id)
+    target_blocchi = (
+        origine_blocchi
+        if variante_target.id == variante_origine_id
+        else await _blocchi_variante(variante_target.id)
+    )
+
+    # Sequenza simulata variante origine (post rimozione del blocco).
+    sim_origine = [b for b in origine_blocchi if b.id != blocco.id]
+
+    # Sequenza simulata variante target (post inserimento del blocco).
+    target_senza = [b for b in target_blocchi if b.id != blocco.id]
+    pos_inserimento = (
+        len(target_senza)
+        if payload.seq_target is None
+        else max(0, min(payload.seq_target - 1, len(target_senza)))
+    )
+    sim_target = (
+        target_senza[:pos_inserimento]
+        + [blocco]
+        + target_senza[pos_inserimento:]
+    )
+
+    # 6. Calcola violazioni.
+    label_origine = f"V{0}"  # placeholder; potremmo lookup la giornata
+    label_target = f"G{payload.giornata_target} V{payload.variant_index_target}"
+
+    violazioni: list[ViolazioneFattibilita] = []
+    if variante_target.id != variante_origine_id:
+        violazioni.extend(
+            _check_fattibilita_variante(
+                sim_origine, variante_origine_id, label_origine
+            )
+        )
+    violazioni.extend(
+        _check_fattibilita_variante(sim_target, variante_target.id, label_target)
+    )
+
+    # Fausto review #7 WARNING entry 230: PdC dipendenti dal blocco.
+    # Lo spostamento non rompe FK (giro_blocco_id resta valido), ma il
+    # PdC pianificato per il blocco nella giornata X ora è in giornata Y
+    # → la pianificazione PdC è "stale". Warning, non error: l'utente
+    # decide se procedere e poi rigenera i PdC.
+    if variante_target.id != variante_origine_id:
+        from colazione.models.turni_pdc import TurnoPdcBlocco
+
+        n_pdc_dipendenti = int(
+            (
+                await session.execute(
+                    select(func.count(TurnoPdcBlocco.id)).where(
+                        TurnoPdcBlocco.giro_blocco_id == blocco.id
+                    )
+                )
+            ).scalar_one()
+        )
+        if n_pdc_dipendenti > 0:
+            violazioni.append(
+                ViolazioneFattibilita(
+                    severity="warning",
+                    codice="pdc_stale",
+                    variante_id=variante_target.id,
+                    variante_label=label_target,
+                    seq_blocco_a=blocco.seq,
+                    seq_blocco_b=blocco.seq,
+                    descrizione=(
+                        f"{n_pdc_dipendenti} blocchi PdC dipendono da "
+                        "questo blocco: lo spostamento li rende "
+                        "pianificazionalmente stale. Considera di "
+                        "rigenerare i turni PdC dopo l'operazione."
+                    ),
+                )
+            )
+
+    has_errors = any(v.severity == "error" for v in violazioni)
+
+    # 7. Dry run o errori senza force → no commit.
+    if payload.dry_run or (has_errors and not payload.force):
+        return SpostaBloccoResponse(
+            applied=False,
+            blocco_id=blocco.id,
+            nuovo_giro_variante_id=None,
+            nuovo_seq=None,
+            violazioni=violazioni,
+        )
+
+    # 8. Applica lo spostamento.
+    # 8a. Re-numera seq nella variante origine (post rimozione).
+    if variante_target.id != variante_origine_id:
+        for idx, b in enumerate(sim_origine, start=1):
+            if b.seq != idx:
+                b.seq = idx
+
+    # 8b. Aggiorna FK + re-numera seq nella variante target.
+    blocco.giro_variante_id = variante_target.id
+    for idx, b in enumerate(sim_target, start=1):
+        if b.seq != idx:
+            b.seq = idx
+
+    await session.commit()
+    await session.refresh(blocco)
+
+    return SpostaBloccoResponse(
+        applied=True,
+        blocco_id=blocco.id,
+        nuovo_giro_variante_id=variante_target.id,
+        nuovo_seq=blocco.seq,
+        violazioni=violazioni,
+    )
+
+
 @giri_dettaglio_router.post(
     "/{giro_id}/duplica",
     response_model=DuplicaGiroResponse,

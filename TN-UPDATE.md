@@ -10,6 +10,145 @@
 
 ---
 
+## 2026-05-07 (230) — MR-B.1: drag&drop blocchi tra giornate (Mac-like)
+
+### Contesto
+
+Decisione utente entry 229 finale:
+
+> "drag&drop deve essere fluido come un desktop Mac"
+> "voglio interagire manualmente con il turno generato: aggiungere
+> vuoti, eliminare, spostare un treno X sulla giornata 2, sistemare
+> la doppia composizione che oggi non funziona"
+
+Fase B spezzata in 3 sub-MR atomici. **MR-B.1**: spostamento blocchi
+tra giornate/varianti (il gesto più frequente e immediato).
+
+### Modifiche backend
+
+**`backend/src/colazione/api/giri.py`** — nuovo endpoint
+**`POST /api/giri/{id}/blocchi/{id}/sposta`**:
+
+- Schemi: `SpostaBloccoRequest` (giornata_target, variant_index_target,
+  seq_target opzionale, dry_run, force) + `SpostaBloccoResponse`
+  (applied, blocco_id, nuovo_giro_variante_id, nuovo_seq, violazioni)
+  + `ViolazioneFattibilita` (severity error/warning, codice
+  `discontinuita_stazione|gap_negativo|gap_eccessivo|pdc_stale`,
+  variante_id, label, seq_blocco_a/b, descrizione).
+- Logica:
+  1. Lock pessimistico `SELECT FOR UPDATE` su `GiroMateriale`
+     (Fausto review #3+#5 CRITICAL: serializza drag&drop concorrenti
+     evitando corruzione `seq` unique).
+  2. Visibilità multi-tenant + freeze pipeline check.
+  3. Carica blocco origine + variante target (404 se non match).
+  4. Simula sequenze post-spostamento (origine senza il blocco, target
+     col blocco inserito a `seq_target` o append).
+  5. `_check_fattibilita_variante`:
+     - `discontinuita_stazione` (error): `block[i].stazione_a !=
+       block[i+1].stazione_da` su blocchi con stazioni definite.
+     - `gap_negativo` (error): `gap < -360 min` (=oltre 6h indietro,
+       oltre il cross-mezzanotte normale).
+     - `gap_eccessivo` (warning): gap > 5h diurni (atipico).
+  6. PdC dipendenti (Fausto review #7 WARNING): aggiunge violazione
+     `pdc_stale` (warning) se ci sono `turno_pdc_blocco` collegati.
+  7. Se `dry_run=true` o errors senza force → `applied=false` no commit.
+  8. Else: aggiorna FK `giro_variante_id` + re-numera seq origine e
+     target → commit.
+
+**`backend/tests/test_sposta_blocco_api.py`** (nuovo, 3 test): 401
+auth, 404 giro inesistente, 422 payload (5 forme: campi mancanti,
+ge=1/0 violati, extra fields).
+
+### Code review indipendente (Fausto)
+
+2 fix critici applicati prima del commit:
+- **#3+#5 CRITICAL** race condition seq → lock `with_for_update()` su
+  `GiroMateriale` (evita deadlock di lockare 2 varianti separate).
+- **#7 WARNING** PdC dipendenti → violazione `pdc_stale` warning.
+
+3 fix accettati (timezone non-issue: `time` naive giorno-locale; no-op
+intra-variante minor; ownership check ok).
+
+### Modifiche frontend
+
+**Dipendenze**: aggiunte `@dnd-kit/core@6.3.1` + `@dnd-kit/utilities@3.2.2`.
+
+**`frontend/src/lib/api/giri.ts`**: tipi `ViolazioneFattibilita`,
+`SpostaBloccoPayload`, `SpostaBloccoResponse` + funzione `spostaBlocco()`.
+
+**`frontend/src/hooks/useGiri.ts`**: hook `useSpostaBlocco()` mutation
+che invalida `GIRI_KEY` + dettaglio giro `onSuccess` (solo se applied).
+
+**`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`**:
+- Imports dnd-kit (DndContext, DragOverlay, PointerSensor, useDraggable,
+  useDroppable, useSensors).
+- Stati nuovi: `dragActiveBlocco` (per overlay), `pendingMove` (dialog
+  conferma).
+- Sensors: PointerSensor con `activationConstraint: { distance: 5 }`
+  → click puro non triggera drag.
+- `handleDragStart` + `handleDragEnd` async: dry_run, se errors mostra
+  dialog conferma; se solo warnings o nessuna violazione, auto-apply
+  con `force=false`.
+- `confermaSpostamentoForce`: applica con `dry_run=false, force=true`.
+- Wrap del root con `<DndContext>` + `<DragOverlay>` (drop animation
+  Mac-style: `cubic-bezier(0.18, 0.67, 0.6, 1.22)` 220ms).
+- Nuovo `<DragGhost>`: ghost preview tilted+scaled con shadow-2xl.
+- Nuovo `<DroppableTimeline>` wrapper: wrappa il timeline div di
+  `VarianteRow` con `useDroppable`, evidenzia con
+  `bg-primary/8 ring-2 ring-primary/40` quando `isOver`.
+- Nuovo `<DraggableBloccoSegment>` wrapper: chiama `useDraggable` e
+  passa `dragRef/listeners/attributes/isDragging` a `BloccoSegment`.
+- `BloccoSegment` + `CommercialeBlocco` + button vuoto: aggiunte prop
+  drag opzionali, spread su `<button>`. `isDragging` → `opacity-30`
+  per ghost effect.
+- Nuovo `<SpostaBloccoConfirmDialog>`: dialog modal con lista
+  violazioni (rows colorate error/warning), bottone "Forza
+  spostamento" o "Annulla".
+
+### Verifiche
+
+- ✅ `ruff check src/colazione/api/giri.py
+  tests/test_sposta_blocco_api.py` clean.
+- ✅ `mypy --strict src/colazione/api/giri.py` clean.
+- ✅ `pytest tests/test_sposta_blocco_api.py --co` → 3 test collected.
+- ✅ `pnpm build` (intero) → bundle `index-Cf_AefC5.js`, 1804 moduli
+  trasformati, nessun errore.
+
+### Stato
+
+- ✅ MR-B.1 chiuso. Backend + frontend pronti.
+- ⏳ Commit + push + deploy backend + frontend Railway.
+
+### Per l'utente
+
+1. Apri il dettaglio di un giro materiale (Gantt completo).
+2. Trascina un blocco (corsa commerciale o vuoto) verso la riga di
+   un'altra giornata/variante. Il cursore mostra un ghost stile Mac
+   (pillola tilted con ombra elevata).
+3. La riga di destinazione si evidenzia in blu chiaro quando passi
+   sopra (drop zone hover).
+4. Rilascia: dry_run automatico → se non ci sono violazioni `error`,
+   lo spostamento viene applicato. Se ci sono violazioni, si apre un
+   dialog di conferma con la lista (`discontinuita_stazione`,
+   `gap_negativo`, `pdc_stale`, ecc.). Click "Forza spostamento" per
+   applicare comunque.
+
+**Limitazioni iter 1**:
+- Reorder intra-variante (drag dentro la stessa giornata) non
+  supportato (no-op). Sub-MR successivo.
+- Re-numerazione seq con re-render: la grafica si aggiorna dopo
+  invalidate query (refresh ~200ms). Per ora niente animation
+  ottimistica.
+
+### Prossimo step
+
+- **MR-B.2**: aggiungi/elimina vuoto manuale (drag dalla "palette"
+  vuoti predefiniti + click destro su blocco per eliminare).
+- **MR-B.3**: doppia composizione interattiva (riuso `PATCH /blocchi/{id}`
+  esistente con UI inline n_pezzi/sgancio).
+
+---
+
 ## 2026-05-07 (229) — MR-C: wizard "materiale + linee → giri" (paradigma rovesciato)
 
 ### Contesto

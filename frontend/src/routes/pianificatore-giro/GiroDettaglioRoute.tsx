@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -10,6 +11,7 @@ import {
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowLeft,
   ChevronDown,
   ChevronLeft,
@@ -23,6 +25,19 @@ import {
   Unlink,
   Users,
 } from "lucide-react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+  type DraggableAttributes,
+} from "@dnd-kit/core";
+import type { SyntheticListenerMap } from "@dnd-kit/core/dist/hooks/utilities";
 
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -48,6 +63,7 @@ import {
   useGiroDettaglio,
   usePatchBlocco,
   usePatchGiro,
+  useSpostaBlocco,
   useThreadsGiro,
 } from "@/hooks/useGiri";
 import { useTurniPdcGiro } from "@/hooks/useTurniPdc";
@@ -57,6 +73,8 @@ import type {
   GiroDettaglio,
   GiroGiornata,
   GiroVariante,
+  SpostaBloccoResponse,
+  ViolazioneFattibilita,
 } from "@/lib/api/giri";
 import { formatDateIt, formatNumber } from "@/lib/format";
 import { stazioneAcronimo } from "@/lib/stazioni-acronimi";
@@ -218,6 +236,126 @@ export function GiroDettaglioRoute() {
     Set<number> | null
   >(null);
 
+  // Sprint 8.0 MR-B.1 (entry 230): drag&drop blocchi tra giornate.
+  // - `dragActiveBlocco`: blocco in dragging, visualizzato in DragOverlay.
+  // - `pendingMove`: spostamento in attesa di conferma utente (dopo
+  //   dry_run con violazioni `severity=error`).
+  const [dragActiveBlocco, setDragActiveBlocco] =
+    useState<GiroBlocco | null>(null);
+  const [pendingMove, setPendingMove] = useState<{
+    blocco: GiroBlocco;
+    giornataTarget: number;
+    variantIndexTarget: number;
+    response: SpostaBloccoResponse;
+  } | null>(null);
+  const spostaMutation = useSpostaBlocco();
+
+  // Sensors dnd-kit: PointerSensor con activation distance 5px → click
+  // puro non triggera drag (utile per onClick selezione blocco).
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 5 },
+    }),
+  );
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    const blocco = event.active.data.current?.blocco as
+      | GiroBlocco
+      | undefined;
+    setDragActiveBlocco(blocco ?? null);
+  }, []);
+
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      setDragActiveBlocco(null);
+      const { active, over } = event;
+      if (over === null) return;
+      const blocco = active.data.current?.blocco as
+        | GiroBlocco
+        | undefined;
+      const sourceVarianteId = active.data.current?.varianteId as
+        | number
+        | undefined;
+      const target = over.data.current as
+        | {
+            varianteId: number;
+            giornataNumero: number;
+            variantIndex: number;
+          }
+        | undefined;
+      if (blocco === undefined || target === undefined) return;
+      // No-op se rilascio sulla stessa variante (intra-variante reorder
+      // fuori scope MR-B.1).
+      if (sourceVarianteId === target.varianteId) return;
+      const giroDettaglio = query.data;
+      if (giroDettaglio === undefined) return;
+
+      try {
+        const dryRes = await spostaMutation.mutateAsync({
+          giroId: giroDettaglio.id,
+          bloccoId: blocco.id,
+          payload: {
+            giornata_target: target.giornataNumero,
+            variant_index_target: target.variantIndex,
+            dry_run: true,
+            force: false,
+          },
+        });
+        const hasErrors = dryRes.violazioni.some(
+          (v) => v.severity === "error",
+        );
+        if (!hasErrors) {
+          await spostaMutation.mutateAsync({
+            giroId: giroDettaglio.id,
+            bloccoId: blocco.id,
+            payload: {
+              giornata_target: target.giornataNumero,
+              variant_index_target: target.variantIndex,
+              dry_run: false,
+              force: false,
+            },
+          });
+        } else {
+          setPendingMove({
+            blocco,
+            giornataTarget: target.giornataNumero,
+            variantIndexTarget: target.variantIndex,
+            response: dryRes,
+          });
+        }
+      } catch (err) {
+        const msg =
+          err instanceof ApiError ? err.message : (err as Error).message;
+        window.alert(`Spostamento fallito: ${msg}`);
+      }
+    },
+    [query.data, spostaMutation],
+  );
+
+  const confermaSpostamentoForce = useCallback(async () => {
+    if (pendingMove === null) return;
+    const giroDettaglio = query.data;
+    if (giroDettaglio === undefined) return;
+    try {
+      await spostaMutation.mutateAsync({
+        giroId: giroDettaglio.id,
+        bloccoId: pendingMove.blocco.id,
+        payload: {
+          giornata_target: pendingMove.giornataTarget,
+          variant_index_target: pendingMove.variantIndexTarget,
+          dry_run: false,
+          force: true,
+        },
+      });
+    } catch (err) {
+      const msg =
+        err instanceof ApiError ? err.message : (err as Error).message;
+      window.alert(`Spostamento forzato fallito: ${msg}`);
+    } finally {
+      setPendingMove(null);
+    }
+  }, [pendingMove, query.data, spostaMutation]);
+
   // Sprint 8.0 MR-1 (entry 214 + 217 hotfix UX): se presente
   // ``?focusBlocco=<id>`` in URL (arrivo dal popup Cerca treno):
   //
@@ -299,6 +437,14 @@ export function GiroDettaglioRoute() {
   const programmaId = typeof meta.programma_id === "number" ? meta.programma_id : null;
 
   return (
+    <DndContext
+      sensors={sensors}
+      onDragStart={handleDragStart}
+      onDragEnd={(e) => {
+        void handleDragEnd(e);
+      }}
+      onDragCancel={() => setDragActiveBlocco(null)}
+    >
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex items-center justify-between gap-2">
         <Link
@@ -456,7 +602,156 @@ export function GiroDettaglioRoute() {
         open={pdcDialogOpen}
         onOpenChange={setPdcDialogOpen}
       />
+
+      {/* Sprint 8.0 MR-B.1 (entry 230) — dialog conferma spostamento
+          con violazioni di fattibilità. */}
+      <SpostaBloccoConfirmDialog
+        pending={pendingMove}
+        isPending={spostaMutation.isPending}
+        onCancel={() => setPendingMove(null)}
+        onConfirm={() => {
+          void confermaSpostamentoForce();
+        }}
+      />
     </div>
+    {/* DragOverlay: ghost preview del blocco trascinato, fluido stile Mac
+        (segue il cursore con animation framer-style built-in di dnd-kit). */}
+    <DragOverlay dropAnimation={{ duration: 220, easing: "cubic-bezier(0.18, 0.67, 0.6, 1.22)" }}>
+      {dragActiveBlocco !== null ? (
+        <DragGhost blocco={dragActiveBlocco} />
+      ) : null}
+    </DragOverlay>
+    </DndContext>
+  );
+}
+
+/**
+ * Sprint 8.0 MR-B.1 (entry 230) — preview "ghost" del blocco trascinato.
+ * Stile compatto Mac-like: pillola bianca con ombra elevata.
+ */
+function DragGhost({ blocco }: { blocco: GiroBlocco }) {
+  const tipo = blocco.tipo_blocco;
+  const numero = blocco.numero_treno ?? "—";
+  return (
+    <div
+      className={cn(
+        "pointer-events-none flex items-center gap-2 rounded-lg border bg-white/95 px-3 py-1.5 shadow-2xl backdrop-blur",
+        tipo === "corsa_commerciale"
+          ? "border-emerald-500/60 ring-2 ring-emerald-300/40"
+          : "border-rose-400/60 ring-2 ring-rose-300/40",
+      )}
+      style={{ transform: "rotate(-2deg) scale(1.04)" }}
+    >
+      <span
+        className={cn(
+          "h-2 w-2 rounded-full",
+          tipo === "corsa_commerciale" ? "bg-emerald-500" : "bg-rose-400",
+        )}
+      />
+      <span className="font-mono text-[12px] font-semibold tabular-nums text-foreground">
+        {numero}
+      </span>
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        {tipoBloccoLabel(tipo)}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Sprint 8.0 MR-B.1 (entry 230) — dialog di conferma per uno
+ * spostamento che genera violazioni di fattibilità (severity=error).
+ *
+ * Lista le violazioni; l'utente può forzare l'operazione (force=true)
+ * o annullare. Le violazioni warning (es. `pdc_stale`, gap > 5h) sono
+ * mostrate come info ma non bloccano lo spostamento.
+ */
+function SpostaBloccoConfirmDialog({
+  pending,
+  isPending,
+  onCancel,
+  onConfirm,
+}: {
+  pending: {
+    blocco: GiroBlocco;
+    giornataTarget: number;
+    variantIndexTarget: number;
+    response: SpostaBloccoResponse;
+  } | null;
+  isPending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const open = pending !== null;
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-amber-600" aria-hidden />
+            Spostamento con violazioni
+          </DialogTitle>
+          <DialogDescription>
+            {pending !== null && (
+              <>
+                Lo spostamento del blocco{" "}
+                <span className="font-mono font-medium">
+                  {pending.blocco.numero_treno ?? `#${pending.blocco.id}`}
+                </span>{" "}
+                a giornata {pending.giornataTarget} (variante{" "}
+                {pending.variantIndexTarget}) genera{" "}
+                {pending.response.violazioni.length} segnalazioni.
+                Verifica e conferma se vuoi forzare l'operazione.
+              </>
+            )}
+          </DialogDescription>
+        </DialogHeader>
+
+        {pending !== null && (
+          <ul className="max-h-72 space-y-1.5 overflow-y-auto rounded-md border border-border bg-muted/20 p-3 text-sm">
+            {pending.response.violazioni.map((v, i) => (
+              <ViolazioneRow key={i} v={v} />
+            ))}
+          </ul>
+        )}
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={onCancel}
+            disabled={isPending}
+          >
+            Annulla
+          </Button>
+          <Button onClick={onConfirm} disabled={isPending}>
+            {isPending ? "Sposto…" : "Forza spostamento"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ViolazioneRow({ v }: { v: ViolazioneFattibilita }) {
+  return (
+    <li
+      className={cn(
+        "flex items-start gap-2 rounded px-2 py-1.5",
+        v.severity === "error"
+          ? "bg-destructive/5 text-destructive"
+          : "bg-amber-50 text-amber-900",
+      )}
+    >
+      <span className="mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-bold uppercase">
+        {v.severity === "error" ? "!" : "i"}
+      </span>
+      <div className="flex-1">
+        <div className="text-xs font-medium uppercase tracking-wide">
+          {v.codice} · {v.variante_label}
+        </div>
+        <div className="text-[13px] leading-snug">{v.descrizione}</div>
+      </div>
+    </li>
   );
 }
 
@@ -1774,10 +2069,14 @@ function VarianteRow({
         )}
       </div>
 
-      {/* Timeline */}
-      <div
-        className="ticks-bg relative"
-        style={{ width: timelineWidthPx, height: TIMELINE_ROW_HEIGHT_PX }}
+      {/* Timeline — Sprint 8.0 MR-B.1 (entry 230): droppable per
+          drag&drop blocchi tra giornate/varianti. */}
+      <DroppableTimeline
+        varianteId={variante.id}
+        giornataNumero={giornata.numero_giornata}
+        variantIndex={variante.variant_index}
+        widthPx={timelineWidthPx}
+        heightPx={TIMELINE_ROW_HEIGHT_PX}
       >
         {/* Linea base sottile centrata */}
         <div
@@ -1804,18 +2103,21 @@ function VarianteRow({
           <GapMarker key={`gap-${variante.id}-${i}`} gap={g} />
         ))}
 
-        {/* Blocchi posizionati */}
+        {/* Blocchi posizionati — Sprint 8.0 MR-B.1 (entry 230):
+            ognuno wrappato in DraggableBloccoSegment per il drag&drop
+            tra giornate/varianti. */}
         {blocchi.map((b) => (
-          <BloccoSegment
+          <DraggableBloccoSegment
             key={b.id}
             blocco={b}
+            varianteId={variante.id}
             selected={b.id === selectedBloccoId}
             isFirstOfRow={b.id === firstId}
             isLastOfRow={b.id === lastId}
             onSelect={() => onSelectBlocco(b)}
           />
         ))}
-      </div>
+      </DroppableTimeline>
 
       {/* Per + Km sticky-right (Sprint 8.0 entry 204: per variante) */}
       <div
@@ -1853,19 +2155,99 @@ function VarianteRow({
 // Blocco segment — render diverso per tipo
 // =====================================================================
 
+/**
+ * Sprint 8.0 MR-B.1 (entry 230) — wrapper droppable della timeline di
+ * una variante. Riceve i blocchi come children e accetta il drop di un
+ * blocco trascinato (via `useDroppable`).
+ */
+function DroppableTimeline({
+  varianteId,
+  giornataNumero,
+  variantIndex,
+  widthPx,
+  heightPx,
+  children,
+}: {
+  varianteId: number;
+  giornataNumero: number;
+  variantIndex: number;
+  widthPx: number;
+  heightPx: number;
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `variante-${varianteId}`,
+    data: { varianteId, giornataNumero, variantIndex },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "ticks-bg relative transition-colors",
+        isOver && "bg-primary/8 ring-2 ring-primary/40 ring-inset",
+      )}
+      style={{ width: widthPx, height: heightPx }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Sprint 8.0 MR-B.1 (entry 230) — wrapper draggable per BloccoSegment.
+ * Chiama `useDraggable` e passa ref/listeners/attributes alla
+ * `BloccoSegment` interna che li applica al `<button>`.
+ */
+function DraggableBloccoSegment({
+  varianteId,
+  ...rest
+}: {
+  blocco: GiroBlocco;
+  varianteId: number;
+  selected: boolean;
+  isFirstOfRow: boolean;
+  isLastOfRow: boolean;
+  onSelect: () => void;
+}) {
+  const { setNodeRef, listeners, attributes, isDragging } = useDraggable({
+    id: `blocco-${rest.blocco.id}`,
+    data: { blocco: rest.blocco, varianteId },
+  });
+  return (
+    <BloccoSegment
+      {...rest}
+      dragRef={setNodeRef}
+      dragListeners={listeners}
+      dragAttributes={attributes}
+      isDragging={isDragging}
+    />
+  );
+}
+
+interface DragProps {
+  dragRef?: (el: HTMLElement | null) => void;
+  dragListeners?: SyntheticListenerMap | undefined;
+  dragAttributes?: DraggableAttributes;
+  isDragging?: boolean;
+}
+
 function BloccoSegment({
   blocco,
   selected,
   isFirstOfRow,
   isLastOfRow,
   onSelect,
+  dragRef,
+  dragListeners,
+  dragAttributes,
+  isDragging,
 }: {
   blocco: GiroBlocco;
   selected: boolean;
   isFirstOfRow: boolean;
   isLastOfRow: boolean;
   onSelect: () => void;
-}) {
+} & DragProps) {
   const { minToPx } = useGanttScale();
   const inizio = parseTimeToMin(blocco.ora_inizio);
   const fine = parseTimeToMin(blocco.ora_fine);
@@ -1892,6 +2274,10 @@ function BloccoSegment({
         isLastOfRow={isLastOfRow}
         onSelect={onSelect}
         tooltip={tooltip}
+        dragRef={dragRef}
+        dragListeners={dragListeners}
+        dragAttributes={dragAttributes}
+        isDragging={isDragging}
       />
     );
   }
@@ -1949,11 +2335,23 @@ function BloccoSegment({
       <button
         type="button"
         id={`gantt-blocco-${blocco.id}`}
+        ref={dragRef}
+        {...(dragListeners ?? {})}
+        {...(dragAttributes ?? {})}
         onClick={onSelect}
         title={tooltip}
         aria-pressed={selected}
-        className={cn("blk absolute overflow-hidden", selected && "is-selected")}
-        style={{ left: startPx, top: 24, width: widthPx }}
+        className={cn(
+          "blk absolute overflow-hidden",
+          selected && "is-selected",
+          isDragging === true && "opacity-30",
+        )}
+        style={{
+          left: startPx,
+          top: 24,
+          width: widthPx,
+          touchAction: "none",
+        }}
       >
         {isUscitaCiclo && (
           <span
@@ -2130,6 +2528,10 @@ function CommercialeBlocco({
   isLastOfRow,
   onSelect,
   tooltip,
+  dragRef,
+  dragListeners,
+  dragAttributes,
+  isDragging,
 }: {
   blocco: GiroBlocco;
   startPx: number;
@@ -2139,7 +2541,7 @@ function CommercialeBlocco({
   isLastOfRow: boolean;
   onSelect: () => void;
   tooltip: string;
-}) {
+} & DragProps) {
   const direction = inferDirection(blocco);
   const arrow = direction === "ret" ? "←" : "→";
   // Sprint 7.9 MR δ.1 (entry 141): solo PRIMA stazione del giro (origine
@@ -2169,11 +2571,23 @@ function CommercialeBlocco({
     <button
       type="button"
       id={`gantt-blocco-${blocco.id}`}
+      ref={dragRef}
+      {...(dragListeners ?? {})}
+      {...(dragAttributes ?? {})}
       onClick={onSelect}
       title={tooltip}
       aria-pressed={selected}
-      className={cn("blk absolute overflow-hidden", selected && "is-selected")}
-      style={{ left: startPx, top: 24, width: widthPx }}
+      className={cn(
+        "blk absolute overflow-hidden",
+        selected && "is-selected",
+        isDragging === true && "opacity-30",
+      )}
+      style={{
+        left: startPx,
+        top: 24,
+        width: widthPx,
+        touchAction: "none",
+      }}
     >
       {showStazioni ? (
         <div className="flex justify-between gap-1 font-mono text-[10px] font-semibold leading-none text-emerald-700">
