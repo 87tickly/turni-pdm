@@ -509,6 +509,13 @@ function ZoomToolbar({
 
 function AggregatedVarianteRow({ row }: { row: AggregatedRow }) {
   const { timelineWidthPx } = useGanttScale();
+  // Sprint 8.0 MR-D (entry 236): mostra etichetta_parlante della
+  // variante (es. "LV 1:5", "F", "Si eff. 21-28/3") per distinguere
+  // varianti calendariali della stessa giornata-tipo.
+  const etichettaTrunc =
+    row.varianteEtichetta.length > 16
+      ? row.varianteEtichetta.slice(0, 14) + "…"
+      : row.varianteEtichetta;
   const blocchiOrdinati = useMemo(
     () =>
       [...row.blocchi].sort((a, b) => {
@@ -524,9 +531,16 @@ function AggregatedVarianteRow({ row }: { row: AggregatedRow }) {
 
   return (
     <div className="flex">
-      {/* Etichetta riga sx */}
+      {/* Etichetta riga sx — Sprint 8.0 MR-D (entry 236):
+          aggiunta `etichetta_parlante` della variante (es. "LV 1:5"),
+          indentazione visuale per varianti non-canoniche per
+          raggrupparle visivamente con la canonica della stessa
+          giornata. */}
       <div
-        className="sticky left-0 z-20 flex flex-col justify-center border-r border-border bg-white px-3 py-3"
+        className={cn(
+          "sticky left-0 z-20 flex flex-col justify-center border-r border-border bg-white px-3 py-3",
+          row.variantIndex > 0 && "border-l-2 border-l-primary/30",
+        )}
         style={{ width: GIORNATA_LABEL_COL_PX }}
       >
         <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -540,7 +554,15 @@ function AggregatedVarianteRow({ row }: { row: AggregatedRow }) {
         </div>
         <div className="text-[9px] text-muted-foreground">
           G{row.giornataNumero}
-          {row.variantIndex > 0 && ` · V${row.variantIndex}`}
+          {row.variantIndex > 0 && (
+            <span className="text-primary"> · V{row.variantIndex}</span>
+          )}
+        </div>
+        <div
+          className="mt-0.5 truncate text-[9px] italic text-foreground/70"
+          title={row.varianteEtichetta}
+        >
+          {etichettaTrunc}
         </div>
       </div>
 

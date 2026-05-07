@@ -76,6 +76,10 @@ export function WizardDaLineeDialog({
   );
   const [confirmDeletePdc, setConfirmDeletePdc] = useState(false);
   const [searchLinea, setSearchLinea] = useState("");
+  // Sprint 8.0 MR-D (entry 236): di default mostra solo materiali con
+  // dotazione effettiva (pezzi_disponibili != null E > 0). Toggle
+  // "Mostra tutti" per override.
+  const [mostraTuttiMateriali, setMostraTuttiMateriali] = useState(false);
 
   // Reset state ogni volta che il dialog si apre.
   useEffect(() => {
@@ -86,10 +90,20 @@ export function WizardDaLineeDialog({
       setLineeSelezionate(new Set());
       setConfirmDeletePdc(false);
       setSearchLinea("");
+      setMostraTuttiMateriali(false);
       wizard.reset();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // MR-D entry 236: filtra materiali per dotazione disponibile.
+  const materialiVisibili = useMemo(() => {
+    const all = materialiQuery.data ?? [];
+    if (mostraTuttiMateriali) return all;
+    return all.filter(
+      (m) => m.pezzi_disponibili !== null && m.pezzi_disponibili > 0,
+    );
+  }, [materialiQuery.data, mostraTuttiMateriali]);
 
   const lineeFiltrate = useMemo(() => {
     const q = searchLinea.trim().toLowerCase();
@@ -187,7 +201,7 @@ export function WizardDaLineeDialog({
                   disabled={materialiQuery.isLoading}
                 >
                   <option value="">— seleziona —</option>
-                  {materialiQuery.data?.map((m) => (
+                  {materialiVisibili.map((m) => (
                     <option key={m.codice} value={m.codice}>
                       {m.codice}
                       {m.nome_commerciale !== null
@@ -202,6 +216,27 @@ export function WizardDaLineeDialog({
                 {materialiQuery.isLoading && (
                   <p className="mt-1 text-xs text-muted-foreground">
                     Carico anagrafica materiali…
+                  </p>
+                )}
+                {!materialiQuery.isLoading && (
+                  <label className="mt-2 inline-flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={mostraTuttiMateriali}
+                      onChange={(e) =>
+                        setMostraTuttiMateriali(e.target.checked)
+                      }
+                      className="h-3.5 w-3.5 rounded border-border accent-primary"
+                    />
+                    Mostra tutti i materiali (anche senza dotazione
+                    registrata)
+                  </label>
+                )}
+                {!mostraTuttiMateriali && materialiQuery.data && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {materialiVisibili.length} di{" "}
+                    {materialiQuery.data.length} materiali con dotazione
+                    disponibile.
                   </p>
                 )}
               </div>

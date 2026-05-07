@@ -16,12 +16,14 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
-    Numeric as sa_Numeric,
     String,
     Text,
     Time,
     UniqueConstraint,
     func,
+)
+from sqlalchemy import (
+    Numeric as sa_Numeric,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -554,4 +556,54 @@ class MaterialeDotazioneAzienda(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class AreaMetropolitana(Base):
+    """Sprint 8.0 MR-E (entry 236, migration 0040) — area metropolitana.
+
+    Whitelist di stazioni "intercambiabili" della stessa città (es.
+    Milano: Centrale, Garibaldi, Cadorna, Lambrate, Rogoredo, ...).
+    Quando il builder concatena 2 corse il cui arrivo + partenza
+    successiva sono in stazioni diverse della stessa area, accetta la
+    concatenazione (con vuoto tecnico intra-area di
+    `gap_intra_area_min` minuti generato dal posizionamento).
+
+    Risolve il problema dei turni mono-corsa che non si concatenano
+    perché la corsa successiva parte da MI.Garibaldi mentre la
+    precedente arriva a MI.Centrale.
+    """
+
+    __tablename__ = "area_metropolitana"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    azienda_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("azienda.id", ondelete="CASCADE")
+    )
+    codice: Mapped[str] = mapped_column(String(50))
+    nome: Mapped[str] = mapped_column(Text)
+    gap_intra_area_min: Mapped[int] = mapped_column(Integer, default=10)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class AreaStazioneMembri(Base):
+    """M:N tra `AreaMetropolitana` e `Stazione`.
+
+    PK composito `(area_id, stazione_codice)`: una stazione può
+    appartenere a più aree (caso raro), un'area ha N stazioni.
+    """
+
+    __tablename__ = "area_stazione_membri"
+
+    area_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("area_metropolitana.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    stazione_codice: Mapped[str] = mapped_column(
+        String(20),
+        ForeignKey("stazione.codice", ondelete="CASCADE"),
+        primary_key=True,
     )

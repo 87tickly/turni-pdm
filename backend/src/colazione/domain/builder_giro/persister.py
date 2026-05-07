@@ -556,6 +556,42 @@ async def _persisti_blocchi_variante(
             )
             seq_blocco += 1
 
+        # Sprint 8.0 MR-E (entry 236): vuoto tecnico INTRA-AREA tra 2
+        # corse adiacenti se la stazione di arrivo della precedente
+        # differisce dalla stazione di partenza della corrente. Il
+        # builder accetta queste concatenazioni SOLO se le 2 stazioni
+        # sono nella stessa area metropolitana (vedi catena.py
+        # `_stazioni_intra_area`); qui materializziamo il vuoto come
+        # blocco `materiale_vuoto` con tipo_vuoto="intra_area_metro".
+        if idx > 0:
+            prec = variante.blocchi_assegnati[idx - 1]
+            if prec.corsa.codice_destinazione != blocco.corsa.codice_origine:
+                session.add(
+                    GiroBlocco(
+                        giro_variante_id=giro_variante_id,
+                        seq=seq_blocco,
+                        tipo_blocco="materiale_vuoto",
+                        corsa_commerciale_id=None,
+                        corsa_materiale_vuoto_id=None,
+                        stazione_da_codice=prec.corsa.codice_destinazione,
+                        stazione_a_codice=blocco.corsa.codice_origine,
+                        ora_inizio=prec.corsa.ora_arrivo,
+                        ora_fine=blocco.corsa.ora_partenza,
+                        descrizione=(
+                            f"Trasferimento intra-area "
+                            f"{prec.corsa.codice_destinazione} → "
+                            f"{blocco.corsa.codice_origine}"
+                        ),
+                        is_validato_utente=True,
+                        metadata_json={
+                            "tipo_vuoto": "intra_area_metro",
+                            "is_intra_area": True,
+                            "motivo": "trasferimento_intra_area_metropolitana",
+                        },
+                    )
+                )
+                seq_blocco += 1
+
         # Blocco corsa commerciale
         session.add(
             GiroBlocco(

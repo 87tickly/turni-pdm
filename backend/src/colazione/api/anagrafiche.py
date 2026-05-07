@@ -30,6 +30,8 @@ from colazione.auth import require_any_role, require_role
 from colazione.db import get_session
 from colazione.domain.calendario import tipo_giorno
 from colazione.models.anagrafica import (
+    AreaMetropolitana,
+    AreaStazioneMembri,
     Depot,
     FestivitaUfficiale,
     LocalitaManutenzione,
@@ -52,6 +54,9 @@ _authz = Depends(require_role("PIANIFICATORE_GIRO"))
 _authz_depots = Depends(
     require_any_role("PIANIFICATORE_GIRO", "PIANIFICATORE_PDC", "GESTIONE_PERSONALE")
 )
+# Sprint 8.0 MR-E (entry 236): seed default aree metropolitane (one-shot
+# admin op).
+_authz_admin = Depends(require_role("ADMIN"))
 
 
 class StazioneRead(BaseModel):
@@ -623,6 +628,236 @@ async def delete_regola_invio_sosta(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     await session.delete(regola)
     await session.commit()
+
+
+# =====================================================================
+# Sprint 8.0 MR-E (entry 236) — Aree metropolitane (whitelist intra-area)
+# =====================================================================
+
+
+class AreaMetropolitanaRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    codice: str
+    nome: str
+    gap_intra_area_min: int
+    n_stazioni: int
+
+
+class PopolaAreaResponse(BaseModel):
+    """Risposta del seed popola-default."""
+
+    aree_create: int
+    aree_aggiornate: int
+    n_stazioni_associate: int
+    dettagli: list[dict[str, object]]
+
+
+# Default seed Milano: pattern di nomi delle stazioni della grande
+# area metropolitana milanese. Il match è LIKE 'NOME%' su Stazione.nome
+# (case-insensitive). Solo le stazioni effettivamente presenti nella
+# tabella vengono associate; se il PdE non le ha ancora importate,
+# l'admin può rilanciare l'endpoint dopo l'import.
+_SEED_AREE_DEFAULT: list[dict[str, object]] = [
+    {
+        "codice": "MILANO",
+        "nome": "Milano area metropolitana",
+        "gap_intra_area_min": 10,
+        "patterns_nome_stazione": [
+            "MILANO CENTRALE",
+            "MILANO PORTA GARIBALDI",
+            "MILANO CADORNA",
+            "MILANO LAMBRATE",
+            "MILANO ROGOREDO",
+            "MILANO PORTA ROMANA",
+            "MILANO PORTA GENOVA",
+            "MILANO BOVISA",
+            "MILANO GRECO",
+            "MILANO LANCETTI",
+            "MILANO REPUBBLICA",
+            "MILANO DOMODOSSOLA",
+            "MILANO VILLAPIZZONE",
+            "MILANO SAN CRISTOFORO",
+            "MILANO CERTOSA",
+            "MILANO SAN ROCCO",
+            "MILANO FORLANINI",
+            "MILANO DATEO",
+            "MILANO PORTA VITTORIA",
+        ],
+    },
+]
+
+
+@router.get(
+    "/aree-metropolitane",
+    response_model=list[AreaMetropolitanaRead],
+    summary=(
+        "Sprint 8.0 MR-E (entry 236): lista aree metropolitane "
+        "configurate per l'azienda corrente."
+    ),
+)
+async def list_aree_metropolitane(
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> list[AreaMetropolitanaRead]:
+    aree = list(
+        (
+            await session.execute(
+                select(AreaMetropolitana)
+                .where(AreaMetropolitana.azienda_id == user.azienda_id)
+                .order_by(AreaMetropolitana.codice)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    counts: dict[int, int] = {}
+    if aree:
+        rows = (
+            await session.execute(
+                select(
+                    AreaStazioneMembri.area_id,
+                    distinct(AreaStazioneMembri.stazione_codice),
+                ).where(
+                    AreaStazioneMembri.area_id.in_([a.id for a in aree])
+                )
+            )
+        ).all()
+        for r in rows:
+            counts[int(r[0])] = counts.get(int(r[0]), 0) + 1
+    return [
+        AreaMetropolitanaRead(
+            id=a.id,
+            codice=a.codice,
+            nome=a.nome,
+            gap_intra_area_min=a.gap_intra_area_min,
+            n_stazioni=counts.get(a.id, 0),
+        )
+        for a in aree
+    ]
+
+
+@router.post(
+    "/aree-metropolitane/popola-default",
+    response_model=PopolaAreaResponse,
+    summary=(
+        "Sprint 8.0 MR-E (entry 236): popola le aree metropolitane "
+        "default (Milano) per l'azienda corrente. Idempotente: se "
+        "l'area esiste già, aggiunge solo le stazioni mancanti."
+    ),
+)
+async def popola_aree_metropolitane_default(
+    user: CurrentUser = _authz_admin,
+    session: AsyncSession = Depends(get_session),
+) -> PopolaAreaResponse:
+    """Cerca le stazioni esistenti per nome (LIKE 'NOME%') e le associa
+    all'area corrispondente. Crea l'area se non esiste, altrimenti
+    aggiunge solo le stazioni non ancora membri.
+
+    Solo admin: l'operazione è una tantum di setup.
+    """
+    aree_create = 0
+    aree_aggiornate = 0
+    n_associate = 0
+    dettagli: list[dict[str, object]] = []
+
+    for spec in _SEED_AREE_DEFAULT:
+        codice = str(spec["codice"])
+        nome = str(spec["nome"])
+        gap_raw = spec["gap_intra_area_min"]
+        gap_min = int(gap_raw) if isinstance(gap_raw, int) else 10
+        patterns_raw = spec["patterns_nome_stazione"]
+        patterns: list[str] = (
+            [str(p) for p in patterns_raw]
+            if isinstance(patterns_raw, list)
+            else []
+        )
+
+        area = (
+            await session.execute(
+                select(AreaMetropolitana).where(
+                    AreaMetropolitana.azienda_id == user.azienda_id,
+                    AreaMetropolitana.codice == codice,
+                )
+            )
+        ).scalar_one_or_none()
+        was_new = area is None
+        if area is None:
+            area = AreaMetropolitana(
+                azienda_id=user.azienda_id,
+                codice=codice,
+                nome=nome,
+                gap_intra_area_min=gap_min,
+            )
+            session.add(area)
+            await session.flush()
+            aree_create += 1
+        else:
+            aree_aggiornate += 1
+
+        # Lookup stazioni per pattern (LIKE 'PATTERN%' case-insensitive).
+        if patterns:
+            ilike_clauses = [
+                Stazione.nome.ilike(f"{p}%") for p in patterns
+            ]
+            stazioni_found = list(
+                (
+                    await session.execute(
+                        select(Stazione.codice, Stazione.nome).where(
+                            Stazione.azienda_id == user.azienda_id,
+                            or_(*ilike_clauses),
+                        )
+                    )
+                ).all()
+            )
+        else:
+            stazioni_found = []
+
+        # Esistenti membri dell'area.
+        membri_esistenti = set(
+            (
+                await session.execute(
+                    select(AreaStazioneMembri.stazione_codice).where(
+                        AreaStazioneMembri.area_id == area.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        nuove_associazioni = 0
+        nomi_aggiunti: list[str] = []
+        for codice_st, nome_st in stazioni_found:
+            if codice_st in membri_esistenti:
+                continue
+            session.add(
+                AreaStazioneMembri(
+                    area_id=area.id, stazione_codice=str(codice_st)
+                )
+            )
+            nuove_associazioni += 1
+            nomi_aggiunti.append(str(nome_st))
+        n_associate += nuove_associazioni
+
+        dettagli.append(
+            {
+                "area_codice": codice,
+                "is_new": was_new,
+                "n_stazioni_trovate": len(stazioni_found),
+                "n_associazioni_create": nuove_associazioni,
+                "stazioni_associate_nomi": nomi_aggiunti,
+            }
+        )
+
+    await session.commit()
+
+    return PopolaAreaResponse(
+        aree_create=aree_create,
+        aree_aggiornate=aree_aggiornate,
+        n_stazioni_associate=n_associate,
+        dettagli=dettagli,
+    )
 
 
 # Esposto per riuso da altri moduli backend (es. builder Sprint 7.7.3).

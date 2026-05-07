@@ -62,7 +62,10 @@ from colazione.domain.builder_giro.capacity_routing import (
     carica_dotazione_per_azienda,
     ribilancia_per_capacity,
 )
-from colazione.domain.builder_giro.catena import costruisci_catene
+from colazione.domain.builder_giro.catena import (
+    ParamCatena,
+    costruisci_catene,
+)
 from colazione.domain.builder_giro.composizione import (
     BloccoAssegnato,
     GiroAssegnato,
@@ -1436,6 +1439,38 @@ async def genera_giri(
             "— escluse dalla generazione."
         )
 
+    # Sprint 8.0 MR-E (entry 236): carica mappa stazione → area
+    # metropolitana per l'azienda corrente. Rilassa la continuità
+    # geografica nel `_trova_prossima` di catena.py per stazioni della
+    # stessa area (es. Milano multi-stazione). NULL/vuoto = nessuna
+    # rilassazione, comportamento storico.
+    from colazione.models.anagrafica import (
+        AreaMetropolitana,
+        AreaStazioneMembri,
+    )
+
+    area_rows = (
+        await session.execute(
+            select(
+                AreaStazioneMembri.stazione_codice,
+                AreaStazioneMembri.area_id,
+            )
+            .join(
+                AreaMetropolitana,
+                AreaMetropolitana.id == AreaStazioneMembri.area_id,
+            )
+            .where(AreaMetropolitana.azienda_id == azienda_id)
+        )
+    ).all()
+    area_per_stazione: dict[str, int] = {
+        str(r[0]): int(r[1]) for r in area_rows
+    }
+    param_catena = (
+        ParamCatena(area_per_stazione=area_per_stazione)
+        if area_per_stazione
+        else ParamCatena()
+    )
+
     # Sprint 5.6 Feature 3: attiva il vincolo finestra uscita deposito
     # 01:00-03:00 per programmi reali (non per test puri legacy).
     param_pos = ParamPosizionamento(finestra_uscita_vietata_attiva=True)
@@ -1479,7 +1514,7 @@ async def genera_giri(
             corse_giorno = [c for c in corse_mat if _corsa_vale_in_data(c, d)]
             if not corse_giorno:
                 continue
-            catene = costruisci_catene(corse_giorno)
+            catene = costruisci_catene(corse_giorno, param_catena)
             for cat in catene:
                 try:
                     cat_pos = posiziona_su_localita(

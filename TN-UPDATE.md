@@ -10,6 +10,152 @@
 
 ---
 
+## 2026-05-07 (236) — MR-E + MR-D: aree metropolitane + fix UI varianti/wizard
+
+### Contesto
+
+Decisione utente entry 235:
+> "fai tutto quello che serve e risolvi il problema e fatti aiutare
+> da fausto. inoltre ti consiglio di snellire un pò è tutto troppo
+> poco intuitivo."
+
+Test live ha confermato:
+- 38 turni di cui ~25 mono-giornata mono-corsa (es. G-FIO-016-ETR522-1g)
+- 236 corse del PdE non coperte (109 sosta condivisa + 127 linea
+  disgiunta)
+- Vista aggregata non mostrava `etichetta_parlante` delle varianti
+- Wizard mostrava materiali senza dotazione registrata (rumore)
+
+### MR-E — Aree metropolitane (radice tecnica)
+
+**Indagine**. In `catena.py::_trova_prossima` il check di continuità
+geografica è strict: `c.codice_origine != ultima.codice_destinazione →
+catena chiusa`. A Milano una corsa BG→MI.Centrale + S5
+MI.Garibaldi→Treviglio NON si concatenano (transfer 15 min reale ma
+stazioni diverse) → catena di 1 corsa → turno mono-corsa.
+
+**Soluzione (Fausto brainstorm: opzione D = whitelist intra-area)**:
+introdurre il concetto di "area metropolitana" — gruppo di stazioni
+"intercambiabili" della stessa città. Il builder accetta la
+concatenazione cross-stazione SE entrambe sono nella stessa area.
+Niente vuoti fake tra città diverse (rispetta vincolo utente).
+
+**Migration `0040_area_metropolitana`**:
+- Tabella `area_metropolitana(id, azienda_id, codice, nome,
+  gap_intra_area_min DEFAULT 10)` — unique `(azienda, codice)`.
+- Tabella `area_stazione_membri(area_id, stazione_codice)` — PK
+  composito M:N + index inverso su `stazione_codice`.
+
+**Modelli `AreaMetropolitana`, `AreaStazioneMembri`** in
+`models/anagrafica.py`.
+
+**Backend `catena.py`**:
+- `ParamCatena.area_per_stazione: dict[str, int] | None` — mapping
+  `stazione_codice → area_metropolitana_id`.
+- `_stazioni_intra_area(a, b, mappa)` helper.
+- `_trova_prossima` rilassa: accetta corsa successiva se origine ==
+  destinazione (match esatto) OR stazioni nella stessa area (match
+  area). Tie-break match-esatto > match-area a parità di partenza.
+
+**Backend `builder.py`**:
+- Carica mappa `area_per_stazione` per l'azienda corrente all'inizio
+  di `genera_giri` (un SELECT con join).
+- Costruisce `param_catena = ParamCatena(area_per_stazione=...)` se
+  non vuota, default `ParamCatena()` (retrocompat).
+- Passa `param_catena` a tutte le chiamate `costruisci_catene`.
+
+**Backend `persister.py`**:
+- Materializzazione automatica del **vuoto intra-area** tra 2 corse
+  consecutive del giro: se `prec.dest != curr.origine`, INSERT blocco
+  `materiale_vuoto` con `tipo_vuoto: "intra_area_metro"` +
+  `is_intra_area: true` in metadata. Il builder accetta queste
+  concatenazioni SOLO se le 2 stazioni sono in stessa area, quindi
+  qui basta "stazioni diverse" per identificare il caso.
+
+**Backend `api/anagrafiche.py`** — 2 endpoint nuovi:
+- `GET /api/aree-metropolitane`: lista aree dell'azienda con conteggio
+  stazioni associate.
+- `POST /api/aree-metropolitane/popola-default`: seed admin idempotente
+  che cerca stazioni con nome ILIKE `'MILANO PORTA GARIBALDI%'`,
+  `'MILANO CENTRALE%'`, `'MILANO LAMBRATE%'`, ecc. (19 pattern Milano)
+  e le associa all'area MILANO (creandola se non esiste). Idempotente:
+  rilancio aggiunge solo le stazioni nuove.
+
+### MR-D — Fix UI
+
+**`TurnoAggregatoRoute.tsx`** — vista aggregata:
+- Riga sx ora mostra `etichetta_parlante` della variante (es.
+  "LV 1:5", "F", "Si eff. 21-28/3") sotto al turno + giornata.
+- Indentazione visuale (border-left primary/30) per varianti
+  non-canoniche per raggrupparle visualmente con la canonica.
+- "V1", "V2" colorati primary per evidenziare varianti calendariali.
+
+**`WizardDaLineeDialog.tsx`** — filtro materiali:
+- Default mostra solo materiali con `pezzi_disponibili != null AND > 0`.
+- Toggle "Mostra tutti i materiali (anche senza dotazione registrata)"
+  per override.
+- Conteggio "N di M materiali con dotazione disponibile" sotto lo
+  select.
+- Riduce il rumore della lista (prima 50+ materiali, ora ~10-15).
+
+### Verifiche
+
+- ✅ `ruff check` clean (3 errori B008 preesistenti, non miei).
+- ✅ `mypy --strict` clean su tutti i file toccati.
+- ✅ `pnpm build` → bundle `index-7NBo28Zy.js`, 1805 moduli.
+
+### Fausto consulenza
+
+Brainstorm su opzioni A/B/C/D per rilassare continuità geografica:
+- A) Whitelist stazioni intra-area
+- B) Tolleranza km (coordinate)
+- C) gap_max esteso per capolinea
+- D) A+C combinati
+
+Risposta: **D** ottimale per bilanciamento. Implementato A (più
+impattante e meno regressivo); C rinviato (gap_max esteso era già
+configurabile via `programma.max_sosta_diurna_min` di MR-4 entry 224).
+
+### Stato
+
+- ✅ Backend deployato (migration 0040 applicata automaticamente al
+  boot Railway via `alembic upgrade head`).
+- ✅ Frontend deployato.
+- ⏳ **Setup richiesto da admin** dopo il primo deploy: chiamare
+  `POST /api/aree-metropolitane/popola-default` (con JWT admin) per
+  popolare l'area MILANO con le stazioni del PdE. Idempotente.
+
+### Per l'utente
+
+1. Dopo deploy, l'admin deve chiamare l'endpoint
+   `POST /api/aree-metropolitane/popola-default` per associare le
+   stazioni Milano all'area. Posso aggiungerti un bottone UI nelle
+   impostazioni admin se confermi (oppure curl one-shot se preferisci).
+2. Una volta popolata l'area, **rigenera i giri** del programma
+   giugno 2026 (force=true). Atteso:
+   - Numero turni mono-corsa drasticamente ridotto (corse Milano
+     multi-stazione concatenate)
+   - Numero corse non coperte ridotto (specialmente le 109 "sosta
+     condivisa" che spesso erano blockate da stazioni Milano diverse)
+3. Vista aggregata: ora vedi etichetta_parlante variante sotto al
+   numero giornata. Le varianti V1+ hanno barra primary a sinistra.
+4. Wizard: lista materiali pulita di default, toggle "Mostra tutti"
+   per fallback.
+
+### Prossimo step
+
+- **MR-F UX snellimento generale** (decisione utente "snellire un pò"):
+  da decidere insieme — propongo:
+  - BloccoDialog: pannelli collapsabili (config doppia/sgancio,
+    elimina vuoto, aggiungi vuoto, metadata) → accordion con header
+    cliccabili invece di tutto sempre visibile.
+  - ProgrammaGiriRoute: bottoni header in menu "Azioni" (cerca treno,
+    wizard linee → 1 dropdown).
+  - Sezione "Corse non coperte" sotto la tabella → expander
+    collapsabile se >50 corse.
+
+---
+
 ## 2026-05-07 (235) — MR-B.2.2: aggiungi vuoto manuale (chiude Fase B)
 
 ### Contesto
