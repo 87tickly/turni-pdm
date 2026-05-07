@@ -18,7 +18,7 @@ Entrambi i campi sono ``NULL`` per default → nessuna logica esistente
 si rompe. Il pianificatore attiva esplicitamente i vincoli nei
 programmi che vuole.
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: 0c4f8a3b1e29
 Revises: f6a1b2c3d4e5 (0038)
 Create Date: 2026-05-07
 """
@@ -30,7 +30,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "a1b2c3d4e5f6"
+revision: str = "0c4f8a3b1e29"
 down_revision: str | None = "f6a1b2c3d4e5"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
