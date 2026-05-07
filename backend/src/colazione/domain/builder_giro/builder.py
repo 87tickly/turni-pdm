@@ -51,7 +51,12 @@ from typing import Any
 from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from colazione.domain.builder_giro.aggregazione_a2 import aggrega_a2
+from colazione.domain.builder_giro.aggregazione_a2 import (
+    GiornataAggregata,
+    GiroAggregato,
+    VarianteGiornata,
+    aggrega_a2,
+)
 from colazione.domain.builder_giro.capacity_routing import (
     aggrega_corse_residue_da_scartati,
     carica_dotazione_per_azienda,
@@ -59,11 +64,13 @@ from colazione.domain.builder_giro.capacity_routing import (
 )
 from colazione.domain.builder_giro.catena import costruisci_catene
 from colazione.domain.builder_giro.composizione import (
+    BloccoAssegnato,
     GiroAssegnato,
     assegna_e_rileva_eventi,
 )
 from colazione.domain.builder_giro.etichetta import calcola_etichetta_giro
 from colazione.domain.builder_giro.fusione_cluster_a1 import fonde_cluster_simili
+from colazione.domain.builder_giro.giornata_tipo import CatenaIstanza
 from colazione.domain.builder_giro.multi_giornata import (
     Giro,
     ParamMultiGiornata,
@@ -71,6 +78,11 @@ from colazione.domain.builder_giro.multi_giornata import (
 )
 from colazione.domain.builder_giro.multi_giornata import (
     _km_giornata as _km_giornata_catena,
+)
+from colazione.domain.builder_giro.multi_giornata_v2 import (
+    ParamBuilderV2,
+    TurnoConVarianti,
+    costruisci_turni_v2,
 )
 from colazione.domain.builder_giro.persister import (
     GiroDaPersistere,
@@ -83,6 +95,10 @@ from colazione.domain.builder_giro.posizionamento import (
     ParamPosizionamento,
     PosizionamentoImpossibileError,
     posiziona_su_localita,
+)
+from colazione.domain.builder_giro.risolvi_corsa import (
+    AssegnazioneRisolta,
+    ComposizioneItem,
 )
 from colazione.models.anagrafica import FestivitaUfficiale, LocalitaManutenzione
 from colazione.models.corse import CorsaCommerciale, corse_attive_clause
@@ -700,6 +716,320 @@ def _raggruppa_corse_per_regola_dominante(
     return out
 
 
+def _materiale_da_regola(regola: ProgrammaRegolaAssegnazione) -> str:
+    """MR-1110 sotto-MR 11 (entry 210): estrae il codice materiale
+    "primo" dalla composizione della regola.
+
+    Convenzione monomateriale: oggi v2 supporta solo regole con
+    composizione di 1+ pezzi dello STESSO materiale (es. ``[ETR526
+    × 2]``). Composizioni miste (``[ETR526 × 1, ETR425 × 1]``) sono
+    trattate come monomateriale del primo elemento (limitazione
+    documentata, scope MR follow-up). Per regole v1 la composizione
+    completa va attraverso ``assegna_e_rileva_eventi`` che rileva
+    aggancio/sgancio del secondo materiale.
+    """
+    if not regola.composizione_json:
+        # Fallback retrocompat ai campi legacy (Sprint 5.5 pre-migrazione).
+        return regola.materiale_tipo_codice or ""
+    return str(regola.composizione_json[0].get("materiale_tipo_codice", ""))
+
+
+def _composizione_da_regola(
+    regola: ProgrammaRegolaAssegnazione,
+) -> tuple[ComposizioneItem, ...]:
+    """MR-1110 sotto-MR 11 (entry 210): converte la
+    ``regola.composizione_json`` in tuple di ``ComposizioneItem``.
+
+    Speculare a ``risolvi_corsa.matches_all`` ma senza valutazione di
+    filtri: assumiamo che il caller abbia già scelto la regola
+    dominante per la corsa (v2 chiama questo solo per assemblare
+    ``AssegnazioneRisolta`` post-pipeline pura).
+    """
+    if not regola.composizione_json:
+        return (
+            ComposizioneItem(
+                materiale_tipo_codice=regola.materiale_tipo_codice or "",
+                n_pezzi=regola.numero_pezzi or 1,
+            ),
+        )
+    return tuple(
+        ComposizioneItem(
+            materiale_tipo_codice=str(c.get("materiale_tipo_codice", "")),
+            n_pezzi=int(c.get("n_pezzi", 1)),
+        )
+        for c in regola.composizione_json
+    )
+
+
+def _turno_v2_a_giro_aggregato(
+    turno: TurnoConVarianti,
+    regola_per_corsa_id: dict[int, ProgrammaRegolaAssegnazione],
+) -> GiroAggregato:
+    """MR-1110 sotto-MR 11 (entry 210): adapter da output v2 a
+    ``GiroAggregato`` v1 (input persister).
+
+    Mappa 1:1 le N giornate-tipo del turno v2 (concatenate
+    ciclicamente) sulle N giornate del ``GiroAggregato``, e le M
+    varianti calendariali su M ``VarianteGiornata``. I blocchi
+    ``BloccoAssegnato`` di ogni variante vengono ricostruiti dalle
+    corse della catena canonica + ``AssegnazioneRisolta`` derivata
+    dalla regola dominante della corsa (lookup per id).
+
+    **Limitazione corrente**: ``eventi_composizione`` è sempre vuoto.
+    v2 lavora su catene monomateriali per costruzione (la chiave
+    ``GiornataTipo`` include ``materiale_tipo_codice``), quindi gli
+    eventi aggancio/sgancio interni alla giornata non emergono. Le
+    composizioni miste (``ETR526 + ETR425``) e gli eventi
+    cross-giornata sono scope MR follow-up.
+
+    Args:
+        turno: ``TurnoConVarianti`` output di ``costruisci_turni_v2``.
+        regola_per_corsa_id: mapping ``corsa.id → regola_dominante``
+            costruito a monte (vedi ``_indicizza_regola_per_corsa``).
+
+    Returns:
+        ``GiroAggregato`` pronto per ``persisti_giri``.
+    """
+    giornate_agg: list[GiornataAggregata] = []
+    km_cumulati: float = 0.0
+    n_cluster_a1: int = 0
+
+    for idx, gtv in enumerate(turno.giornate_tipo, start=1):
+        varianti_g: list[VarianteGiornata] = []
+        for var in gtv.varianti:
+            blocchi: list[BloccoAssegnato] = []
+            for corsa in var.catena_canonica.catena.corse:
+                regola = regola_per_corsa_id.get(int(corsa.id))
+                if regola is None:
+                    # Corsa orfana (non dovrebbe accadere se v2 input
+                    # è stato filtrato da `_raggruppa_corse_per_regola_dominante`).
+                    continue
+                blocchi.append(
+                    BloccoAssegnato(
+                        corsa=corsa,
+                        assegnazione=AssegnazioneRisolta(
+                            regola_id=regola.id,
+                            composizione=_composizione_da_regola(regola),
+                            is_composizione_manuale=bool(regola.is_composizione_manuale),
+                        ),
+                    )
+                )
+            varianti_g.append(
+                VarianteGiornata(
+                    catena_posizionata=var.catena_canonica,
+                    blocchi_assegnati=tuple(blocchi),
+                    eventi_composizione=(),
+                    dates_apply=tuple(sorted(var.dates_apply)),
+                )
+            )
+        giornate_agg.append(
+            GiornataAggregata(numero_giornata=idx, varianti=tuple(varianti_g))
+        )
+        # km cumulati = somma del max km per giornata (la variante
+        # canonica determina il km della giornata, ma usiamo il max
+        # tra varianti per non sottostimare).
+        if gtv.varianti:
+            km_cumulati += max(v.km_giornaliera for v in gtv.varianti)
+            n_cluster_a1 += len(gtv.varianti)
+
+    return GiroAggregato(
+        localita_codice=turno.localita_codice,
+        materiale_tipo_codice=turno.materiale_tipo_codice,
+        giornate=tuple(giornate_agg),
+        chiuso=True,  # v2 produce sempre cicli chiusi (concatenazione_ciclica)
+        motivo_chiusura="naturale",
+        km_cumulati=km_cumulati,
+        corse_residue=(),
+        incompatibilita_materiale=(),
+        n_cluster_a1=n_cluster_a1 if n_cluster_a1 > 0 else 1,
+    )
+
+
+async def _genera_giri_v2(
+    *,
+    programma: ProgrammaMateriale,
+    localita: LocalitaManutenzione,
+    whitelist: frozenset[str],
+    azienda_id: int,
+    session: AsyncSession,
+    istanze_v2: list[CatenaIstanza],
+    regole: list[ProgrammaRegolaAssegnazione],
+    corse: list[CorsaCommerciale],
+    warnings_esistenti: list[str],
+    catene_scartate_per_regola: dict[int, int],
+    n_corse_orfane: int,
+    eseguito_da_user_id: int | None,
+    force: bool,
+) -> BuilderResult:
+    """MR-1110 sotto-MR 11 (entry 210): pipeline builder v2 end-to-end.
+
+    Chiamata da ``genera_giri`` quando ``programma.builder_version='v2'``.
+    Salta gli step 4-7 v1 (multi-giornata, sourcing, capacity, fusione,
+    A2): l'output di ``costruisci_turni_v2`` è già aggregato e ciclico
+    per costruzione, e l'adapter ``_turno_v2_a_giro_aggregato``
+    produce direttamente ``GiroAggregato`` per il persister v1.
+
+    **Limitazioni note**:
+
+    - Composizioni miste (es. ``ETR526 + ETR425``) sono trattate come
+      monomateriale del primo elemento. Eventi aggancio/sgancio interni
+      al giro non vengono rilevati. Per programmi con regole a
+      composizione mista, usare ``builder_version='v1'``.
+    - Strict mode (``no_corse_residue``, ``no_giro_appeso``, ecc.) non
+      è applicato in v2 — i giri v2 sono sempre chiusi per costruzione,
+      e le orfane sono già contate nei warning. Re-introducibile come
+      MR follow-up se serve.
+    - Capacity check (dotazione materiale) invariato: gira solo dopo
+      la persistenza, indipendente dalla pipeline.
+    """
+    warnings = list(warnings_esistenti)
+
+    # Carica festività + periodo per il calcolo varianti calendariali.
+    festivita = await carica_festivita_periodo(
+        session, azienda_id, programma.valido_da, programma.valido_a
+    )
+    periodo: tuple[date, date] = (programma.valido_da, programma.valido_a)
+
+    # Pipeline v2 pura.
+    turni_v2, orfane_v2 = costruisci_turni_v2(
+        istanze_v2, festivita, periodo, params=ParamBuilderV2()
+    )
+
+    if orfane_v2:
+        warnings.append(
+            f"{len(orfane_v2)} catene-istanza scartate dalla pipeline v2 "
+            "(sotto soglia significatività min_istanze=2 o non concatenabili "
+            "in un ciclo). Vedi `BuilderResult.n_corse_residue` per il count "
+            "corse correlato."
+        )
+
+    # Index inverso corsa.id → regola_dominante per l'adapter.
+    regola_per_corsa_id: dict[int, ProgrammaRegolaAssegnazione] = {}
+    for c in corse:
+        regola_dom = _trova_regola_dominante_per_corsa(c, regole)
+        if regola_dom is not None:
+            regola_per_corsa_id[int(c.id)] = regola_dom
+
+    # Adapter v2 → GiroAggregato (input persister).
+    giri_aggregati = [
+        _turno_v2_a_giro_aggregato(t, regola_per_corsa_id) for t in turni_v2
+    ]
+
+    # Diagnostica regole senza giri (entry 197/198, parità v1).
+    regole_con_giri = {
+        r.id
+        for ga in giri_aggregati
+        for gg in ga.giornate
+        for v in gg.varianti
+        for b in v.blocchi_assegnati
+        for r in regole
+        if r.id == b.assegnazione.regola_id
+    }
+    for r in regole:
+        if r.id in regole_con_giri:
+            continue
+        materiale = _materiale_da_regola(r) or "—"
+        n_scartate = catene_scartate_per_regola.get(r.id, 0)
+        if n_scartate > 0:
+            causa = (
+                f"{n_scartate} catene candidate scartate dal posizionamento "
+                f"sulla sede {localita.codice!r}: la sede non ha stazioni "
+                "vicine alle linee della regola."
+            )
+        else:
+            causa = (
+                "Possibili cause: filtri non matchano corse nel periodo, "
+                "min_istanze=2 non raggiunto, oppure giornate-tipo non "
+                "concatenabili in un ciclo (D2 v2)."
+            )
+        warnings.append(
+            f"Regola #{r.id} (materiale: {materiale}) non ha generato "
+            f"giri v2. {causa}"
+        )
+
+    # Step 8: numero_turno + persisti.
+    giri_da_persistere: list[GiroDaPersistere] = []
+    for idx, giro_agg in enumerate(giri_aggregati, start=1):
+        numero_turno = (
+            f"G-{localita.codice_breve}-{idx:03d}-"
+            f"{giro_agg.materiale_tipo_codice}-{len(giro_agg.giornate)}g"
+        )
+        giri_da_persistere.append(
+            GiroDaPersistere(
+                numero_turno=numero_turno,
+                giro=giro_agg,
+                genera_rientro_sede=True,
+                whitelist_sede=whitelist,
+            )
+        )
+
+    giro_ids = await persisti_giri(
+        giri_da_persistere,
+        session,
+        programma.id,
+        azienda_id,
+        periodo_valido_da=programma.valido_da,
+        periodo_valido_a=programma.valido_a,
+    )
+    await session.commit()
+
+    # Capacity check temporale (parità v1, indipendente dalla pipeline).
+    dotazione = await carica_dotazione_per_azienda(session, azienda_id)
+    from colazione.domain.builder_giro.capacity_temporale import (
+        verifica_capacity_temporale,
+    )
+
+    warnings_cap_temp = await verifica_capacity_temporale(
+        session, programma_id=programma.id, dotazione=dotazione
+    )
+    warnings.extend(warnings_cap_temp)
+
+    # Stats finali. v2 non ha il concetto di `corse_residue` per giro
+    # (le orfane sono in `orfane_v2`, già contate sopra come warning).
+    n_corse_processate = sum(
+        len(v.blocchi_assegnati)
+        for ga in giri_aggregati
+        for gg in ga.giornate
+        for v in gg.varianti
+    )
+    n_giri_chiusi = sum(1 for ga in giri_aggregati if ga.chiuso)
+    n_corse_residue_v2 = sum(
+        len(o.catena_posizionata.catena.corse) for o in orfane_v2
+    ) + n_corse_orfane
+
+    # Persisti BuilderRun (parità v1).
+    run = BuilderRun(
+        programma_id=programma.id,
+        azienda_id=azienda_id,
+        localita_codice=localita.codice,
+        eseguito_da_user_id=eseguito_da_user_id,
+        n_giri_creati=len(giro_ids),
+        n_giri_chiusi=n_giri_chiusi,
+        n_giri_non_chiusi=0,  # v2 produce sempre chiusi
+        n_corse_processate=n_corse_processate,
+        n_corse_residue=n_corse_residue_v2,
+        n_eventi_composizione=0,  # v2 monomateriale, no eventi interni
+        n_incompatibilita_materiale=0,
+        warnings_json=list(warnings),
+        force=force,
+    )
+    session.add(run)
+    await session.commit()
+
+    return BuilderResult(
+        giri_ids=giro_ids,
+        n_giri_creati=len(giro_ids),
+        n_corse_processate=n_corse_processate,
+        n_corse_residue=n_corse_residue_v2,
+        n_giri_chiusi=n_giri_chiusi,
+        n_giri_non_chiusi=0,
+        n_giri_km_cap=0,  # v2 non gestisce km cap (modello "fasi del ciclo")
+        n_eventi_composizione=0,
+        n_incompatibilita_materiale=0,
+        warnings=warnings,
+    )
+
+
 def _trova_regola_dominante(
     cat_pos: CatenaPosizionata,
     regole: list[ProgrammaRegolaAssegnazione],
@@ -921,14 +1251,13 @@ async def genera_giri(
     if programma.stato != "attivo":
         raise ProgrammaNonAttivoError(programma_id, programma.stato)
 
-    # MR-1110 sotto-MR 10 (entry 206): routing pipeline builder.
-    # Solo ``v1`` (legacy) è oggi end-to-end con persister. Tutto il
-    # resto (``v2`` di entry 202, valori inattesi da DB pre-0038)
-    # alza ``BuilderVersionNonSupportata``. Quando il wiring v2 sarà
-    # completo (adapter ``TurnoConVarianti → GiroDaPersistere``,
-    # sotto-MR follow-up), questo check si trasformerà in branching:
-    # ``if v2: return _genera_giri_v2(...)``.
-    if programma.builder_version != "v1":
+    # MR-1110 sotto-MR 11 (entry 210): routing pipeline builder.
+    # ``v1`` = pipeline legacy (multi_giornata + sourcing + capacity +
+    # fusione + A2 + persister). ``v2`` = pipeline MR-1110 nuova
+    # (catene-istanza → giornate-tipo → varianti calendariali → turni
+    # ciclici → adapter → persister; salta sourcing/capacity/A2 v1).
+    # Valori inattesi (DB corrotto pre-0038) alzano l'eccezione.
+    if programma.builder_version not in ("v1", "v2"):
         raise BuilderVersionNonSupportata(
             programma_id, programma.builder_version
         )
@@ -1028,6 +1357,16 @@ async def genera_giri(
     is_prima_generazione_sede = n_esistenti_sede == 0 or force
     primo_giorno_con_corse: date | None = None
     catene_per_data: dict[date, list[CatenaPosizionata]] = {}
+    # MR-1110 sotto-MR 11 (entry 210): accumula CatenaIstanza per
+    # alimentare la pipeline v2. Popolato in parallelo a `catene_per_data`
+    # (input v1) durante il loop di posizionamento. Ignorato se
+    # programma.builder_version='v1'.
+    istanze_v2: list[CatenaIstanza] = []
+    # Pre-calcolo tipo materiale per regola (uso v2 only — v1 lo
+    # determina blocco-per-blocco dentro `assegna_e_rileva_eventi`).
+    materiale_per_regola: dict[int, str] = {
+        r.id: _materiale_da_regola(r) for r in regole
+    }
     # Entry 198: traccia le catene scartate per posizionamento aggregate
     # per regola dominante. Usato dal warning finale per spiegare
     # all'utente quando una regola finisce con 0 giri perché la sede
@@ -1078,7 +1417,38 @@ async def genera_giri(
                     )
                     continue
                 catene_pos_giorno.append(cat_pos)
+                # MR-1110 sotto-MR 11 (entry 210): accumula istanza v2
+                # con materiale dedotto dalla regola di scope corrente.
+                istanze_v2.append(
+                    CatenaIstanza(
+                        data=d,
+                        catena_posizionata=cat_pos,
+                        materiale_tipo_codice=materiale_per_regola[regola_id],
+                    )
+                )
         catene_per_data[d] = catene_pos_giorno
+
+    # MR-1110 sotto-MR 11 (entry 210): branching pipeline v2.
+    # Salta tutti gli step 4-7 v1 (multi-giornata, sourcing, capacity,
+    # fusione, A2) perché v2 produce direttamente turni ciclici già
+    # aggregati. L'adapter `_turno_v2_a_giro_aggregato` traduce in
+    # `GiroAggregato` per il persister v1 invariato (step 8).
+    if programma.builder_version == "v2":
+        return await _genera_giri_v2(
+            programma=programma,
+            localita=localita,
+            whitelist=whitelist,
+            azienda_id=azienda_id,
+            session=session,
+            istanze_v2=istanze_v2,
+            regole=regole,
+            corse=corse,
+            warnings_esistenti=warnings,
+            catene_scartate_per_regola=catene_scartate_per_regola,
+            n_corse_orfane=n_corse_orfane,
+            eseguito_da_user_id=eseguito_da_user_id,
+            force=force,
+        )
 
     # 4. Multi-giornata (cross-notte) con cumulo km e chiusura dinamica.
     # Sprint 7.7 MR 1 (refactor cap-per-regola): per ogni catena calcolo

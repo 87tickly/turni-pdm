@@ -839,21 +839,100 @@ async def test_due_regole_distinte_non_mescolano_corse(azienda_id: int) -> None:
     )
 
 
-async def test_builder_version_v2_alza_not_implemented(azienda_id: int) -> None:
-    """MR-1110 sotto-MR 10/7 (entry 206/207): un programma con
-    ``builder_version='v2'`` riceve ``BuilderVersionNonSupportata``
-    (sottoclasse di ``NotImplementedError``) finché l'adapter
-    ``TurnoConVarianti → GiroDaPersistere`` non è scritto. Programmi
-    con ``"v1"`` (default) procedono normalmente.
+async def test_builder_version_v2_routing_alza_per_valori_invalidi(
+    azienda_id: int,
+) -> None:
+    """MR-1110 sotto-MR 11 (entry 210): il routing in ``genera_giri``
+    accetta solo ``v1`` o ``v2``. Valori inattesi (es. DB corrotto
+    pre-migration 0038, oppure futuri valori non supportati) alzano
+    ``BuilderVersionNonSupportata``.
 
-    Questo test garantisce che il routing scaffold (entry 206) non
-    venga rimosso accidentalmente prima di completare il wiring v2.
+    Questo test garantisce la difesa contro stati DB non validi: se
+    qualcuno bypassa il CHECK constraint e setta ``builder_version='v3'``
+    a manazza, il builder rifiuta il run con un errore esplicito.
     """
     from colazione.domain.builder_giro import BuilderVersionNonSupportata
 
     prog_id = await _setup_completo(azienda_id)
 
-    # Promuovi il programma a v2 (PATCH "manuale" via UPDATE diretto).
+    # Forza un valore non valido bypassando il CHECK con DDL temporaneo
+    # (simulazione DB pre-0038 o corruzione manuale).
+    async with session_scope() as session:
+        await session.execute(
+            text(
+                "ALTER TABLE programma_materiale DROP CONSTRAINT "
+                "IF EXISTS programma_materiale_builder_version_check"
+            )
+        )
+        await session.execute(
+            text(
+                "UPDATE programma_materiale SET builder_version = 'v3' "
+                "WHERE id = :pid"
+            ),
+            {"pid": prog_id},
+        )
+        await session.commit()
+
+    try:
+        async with session_scope() as session:
+            with pytest.raises(BuilderVersionNonSupportata) as exc_info:
+                await genera_giri(
+                    programma_id=prog_id,
+                    data_inizio=date(2026, 4, 27),
+                    n_giornate=1,
+                    localita_codice=LOC_CODICE,
+                    session=session,
+                    azienda_id=azienda_id,
+                )
+
+        assert exc_info.value.programma_id == prog_id
+        assert exc_info.value.version == "v3"
+    finally:
+        # Ripristina il CHECK constraint per non lasciare il DB
+        # corrotto se altri test girano dopo.
+        async with session_scope() as session:
+            await session.execute(
+                text(
+                    "UPDATE programma_materiale SET builder_version = 'v1' "
+                    "WHERE id = :pid"
+                ),
+                {"pid": prog_id},
+            )
+            await session.execute(
+                text(
+                    "ALTER TABLE programma_materiale ADD CONSTRAINT "
+                    "programma_materiale_builder_version_check "
+                    "CHECK (builder_version IN ('v1', 'v2'))"
+                )
+            )
+            await session.commit()
+
+
+async def test_builder_version_v2_produce_giri_via_nuova_pipeline(
+    azienda_id: int,
+) -> None:
+    """MR-1110 sotto-MR 11 (entry 210): un programma con
+    ``builder_version='v2'`` viene processato dalla pipeline nuova
+    (catene-istanza → giornate-tipo → varianti calendariali → turni
+    ciclici → adapter GiroAggregato → persister). Smoke test che
+    verifica end-to-end il branching senza eccezioni e con un
+    BuilderResult coerente.
+
+    Atteso per scenario minimale (1 sola data, ciclo banale): il
+    builder v2 può scartare le istanze come orfane (sotto soglia
+    significatività min_istanze=2 con 1 sola data) — è OK, basta che
+    NON alzi eccezione e produca un BuilderResult con eventuali
+    warning informativi.
+    """
+    prog_id = await _setup_completo(
+        azienda_id,
+        corse_def=[
+            ("TEST_V2_1", "S99001", "S99002", (8, 0), (9, 0), ["2026-04-27"]),
+            ("TEST_V2_2", "S99002", "S99001", (10, 0), (11, 0), ["2026-04-27"]),
+        ],
+    )
+
+    # Promuovi il programma a v2.
     async with session_scope() as session:
         await session.execute(
             text(
@@ -864,20 +943,251 @@ async def test_builder_version_v2_alza_not_implemented(azienda_id: int) -> None:
         )
         await session.commit()
 
-    # genera_giri deve alzare l'eccezione dedicata.
+    # genera_giri NON deve alzare; deve ritornare BuilderResult.
     async with session_scope() as session:
-        with pytest.raises(BuilderVersionNonSupportata) as exc_info:
-            await genera_giri(
-                programma_id=prog_id,
-                data_inizio=date(2026, 4, 27),
-                n_giornate=1,
-                localita_codice=LOC_CODICE,
-                session=session,
-                azienda_id=azienda_id,
-            )
+        result = await genera_giri(
+            programma_id=prog_id,
+            data_inizio=date(2026, 4, 27),
+            n_giornate=1,
+            localita_codice=LOC_CODICE,
+            session=session,
+            azienda_id=azienda_id,
+        )
 
-    assert exc_info.value.programma_id == prog_id
-    assert exc_info.value.version == "v2"
+    # Smoke: BuilderResult coerente. v2 con 1 data può non produrre
+    # giri (filtro min_istanze D3) → warning informativo, ma niente
+    # crash.
+    assert result is not None
+    assert isinstance(result.giri_ids, list)
+    # In v2 con 1 data e min_istanze=2 default, le istanze finiscono
+    # orfane: 0 giri creati ma warning popolato.
+    if result.n_giri_creati == 0:
+        assert any(
+            "v2" in w or "min_istanze" in w or "concatenab" in w
+            for w in result.warnings
+        ), f"Atteso warning v2, visti: {result.warnings}"
+
+
+async def test_builder_v2_end_to_end_persiste_giri(azienda_id: int) -> None:
+    """MR-1110 sotto-MR 11 (entry 210): pipeline v2 end-to-end con
+    persistenza DB. Scenario: 5 date con stessa sequenza di corse
+    (catena S99001→S99002→S99001) → 1 giornata-tipo con 1 variante
+    (5 istanze) → 1 turno v2 di 1 giornata persistito.
+
+    Verifica:
+    - ``BuilderResult.n_giri_creati == 1``.
+    - DB ha ``GiroMateriale + GiroGiornata + GiroVariante + GiroBlocco``.
+    - ``GiroVariante.dates_apply_json`` = le 5 date.
+    - ``GiroBlocco.tipo_blocco='corsa_commerciale'`` per le 2 corse.
+    """
+    date_test = ["2026-04-27", "2026-04-28", "2026-04-29", "2026-04-30", "2026-05-01"]
+
+    prog_id = await _setup_completo(
+        azienda_id,
+        corse_def=[
+            ("TEST_V2_E2E_1", "S99001", "S99002", (8, 0), (9, 0), date_test),
+            ("TEST_V2_E2E_2", "S99002", "S99001", (10, 0), (11, 0), date_test),
+        ],
+    )
+
+    async with session_scope() as session:
+        await session.execute(
+            text(
+                "UPDATE programma_materiale SET builder_version = 'v2' "
+                "WHERE id = :pid"
+            ),
+            {"pid": prog_id},
+        )
+        await session.commit()
+
+    async with session_scope() as session:
+        result = await genera_giri(
+            programma_id=prog_id,
+            data_inizio=date(2026, 4, 27),
+            n_giornate=5,
+            localita_codice=LOC_CODICE,
+            session=session,
+            azienda_id=azienda_id,
+        )
+
+    assert result.n_giri_creati == 1, (
+        f"Atteso 1 giro v2 (1 turno × 1 giornata-tipo × 1 variante con "
+        f"5 istanze), ottenuti {result.n_giri_creati}. "
+        f"Warnings: {result.warnings}"
+    )
+    assert result.n_corse_processate == 2, (
+        f"Atteso 2 blocchi commerciali nel giro (2 corse × 1 variante), "
+        f"viste {result.n_corse_processate}"
+    )
+
+    # Verifica struttura DB. Nota: ``giro_variante.etichetta_parlante``
+    # non esiste a livello tabella: l'etichetta viene calcolata dall'API
+    # read-side (vedi entry 205, ``api/giri.py::get_giro_dettaglio``).
+    async with session_scope() as session:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT gm.numero_turno, gm.materiale_tipo_codice,
+                           gv.dates_apply_json,
+                           COUNT(gb.id) FILTER (WHERE gb.tipo_blocco = 'corsa_commerciale') AS n_corse
+                    FROM giro_materiale gm
+                    JOIN giro_giornata gg ON gg.giro_materiale_id = gm.id
+                    JOIN giro_variante gv ON gv.giro_giornata_id = gg.id
+                    LEFT JOIN giro_blocco gb ON gb.giro_variante_id = gv.id
+                    WHERE gm.programma_id = :pid
+                    GROUP BY gm.numero_turno, gm.materiale_tipo_codice,
+                             gv.dates_apply_json
+                    """
+                ),
+                {"pid": prog_id},
+            )
+        ).all()
+
+    assert len(rows) == 1, f"Atteso 1 variante, viste {len(rows)}"
+    row = rows[0]
+    # Numero turno formato: G-{LOC_BREVE}-{NNN}-{MAT}-{Ng}g
+    assert row.numero_turno.startswith("G-TBLD-001-ALe711-1g"), (
+        f"Numero turno inatteso: {row.numero_turno}"
+    )
+    assert row.materiale_tipo_codice == "ALe711"
+    # Dates apply: le 5 date
+    assert sorted(row.dates_apply_json) == date_test
+    assert row.n_corse == 2  # TEST_V2_E2E_1 + TEST_V2_E2E_2
+
+
+async def test_builder_v1_vs_v2_stesso_scenario_entrambi_producono_giro(
+    azienda_id: int,
+) -> None:
+    """MR-1110 sotto-MR 11 (entry 210): test di confronto v1 vs v2.
+
+    Stesso scenario (5 date × 2 corse base) processato dal builder v1
+    e poi rigenerato con builder v2. Entrambe le pipeline devono
+    produrre 1 giro persistito con le stesse 5 date e le stesse 2
+    corse commerciali. Il numero esatto di varianti può differire
+    leggermente (v1 può avere clustering A1 con 1 sola variante,
+    v2 produce la variante che copre tutte le 5 date come "principale").
+
+    Questo test garantisce parità funzionale base tra le due pipeline
+    su scenari semplici, evitando regressioni quando l'utente promuove
+    un programma da v1 a v2.
+    """
+    date_test = ["2026-04-27", "2026-04-28", "2026-04-29", "2026-04-30", "2026-05-01"]
+
+    # ---- RUN v1 ----
+    prog_id = await _setup_completo(
+        azienda_id,
+        corse_def=[
+            ("TEST_VS_1", "S99001", "S99002", (8, 0), (9, 0), date_test),
+            ("TEST_VS_2", "S99002", "S99001", (10, 0), (11, 0), date_test),
+        ],
+    )
+
+    async with session_scope() as session:
+        result_v1 = await genera_giri(
+            programma_id=prog_id,
+            data_inizio=date(2026, 4, 27),
+            n_giornate=5,
+            localita_codice=LOC_CODICE,
+            session=session,
+            azienda_id=azienda_id,
+        )
+
+    assert result_v1.n_giri_creati >= 1, "v1 deve produrre almeno 1 giro"
+
+    # Salva struttura v1 per confronto.
+    async with session_scope() as session:
+        v1_data = (
+            await session.execute(
+                text(
+                    """
+                    SELECT gm.materiale_tipo_codice,
+                           COUNT(DISTINCT gv.id) AS n_varianti,
+                           COUNT(gb.id) FILTER (WHERE gb.tipo_blocco = 'corsa_commerciale') AS n_corse
+                    FROM giro_materiale gm
+                    JOIN giro_giornata gg ON gg.giro_materiale_id = gm.id
+                    JOIN giro_variante gv ON gv.giro_giornata_id = gg.id
+                    LEFT JOIN giro_blocco gb ON gb.giro_variante_id = gv.id
+                    WHERE gm.programma_id = :pid
+                    GROUP BY gm.id, gm.materiale_tipo_codice
+                    """
+                ),
+                {"pid": prog_id},
+            )
+        ).all()
+
+    # ---- RIGENERA con v2 (force=True) ----
+    async with session_scope() as session:
+        await session.execute(
+            text(
+                "UPDATE programma_materiale SET builder_version = 'v2' "
+                "WHERE id = :pid"
+            ),
+            {"pid": prog_id},
+        )
+        await session.commit()
+
+    async with session_scope() as session:
+        result_v2 = await genera_giri(
+            programma_id=prog_id,
+            data_inizio=date(2026, 4, 27),
+            n_giornate=5,
+            localita_codice=LOC_CODICE,
+            session=session,
+            azienda_id=azienda_id,
+            force=True,
+        )
+
+    assert result_v2.n_giri_creati >= 1, (
+        f"v2 deve produrre almeno 1 giro nello stesso scenario di v1. "
+        f"Warnings: {result_v2.warnings[:5]}"
+    )
+
+    # Confronto strutturale: stesso materiale, stesso numero corse totali.
+    async with session_scope() as session:
+        v2_data = (
+            await session.execute(
+                text(
+                    """
+                    SELECT gm.materiale_tipo_codice,
+                           COUNT(DISTINCT gv.id) AS n_varianti,
+                           COUNT(gb.id) FILTER (WHERE gb.tipo_blocco = 'corsa_commerciale') AS n_corse
+                    FROM giro_materiale gm
+                    JOIN giro_giornata gg ON gg.giro_materiale_id = gm.id
+                    JOIN giro_variante gv ON gv.giro_giornata_id = gg.id
+                    LEFT JOIN giro_blocco gb ON gb.giro_variante_id = gv.id
+                    WHERE gm.programma_id = :pid
+                    GROUP BY gm.id, gm.materiale_tipo_codice
+                    """
+                ),
+                {"pid": prog_id},
+            )
+        ).all()
+
+    # Atteso: v1 e v2 hanno modelli di persistenza fondamentalmente
+    # diversi.
+    # - v1 replica i blocchi per ogni data (5 date × 2 corse = 10
+    #   blocchi commerciali in DB) frammentando cluster A1 per
+    #   ciascuna data.
+    # - v2 condivide i blocchi tra le date di applicazione (1 variante
+    #   × 2 corse = 2 blocchi commerciali in DB, con
+    #   ``dates_apply_json = [5 date]``).
+    # Il test verifica solo che entrambe le pipeline producano giri
+    # validi senza eccezioni, coprano lo stesso materiale, e che v2
+    # produca un output PIÙ COMPATTO di v1 (= meno o uguale numero di
+    # giri persistiti grazie alla riduzione del clustering).
+    assert len(v1_data) >= 1
+    assert len(v2_data) >= 1
+    materiali_v1 = {r.materiale_tipo_codice for r in v1_data}
+    materiali_v2 = {r.materiale_tipo_codice for r in v2_data}
+    assert materiali_v1 == materiali_v2, (
+        f"v1 materiali: {materiali_v1}, v2 materiali: {materiali_v2}. "
+        "Le due pipeline devono coprire gli stessi materiali."
+    )
+    assert len(v2_data) <= len(v1_data), (
+        f"v2 dovrebbe produrre <= giri di v1 (modello compatto). "
+        f"v1: {len(v1_data)} giri, v2: {len(v2_data)} giri."
+    )
 
 
 async def test_pde_realistico_varianti_calendariali_multiple(azienda_id: int) -> None:

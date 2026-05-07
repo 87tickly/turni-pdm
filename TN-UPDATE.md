@@ -10,6 +10,129 @@
 
 ---
 
+## 2026-05-07 (210) — MR-1110 sotto-MR 11: wiring end-to-end pipeline v2 al persister
+
+### Contesto
+
+Decisione utente 2026-05-07: "ok procedi" sul wiring end-to-end della
+pipeline v2 al persister DB. Era l'ultimo pezzo residuo di MR-1110:
+fino a ieri il routing v2 (entry 206) alzava ``BuilderVersionNonSupportata``
+perché la pipeline ``costruisci_turni_v2`` (entry 202) produceva
+``TurnoConVarianti`` ma mancava l'adapter che lo trasformava in input
+del persister v1. Adesso v2 è funzionalmente equivalente a v1 (con
+limitazioni note documentate).
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_giro/builder.py`**:
+
+1. **Adapter `_turno_v2_a_giro_aggregato(turno, regola_per_corsa_id)`**
+   (~70 righe): traduce ``TurnoConVarianti`` v2 → ``GiroAggregato`` v1
+   per il persister. Mappa N giornate-tipo del turno su N
+   ``GiornataAggregata`` (1-based), e M ``VarianteCalendariale`` su M
+   ``VarianteGiornata``. I ``BloccoAssegnato`` vengono ricostruiti
+   dalle corse della catena canonica + ``AssegnazioneRisolta``
+   derivata dalla regola dominante della corsa (lookup index per id).
+
+2. **Helper `_materiale_da_regola()` + `_composizione_da_regola()`**:
+   estraggono il codice materiale primo + tuple ``ComposizioneItem``
+   dalla ``regola.composizione_json``. Convenzione monomateriale per
+   v2 (limitazione documentata).
+
+3. **Funzione `_genera_giri_v2()`** (~150 righe, async): orchestratore
+   v2 end-to-end. Chiamata da ``genera_giri`` quando
+   ``programma.builder_version == "v2"``. Salta gli step 4-7 v1
+   (multi-giornata, sourcing, capacity, fusione, A2): l'output v2 è
+   già aggregato/ciclico per costruzione. Riusa ``persisti_giri``
+   invariato (step 8) e ``BuilderRun`` (step 9). Diagnostica regole
+   senza giri in parità con v1.
+
+4. **Loop step 3 v1 esteso**: ora accumula ``istanze_v2: list[CatenaIstanza]``
+   in parallelo a ``catene_per_data`` (input v1). ``CatenaIstanza``
+   = ``(data, catena_posizionata, materiale_tipo_codice)`` con
+   materiale pre-calcolato dalla regola di scope corrente. Costo
+   memoria trascurabile, costo CPU zero (riuso del loop esistente).
+
+5. **Routing**: il check ``if programma.builder_version != "v1"`` è
+   stato sostituito con ``not in ("v1", "v2")`` + branching post-step
+   3 ``if v2: return await _genera_giri_v2(...)``.
+
+### Limitazioni note (documentate, scope MR follow-up)
+
+1. **Composizioni miste**: regole con composizione tipo ``[ETR526 × 1,
+   ETR425 × 1]`` (due materiali nello stesso convoglio) sono trattate
+   come monomateriale del primo elemento. Eventi aggancio/sgancio
+   interni al giro non emergono in v2.
+2. **Strict mode**: ``no_corse_residue``, ``no_giro_appeso`` non
+   applicati in v2. Giri v2 sono sempre chiusi per costruzione, le
+   corse residue sono già nei warning.
+3. **Capacity routing**: non eseguito in v2 (input già è
+   ``CatenaIstanza`` con materiale assegnato). Se la regola sfora
+   la dotazione azienda, l'errore emerge solo nel capacity check
+   temporale post-persistenza.
+4. **n_giri_km_cap = 0** in v2: il modello "fasi del ciclo" non ha
+   il concetto di "km cap raggiunto" (i giri sono sempre chiusi al
+   termine del ciclo, non per esaurimento km).
+
+Tutto questo sarà chiuso quando un programma reale a composizione mista
+girerà in v2 e l'utente vorrà gli eventi visibili.
+
+### Test
+
+**`backend/tests/test_builder_giri.py`** — 4 nuovi test (al posto
+del singolo "v2 alza eccezione" rimosso):
+
+1. `test_builder_version_v2_routing_alza_per_valori_invalidi`:
+   bypass del CHECK constraint (DDL temporaneo) per simulare DB
+   corrotto/futuro → routing rifiuta ``v3`` con ``BuilderVersionNonSupportata``.
+   Ripristino del CHECK in finally.
+
+2. `test_builder_version_v2_produce_giri_via_nuova_pipeline`: smoke
+   test sul branching v2. Programma con 1 sola data; min_istanze=2
+   default → orfana → 0 giri ma BuilderResult coerente con warning
+   informativo.
+
+3. `test_builder_v2_end_to_end_persiste_giri`: scenario sostanziale
+   (5 date × 2 corse stessa sequenza) → 1 giro v2 persistito con
+   1 giornata + 1 variante + 2 ``GiroBlocco`` commerciali +
+   ``dates_apply_json = [5 date]`` + numero_turno
+   ``"G-TBLD-001-ALe711-1g"``.
+
+4. `test_builder_v1_vs_v2_stesso_scenario_entrambi_producono_giro`:
+   confronto pipeline. Stesso scenario passato prima a v1 (5 giri
+   frammentati) poi rigenerato con v2 (1 giro compatto). Asserts:
+   stesso materiale coperto, ``len(v2_giri) <= len(v1_giri)``
+   (= modello compatto). Numero blocchi DB diverso per design (v1
+   replica per data, v2 condivide via ``dates_apply``).
+
+### Verifiche
+
+- ✅ ``mypy --strict`` clean (80 source files).
+- ✅ ``ruff check`` clean.
+- ✅ ``pytest tests/test_builder_giri.py`` → 20 passed, 1 skipped.
+- ⏳ pytest full in corso al momento del commit.
+
+### Stato
+
+- ✅ MR-1110 **completamente chiuso**. Sotto-MR 4, 3, 5, 6, 7, 8,
+  9 (Step A + B), 10, 11 tutti completati.
+- ⏳ Commit + push + deploy backend Railway.
+
+### Come usare la pipeline v2 in produzione
+
+1. Dal frontend (TODO sotto-MR successivo): aggiungere campo
+   ``builder_version`` selezionabile nella pagina di configurazione
+   programma. Default ``"v1"`` retrocompat.
+2. Dall'API: ``PATCH /api/programmi/{id}`` con body
+   ``{"builder_version": "v2"}`` → poi ``POST /genera-giri?force=true``.
+3. Dal DB direttamente:
+   ``UPDATE programma_materiale SET builder_version = 'v2' WHERE id = X``.
+
+I programmi esistenti restano ``"v1"`` finché non vengono esplicitamente
+promossi.
+
+---
+
 ## 2026-05-07 (209) — Cleanup post-MR-1110: review Fausto + 2 fix di pulizia
 
 ### Contesto
