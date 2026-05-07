@@ -300,6 +300,11 @@ export function ProgrammaGiriRoute() {
                     });
                   }}
                   onModificaGruppo={(g) => setEditingGroup(g)}
+                  onApriGanttAggregato={(g) => {
+                    navigate(
+                      `/pianificatore-giro/programmi/${programmaId}/turno-aggregato/${encodeURIComponent(g.materiale)}/${encodeURIComponent(g.sede)}`,
+                    );
+                  }}
                   selectedId={selectedGiroId}
                   onSelect={(id) => {
                     setSelectedGiroId(id);
@@ -885,6 +890,7 @@ function GiriTableAggregata({
   expanded,
   onToggleGroup,
   onModificaGruppo,
+  onApriGanttAggregato,
   selectedId,
   onSelect,
   onOpenFull,
@@ -897,6 +903,12 @@ function GiriTableAggregata({
     materiale: string;
     sede: string;
     nGiri: number;
+  }) => void;
+  /** Sprint 8.0 MR-A (entry 231): naviga alla vista Gantt aggregata
+   *  che combina tutti i giri del gruppo in 1 unica timeline. */
+  onApriGanttAggregato: (g: {
+    materiale: string;
+    sede: string;
   }) => void;
   selectedId: number | null;
   onSelect: (id: number) => void;
@@ -935,6 +947,12 @@ function GiriTableAggregata({
                   nGiri: g.giri.length,
                 })
               }
+              onApriGanttAggregato={() =>
+                onApriGanttAggregato({
+                  materiale: g.materiale,
+                  sede: g.sede,
+                })
+              }
               selectedId={selectedId}
               onSelect={onSelect}
               onOpenFull={onOpenFull}
@@ -953,6 +971,7 @@ function GruppoRows({
   isExpanded,
   onToggle,
   onModifica,
+  onApriGanttAggregato,
   selectedId,
   onSelect,
   onOpenFull,
@@ -963,6 +982,7 @@ function GruppoRows({
   isExpanded: boolean;
   onToggle: () => void;
   onModifica: () => void;
+  onApriGanttAggregato: () => void;
   selectedId: number | null;
   onSelect: (id: number) => void;
   onOpenFull: (id: number) => void;
@@ -1010,18 +1030,32 @@ function GruppoRows({
           )}
         </td>
         <td className="px-3 py-2.5 text-right">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              onModifica();
-            }}
-            title="Modifica materiale o deposito di tutto il gruppo"
-          >
-            <Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            Modifica gruppo
-          </Button>
+          <div className="inline-flex items-center gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                onApriGanttAggregato();
+              }}
+              title="Apri Gantt aggregato: tutti i turni di questo gruppo combinati in 1 vista per drag&drop cross-turno"
+            >
+              <ArrowRight className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              Apri Gantt aggregato
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                onModifica();
+              }}
+              title="Modifica materiale o deposito di tutto il gruppo"
+            >
+              <Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              Modifica gruppo
+            </Button>
+          </div>
         </td>
       </tr>
       {isExpanded && (

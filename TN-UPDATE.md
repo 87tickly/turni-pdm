@@ -10,6 +10,145 @@
 
 ---
 
+## 2026-05-07 (231) — MR-A: vista aggregata "1 turno N giornate" + drag&drop cross-turno
+
+### Contesto
+
+Decisione utente entry 230 finale:
+
+> "lo spostamento funziona. e anche bene, solo che posso solo
+> spostarlo tra treni dello stesso turno/giornata. perchè non hai
+> aggregato tutti i giri con un solo materiale?"
+
+L'osservazione è centrata: il drag&drop MR-B.1 era scoped al singolo
+giro_materiale (1 turno). Sul programma reale ci sono N turni separati
+per stesso `(materiale, sede)` — es. 10 turni ATR803-CRE — e l'utente
+non poteva spostare blocchi tra turni diversi.
+
+MR-A unifica due cose:
+1. **Vista aggregata UI** (`/programmi/{id}/turno-aggregato/{mat}/{sede}`):
+   1 Gantt unico con tutte le giornate di tutti i giri matching.
+2. **Drag&drop cross-turno** (backend extension `giro_target_id`):
+   trascini un blocco da T-001 a T-002 e il backend sposta la FK +
+   ricalcola seq.
+
+### Modifiche backend
+
+**`backend/src/colazione/api/giri.py`**:
+
+- `SpostaBloccoRequest` esteso con `giro_target_id: int | None = None`
+  (default = stesso giro = comportamento MR-B.1).
+- Logica:
+  - **Lock multi-giro**: se `giro_target_id != giro_id`, lock entrambi
+    in ordine di id crescente (deterministico, evita deadlock se 2
+    utenti spostano in direzioni opposte A→B/B→A).
+  - **Validazione cross-azienda**: `WHERE azienda_id = user.azienda_id`
+    su entrambi i giri.
+  - **Validazione cross-programma**: `target.programma_id ==
+    source.programma_id` (i giri devono appartenere allo stesso
+    programma per garantire coerenza PdE/regole/dotazione). Altrimenti
+    400.
+  - Lookup variante target nel giro target (non più hardcoded source).
+
+**`backend/tests/test_sposta_blocco_api.py`**: 2 test aggiuntivi
+(giro_target_id inesistente 404, payload con `giro_target_id` valido
+schema-wise).
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/giri.ts`**: `SpostaBloccoPayload` esteso con
+`giro_target_id?: number | null` (opzionale, default `null`).
+
+**`frontend/src/routes/pianificatore-giro/GiroDettaglioRoute.tsx`**:
+- `DraggableBloccoSegment` + `DroppableTimeline` accettano `giroId`
+  opzionale e lo includono nei `data` di drag/drop.
+- `handleDragEnd` legge `sourceGiroId` da active.data e `target.giroId`
+  da over.data; calcola `giro_target_id` payload solo se diversi.
+- `confermaSpostamentoForce` propaga `giro_target_id` dal
+  `pendingMove`.
+- Esportati: `BASE_TIMELINE_WIDTH_PX`, `AXIS_TOTAL_MIN`,
+  `AXIS_START_MIN`, `GIORNATA_LABEL_COL_PX`, `PER_KM_COL_PX`,
+  `TIMELINE_ROW_HEIGHT_PX`, `GanttScale` interface,
+  `GanttScaleContext`, `useGanttScale`, `buildGanttScale(zoom)`,
+  `DroppableTimeline`, `DraggableBloccoSegment` (riusabili dalla
+  TurnoAggregatoRoute).
+
+**`frontend/src/routes/pianificatore-giro/TurnoAggregatoRoute.tsx`**
+(nuovo, ~580 righe): vista aggregata.
+- Path `/pianificatore-giro/programmi/:programmaId/turno-aggregato/:materiale/:sede`.
+- Filtra `useGiriProgramma` per `(materiale, sedeBreve)` (sede estratta
+  da `numero_turno` con regex `^G-(\w+)-`).
+- `useQueries` parallel per fetchare il dettaglio di ogni giro matching.
+- Compone righe sequenziali `AggregatedRow[]` con `giornataAggregata
+  = 1..N totale tutte le giornate di tutti i giri`.
+- Stats aggregate: turni, giornate, varianti, corse, km/g cumulato.
+- ZoomToolbar 75/100/150/200%.
+- `AxisTimeline` con tick orari 04→04 (24h ciclo).
+- `AggregatedVarianteRow` per ogni variante: etichetta sx
+  `T-{seq} G{n} V{idx}`, timeline droppable, km/g sticky-right.
+- `DndContext` + `PointerSensor` (activation distance 5px) +
+  `DragOverlay` con ghost Mac-like.
+- `SpostaBloccoConfirmDialog` mostra le violazioni; titolo
+  contestualizzato per cross-turno: "verso un altro turno" vs "nello
+  stesso turno".
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaGiriRoute.tsx`**:
+- `GiriTableAggregata` riceve nuovo prop
+  `onApriGanttAggregato(materiale, sede)`.
+- `GruppoRows` row header: aggiunto bottone **"Apri Gantt aggregato"**
+  accanto a "Modifica gruppo".
+- Click → `navigate(/turno-aggregato/{mat}/{sede})`.
+
+**`frontend/src/routes/AppRoutes.tsx`**: nuova route registrata sotto
+`/pianificatore-giro` con ruolo `PIANIFICATORE_GIRO`.
+
+### Verifiche
+
+- ✅ `ruff check src/colazione/api/giri.py
+  tests/test_sposta_blocco_api.py` clean.
+- ✅ `mypy --strict src/colazione/api/giri.py` clean.
+- ✅ `pytest tests/test_sposta_blocco_api.py --co` → 5 test collected.
+- ✅ `pnpm build` (intero) → bundle `index-Bugmu1gy.js`, 1805 moduli
+  trasformati, nessun errore.
+
+### Stato
+
+- ✅ MR-A chiuso. Backend + frontend pronti.
+- ⏳ Commit + push + deploy backend + frontend Railway.
+
+### Per l'utente
+
+1. Sul programma → "Giri generati" → spunta **"Raggruppa per
+   materiale"** nella FiltersBar.
+2. Sull'header di un gruppo (es. ATR803 · CRE — 10 turni), clicca
+   bottone **"Apri Gantt aggregato"**.
+3. Si apre la nuova vista con TUTTI i 10 turni combinati in 1 Gantt
+   unico: 25 righe-giornata (sequenza aggregata 1..25), ognuna
+   etichettata "T-{turno} G{giornata} V{variante}".
+4. Trascina un blocco da una riga a un'altra → il drag&drop
+   attraversa i turni grazie all'estensione backend `giro_target_id`.
+
+### Limitazioni iter 1
+
+- **Performance**: con N turni grandi (>20) e tante giornate, il
+  rendering è O(rows × blocks). Per scenari estesi va valutato
+  virtualization (`react-window` o simile) — fuori scope.
+- **Click selezione blocco**: nella vista aggregata `onSelect` è
+  no-op. Una versione successiva può aprire un mini-popover con
+  azioni (apri dettaglio giro, marca doppia composizione, ecc.).
+- **Stesso programma obbligatorio**: lo spostamento cross-turno è
+  vincolato al medesimo `programma_id` lato backend. Cross-programma
+  → 400.
+
+### Prossimo step
+
+- **MR-B.2**: aggiungi/elimina vuoto manuale (palette vuoti +
+  context menu).
+- **MR-B.3**: doppia composizione UI inline (riusa `PATCH /blocchi/{id}`
+  esistente).
+
+---
+
 ## 2026-05-07 (230) — MR-B.1: drag&drop blocchi tra giornate (Mac-like)
 
 ### Contesto

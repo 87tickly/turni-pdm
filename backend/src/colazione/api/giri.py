@@ -2625,8 +2625,12 @@ class ViolazioneFattibilita(BaseModel):
 
 
 class SpostaBloccoRequest(BaseModel):
-    """Payload per spostare un blocco tra giornate/varianti dello
-    stesso giro.
+    """Payload per spostare un blocco tra giornate/varianti.
+
+    Sprint 8.0 MR-A (entry 231): supporto cross-turno via
+    `giro_target_id` opzionale. Quando passato, il blocco viene
+    spostato in un altro `GiroMateriale` dello stesso programma e
+    azienda. Default `None` = stesso giro (comportamento MR-B.1).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -2645,6 +2649,15 @@ class SpostaBloccoRequest(BaseModel):
         description=(
             "Posizione seq nella variante destinazione (1-based). "
             "Se None, append in coda."
+        ),
+    )
+    giro_target_id: int | None = Field(
+        default=None,
+        description=(
+            "Sprint 8.0 MR-A entry 231 — id del giro destinazione "
+            "per spostamento cross-turno. Default None = stesso giro "
+            "del blocco (intra-turno, comportamento MR-B.1). Il giro "
+            "target deve appartenere stesso programma + stessa azienda."
         ),
     )
     dry_run: bool = Field(
@@ -2805,21 +2818,58 @@ async def sposta_blocco(
     # CRITICAL entry 230): serializza drag&drop concorrenti sullo
     # stesso giro evitando corruzione di `seq` (unique
     # `(giro_variante_id, seq)`). Il lock è rilasciato a fine request.
-    giro = (
-        await session.execute(
-            select(GiroMateriale)
-            .where(
-                GiroMateriale.id == giro_id,
-                GiroMateriale.azienda_id == user.azienda_id,
+    #
+    # Sprint 8.0 MR-A entry 231: lock anche giro_target_id per
+    # cross-turno. Per evitare deadlock se 2 utenti spostano in
+    # direzioni opposte (A→B e B→A), lock i due giri in ordine di id
+    # crescente (deterministico).
+    target_giro_id = payload.giro_target_id
+    if target_giro_id is not None and target_giro_id != giro_id:
+        lock_ids = sorted([giro_id, target_giro_id])
+    else:
+        lock_ids = [giro_id]
+
+    giri_locked = list(
+        (
+            await session.execute(
+                select(GiroMateriale)
+                .where(
+                    GiroMateriale.id.in_(lock_ids),
+                    GiroMateriale.azienda_id == user.azienda_id,
+                )
+                .order_by(GiroMateriale.id)
+                .with_for_update()
             )
-            .with_for_update()
         )
-    ).scalar_one_or_none()
-    if giro is None:
+        .scalars()
+        .all()
+    )
+    if len(giri_locked) != len(lock_ids):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="giro non trovato",
+            detail="giro o giro_target non trovato",
         )
+    giri_by_id = {g.id: g for g in giri_locked}
+    giro = giri_by_id[giro_id]
+
+    # MR-A entry 231: cross-turno richiede stesso programma_id (i giri
+    # devono appartenere allo stesso programma per garantire coerenza
+    # PdE, regole, dotazione).
+    if target_giro_id is not None and target_giro_id != giro_id:
+        target_giro = giri_by_id.get(target_giro_id)
+        if target_giro is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="giro_target non trovato",
+            )
+        if target_giro.programma_id != giro.programma_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "giro_target appartiene a un programma diverso: "
+                    "lo spostamento cross-programma non è ammesso."
+                ),
+            )
 
     # 2. Pipeline freeze.
     stato_pipeline = (
@@ -2858,13 +2908,18 @@ async def sposta_blocco(
 
     variante_origine_id = blocco.giro_variante_id
 
-    # 4. Trova variante destinazione.
+    # 4. Trova variante destinazione (intra o cross-turno MR-A).
+    target_giro_id_effective = (
+        payload.giro_target_id
+        if payload.giro_target_id is not None
+        else giro_id
+    )
     variante_target = (
         await session.execute(
             select(GiroVariante)
             .join(GiroGiornata, GiroGiornata.id == GiroVariante.giro_giornata_id)
             .where(
-                GiroGiornata.giro_materiale_id == giro_id,
+                GiroGiornata.giro_materiale_id == target_giro_id_effective,
                 GiroGiornata.numero_giornata == payload.giornata_target,
                 GiroVariante.variant_index == payload.variant_index_target,
             )
@@ -2874,7 +2929,8 @@ async def sposta_blocco(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=(
-                f"variante target non trovata: giornata="
+                f"variante target non trovata: giro="
+                f"{target_giro_id_effective}, giornata="
                 f"{payload.giornata_target}, variant_index="
                 f"{payload.variant_index_target}"
             ),

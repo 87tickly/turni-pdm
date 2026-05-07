@@ -596,6 +596,13 @@ export interface SpostaBloccoPayload {
   giornata_target: number;
   variant_index_target: number;
   seq_target?: number | null;
+  /**
+   * Sprint 8.0 MR-A (entry 231) — id del giro destinazione per
+   * spostamento cross-turno. Default `null` = stesso giro del blocco
+   * (intra-turno). Il giro target deve appartenere stesso programma
+   * + stessa azienda.
+   */
+  giro_target_id?: number | null;
   dry_run: boolean;
   force: boolean;
 }

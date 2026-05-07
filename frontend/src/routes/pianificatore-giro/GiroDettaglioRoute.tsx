@@ -110,8 +110,8 @@ import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdc
 // Constants — time axis 04:00 → 04:00 next day (24h, 1440 min)
 // =====================================================================
 
-const AXIS_START_MIN = 4 * 60; // 04:00 reference
-const AXIS_TOTAL_MIN = 24 * 60; // 1440 min
+export const AXIS_START_MIN = 4 * 60; // 04:00 reference
+export const AXIS_TOTAL_MIN = 24 * 60; // 1440 min
 
 // Sprint 7.9 MR γ (2026-05-04) ha portato il default da 1h=60px a
 // 1h=40px (960px totale) per evitare scroll orizzontale su schermi
@@ -119,10 +119,10 @@ const AXIS_TOTAL_MIN = 24 * 60; // 1440 min
 // `GanttScaleContext`, l'utente sceglie 75/100/150/200% in toolbar
 // (default 100% = 960px = scala MR γ). Risolve il troncamento di
 // numeri/orari sui giri densi tipo direttrice Tirano (~26 treni/g).
-const BASE_TIMELINE_WIDTH_PX = 960;
-const GIORNATA_LABEL_COL_PX = 100;
-const PER_KM_COL_PX = 120;
-const TIMELINE_ROW_HEIGHT_PX = 88;
+export const BASE_TIMELINE_WIDTH_PX = 960;
+export const GIORNATA_LABEL_COL_PX = 100;
+export const PER_KM_COL_PX = 120;
+export const TIMELINE_ROW_HEIGHT_PX = 88;
 const NOTTE_ROW_HEIGHT_PX = 24;
 
 const ZOOM_LEVELS = [0.75, 1, 1.5, 2] as const;
@@ -136,7 +136,7 @@ const LS_KEY_GANTT_ZOOM = "colazione.gantt-giro.zoom";
 // per id-giornata in localStorage così la scelta sopravvive a refresh.
 const LS_KEY_GANTT_EXPANDED = "colazione.gantt-giro.expanded";
 
-interface GanttScale {
+export interface GanttScale {
   /** Larghezza totale della timeline in px (24h scalate da zoom). */
   timelineWidthPx: number;
   /** Pixel per ora effettivi (per UI/tick). */
@@ -151,14 +151,29 @@ function _baseMinToPx(min: number, totalWidthPx: number): number {
   return (rel / AXIS_TOTAL_MIN) * totalWidthPx;
 }
 
-const GanttScaleContext = createContext<GanttScale>({
+export const GanttScaleContext = createContext<GanttScale>({
   timelineWidthPx: BASE_TIMELINE_WIDTH_PX,
   pxPerHour: BASE_TIMELINE_WIDTH_PX / 24,
   minToPx: (min) => _baseMinToPx(min, BASE_TIMELINE_WIDTH_PX),
 });
 
-function useGanttScale(): GanttScale {
+export function useGanttScale(): GanttScale {
   return useContext(GanttScaleContext);
+}
+
+/**
+ * Sprint 8.0 MR-A (entry 231) — factory di GanttScale per la vista
+ * aggregata, che ha bisogno di settare il provider esternamente.
+ * Il GiroDettaglioRoute usa il proprio provider interno con zoom
+ * persisted; la TurnoAggregatoRoute riusa la stessa logica.
+ */
+export function buildGanttScale(zoom: number): GanttScale {
+  const timelineWidthPx = BASE_TIMELINE_WIDTH_PX * zoom;
+  return {
+    timelineWidthPx,
+    pxPerHour: timelineWidthPx / 24,
+    minToPx: (min) => _baseMinToPx(min, timelineWidthPx),
+  };
 }
 
 function readPersistedZoom(): ZoomLevel {
@@ -244,8 +259,10 @@ export function GiroDettaglioRoute() {
     useState<GiroBlocco | null>(null);
   const [pendingMove, setPendingMove] = useState<{
     blocco: GiroBlocco;
+    sourceGiroId: number;
     giornataTarget: number;
     variantIndexTarget: number;
+    giroTargetIdPayload: number | null;
     response: SpostaBloccoResponse;
   } | null>(null);
   const spostaMutation = useSpostaBlocco();
@@ -276,11 +293,15 @@ export function GiroDettaglioRoute() {
       const sourceVarianteId = active.data.current?.varianteId as
         | number
         | undefined;
+      const sourceGiroId = active.data.current?.giroId as
+        | number
+        | undefined;
       const target = over.data.current as
         | {
             varianteId: number;
             giornataNumero: number;
             variantIndex: number;
+            giroId?: number;
           }
         | undefined;
       if (blocco === undefined || target === undefined) return;
@@ -290,13 +311,22 @@ export function GiroDettaglioRoute() {
       const giroDettaglio = query.data;
       if (giroDettaglio === undefined) return;
 
+      // Sprint 8.0 MR-A entry 231: cross-turno via giro_target_id.
+      // Source = sourceGiroId (o giroDettaglio.id come fallback).
+      // Target = target.giroId (o stesso source, intra-turno).
+      const sourceGiro = sourceGiroId ?? giroDettaglio.id;
+      const targetGiro = target.giroId ?? sourceGiro;
+      const giroTargetIdPayload =
+        targetGiro !== sourceGiro ? targetGiro : null;
+
       try {
         const dryRes = await spostaMutation.mutateAsync({
-          giroId: giroDettaglio.id,
+          giroId: sourceGiro,
           bloccoId: blocco.id,
           payload: {
             giornata_target: target.giornataNumero,
             variant_index_target: target.variantIndex,
+            giro_target_id: giroTargetIdPayload,
             dry_run: true,
             force: false,
           },
@@ -306,11 +336,12 @@ export function GiroDettaglioRoute() {
         );
         if (!hasErrors) {
           await spostaMutation.mutateAsync({
-            giroId: giroDettaglio.id,
+            giroId: sourceGiro,
             bloccoId: blocco.id,
             payload: {
               giornata_target: target.giornataNumero,
               variant_index_target: target.variantIndex,
+              giro_target_id: giroTargetIdPayload,
               dry_run: false,
               force: false,
             },
@@ -318,8 +349,10 @@ export function GiroDettaglioRoute() {
         } else {
           setPendingMove({
             blocco,
+            sourceGiroId: sourceGiro,
             giornataTarget: target.giornataNumero,
             variantIndexTarget: target.variantIndex,
+            giroTargetIdPayload,
             response: dryRes,
           });
         }
@@ -334,15 +367,14 @@ export function GiroDettaglioRoute() {
 
   const confermaSpostamentoForce = useCallback(async () => {
     if (pendingMove === null) return;
-    const giroDettaglio = query.data;
-    if (giroDettaglio === undefined) return;
     try {
       await spostaMutation.mutateAsync({
-        giroId: giroDettaglio.id,
+        giroId: pendingMove.sourceGiroId,
         bloccoId: pendingMove.blocco.id,
         payload: {
           giornata_target: pendingMove.giornataTarget,
           variant_index_target: pendingMove.variantIndexTarget,
+          giro_target_id: pendingMove.giroTargetIdPayload,
           dry_run: false,
           force: true,
         },
@@ -354,7 +386,7 @@ export function GiroDettaglioRoute() {
     } finally {
       setPendingMove(null);
     }
-  }, [pendingMove, query.data, spostaMutation]);
+  }, [pendingMove, spostaMutation]);
 
   // Sprint 8.0 MR-1 (entry 214 + 217 hotfix UX): se presente
   // ``?focusBlocco=<id>`` in URL (arrivo dal popup Cerca treno):
@@ -2157,13 +2189,14 @@ function VarianteRow({
 
 /**
  * Sprint 8.0 MR-B.1 (entry 230) — wrapper droppable della timeline di
- * una variante. Riceve i blocchi come children e accetta il drop di un
- * blocco trascinato (via `useDroppable`).
+ * una variante. Sprint 8.0 MR-A (entry 231): aggiunto `giroId`
+ * opzionale per drag&drop cross-turno (vista aggregata).
  */
-function DroppableTimeline({
+export function DroppableTimeline({
   varianteId,
   giornataNumero,
   variantIndex,
+  giroId,
   widthPx,
   heightPx,
   children,
@@ -2171,13 +2204,15 @@ function DroppableTimeline({
   varianteId: number;
   giornataNumero: number;
   variantIndex: number;
+  /** MR-A entry 231: id del giro proprietario della variante. */
+  giroId?: number;
   widthPx: number;
   heightPx: number;
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `variante-${varianteId}`,
-    data: { varianteId, giornataNumero, variantIndex },
+    data: { varianteId, giornataNumero, variantIndex, giroId },
   });
   return (
     <div
@@ -2195,15 +2230,18 @@ function DroppableTimeline({
 
 /**
  * Sprint 8.0 MR-B.1 (entry 230) — wrapper draggable per BloccoSegment.
- * Chiama `useDraggable` e passa ref/listeners/attributes alla
- * `BloccoSegment` interna che li applica al `<button>`.
+ * Sprint 8.0 MR-A (entry 231): aggiunto `giroId` opzionale per
+ * drag&drop cross-turno (vista aggregata).
  */
-function DraggableBloccoSegment({
+export function DraggableBloccoSegment({
   varianteId,
+  giroId,
   ...rest
 }: {
   blocco: GiroBlocco;
   varianteId: number;
+  /** MR-A entry 231: id del giro proprietario del blocco. */
+  giroId?: number;
   selected: boolean;
   isFirstOfRow: boolean;
   isLastOfRow: boolean;
@@ -2211,7 +2249,7 @@ function DraggableBloccoSegment({
 }) {
   const { setNodeRef, listeners, attributes, isDragging } = useDraggable({
     id: `blocco-${rest.blocco.id}`,
-    data: { blocco: rest.blocco, varianteId },
+    data: { blocco: rest.blocco, varianteId, giroId },
   });
   return (
     <BloccoSegment

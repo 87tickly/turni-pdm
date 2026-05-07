@@ -13,6 +13,7 @@ import { ProgrammaDettaglioRoute } from "@/routes/pianificatore-giro/ProgrammaDe
 import { ProgrammaGiriRoute } from "@/routes/pianificatore-giro/ProgrammaGiriRoute";
 import { ProgrammiRoute } from "@/routes/pianificatore-giro/ProgrammiRoute";
 import { TurniPdcGiroRoute } from "@/routes/pianificatore-giro/TurniPdcGiroRoute";
+import { TurnoAggregatoRoute } from "@/routes/pianificatore-giro/TurnoAggregatoRoute";
 import { TurnoPdcDettaglioRoute } from "@/routes/pianificatore-giro/TurnoPdcDettaglioRoute";
 import { GestionePersonaleAssegnaPersoneRoute } from "@/routes/gestione-personale/AssegnaPersoneRoute";
 import { GestionePersonaleCalendarioRoute } from "@/routes/gestione-personale/CalendarioRoute";
@@ -76,6 +77,13 @@ export function AppRoutes() {
             <Route path="programmi" element={<ProgrammiRoute />} />
             <Route path="programmi/:programmaId" element={<ProgrammaDettaglioRoute />} />
             <Route path="programmi/:programmaId/giri" element={<ProgrammaGiriRoute />} />
+            {/* Sprint 8.0 MR-A (entry 231) — vista aggregata per
+                (materiale, sede): combina N giri in 1 Gantt unico per
+                drag&drop cross-turno. */}
+            <Route
+              path="programmi/:programmaId/turno-aggregato/:materiale/:sede"
+              element={<TurnoAggregatoRoute />}
+            />
             <Route path="giri/:giroId" element={<GiroDettaglioRoute />} />
             <Route path="giri/:giroId/turni-pdc" element={<TurniPdcGiroRoute />} />
             <Route path="thread/:threadId" element={<MaterialeThreadRoute />} />

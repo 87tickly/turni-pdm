@@ -139,3 +139,61 @@ async def test_sposta_payload_invalido_422(client: TestClient) -> None:
         },
     )
     assert res.status_code == 422
+
+
+# =====================================================================
+# Sprint 8.0 MR-A entry 231: payload cross-turno
+# =====================================================================
+
+
+async def test_sposta_giro_target_inesistente_404(
+    client: TestClient,
+) -> None:
+    """`giro_target_id` non trovato per l'azienda corrente → 404."""
+    token = _login(client, "admin", "admin12345")
+    res = client.post(
+        "/api/giri/99999998/blocchi/1/sposta",
+        headers=_auth(token),
+        json=_payload(),
+    )
+    # Il primo giro non esiste; con cross-turno fittizio dovrebbe sempre 404.
+    assert res.status_code == 404
+
+    # Cross-turno con giro_target_id inesistente: anche se passassimo
+    # un giro source valido (test richiede DB seedato), il target manca
+    # → 404 dal lookup `giri_locked`.
+    payload_cross = {
+        **_payload(),
+        "giro_target_id": 99999999,
+    }
+    res = client.post(
+        "/api/giri/99999998/blocchi/1/sposta",
+        headers=_auth(token),
+        json=payload_cross,
+    )
+    assert res.status_code == 404
+
+
+async def test_sposta_giro_target_id_payload_valido(
+    client: TestClient,
+) -> None:
+    """`giro_target_id` opzionale: payload accettato schema-wise (poi
+    può fallire 404 sul lookup business)."""
+    token = _login(client, "admin", "admin12345")
+
+    # giro_target_id None → schema OK, comportamento intra-turno.
+    res = client.post(
+        "/api/giri/99999998/blocchi/1/sposta",
+        headers=_auth(token),
+        json=_payload(),
+    )
+    assert res.status_code == 404  # giro inesistente, ma schema OK
+
+    # giro_target_id int → schema OK.
+    payload_cross = {**_payload(), "giro_target_id": 12345}
+    res = client.post(
+        "/api/giri/99999998/blocchi/1/sposta",
+        headers=_auth(token),
+        json=payload_cross,
+    )
+    assert res.status_code == 404  # giro inesistente, ma schema OK
