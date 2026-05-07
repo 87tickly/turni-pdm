@@ -10,6 +10,70 @@
 
 ---
 
+## 2026-05-07 (216) — Hotfix MR-1: typo r.variante_index → r.variant_index
+
+### Bug
+
+Utente prova cerca-treno su programma reale (giro #549, ATR803 sede
+CRE), digita ``10667`` → frontend mostra "Errore: Failed to fetch".
+DevTools Network: ``cerca-treno?q=10667&limit=50`` ritorna **500
+Internal Server Error**.
+
+### Causa
+
+Log Railway backend:
+```
+File "/app/src/colazione/api/giri.py", line 671, in _add_rows
+    variante_index=int(r.variante_index),
+                       ^^^^^^^^^^^^^^^^
+AttributeError: variante_index
+```
+
+Nel mio endpoint cerca-treno (entry 214) ho fatto un typo italiano:
+``r.variante_index`` invece di ``r.variant_index``. Il modello
+``GiroVariante`` espone l'attributo ``variant_index`` (come dalla
+SELECT della query), ma nel codice di mapping row → Pydantic ho
+scritto la versione italianizzata.
+
+Lo schema Pydantic ``CercaTrenoBloccoRef.variante_index`` invece è
+corretto (italiano consistente con il resto del response).
+
+mypy non ha catturato il typo perché la query SQLAlchemy usa
+``select(...)`` con campi dinamici → il tipo di `r` è ``Row[Any]``,
+qualunque ``r.<x>`` passa typecheck.
+
+### Fix
+
+```python
+# Prima:
+variante_index=int(r.variante_index),
+# Dopo:
+variante_index=int(r.variant_index),
+```
+
+Una sola riga (giri.py:671). Il response Pydantic (campo
+``variante_index``) resta invariato.
+
+### Lessons learned
+
+I test pytest avrebbero catturato questo bug — ma non li ho potuti
+eseguire localmente (Postgres Docker non running). Promemoria:
+``docker compose up postgres + pytest tests/test_cerca_treno_api.py``
+prima del commit di endpoint nuovi che non hanno tipo statico
+SQLAlchemy.
+
+### Verifiche
+
+- ✅ ``mypy --strict src/colazione/api/giri.py`` clean.
+- ⏳ Test pytest ancora non eseguito localmente (limite ambiente).
+
+### Stato
+
+- ✅ Hotfix applicato.
+- ⏳ Commit + push + deploy backend Railway.
+
+---
+
 ## 2026-05-07 (215) — MR-1 follow-up: cerca treno anche su ProgrammaGiriRoute
 
 ### Contesto

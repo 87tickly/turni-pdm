@@ -668,7 +668,7 @@ async def cerca_treno(
                 giro_id=int(r.giro_id),
                 numero_turno=str(r.numero_turno),
                 giornata=int(r.numero_giornata),
-                variante_index=int(r.variante_index),
+                variante_index=int(r.variant_index),
                 variante_etichetta=r.validita_testo,
                 seq=int(r.seq),
             )
