@@ -23,6 +23,7 @@ import type {
 } from "@/lib/api/giri";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { CercaTrenoDialog } from "@/routes/pianificatore-giro/CercaTrenoDialog";
 import { GeneraTurnoPdcDialog } from "@/routes/pianificatore-giro/GeneraTurnoPdcDialog";
 
 /**
@@ -61,6 +62,9 @@ export function ProgrammaGiriRoute() {
   // Sprint 7.9 MR η.1 — dialog generazione PdC mountato a livello
   // pagina, attivato dalla riga giro corrispondente.
   const [generaPdcGiroId, setGeneraPdcGiroId] = useState<number | null>(null);
+  // Sprint 8.0 MR-1 (entry 214/215): popup cerca treno scoped al
+  // programma corrente.
+  const [cercaTrenoOpen, setCercaTrenoOpen] = useState(false);
 
   const giri = useMemo(() => giriQuery.data ?? [], [giriQuery.data]);
 
@@ -106,14 +110,42 @@ export function ProgrammaGiriRoute() {
             )}
           </p>
         </div>
-        <Link
-          to={`/pianificatore-giro/programmi/${programmaId}`}
-          className="inline-flex items-center gap-2 rounded-md border border-border bg-white px-3.5 py-2 text-sm text-foreground hover:bg-muted"
-        >
-          Apri dettaglio programma
-          <ArrowRight className="h-4 w-4" aria-hidden />
-        </Link>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCercaTrenoOpen(true)}
+            disabled={giri.length === 0}
+            title={
+              giri.length === 0
+                ? "Nessun giro generato ancora"
+                : "Cerca un treno tra i giri di questo programma"
+            }
+          >
+            <Search className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            Cerca treno
+          </Button>
+          <Link
+            to={`/pianificatore-giro/programmi/${programmaId}`}
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-white px-3.5 py-2 text-sm text-foreground hover:bg-muted"
+          >
+            Apri dettaglio programma
+            <ArrowRight className="h-4 w-4" aria-hidden />
+          </Link>
+        </div>
       </div>
+
+      <CercaTrenoDialog
+        programmaId={programmaId}
+        open={cercaTrenoOpen}
+        onOpenChange={setCercaTrenoOpen}
+        onSelect={(_it, b) => {
+          setCercaTrenoOpen(false);
+          navigate(
+            `/pianificatore-giro/giri/${b.giro_id}?focusBlocco=${b.blocco_id}`,
+          );
+        }}
+      />
 
       {/* Body */}
       {giriQuery.isLoading ? (

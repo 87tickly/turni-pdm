@@ -10,6 +10,58 @@
 
 ---
 
+## 2026-05-07 (215) — MR-1 follow-up: cerca treno anche su ProgrammaGiriRoute
+
+### Contesto
+
+Dopo il deploy entry 214, l'utente ha segnalato "io non trovo il
+cerca treno da nessuna parte" con 2 screenshot:
+
+1. ``/pianificatore-giro/programmi/12/giri`` (``ProgrammaGiriRoute``,
+   schermata "Giri generati") → bottone NON presente. **È normale**:
+   in entry 214 avevo integrato solo ``DashboardRoute`` (Home) e
+   ``GiroDettaglioRoute`` (dettaglio singolo). Mio errore di analisi
+   — la pagina dei giri di un programma è quella più usata e va
+   inclusa.
+2. ``/pianificatore-giro/giri/422`` (``GiroDettaglioRoute``) →
+   bottone non visibile. Diagnosi: il bundle deployato
+   ``index-kDhUd9AG.js`` contiene 4 occorrenze di "Cerca treno",
+   quindi il deploy è andato. Probabile causa: cache browser (vecchio
+   JS bundle in memoria). Soluzione utente: ``Cmd+Shift+R``.
+
+### Modifiche
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaGiriRoute.tsx`**:
+
+- Import ``CercaTrenoDialog``.
+- Stato ``cercaTrenoOpen: boolean``.
+- Bottone ``[🔍 Cerca treno]`` nella riga title accanto al link
+  "Apri dettaglio programma → ", disabilitato se ``giri.length === 0``
+  con tooltip esplicativo.
+- Dialog mountato subito dopo, ``onSelect`` → ``navigate(\`/giri/${id}?focusBlocco=${b}\`)``.
+
+### Verifiche
+
+- ✅ ``pnpm tsc --noEmit`` clean (frontend).
+- ✅ ``vite dev`` builda + serve. Login render senza errori console.
+
+### Stato
+
+- ✅ Cerca treno integrato in **3 route** ora: ``DashboardRoute`` +
+  ``ProgrammaGiriRoute`` + ``GiroDettaglioRoute``.
+- ⏳ Commit + push + deploy frontend Railway.
+
+### Per l'utente
+
+Dopo deploy, fai ``Cmd+Shift+R`` (hard reload) per scaricare il
+nuovo bundle JS. Vedrai il bottone:
+
+- Sulla **Home** Pianificatore Giro (su ogni card programma)
+- Sulla pagina **"Giri generati"** del programma (header destro)
+- Sul **dettaglio singolo giro** (in alto a destra del link "Lista giri")
+
+---
+
 ## 2026-05-07 (214) — MR-1: cerca treno (commerciale + vuoto) tra i giri del programma
 
 ### Contesto
