@@ -10,6 +10,103 @@
 
 ---
 
+## 2026-05-07 (223) — Rollback parziale MR-3: il check multi-giornata era troppo restrittivo
+
+### Bug
+
+Dopo deploy entry 222, l'utente ha rigenerato e segnalato:
+
+> "la logica non funziona, ora creiamo una sola giornata. e bon. e
+> Comunque non copriamo i giri scoperti"
+
+Tutti i giri sono diventati single-day.
+
+### Causa
+
+Il check ``_minuti_diurni_sosta_intergiornata > 300`` (5h) entry 222
+era troppo aggressivo per la realtà operativa dei treni regionali:
+
+- Catena tipica fine pomeriggio (es. ultima corsa finisce alle 16:00)
+- Catena successiva inizio mattino (es. prima corsa parte alle 09:00)
+- Sosta totale ~17h, di cui:
+  - 16:00–22:00 = 6h diurne
+  - 22:00–06:00 = 8h notte
+  - 06:00–09:00 = 3h diurne
+  - **Totale diurni = 9h** > 5h → check spezza il giro
+
+Quindi qualsiasi continuazione di giorno-2 con catene "normali"
+(treni regionali) viene rifiutata. Risultato: builder produce solo
+giri single-day → nemmeno il pattern fisiologico "convoglio dorme
+in stazione X" funziona.
+
+### Fix
+
+**`backend/src/colazione/domain/builder_giro/multi_giornata.py`**:
+rimosso il check ``diurno_sosta > MAX_SOSTA_DIURNA_MIN`` nel loop di
+estensione del giro (entry 222 è cancellata in questa parte). I
+giri multi-giornata tornano a estendersi normalmente, vincolati solo
+da ``n_giornate_max`` + ``km_max_ciclo`` + ``staz_arrivo == staz_partenza``.
+
+**Cosa resta dell'entry 222** (mantenuto):
+
+- ``ParamCatena.gap_max = 300`` (5h intra-giornata): intatto. Il
+  builder NON concatena 2 corse nella stessa giornata se il gap > 5h
+  → niente più giri come pre-entry 222 con gap di 6h diurni.
+- ``_minuti_diurni_sosta_intergiornata`` helper + costante
+  ``MAX_SOSTA_DIURNA_MIN``: ESPOSTI ma non usati. Rimangono per
+  possibile riutilizzo come soglia **configurabile per programma**
+  in iterazione 2 (utente sceglie la sua tolleranza).
+- 7 test ``test_sosta_diurna_mr3.py``: PASSED. L'helper resta
+  testato.
+
+### Verifiche
+
+- ✅ ``ruff check`` clean.
+- ✅ ``mypy --strict`` clean.
+- ✅ ``pytest tests/test_sosta_diurna_mr3.py`` → 7/7 PASSED.
+
+### Lessons learned
+
+1. **Diagnosi prima di azione** (regola 1 METODO): avrei dovuto
+   verificare con un esempio numerico realistico (catena 16:00 →
+   09:00 = 9h diurni) PRIMA di scegliere 300 min come soglia. La
+   matematica del calcolo era corretta, la soglia era irrealistica.
+2. **Vincolo del builder ≠ ottimizzazione**: il builder fa
+   trade-off tra "più giri corti" e "meno giri lunghi con soste".
+   Spostare l'asticella del cap diurno a 5h ha forzato la prima,
+   ma l'utente vuole il pattern multi-giornata fisiologico.
+3. La VERA soluzione per "G1 sosta 22h" è probabilmente:
+   - Configurazione utente "sotto N% di servizio nella giornata,
+     considera la giornata 'sottoutilizzata' e spezza il giro"
+   - NON un check sulla durata della sosta diurna
+4. Il problema "189 corse non coperte" è ortogonale: né MR-2.5/
+   2.6/2.7 né MR-3 lo risolvono. Serve probabilmente revisione
+   manuale delle regole del programma + dotazione materiali.
+
+### Stato
+
+- ✅ Rollback applicato. Builder torna al comportamento pre-entry
+  222 sul multi-giornata.
+- ✅ Mantenuto cap intra-giornata 5h (entry 222 parte 1).
+- ⏳ Commit + push + deploy backend Railway.
+
+### Prossimo step (utente decide)
+
+Soluzioni rimaste sul tavolo:
+
+1. **Vincolo configurabile per programma**: ``max_sosta_diurna_min``
+   come campo del programma (default = unlimited, l'utente sceglie
+   se attivare e quale valore). UI: input nella configurazione.
+2. **Vincolo "giornata sottoutilizzata"**: percentuale minima di
+   servizio richiesto per ogni giornata di un giro multi-giornata
+   (es. ≥ 30%). Spezza il giro lì se la giornata K è sotto soglia.
+3. **Accettare** che il pattern multi-giornata produca soste lunghe
+   per definizione (= il convoglio dorme in stazione, non in
+   deposito) e concentrare gli sforzi sulla copertura 100% (MR-2.7
+   v2 con override dotazione).
+
+---
+
 ## 2026-05-07 (222) — MR-3: vincolo HARD soste diurne max 5h (intra-giornata + multi-giornata)
 
 ### Contesto

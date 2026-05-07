@@ -546,19 +546,18 @@ def _costruisci_giri_per_data(
                 if prossima is None:
                     break
 
-                # Sprint 8.0 MR-3 (entry 222): se la sosta in stazione
-                # tra G_k (ultima_corsa.ora_arrivo) e G_{k+1}
-                # (prossima.catena.corse[0].ora_partenza) ha più di 5h
-                # diurne (fuori 22:00-06:00), NON estendere il giro.
-                # Il convoglio rientra deposito invece di restare fermo
-                # in stazione durante il diurno feriale.
-                ora_arrivo_g_k = ultima_corsa.ora_arrivo
-                ora_partenza_g_k1 = prossima.catena.corse[0].ora_partenza
-                diurno_sosta = _minuti_diurni_sosta_intergiornata(
-                    ora_arrivo_g_k, ora_partenza_g_k1
-                )
-                if diurno_sosta > MAX_SOSTA_DIURNA_MIN:
-                    break
+                # MR-3 entry 223 (rollback parziale di entry 222): il
+                # check ``_minuti_diurni_sosta_intergiornata > 300`` era
+                # troppo restrittivo per la realtà operativa: treni
+                # regionali finiscono fine pomeriggio (~16:00) e
+                # ricominciano mattina (~09:00) → sosta intergiornata
+                # ~9h diurni → spezza sempre. Risultato: tutti giri di
+                # 1 giornata. L'utente ha confermato che è inaccettabile.
+                # Rimosso il check qui — il vincolo 5h ora vale solo
+                # per soste INTRA-giornata (gap_max in catena.py).
+                # ``_minuti_diurni_sosta_intergiornata`` resta come
+                # helper esposto per usi futuri (potrebbe servire come
+                # soglia configurabile per programma in iterazione 2).
 
                 giornate.append(GiornataGiro(data=d_prossima, catena_posizionata=prossima))
                 visitate.add(id(prossima))
