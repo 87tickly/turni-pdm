@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
+  Plus,
   Search,
   Users,
   Wrench,
@@ -25,6 +26,7 @@ import {
 import { Spinner } from "@/components/ui/Spinner";
 import {
   useCorseNonCoperte,
+  useGeneraDaResidue,
   useGiriProgramma,
   useGiroDettaglio,
   useRiempiGap,
@@ -34,6 +36,7 @@ import { ApiError } from "@/lib/api/client";
 import type {
   CorsaNonCopertaItem,
   FillGapResult,
+  GeneraDaResidueResponse,
   GiroBlocco,
   GiroDettaglio,
   GiroGiornata,
@@ -1074,6 +1077,27 @@ function CorseNonCoperteSection({ programmaId }: { programmaId: number }) {
   const [previewResult, setPreviewResult] = useState<FillGapResult | null>(null);
   const riempiGapMutation = useRiempiGap();
 
+  // Sprint 8.0 MR-2.7 (entry 221): stati per "Genera-da-residue".
+  // ``confermaOpen``: dialog di conferma pre-esecuzione.
+  // ``residueResult``: risultato dell'esecuzione (dialog post).
+  const [confermaResidueOpen, setConfermaResidueOpen] = useState(false);
+  const [residueResult, setResidueResult] =
+    useState<GeneraDaResidueResponse | null>(null);
+  const residueMutation = useGeneraDaResidue();
+
+  const onClickGeneraDaResidue = () => {
+    setConfermaResidueOpen(true);
+  };
+
+  const onConfermaGeneraDaResidue = () => {
+    residueMutation.mutate(programmaId, {
+      onSuccess: (data) => {
+        setConfermaResidueOpen(false);
+        setResidueResult(data);
+      },
+    });
+  };
+
   const onClickRiempiGap = () => {
     riempiGapMutation.mutate(
       { programmaId, dryRun: true },
@@ -1179,17 +1203,32 @@ function CorseNonCoperteSection({ programmaId }: { programmaId: number }) {
               </div>
             )}
           </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={onClickRiempiGap}
-            disabled={riempiGapMutation.isPending}
-          >
-            <Wrench className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            {riempiGapMutation.isPending && previewResult === null
-              ? "Calcolo…"
-              : "Riempi gap"}
-          </Button>
+          <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onClickRiempiGap}
+              disabled={riempiGapMutation.isPending}
+              title="Tenta di inserire le corse scoperte nei gap intra-giornata dei giri esistenti (match esatto stazioni)."
+            >
+              <Wrench className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              {riempiGapMutation.isPending && previewResult === null
+                ? "Calcolo…"
+                : "Riempi gap"}
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={onClickGeneraDaResidue}
+              disabled={residueMutation.isPending}
+              title="Genera nuovi giri (in aggiunta ai giri esistenti) per le corse scoperte usando i materiali liberi della dotazione."
+            >
+              <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              {residueMutation.isPending && !confermaResidueOpen
+                ? "Generazione…"
+                : "Genera nuovi giri"}
+            </Button>
+          </div>
         </div>
         <div className="max-h-[340px] overflow-y-auto">
           <table className="w-full text-sm">
@@ -1218,7 +1257,199 @@ function CorseNonCoperteSection({ programmaId }: { programmaId: number }) {
         onCancel={() => setPreviewResult(null)}
         onConferma={onConfermaApply}
       />
+      {/* MR-2.7: dialog conferma pre-esecuzione genera-da-residue. */}
+      <GeneraDaResidueConfirmDialog
+        open={confermaResidueOpen}
+        n_corse_scoperte={items.length}
+        running={residueMutation.isPending}
+        onCancel={() => setConfermaResidueOpen(false)}
+        onConferma={onConfermaGeneraDaResidue}
+      />
+      {/* MR-2.7: dialog risultato post-esecuzione (per località + stats). */}
+      <GeneraDaResidueResultDialog
+        result={residueResult}
+        onClose={() => setResidueResult(null)}
+      />
     </>
+  );
+}
+
+function GeneraDaResidueConfirmDialog({
+  open,
+  n_corse_scoperte,
+  running,
+  onCancel,
+  onConferma,
+}: {
+  open: boolean;
+  n_corse_scoperte: number;
+  running: boolean;
+  onCancel: () => void;
+  onConferma: () => void;
+}) {
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o && !running) onCancel();
+      }}
+    >
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Plus className="h-5 w-5" />
+            Genera nuovi giri da residue
+          </DialogTitle>
+          <DialogDescription>
+            Il builder verrà eseguito una seconda volta sulle corse non
+            coperte ({n_corse_scoperte}), generando giri AGGIUNTIVI con
+            i materiali ancora liberi della dotazione. I giri esistenti
+            restano intatti.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 px-1 py-2 text-sm">
+          <p>
+            Il secondo run cerca catene fra le corse residue per ogni
+            sede del programma. Le sedi senza corse residue vengono
+            ignorate.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            <strong>Nota iterazione 1</strong>: il check capacity usa
+            la dotazione totale dell'azienda, non sottrae i pezzi già
+            usati nei giri esistenti. Se la dotazione libera è insufficiente,
+            il warning del builder lo segnala (iterazione 2).
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel} disabled={running}>
+            Annulla
+          </Button>
+          <Button variant="primary" onClick={onConferma} disabled={running}>
+            {running ? "Generazione…" : "Conferma e genera"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function GeneraDaResidueResultDialog({
+  result,
+  onClose,
+}: {
+  result: GeneraDaResidueResponse | null;
+  onClose: () => void;
+}) {
+  const open = result !== null;
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+    >
+      <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col overflow-hidden">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+            Esecuzione completata
+          </DialogTitle>
+          <DialogDescription>
+            Risultato del secondo run del builder per ogni sede del
+            programma.
+          </DialogDescription>
+        </DialogHeader>
+        {result !== null && (
+          <>
+            <div className="grid grid-cols-2 gap-3 px-1 pb-2">
+              <Card className="border-emerald-300/60 bg-emerald-50 p-3">
+                <div className="text-xs uppercase tracking-wide text-emerald-800">
+                  Nuovi giri creati
+                </div>
+                <div className="mt-1 text-2xl font-semibold tabular-nums text-emerald-900">
+                  {result.n_giri_totali_creati}
+                </div>
+              </Card>
+              <Card className="border-sky-300/60 bg-sky-50 p-3">
+                <div className="text-xs uppercase tracking-wide text-sky-800">
+                  Corse inserite
+                </div>
+                <div className="mt-1 text-2xl font-semibold tabular-nums text-sky-900">
+                  {result.n_corse_inserite_totali}
+                </div>
+              </Card>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-1">
+              {result.risultati_per_localita.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  Nessuna sede da processare.
+                </p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-background text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <tr className="border-b border-border">
+                      <th className="px-3 py-2 text-left font-medium">Sede</th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        Nuovi giri
+                      </th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        Corse
+                      </th>
+                      <th className="px-3 py-2 text-right font-medium">
+                        Residue
+                      </th>
+                      <th className="px-3 py-2 text-left font-medium">Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.risultati_per_localita.map((r) => (
+                      <tr
+                        key={r.localita_codice}
+                        className="border-b border-border/60 last:border-0"
+                      >
+                        <td className="px-3 py-2 font-mono text-xs">
+                          {r.localita_codice}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">
+                          {r.n_giri_creati}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">
+                          {r.n_corse_processate}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">
+                          {r.n_corse_residue}
+                        </td>
+                        <td className="px-3 py-2 text-xs">
+                          {r.errore !== null ? (
+                            <span className="text-destructive">
+                              {r.errore}
+                            </span>
+                          ) : r.warnings.length > 0 ? (
+                            <span
+                              className="text-amber-700"
+                              title={r.warnings.join("\n")}
+                            >
+                              {r.warnings.length} warning
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </>
+        )}
+        <DialogFooter>
+          <Button variant="primary" onClick={onClose}>
+            Chiudi
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

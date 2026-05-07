@@ -430,3 +430,32 @@ export async function riempiGap(
     { method: "POST" },
   );
 }
+
+// =====================================================================
+// Sprint 8.0 MR-2.7 (entry 221) — genera-da-residue
+// =====================================================================
+
+export interface GeneraDaResidueLocResult {
+  localita_codice: string;
+  n_giri_creati: number;
+  giri_ids: number[];
+  n_corse_processate: number;
+  n_corse_residue: number;
+  warnings: string[];
+  errore: string | null;
+}
+
+export interface GeneraDaResidueResponse {
+  n_giri_totali_creati: number;
+  n_corse_inserite_totali: number;
+  risultati_per_localita: GeneraDaResidueLocResult[];
+}
+
+export async function generaDaResidue(
+  programmaId: number,
+): Promise<GeneraDaResidueResponse> {
+  return apiJson<GeneraDaResidueResponse>(
+    `/api/programmi/${programmaId}/genera-da-residue`,
+    { method: "POST" },
+  );
+}

@@ -9,6 +9,7 @@ import {
 import {
   cercaTreno,
   duplicaGiro,
+  generaDaResidue,
   generaGiri,
   getGiroDettaglio,
   getThreadDettaglio,
@@ -24,6 +25,7 @@ import {
   type CorsaNonCopertaItem,
   type DuplicaGiroResult,
   type FillGapResult,
+  type GeneraDaResidueResponse,
   type GeneraGiriParams,
   type GiroBlocco,
   type GiroDettaglio,
@@ -163,6 +165,30 @@ export function useDuplicaGiro(): UseMutationResult<DuplicaGiroResult, Error, nu
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (giroId: number) => duplicaGiro(giroId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: GIRI_KEY });
+    },
+  });
+}
+
+/**
+ * Sprint 8.0 MR-2.7 (entry 221) — "Genera-da-residue": secondo run del
+ * builder che genera giri AGGIUNTIVI per le corse non coperte usando
+ * i materiali liberi della dotazione, senza wipe degli esistenti.
+ *
+ * Mutation diretta (no dry_run): l'utente conferma sul dialog UI prima
+ * di lanciare. Sull'apply invalida ``GIRI_KEY`` → si aggiornano lista
+ * giri, dettagli, corse non coperte (la sezione amber dovrebbe
+ * mostrare meno corse residue).
+ */
+export function useGeneraDaResidue(): UseMutationResult<
+  GeneraDaResidueResponse,
+  Error,
+  number
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (programmaId: number) => generaDaResidue(programmaId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: GIRI_KEY });
     },

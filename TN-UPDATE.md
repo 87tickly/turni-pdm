@@ -10,6 +10,146 @@
 
 ---
 
+## 2026-05-07 (221) — MR-2.7: "Genera-da-residue" — secondo run del builder su corse non coperte
+
+### Contesto
+
+Decisione utente entry 220 (su programma reale giugno 2026 con 189
+corse non coperte: **63 sosta condivisa + 126 linea disgiunta** + dotazione
+ETR522 60/71 usati = 11 pezzi liberi):
+
+> "io farei 2.7 e poi prendere in considerazione di aggiungere altri
+> materiali"
+
+Il 66% delle corse residue è ``linea_disgiunta`` (entry 220) → MR-2.6
+"smart fill su soste" gestirebbe solo il 33%. MR-2.7 è la priorità:
+secondo run del builder che genera giri AGGIUNTIVI usando i materiali
+ancora liberi, non più dipendendo dai giri esistenti.
+
+### Modifiche backend
+
+**`backend/src/colazione/domain/builder_giro/builder.py`** —
+``genera_giri()`` esteso con 2 nuovi parametri:
+
+- ``solo_residue: bool = False``: in modalità ``True`` la pipeline
+  salta il check anti-rigenerazione (consenti giri esistenti, no
+  wipe). I nuovi giri vengono numerati con offset
+  ``n_esistenti_sede`` per non collidere sull'unique
+  ``(azienda_id, programma_id, numero_turno)``.
+- ``escludi_corse_ids: set[int] | None = None``: filtra il pool
+  corse sottraendo gli ID delle corse già coperte. Calcolato dal
+  caller (l'endpoint).
+
+**`backend/src/colazione/api/giri.py`** — nuovo endpoint
+``POST /api/programmi/{id}/genera-da-residue``:
+
+- Auth ``_authz`` (PIANIFICATORE_GIRO scrittura).
+- 404 se programma non visibile / non trovato.
+- 400 se programma non attivo.
+- Logica:
+  1. Carica programma.
+  2. Set sedi distinte = sedi delle regole + sedi dei giri esistenti.
+  3. Calcola ``escludi_corse_ids`` = corse coperte da
+     ``GiroBlocco.corsa_commerciale_id`` per giri di questo programma.
+  4. Per ogni sede: chiama ``genera_giri(solo_residue=True,
+     escludi_corse_ids=...)``. Eccezioni del builder catturate per
+     sede e ritornate nel campo ``errore``.
+  5. Aggrega ``GeneraDaResidueResponse`` con ``n_giri_totali_creati``,
+     ``n_corse_inserite_totali``, ``risultati_per_localita: list[GeneraDaResidueLocResult]``.
+
+Schemi Pydantic: ``GeneraDaResidueLocResult`` (per sede: codice, n_giri,
+giri_ids, corse, residue, warnings, errore) + ``GeneraDaResidueResponse``
+(aggregato).
+
+**Limitazione iterazione 1** (documentata): il check capacity del
+builder usa la dotazione **totale** dell'azienda, non sottrae i
+pezzi già usati nei giri esistenti del programma. Significa che il
+secondo run può proporre più giri di quanti la dotazione libera
+consenta. I warning del builder lo segnalano nella response per sede.
+Iterazione 2: override esplicita della dotazione disponibile.
+
+### Modifiche test
+
+**`backend/tests/test_genera_da_residue_api.py`** (nuovo, 4 test
+minimi):
+
+- ``test_genera_da_residue_senza_token_401``: 401 senza JWT.
+- ``test_genera_da_residue_programma_inesistente_404``: 404 multi-tenant.
+- ``test_genera_da_residue_programma_vuoto_zero_giri``: programma senza
+  regole né giri esistenti → ``n_giri_totali_creati=0``, lista vuota.
+- ``test_genera_da_residue_programma_in_bozza_400``: programma stato
+  'bozza' → 400 "programma non attivo".
+
+**Test happy-path** (programma con giri esistenti + corse residue
+che il second run può convertire in nuovi giri) richiede setup
+strutturato + DB Postgres + builder reale → iterazione 2.
+
+### Modifiche frontend
+
+**`frontend/src/lib/api/giri.ts`**: tipi ``GeneraDaResidueLocResult``
++ ``GeneraDaResidueResponse`` + funzione ``generaDaResidue(programmaId)``.
+
+**`frontend/src/hooks/useGiri.ts`**: hook ``useGeneraDaResidue()``
+mutation. ``onSuccess``: invalida ``GIRI_KEY`` → lista giri, dettagli,
+corse non coperte si aggiornano in automatico.
+
+**`frontend/src/routes/pianificatore-giro/ProgrammaGiriRoute.tsx`**:
+
+- Nell'header amber della ``CorseNonCoperteSection`` aggiunto
+  bottone primary **"+ Genera nuovi giri"** accanto al "Riempi gap"
+  (outline). Tooltip esplicativi sui ruoli.
+- Stati: ``confermaResidueOpen`` (dialog pre-esecuzione),
+  ``residueResult`` (dialog post-esecuzione).
+- Nuovo sub-componente ``GeneraDaResidueConfirmDialog``:
+  - Spiega cosa farà il secondo run.
+  - Avviso "iterazione 1 — capacity check su dotazione totale".
+  - Footer Annulla / Conferma e genera.
+- Nuovo sub-componente ``GeneraDaResidueResultDialog``:
+  - 2 KPI (nuovi giri creati, corse inserite).
+  - Tabella per sede: codice, n_giri creati, corse processate,
+    residue, note (warning count o errore).
+  - Footer "Chiudi" → reset stato.
+
+### Verifiche
+
+- ✅ ``ruff check`` clean (giri.py + test + builder.py).
+- ✅ ``mypy --strict`` clean.
+- ✅ ``pnpm tsc --noEmit`` clean.
+- ✅ ``vite dev`` builda + serve, niente errori console.
+
+### Bug fix in fase di sviluppo
+
+- ``CurrentUser.id`` → ``CurrentUser.user_id`` (catturato da mypy
+  prima del commit).
+
+### Stato
+
+- ✅ MR-2.7 chiuso. Backend + test minimi + frontend con 2 dialog.
+- ⏳ Commit + push + deploy backend + frontend Railway.
+
+### Per l'utente
+
+Sul programma reale "giugno 2026" dopo deploy + hard reload:
+
+1. Apri pagina "Giri generati".
+2. Scrolla in fondo → sezione amber con i 189 corse non coperte.
+3. Click **"+ Genera nuovi giri"** → dialog conferma con avviso
+   capacity.
+4. **Conferma e genera** → secondo run del builder. Risultato in
+   un dialog con stats per sede.
+5. Riapri la pagina (auto-refresh): il numero "X corse non coperte"
+   dovrebbe diminuire della quantità delle corse coperte dai nuovi
+   giri.
+
+### Iterazione 2 prevista
+
+- Override esplicita della dotazione disponibile (totale - già
+  usati) per evitare che il second run sfori la dotazione libera.
+- MR-2.6 "smart fill su soste" per le corse ``sosta_condivisa``
+  che restano fuori anche dopo MR-2.7.
+
+---
+
 ## 2026-05-07 (220) — MR-2.5-bis: diagnostica `motivo_presunto` per ogni corsa non coperta
 
 ### Contesto

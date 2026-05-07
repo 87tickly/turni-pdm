@@ -1350,6 +1350,218 @@ async def riempi_gap(
     )
 
 
+# =====================================================================
+# Genera-da-residue — entry 221 (MR-2.7)
+# =====================================================================
+
+
+class GeneraDaResidueLocResult(BaseModel):
+    """Risultato per singola località."""
+
+    localita_codice: str
+    n_giri_creati: int
+    giri_ids: list[int]
+    n_corse_processate: int
+    n_corse_residue: int
+    warnings: list[str]
+    errore: str | None = Field(
+        default=None,
+        description="Se non None, l'esecuzione per questa sede è fallita.",
+    )
+
+
+class GeneraDaResidueResponse(BaseModel):
+    """Risposta aggregata multi-località."""
+
+    n_giri_totali_creati: int
+    n_corse_inserite_totali: int
+    risultati_per_localita: list[GeneraDaResidueLocResult]
+
+
+@router.post(
+    "/{programma_id}/genera-da-residue",
+    response_model=GeneraDaResidueResponse,
+    summary="Secondo run del builder sulle corse non coperte. Genera "
+    "giri AGGIUNTIVI usando i materiali ancora liberi della dotazione, "
+    "senza wipe degli esistenti.",
+)
+async def genera_da_residue(
+    programma_id: int,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> GeneraDaResidueResponse:
+    """Sprint 8.0 MR-2.7 (entry 221): "Genera-da-residue".
+
+    Il builder viene eseguito una seconda volta con:
+
+    - **Pool corse** = corse del PdE che NON sono già coperte dai giri
+      esistenti del programma (il primo run le ha lasciate fuori).
+    - **Multi-località**: itera su tutte le sedi distinte delle regole
+      del programma + sedi dei giri esistenti. Per ogni sede, lancia
+      ``genera_giri(solo_residue=True)``.
+    - **Niente wipe**: i giri esistenti del programma restano intatti.
+      I nuovi giri vengono numerati con offset
+      ``n_esistenti_sede + 1`` per non collidere sull'unique
+      ``(azienda_id, programma_id, numero_turno)``.
+
+    **Limitazione iterazione 1**: il check capacity del builder usa
+    la dotazione **totale** dell'azienda, non sottrae i pezzi già
+    usati nei giri esistenti del programma. Significa che il second
+    run può generare più giri di quanti la dotazione libera consenta.
+    Il warning del builder lo segnala. Iterazione 2: override
+    dotazione con ``totale - già_usati``.
+
+    **PdC**: l'operazione è non distruttiva (solo INSERT di nuovi
+    giri), i PdC esistenti restano coerenti.
+
+    Decisione utente entry 220: "io farei 2.7 e poi prendere in
+    considerazione di aggiungere altri materiali".
+    """
+    # 1. Visibilità + load programma.
+    programma = (
+        await session.execute(
+            select(ProgrammaMateriale).where(
+                ProgrammaMateriale.id == programma_id,
+                ProgrammaMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if programma is None or not programma_visibile_per_ruoli(
+        programma.stato_pipeline_pdc, user.roles, user.is_admin
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="programma non trovato",
+        )
+    if programma.stato != "attivo":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="programma non attivo",
+        )
+
+    # 2. Set delle località da processare:
+    #    a) sedi distinte delle regole del programma (con sede esplicita)
+    #    b) sedi dei giri esistenti (potrebbero essere state generate da
+    #       regole con sede successivamente cambiata)
+    sedi_regole_rows = (
+        await session.execute(
+            select(ProgrammaRegolaAssegnazione.localita_codice)
+            .where(ProgrammaRegolaAssegnazione.programma_id == programma_id)
+            .where(ProgrammaRegolaAssegnazione.localita_codice.is_not(None))
+            .distinct()
+        )
+    ).all()
+    sedi_codici: set[str] = {str(r[0]) for r in sedi_regole_rows if r[0] is not None}
+
+    sedi_giri_rows = (
+        await session.execute(
+            select(GiroMateriale.localita_manutenzione_partenza_id)
+            .where(GiroMateriale.programma_id == programma_id)
+            .distinct()
+        )
+    ).all()
+    if sedi_giri_rows:
+        from colazione.models.anagrafica import LocalitaManutenzione
+
+        loc_ids = [int(r[0]) for r in sedi_giri_rows if r[0] is not None]
+        if loc_ids:
+            loc_codici_rows = (
+                await session.execute(
+                    select(LocalitaManutenzione.codice).where(
+                        LocalitaManutenzione.id.in_(loc_ids)
+                    )
+                )
+            ).all()
+            for lr in loc_codici_rows:
+                if lr[0] is not None:
+                    sedi_codici.add(str(lr[0]))
+
+    if not sedi_codici:
+        return GeneraDaResidueResponse(
+            n_giri_totali_creati=0,
+            n_corse_inserite_totali=0,
+            risultati_per_localita=[],
+        )
+
+    # 3. Calcola escludi_corse_ids (corse già coperte da blocchi dei giri
+    # del programma) — passato al builder per filtrare il pool.
+    coperte_rows = (
+        await session.execute(
+            select(GiroBlocco.corsa_commerciale_id)
+            .join(GiroVariante, GiroVariante.id == GiroBlocco.giro_variante_id)
+            .join(GiroGiornata, GiroGiornata.id == GiroVariante.giro_giornata_id)
+            .join(GiroMateriale, GiroMateriale.id == GiroGiornata.giro_materiale_id)
+            .where(GiroMateriale.programma_id == programma_id)
+            .where(GiroBlocco.corsa_commerciale_id.is_not(None))
+            .distinct()
+        )
+    ).all()
+    escludi_ids: set[int] = {
+        int(r[0]) for r in coperte_rows if r[0] is not None
+    }
+
+    # 4. Itera per sede e lancia il builder con solo_residue=True.
+    from colazione.domain.builder_giro.builder import (
+        BuilderResult,
+        genera_giri,
+    )
+
+    risultati: list[GeneraDaResidueLocResult] = []
+    n_giri_totali = 0
+    for sede in sorted(sedi_codici):
+        try:
+            res: BuilderResult = await genera_giri(
+                programma_id=programma_id,
+                localita_codice=sede,
+                session=session,
+                azienda_id=user.azienda_id,
+                force=False,
+                solo_residue=True,
+                escludi_corse_ids=escludi_ids,
+                eseguito_da_user_id=user.user_id,
+            )
+            risultati.append(
+                GeneraDaResidueLocResult(
+                    localita_codice=sede,
+                    n_giri_creati=res.n_giri_creati,
+                    giri_ids=res.giri_ids,
+                    n_corse_processate=res.n_corse_processate,
+                    n_corse_residue=res.n_corse_residue,
+                    warnings=res.warnings,
+                )
+            )
+            n_giri_totali += res.n_giri_creati
+        except (
+            ProgrammaNonTrovatoError,
+            ProgrammaNonAttivoError,
+            LocalitaNonTrovataError,
+            BuilderVersionNonSupportata,
+            ComposizioneNonAmmessaError,
+            RegolaAmbiguaError,
+            StrictModeViolation,
+            ValueError,
+        ) as exc:
+            risultati.append(
+                GeneraDaResidueLocResult(
+                    localita_codice=sede,
+                    n_giri_creati=0,
+                    giri_ids=[],
+                    n_corse_processate=0,
+                    n_corse_residue=0,
+                    warnings=[],
+                    errore=f"{type(exc).__name__}: {exc}",
+                )
+            )
+
+    n_corse_inserite_totali = sum(r.n_corse_processate for r in risultati)
+
+    return GeneraDaResidueResponse(
+        n_giri_totali_creati=n_giri_totali,
+        n_corse_inserite_totali=n_corse_inserite_totali,
+        risultati_per_localita=risultati,
+    )
+
+
 def _variante_id_from_ins(
     ins: FillGapInsert, varianti: "dict[int, Any]"
 ) -> int:

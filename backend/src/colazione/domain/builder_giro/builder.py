@@ -1205,6 +1205,8 @@ async def genera_giri(
     force: bool = False,
     confirm_delete_pdc: bool = False,
     eseguito_da_user_id: int | None = None,
+    solo_residue: bool = False,
+    escludi_corse_ids: set[int] | None = None,
 ) -> BuilderResult:
     """Genera giri materiali end-to-end e li persiste.
 
@@ -1305,10 +1307,17 @@ async def genera_giri(
     # 2. Anti-rigenerazione SCOPED per (programma, sede) — Sprint 7.6 MR 3.1.
     # I giri delle ALTRE sedi del programma non sono toccati: il programma
     # è un turno materiale unico cumulativo che cresce sede-per-sede.
+    #
+    # Sprint 8.0 MR-2.7 (entry 221): in modalità ``solo_residue`` saltiamo
+    # il check anti-esistenti: vogliamo PROPRIO che i giri esistenti
+    # restino e generare giri AGGIUNTIVI per le corse non coperte. La
+    # numerazione ``numero_turno`` userà ``n_esistenti_sede`` come offset
+    # → niente collisioni sull'indice unique
+    # ``(azienda_id, programma_id, numero_turno)``.
     n_esistenti_sede = await _count_giri_esistenti(
         session, programma_id, localita_id=localita.id
     )
-    if n_esistenti_sede > 0:
+    if n_esistenti_sede > 0 and not solo_residue:
         if not force:
             raise GiriEsistentiError(programma_id, localita_codice, n_esistenti_sede)
         # Sprint 7.9 strategy A (decisione utente 2026-05-04): se la
@@ -1346,6 +1355,14 @@ async def genera_giri(
     #    G-CRE-027-ETR522-1g: ETR522 della regola FIO finito in run CRE).
     date_range = [data_inizio_eff + timedelta(days=i) for i in range(n_giornate_eff)]
     corse = await _carica_corse(session, azienda_id, date_range[0], date_range[-1])
+
+    # Sprint 8.0 MR-2.7 (entry 221): in modalità ``solo_residue`` filtra
+    # le corse sottraendo gli ID già coperti da blocchi di giri di
+    # questo programma. Il pool ridotto si traduce in nuovi giri che
+    # coprono SOLO le corse residue, senza duplicare quelle già nei
+    # giri esistenti. Il caller calcola ``escludi_corse_ids``.
+    if solo_residue and escludi_corse_ids is not None:
+        corse = [c for c in corse if c.id not in escludi_corse_ids]
 
     # Entry 212: filtra le regole per la sede del run corrente. Le
     # regole con sede diversa NON vengono processate qui (saranno
@@ -1741,8 +1758,13 @@ async def genera_giri(
     # Sprint 7.9 MR α: aggiunto suffisso `-{n_giornate}g` per
     # distinguere a colpo d'occhio turni di lunghezze diverse stesso
     # materiale+sede (es. G-FIO-001-ETR526-7g vs G-FIO-002-ETR526-1g).
+    # Sprint 8.0 MR-2.7 (entry 221): in modalità ``solo_residue`` la
+    # numerazione parte da ``n_esistenti_sede + 1`` per non collidere
+    # con i giri esistenti del programma per quella sede (constraint
+    # UNIQUE su ``(azienda_id, programma_id, numero_turno)``).
+    offset_numerazione = n_esistenti_sede if solo_residue else 0
     giri_da_persistere: list[GiroDaPersistere] = []
-    for idx, giro_agg in enumerate(giri_aggregati, start=1):
+    for idx, giro_agg in enumerate(giri_aggregati, start=offset_numerazione + 1):
         numero_turno = (
             f"G-{localita.codice_breve}-{idx:03d}-{giro_agg.materiale_tipo_codice}"
             f"-{len(giro_agg.giornate)}g"
