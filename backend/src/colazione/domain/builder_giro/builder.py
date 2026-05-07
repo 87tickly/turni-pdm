@@ -1325,24 +1325,70 @@ async def genera_giri(
         await _wipe_giri_programma(session, programma_id, localita_id=localita.id)
 
     # 3. Pipeline: carica corse + costruisci catene per data, isolate
-    #    PER REGOLA (Sprint 8.0 entry 203, decisione utente 2026-05-06:
-    #    "le regole sono distinte e separate e non devono in nessun modo
-    #    incontrarsi"). Le catene si formano SOLO tra corse della stessa
-    #    regola dominante — niente mescolanza tra materiali/linee di
-    #    regole diverse. Sostituisce il filtro perimetro Sprint 5.6
-    #    (`any(regole)`), che lasciava il pool unico e provocava giri
-    #    misti tipo "ETR522 con corse di linee della regola ETR526".
+    #    PER MATERIALE (Sprint 8.0 entry 211 — fix di entry 203 troppo
+    #    restrittivo).
+    #
+    #    Storia:
+    #    - Pre-entry 203: pool unico per programma. BUG: catene cross
+    #      materiale (ETR522 + ETR526 nello stesso giro).
+    #    - Entry 203: pool isolato PER REGOLA. BUG SECONDARIO: una
+    #      regola multi-linea non concatena cross-notte tra linee
+    #      diverse → giri di 1 giornata invece di N.
+    #    - Entry 211 (questo): pool isolato PER MATERIALE. Le catene si
+    #      formano dentro lo stesso materiale (anche tra regole diverse
+    #      con stesso materiale), MAI cross-materiale. Ripristina i
+    #      giri multi-giornata mantenendo la garanzia "ETR522 non
+    #      contiene corse ETR526".
+    #
+    #    Decisione utente 2026-05-07 (riferimento giro 403, 5 giornate
+    #    × 10 varianti che è il modello atteso PDF Trenord 1134).
     date_range = [data_inizio_eff + timedelta(days=i) for i in range(n_giornate_eff)]
     corse = await _carica_corse(session, azienda_id, date_range[0], date_range[-1])
 
-    corse_per_regola_dom = _raggruppa_corse_per_regola_dominante(corse, regole)
+    # Pool perimetro (= corse coperte da ALMENO UNA regola del programma).
+    # Stesso comportamento di Sprint 5.6 pre-entry 203.
+    from colazione.domain.builder_giro.risolvi_corsa import matches_all
+
+    def _corsa_in_perimetro(c: Any) -> bool:
+        return any(matches_all(r.filtri_json, c, "feriale") for r in regole)
+
+    corse_perimetro = [c for c in corse if _corsa_in_perimetro(c)]
+
+    # Annota ogni corsa con il MATERIALE (derivato dalla regola
+    # dominante per quella corsa). Le corse senza regola dominante sono
+    # escluse dal builder ma contate come orfane.
+    materiale_per_corsa: dict[int, str] = {}
+    regola_per_corsa_id: dict[int, ProgrammaRegolaAssegnazione] = {}
+    materiale_per_regola: dict[int, str] = {
+        r.id: _materiale_da_regola(r) for r in regole
+    }
+    for c in corse_perimetro:
+        regola_dom = _trova_regola_dominante_per_corsa(c, regole)
+        if regola_dom is None:
+            continue
+        mat = materiale_per_regola.get(regola_dom.id, "")
+        if not mat:
+            continue
+        materiale_per_corsa[int(c.id)] = mat
+        regola_per_corsa_id[int(c.id)] = regola_dom
+
+    # Raggruppa corse per MATERIALE (non per regola). Catene si possono
+    # incrociare tra regole diverse purché lo stesso materiale.
+    corse_per_materiale: dict[str, list[CorsaCommerciale]] = {}
+    for c in corse_perimetro:
+        mat_corsa: str | None = materiale_per_corsa.get(int(c.id))
+        if mat_corsa is None:
+            continue
+        corse_per_materiale.setdefault(mat_corsa, []).append(c)
 
     warnings: list[str] = []
-    n_corse_orfane = len(corse) - sum(len(v) for v in corse_per_regola_dom.values())
+    n_corse_orfane = len(corse_perimetro) - sum(
+        len(v) for v in corse_per_materiale.values()
+    )
     if n_corse_orfane > 0:
         warnings.append(
             f"{n_corse_orfane} corse del periodo non coperte da nessuna "
-            "regola del programma — escluse dalla generazione."
+            "regola con materiale assegnato — escluse dalla generazione."
         )
 
     # Sprint 5.6 Feature 3: attiva il vincolo finestra uscita deposito
@@ -1362,11 +1408,6 @@ async def genera_giri(
     # (input v1) durante il loop di posizionamento. Ignorato se
     # programma.builder_version='v1'.
     istanze_v2: list[CatenaIstanza] = []
-    # Pre-calcolo tipo materiale per regola (uso v2 only — v1 lo
-    # determina blocco-per-blocco dentro `assegna_e_rileva_eventi`).
-    materiale_per_regola: dict[int, str] = {
-        r.id: _materiale_da_regola(r) for r in regole
-    }
     # Entry 198: traccia le catene scartate per posizionamento aggregate
     # per regola dominante. Usato dal warning finale per spiegare
     # all'utente quando una regola finisce con 0 giri perché la sede
@@ -1374,11 +1415,11 @@ async def genera_giri(
     catene_scartate_per_regola: dict[int, int] = {}
     for d in date_range:
         # forza_vuoto_iniziale è scope sede: prima data del periodo con
-        # qualche corsa in qualunque regola.
+        # qualche corsa in qualunque materiale.
         qualche_corsa_oggi = any(
             _corsa_vale_in_data(c, d)
-            for corse_regola in corse_per_regola_dom.values()
-            for c in corse_regola
+            for corse_mat in corse_per_materiale.values()
+            for c in corse_mat
         )
         if qualche_corsa_oggi and primo_giorno_con_corse is None:
             primo_giorno_con_corse = d
@@ -1387,11 +1428,10 @@ async def genera_giri(
         forza_vuoto_iniziale = is_prima_generazione_sede and d == primo_giorno_con_corse
 
         catene_pos_giorno: list[CatenaPosizionata] = []
-        # Sprint 8.0 entry 203: itera per regola → ogni regola è una
-        # "scatola chiusa". Le sue corse non incontrano mai quelle di
-        # un'altra regola, anche se geograficamente concatenabili.
-        for regola_id, corse_regola in corse_per_regola_dom.items():
-            corse_giorno = [c for c in corse_regola if _corsa_vale_in_data(c, d)]
+        # Itera per MATERIALE — le catene si formano nel pool del
+        # singolo materiale, MAI cross-materiale (entry 211).
+        for materiale, corse_mat in corse_per_materiale.items():
+            corse_giorno = [c for c in corse_mat if _corsa_vale_in_data(c, d)]
             if not corse_giorno:
                 continue
             catene = costruisci_catene(corse_giorno)
@@ -1405,25 +1445,36 @@ async def genera_giri(
                         forza_vuoto_iniziale=forza_vuoto_iniziale,
                     )
                 except (LocalitaSenzaStazioneError, PosizionamentoImpossibileError) as exc:
-                    # La regola di questa catena è già nota per costruzione
-                    # (regola_id corrente del loop). Niente lookup post-fatto.
-                    catene_scartate_per_regola[regola_id] = (
-                        catene_scartate_per_regola.get(regola_id, 0) + 1
+                    # Identifica la regola dominante della catena
+                    # (post-fatto dalla prima corsa) per il warning.
+                    regola_dom_pre = (
+                        _trova_regola_dominante_per_corsa(cat.corse[0], regole)
+                        if cat.corse
+                        else None
                     )
+                    if regola_dom_pre is not None:
+                        catene_scartate_per_regola[regola_dom_pre.id] = (
+                            catene_scartate_per_regola.get(regola_dom_pre.id, 0) + 1
+                        )
                     prima_treno = cat.corse[0].numero_treno if cat.corse else "—"
+                    regola_label = (
+                        f" (regola #{regola_dom_pre.id})"
+                        if regola_dom_pre is not None
+                        else ""
+                    )
                     warnings.append(
-                        f"Catena del {d.isoformat()} treno {prima_treno} "
-                        f"(regola #{regola_id}) scartata: {exc}"
+                        f"Catena del {d.isoformat()} treno {prima_treno}{regola_label} "
+                        f"scartata: {exc}"
                     )
                     continue
                 catene_pos_giorno.append(cat_pos)
                 # MR-1110 sotto-MR 11 (entry 210): accumula istanza v2
-                # con materiale dedotto dalla regola di scope corrente.
+                # con materiale del pool corrente.
                 istanze_v2.append(
                     CatenaIstanza(
                         data=d,
                         catena_posizionata=cat_pos,
-                        materiale_tipo_codice=materiale_per_regola[regola_id],
+                        materiale_tipo_codice=materiale,
                     )
                 )
         catene_per_data[d] = catene_pos_giorno
@@ -1481,7 +1532,7 @@ async def genera_giri(
     # contatori raccolti (catene scartate per posizionamento, ecc.).
     regole_senza_catene = [r for r in regole if r.id not in catene_per_regola]
     for r in regole_senza_catene:
-        materiale = (
+        materiale_regola: str | None = (
             r.composizione_json[0].get("materiale_tipo_codice")
             if r.composizione_json
             else None
@@ -1508,7 +1559,7 @@ async def genera_giri(
                 "ad altre regole con priorità più alta (verifica i filtri)."
             )
         warnings.append(
-            f"Regola #{r.id} (materiale: {materiale or '—'}, "
+            f"Regola #{r.id} (materiale: {materiale_regola or '—'}, "
             f"filtri: {summary_filtri or '—'}) non ha generato giri. {causa}"
         )
 

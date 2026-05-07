@@ -10,6 +10,104 @@
 
 ---
 
+## 2026-05-07 (211) — Fix di entry 203: pool corse PER MATERIALE invece che per regola
+
+### Contesto
+
+Il fix entry 203 (pool isolato per regola dominante) era **troppo
+restrittivo**. Risolveva il bug originale "ETR522 + ETR526 nello
+stesso giro" ma introduceva un bug secondario non rilevato dai test
+sintetici: una regola con multi-linee disgiunte (es. regola #27 del
+programma "giugno 2026" con 4 linee Alessandria/Bergamo/Mantova/
+Pioltello) NON poteva concatenare cross-notte tra linee diverse della
+stessa regola → giri di **1 sola giornata** invece di N.
+
+Decisione utente 2026-05-07 (riferimento giro 403, screenshot del
+modello atteso PDF Trenord 1134: 5 giornate × 10 varianti
+calendariali con sosta notturna a VOGHERA tra G1-G2 e G2-G3, sosta
+a MILANO CERTOSA tra G3-G4, sosta a LECCO tra G4-G5): *"deve essere
+così"*.
+
+### Causa esatta
+
+`costruisci_catene(pool_regola_X)` con pool ridotto a una sola regola
+con 4 linee disgiunte:
+
+- Catena del giorno K finisce a stazione fine_K (es. PAVIA per linea
+  Alessandria-Voghera-Pavia-Milano).
+- Catena del giorno K+1 inizia a stazione inizio_(K+1) (es. BERGAMO
+  per linea Bergamo-Pioltello-Milano).
+- `costruisci_giri_multigiornata` richiede `staz_fine_K ==
+  staz_inizio_(K+1)` per concatenazione cross-notte.
+- Disgiunte → niente concatenazione → giro di 1 giornata.
+
+Pre-entry 203 (pool unico programma): le catene "ponteggiavano"
+attraverso linee diverse → giri multi-giornata possibili. Il bug era
+che ponteggiavano anche cross-MATERIALE (ETR522 → ETR526), errore.
+
+### Fix
+
+**`backend/src/colazione/domain/builder_giro/builder.py`** —
+`genera_giri()` step 3 riscritto:
+
+1. **Pool perimetro** `corse_perimetro` ripristinato come pre-entry 203:
+   corse coperte da almeno una regola del programma (qualsiasi).
+2. **Annotazione materiale per corsa**: per ogni corsa, calcolo la
+   regola dominante (priorità max che la matcha) e ne estraggo il
+   `materiale_tipo_codice` primo. ``materiale_per_corsa: dict[int, str]``.
+3. **Raggruppamento per MATERIALE** (non per regola):
+   ``corse_per_materiale: dict[str, list[CorsaCommerciale]]`` — corse
+   con stesso materiale finiscono nello stesso pool, anche se di
+   regole diverse.
+4. **Loop step 3** itera per MATERIALE per ogni data. Le catene si
+   formano dentro il pool del singolo materiale, mai cross-materiale.
+5. **Warning catene scartate**: la regola dominante della catena è
+   ora ricavata post-fatto dalla prima corsa (come pre-entry 203),
+   perché il loop non è più scope-regola.
+
+### Garanzie post-fix
+
+- ✅ Catene multi-linea della stessa regola si concatenano cross-notte
+  (= ripristina giro 5 giornate + sosta notturna).
+- ✅ Catene cross-regola con stesso materiale si concatenano (= 2
+  regole entrambe ETR522 con linee complementari producono giri
+  multi-giornata).
+- ✅ Catene cross-MATERIALE NON si formano (= ETR522 non finisce mai
+  in un giro che contiene corse ETR526). Bug originale entry 203
+  rimane risolto.
+
+### Adattamento pipeline v2 (entry 210)
+
+L'accumulazione `istanze_v2` nel loop step 3 ora usa il `materiale`
+del pool corrente (invece del materiale della regola). Coerenza
+preservata.
+
+### Verifiche
+
+- ✅ ``mypy --strict src/`` clean (80 source files).
+- ✅ ``ruff check`` clean.
+- ✅ ``pytest tests/test_builder_giri.py`` → 20 passed, 1 skipped
+  (incluso ``test_due_regole_distinte_non_mescolano_corse`` che
+  verifica la garanzia cross-materiale: ETR522 vs ETR526).
+
+### Stato
+
+- ✅ Fix applicato. Programma "giugno 2026" tornerà a mostrare giri
+  multi-giornata con varianti calendariali una volta rigenerato dopo
+  il deploy.
+- ⏳ Commit + push + deploy backend Railway.
+
+### Lessons learned
+
+Dovevo leggere il giro reale di produzione (giro 403) **prima** di
+scrivere entry 203, non dopo. Il test sintetico
+`test_due_regole_distinte_non_mescolano_corse` passava ma copriva
+solo il caso cross-MATERIALE; non c'era nessun test che verificasse
+"giri multi-giornata DENTRO la stessa regola con multi-linee
+disgiunte". Aggiungere quel test nel prossimo MR.
+
+---
+
 ## 2026-05-07 (210) — MR-1110 sotto-MR 11: wiring end-to-end pipeline v2 al persister
 
 ### Contesto
