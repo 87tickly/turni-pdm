@@ -70,8 +70,8 @@ export function ModificaConfigurazioneDialog({
   const [fasciaToler, setFasciaToler] = useState(
     String(programma.fascia_oraria_tolerance_min),
   );
-  // Sprint 8.0 MR-4 (entry 224): vincoli soste configurabili. Stringa
-  // vuota = NULL = vincolo disattivato.
+  // Sprint 8.0 MR-4 (entry 224, ribuild forzato entry 226): vincoli
+  // soste configurabili. Stringa vuota = NULL = vincolo disattivato.
   const [maxSostaDiurnaMin, setMaxSostaDiurnaMin] = useState(
     programma.max_sosta_diurna_min === null
       ? ""
