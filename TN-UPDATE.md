@@ -10,6 +10,69 @@
 
 ---
 
+## 2026-05-07 (217) — Hotfix UX MR-1: focus blocco con scroll + pulse highlight nel Gantt
+
+### Bug UX
+
+Utente entry 216: "funziona, ma quando cerco un treno e lui me lo
+trova, mi apre solo il turno ma non me lo identifica portandomi
+comunque a cercarlo. mettiamolo in evidenza".
+
+Comportamento attuale (entry 214): click sul risultato del popup →
+``setSelectedBlocco(b)`` → si apriva il ``BloccoDialog`` come modal
+centrato che mostrava i dettagli del blocco. L'utente lo chiudeva
+con la X e a quel punto NIENTE era più evidenziato nel Gantt → doveva
+cercare il blocco scrollando manualmente.
+
+### Fix
+
+3 modifiche in ``GiroDettaglioRoute.tsx`` + 1 classe CSS in
+``index.css``:
+
+1. **`id` DOM stabile sui blocchi**: aggiunto
+   ``id={\`gantt-blocco-${blocco.id}\`}`` sia su ``CommercialeBlocco``
+   sia su ``materiale_vuoto`` button. Ancorabile via
+   ``document.getElementById``.
+
+2. **CSS `gantt-blocco-highlight`** in ``index.css``: outline 3px
+   amber-500 + box-shadow pulse + animation 4 cicli da 0.9s
+   (~3.6s totali) + ``z-index: 30 !important`` per restare sopra
+   altri blocchi sovrapposti.
+
+3. **`useEffect` focusBlocco**: rimosso ``setSelectedBlocco`` (che
+   apriva il modal), sostituito con:
+   - ``setActiveVariantByGiornata`` — attiva la variante corretta
+     così il blocco è effettivamente renderizzato.
+   - ``setTimeout 350ms`` — dà tempo al Gantt di renderizzare la
+     variante attivata.
+   - ``el.scrollIntoView({behavior: "smooth", block: "center",
+     inline: "center"})`` — porta il blocco in vista (centro).
+   - ``el.classList.add("gantt-blocco-highlight")`` per 3.6s, poi
+     remove.
+
+4. **`onSelect` del CercaTrenoDialog (caso "stesso giro")**: stesso
+   pattern (no setSelectedBlocco, sì scroll+pulse). Coerenza tra
+   "click cerca treno → arriva da fuori" e "click cerca treno → giro
+   già aperto".
+
+### Verifiche
+
+- ✅ ``pnpm tsc --noEmit`` clean (frontend).
+- ✅ ``vite dev`` builda + serve, niente errori console.
+
+### Stato
+
+- ✅ Hotfix UX applicato.
+- ⏳ Commit + push + deploy frontend Railway.
+
+### Per l'utente
+
+Dopo deploy + hard reload: cerca un treno → click → la pagina del
+giro si apre con il blocco **scrollato al centro + pulse arancio
+animato per ~3.5s**. Niente più modal che oscura il Gantt.
+
+---
+
 ## 2026-05-07 (216) — Hotfix MR-1: typo r.variante_index → r.variant_index
 
 ### Bug

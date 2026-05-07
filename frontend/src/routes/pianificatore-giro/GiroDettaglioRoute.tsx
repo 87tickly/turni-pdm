@@ -218,10 +218,22 @@ export function GiroDettaglioRoute() {
     Set<number> | null
   >(null);
 
-  // Sprint 8.0 MR-1 (entry 214): se presente ``?focusBlocco=<id>`` in
-  // URL (arrivo dal popup Cerca treno), trovo il blocco nel giro
-  // caricato e lo evidenzio (attiva la variante giusta + side panel).
-  // Pulisco il param dall'URL così il refresh non riapplica il focus.
+  // Sprint 8.0 MR-1 (entry 214 + 217 hotfix UX): se presente
+  // ``?focusBlocco=<id>`` in URL (arrivo dal popup Cerca treno):
+  //
+  // 1. Attivo la variante giusta della giornata che contiene il blocco
+  //    (così il blocco è effettivamente renderizzato nel Gantt).
+  // 2. Scrollo la viewport del Gantt per portare il blocco in vista
+  //    (smooth, centro orizzontale).
+  // 3. Applico classe ``gantt-blocco-highlight`` per ~3.5s con outline
+  //    pulse giallo/arancio così l'utente lo identifica immediatamente.
+  // 4. Pulisco il param dall'URL così il refresh non riapplica il focus.
+  //
+  // Importante: NON imposto ``setSelectedBlocco`` qui — apriva il
+  // ``BloccoDialog`` modal centrato che oscurava il Gantt e l'utente
+  // doveva chiuderlo manualmente per vedere dove sta il treno
+  // (segnalazione utente entry 217: "mi apre solo il turno ma non me
+  // lo identifica portandomi comunque a cercarlo").
   useEffect(() => {
     const focusBloccoStr = searchParams.get("focusBlocco");
     if (focusBloccoStr === null) return;
@@ -233,8 +245,24 @@ export function GiroDettaglioRoute() {
         const v = g.varianti[vi];
         const b = v.blocchi.find((x) => x.id === target);
         if (b !== undefined) {
-          setSelectedBlocco(b);
           setActiveVariantByGiornata((prev) => ({ ...prev, [g.id]: vi }));
+          // Ritardo per dare tempo al render della variante attivata
+          // (la riga del Gantt potrebbe non esistere ancora se la
+          // variante non era quella canonica).
+          window.setTimeout(() => {
+            const el = document.getElementById(`gantt-blocco-${target}`);
+            if (el !== null) {
+              el.scrollIntoView({
+                behavior: "smooth",
+                block: "center",
+                inline: "center",
+              });
+              el.classList.add("gantt-blocco-highlight");
+              window.setTimeout(() => {
+                el.classList.remove("gantt-blocco-highlight");
+              }, 3600);
+            }
+          }, 350);
           const next = new URLSearchParams(searchParams);
           next.delete("focusBlocco");
           setSearchParams(next, { replace: true });
@@ -302,16 +330,29 @@ export function GiroDettaglioRoute() {
         onOpenChange={setCercaTrenoOpen}
         onSelect={(_it, b) => {
           setCercaTrenoOpen(false);
-          // Stesso giro: imposto subito il blocco. Giro diverso:
-          // navigo passando ``focusBlocco`` come query param —
-          // l'effetto al mount lo evidenzierà.
+          // Stesso giro: attivo la variante + scroll + pulse direttamente
+          // (no navigation). Giro diverso: navigo con ``?focusBlocco=...``
+          // → l'effetto al mount fa lo stesso pattern.
           if (b.giro_id === giro.id) {
             for (const g of giro.giornate) {
               for (let vi = 0; vi < g.varianti.length; vi += 1) {
                 const found = g.varianti[vi].blocchi.find((x) => x.id === b.blocco_id);
                 if (found !== undefined) {
-                  setSelectedBlocco(found);
                   setActiveVariantByGiornata((prev) => ({ ...prev, [g.id]: vi }));
+                  window.setTimeout(() => {
+                    const el = document.getElementById(`gantt-blocco-${b.blocco_id}`);
+                    if (el !== null) {
+                      el.scrollIntoView({
+                        behavior: "smooth",
+                        block: "center",
+                        inline: "center",
+                      });
+                      el.classList.add("gantt-blocco-highlight");
+                      window.setTimeout(() => {
+                        el.classList.remove("gantt-blocco-highlight");
+                      }, 3600);
+                    }
+                  }, 250);
                   return;
                 }
               }
@@ -1907,6 +1948,7 @@ function BloccoSegment({
     return (
       <button
         type="button"
+        id={`gantt-blocco-${blocco.id}`}
         onClick={onSelect}
         title={tooltip}
         aria-pressed={selected}
@@ -2126,6 +2168,7 @@ function CommercialeBlocco({
   return (
     <button
       type="button"
+      id={`gantt-blocco-${blocco.id}`}
       onClick={onSelect}
       title={tooltip}
       aria-pressed={selected}

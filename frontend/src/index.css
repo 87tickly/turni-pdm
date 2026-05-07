@@ -137,6 +137,29 @@ body {
   z-index: 5;
 }
 
+/* Sprint 8.0 MR-1 (entry 217): highlight di un blocco arrivando dal
+   popup Cerca treno via ?focusBlocco. Outline giallo che pulsa per
+   ~3.5s, poi si rimuove. Il blocco resta visivamente identificabile
+   nel Gantt anche dopo che la pagina è renderizzata. */
+.gantt-blocco-highlight {
+  outline: 3px solid #f59e0b; /* amber-500 */
+  outline-offset: 3px;
+  border-radius: 4px;
+  animation: gantt-blocco-pulse 0.9s ease-in-out 4;
+  z-index: 30 !important;
+}
+@keyframes gantt-blocco-pulse {
+  0%,
+  100% {
+    outline-color: #f59e0b; /* amber-500 */
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45);
+  }
+  50% {
+    outline-color: #fbbf24; /* amber-400 */
+    box-shadow: 0 0 0 6px rgba(245, 158, 11, 0);
+  }
+}
+
 /* Sprint 7.9 MR δ.4 (entry 144): scrollbar Gantt sempre visibile
    anche su macOS (Chrome/Safari di default la nascondono finché
    non si scrolla). Senza questa regola l'utente non capisce di
