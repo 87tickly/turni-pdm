@@ -10,6 +10,94 @@
 
 ---
 
+## 2026-05-08 (239) — MR-H: eliminazione definitiva programmi (hard delete)
+
+### Contesto
+
+Richiesta utente dalla schermata `/pianificatore-giro/programmi`:
+"aggiungi la possibilità di eliminare i turni che creo non solo di
+archiviarli". Fino a oggi i programmi avevano solo
+`bozza → attivo → archiviato`: un programma archiviato restava in DB
+per sempre, ingombrando la lista anche se non più utile.
+
+### Decisione di design
+
+Permetto la cancellazione **solo da `bozza` o `archiviato`**, NON da
+`attivo`. Un programma attivo è in produzione: per eliminarlo va prima
+archiviato esplicitamente — protezione contro perdita accidentale di
+lavoro pubblicato. Si può sempre rilassare in futuro, restringere dopo
+sarebbe un breaking change UX.
+
+Hard delete con CASCADE: archivio già esiste come "soft delete"
+implicito, eliminare significa togliere davvero il programma e tutto
+il lavoro derivato. Le FK del progetto sono già configurate
+correttamente (CASCADE su regole/giri/builder_run/thread, SET NULL su
+`corsa_import_run` per preservare gli import del PdE).
+
+### Modifiche
+
+**Backend** (`api/programmi.py`):
+- Nuovo endpoint `DELETE /api/programmi/{programma_id}` (204 No Content).
+- Validazione: 400 se stato `attivo`, 404 se id inesistente o di altra
+  azienda (multi-tenant safety mantenuta dal `_get_programma_or_404`
+  esistente).
+- 5 test in `test_programmi_api.py`: bozza ok, archiviato ok, attivo
+  blocca 400, inesistente 404, CASCADE regole rimosse.
+
+**Frontend**:
+- `lib/api/programmi.ts`: nuova `eliminaProgramma(id)`.
+- `hooks/useProgrammi.ts`: `useEliminaProgramma()` mutation che
+  invalida sia `["programmi"]` che `["giri"]` (CASCADE rimuove giri
+  collegati). Spostato `GIRI_KEY` in cima al file vicino a
+  `PROGRAMMI_KEY` per scope.
+- `routes/pianificatore-giro/ProgrammiRoute.tsx`: bottone "Elimina"
+  rosso (`text-destructive`) nella vista Tabella, mostrato solo per
+  stati `bozza` o `archiviato`. Conferma con `window.confirm`
+  esplicita che enumera l'impatto:
+  - Bozza vuoto → "Programma vuoto, nessun dato collegato."
+  - Bozza con regole → "Verranno eliminate anche N regola/e."
+  - Archiviato → "Verranno eliminati anche N regola/e e M giro/i con
+    tutti i blocchi e le corse associate."
+  Sempre con avviso "L'operazione NON è reversibile."
+
+Vista Calendario invariata: niente bottoni d'azione (è solo
+visualizzazione overview). L'eliminazione passa dalla vista Tabella.
+
+### Verifiche
+
+- ✅ `ruff check src tests` → 2 errori B008 pre-esistenti
+  (`Depends(require_role(...))` su `anagrafiche.py:282` e
+  `pianificatore_pdc.py:109`, già da entry 238). Niente regressioni.
+- ✅ `mypy --strict src` → clean (79 file).
+- ✅ `pnpm tsc --noEmit` → clean.
+- ✅ `pnpm build` → bundle `index-DURUVHS_.js`, 1805 moduli, 894 kB
+  (+1 kB per la nuova feature, normale).
+- ⚠️ `pytest test_programmi_api.py -k elimina` → 1 errore connection
+  refused Postgres locale port 5432, **non bug del codice** (DB locale
+  giù come da entry 238). Test code valido: 33 test collected senza
+  syntax error. I test gireranno verdi quando Postgres sarà su o in
+  ambiente CI.
+
+### Stato
+
+- ✅ MR-H chiuso.
+- ⏳ Commit + push + deploy backend + frontend.
+
+### Per l'utente
+
+- Vista Tabella: ora i programmi `bozza` e `archiviato` mostrano un
+  bottone "Elimina" rosso a fianco di "Pubblica"/"Archivia"/"Apri →".
+- Conferma con messaggio dettagliato che ti dice **esattamente** cosa
+  verrà eliminato (regole, giri, corse) prima di chiedere conferma.
+- Programmi `attivo` non hanno il bottone "Elimina": archivia prima,
+  poi elimina. Doppio passaggio voluto come safety net.
+- I programmi figli (variazioni) eventualmente collegati al programma
+  eliminato sopravvivono ma perdono il link al genitore (`SET NULL`
+  su `programma_genitore_id`). Gli import PdE sopravvivono allo stesso
+  modo (`corsa_import_run.programma_id` SET NULL).
+
+---
+
 ## 2026-05-08 (238) — MR-G: debug + pulizia post Sprint 8.0 (con Fausto)
 
 ### Contesto

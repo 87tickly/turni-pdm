@@ -329,6 +329,15 @@ export async function archiviaProgramma(id: number): Promise<ProgrammaMaterialeR
   });
 }
 
+/**
+ * Sprint 8.0 MR-H: eliminazione definitiva del programma (hard delete).
+ * Ammessa solo per stati ``bozza`` o ``archiviato`` (backend ritorna 400
+ * se il programma è ``attivo``). CASCADE su regole/giri/builder_run/thread.
+ */
+export async function eliminaProgramma(id: number): Promise<void> {
+  await apiJson<void>(`/api/programmi/${id}`, { method: "DELETE" });
+}
+
 export async function addRegola(
   programmaId: number,
   payload: ProgrammaRegolaAssegnazioneCreate,

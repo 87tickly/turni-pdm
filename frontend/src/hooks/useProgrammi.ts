@@ -25,6 +25,7 @@ import {
   confermaPersonale,
   createProgramma,
   deleteRegola,
+  eliminaProgramma,
   updateProgramma,
   getLastBuilderRun,
   getProgramma,
@@ -50,6 +51,7 @@ import {
 } from "@/lib/api/programmi";
 
 const PROGRAMMI_KEY = ["programmi"] as const;
+const GIRI_KEY = ["giri"] as const;
 
 export function useProgrammi(
   params: ListProgrammiParams = {},
@@ -144,6 +146,23 @@ export function useArchiviaProgramma(): UseMutationResult<ProgrammaMaterialeRead
   });
 }
 
+/**
+ * Sprint 8.0 MR-H: eliminazione definitiva (hard delete) del programma.
+ * Backend valida lo stato (solo `bozza` o `archiviato`) e propaga il
+ * CASCADE su regole/giri/builder_run/thread. Invalida `["programmi"]`
+ * + `["giri"]` per rimuovere cache delle entità ormai inesistenti.
+ */
+export function useEliminaProgramma(): UseMutationResult<void, Error, number> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: eliminaProgramma,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: PROGRAMMI_KEY });
+      void qc.invalidateQueries({ queryKey: GIRI_KEY });
+    },
+  });
+}
+
 interface UpdateProgrammaArgs {
   id: number;
   payload: ProgrammaMaterialeUpdate;
@@ -228,8 +247,6 @@ export function useUpdateRegola(): UseMutationResult<
 // del programma toccato (la conferma materiale freezza il ramo,
 // PdC potrebbe ora vederlo nelle list filtrate per ruolo). I dettagli
 // ``"detail" id`` sono coperti dall'invalidazione globale.
-
-const GIRI_KEY = ["giri"] as const;
 
 function invalidatePipelineQueries(qc: ReturnType<typeof useQueryClient>): void {
   void qc.invalidateQueries({ queryKey: PROGRAMMI_KEY });

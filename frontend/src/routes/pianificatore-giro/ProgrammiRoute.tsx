@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useGiriProgramma } from "@/hooks/useGiri";
 import {
   useArchiviaProgramma,
+  useEliminaProgramma,
   useProgramma,
   useProgrammi,
   usePubblicaProgramma,
@@ -573,7 +574,11 @@ function ProgrammaRow({
   const giriQuery = useGiriProgramma(programma.id);
   const pubblicaMutation = usePubblicaProgramma();
   const archiviaMutation = useArchiviaProgramma();
-  const busy = pubblicaMutation.isPending || archiviaMutation.isPending;
+  const eliminaMutation = useEliminaProgramma();
+  const busy =
+    pubblicaMutation.isPending ||
+    archiviaMutation.isPending ||
+    eliminaMutation.isPending;
 
   const handlePubblica = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -593,6 +598,30 @@ function ProgrammaRow({
       onError: (err) => {
         const msg = err instanceof ApiError ? err.message : err.message;
         window.alert(`Archiviazione fallita: ${msg}`);
+      },
+    });
+  };
+
+  const handleElimina = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const regoleCount = detailQuery.data?.regole.length ?? 0;
+    const giriCount = giriQuery.data?.length ?? 0;
+    const dettagli =
+      programma.stato === "bozza"
+        ? regoleCount > 0
+          ? `Verranno eliminate anche ${regoleCount} regola/e di assegnazione.`
+          : "Programma vuoto, nessun dato collegato."
+        : `Verranno eliminati anche ${regoleCount} regola/e e ${giriCount} giro/i con tutti i blocchi e le corse associate.`;
+    if (
+      !window.confirm(
+        `Eliminare definitivamente il programma "${programma.nome}"?\n\n${dettagli}\n\nL'operazione NON è reversibile.`,
+      )
+    )
+      return;
+    eliminaMutation.mutate(programma.id, {
+      onError: (err) => {
+        const msg = err instanceof ApiError ? err.message : err.message;
+        window.alert(`Eliminazione fallita: ${msg}`);
       },
     });
   };
@@ -665,6 +694,18 @@ function ProgrammaRow({
               className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
             >
               Archivia
+            </Button>
+          )}
+          {(programma.stato === "bozza" || programma.stato === "archiviato") && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleElimina}
+              disabled={busy}
+              aria-label={`Elimina ${programma.nome}`}
+              className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+            >
+              Elimina
             </Button>
           )}
           <span className="text-xs text-primary hover:underline">Apri →</span>

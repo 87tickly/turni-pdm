@@ -511,3 +511,77 @@ def test_archivia_gia_archiviato_400(client: TestClient) -> None:
 
     res2 = client.post(f"/api/programmi/{pid}/archivia", headers=_auth_headers(token))
     assert res2.status_code == 400
+
+
+# =====================================================================
+# DELETE /api/programmi/{id} — eliminazione definitiva (Sprint 8.0 MR-H)
+# =====================================================================
+
+
+def test_elimina_bozza_ok(client: TestClient) -> None:
+    """Programma in bozza → DELETE 204, GET successivo 404."""
+    token = _login(client, "admin", "admin12345")
+    res = client.post("/api/programmi", json=_PAYLOAD_MIN, headers=_auth_headers(token))
+    pid = res.json()["id"]
+
+    res_del = client.delete(f"/api/programmi/{pid}", headers=_auth_headers(token))
+    assert res_del.status_code == 204
+
+    res_get = client.get(f"/api/programmi/{pid}", headers=_auth_headers(token))
+    assert res_get.status_code == 404
+
+
+def test_elimina_archiviato_ok(client: TestClient) -> None:
+    """Programma archiviato → DELETE 204."""
+    token = _login(client, "admin", "admin12345")
+    payload = {**_PAYLOAD_MIN, "regole": [_REGOLA_MIN]}
+    res = client.post("/api/programmi", json=payload, headers=_auth_headers(token))
+    pid = res.json()["id"]
+    client.post(f"/api/programmi/{pid}/pubblica", headers=_auth_headers(token))
+    client.post(f"/api/programmi/{pid}/archivia", headers=_auth_headers(token))
+
+    res_del = client.delete(f"/api/programmi/{pid}", headers=_auth_headers(token))
+    assert res_del.status_code == 204
+
+
+def test_elimina_attivo_blocca_400(client: TestClient) -> None:
+    """Programma attivo (in produzione) → DELETE 400, va archiviato prima."""
+    token = _login(client, "admin", "admin12345")
+    payload = {**_PAYLOAD_MIN, "regole": [_REGOLA_MIN]}
+    res = client.post("/api/programmi", json=payload, headers=_auth_headers(token))
+    pid = res.json()["id"]
+    client.post(f"/api/programmi/{pid}/pubblica", headers=_auth_headers(token))
+
+    res_del = client.delete(f"/api/programmi/{pid}", headers=_auth_headers(token))
+    assert res_del.status_code == 400
+    assert "archiv" in res_del.json()["detail"].lower()
+
+    # Verifica: il programma è ancora lì, intatto
+    res_get = client.get(f"/api/programmi/{pid}", headers=_auth_headers(token))
+    assert res_get.status_code == 200
+    assert res_get.json()["stato"] == "attivo"
+
+
+def test_elimina_inesistente_404(client: TestClient) -> None:
+    """ID inesistente → DELETE 404."""
+    token = _login(client, "admin", "admin12345")
+    res = client.delete("/api/programmi/999999", headers=_auth_headers(token))
+    assert res.status_code == 404
+
+
+def test_elimina_cascade_regole(client: TestClient) -> None:
+    """DELETE bozza con regole → CASCADE rimuove le regole."""
+    token = _login(client, "admin", "admin12345")
+    payload = {**_PAYLOAD_MIN, "regole": [_REGOLA_MIN]}
+    res = client.post("/api/programmi", json=payload, headers=_auth_headers(token))
+    pid = res.json()["id"]
+    # Verifica setup: 1 regola creata
+    detail = client.get(f"/api/programmi/{pid}", headers=_auth_headers(token))
+    assert len(detail.json()["regole"]) == 1
+
+    res_del = client.delete(f"/api/programmi/{pid}", headers=_auth_headers(token))
+    assert res_del.status_code == 204
+
+    # CASCADE: programma + regola entrambi spariti
+    res_get = client.get(f"/api/programmi/{pid}", headers=_auth_headers(token))
+    assert res_get.status_code == 404

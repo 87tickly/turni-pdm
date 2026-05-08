@@ -10,6 +10,7 @@ Endpoints:
 - `DELETE /api/programmi/{id}/regole/{regola_id}` — rimuovi regola.
 - `POST /api/programmi/{id}/pubblica` — bozza → attivo con validazione.
 - `POST /api/programmi/{id}/archivia` — attivo → archiviato.
+- `DELETE /api/programmi/{id}` — eliminazione definitiva (solo bozza/archiviato).
 
 **Multi-tenant**: l'`azienda_id` è preso dal JWT (`CurrentUser.azienda_id`),
 mai dal client. Programmi di altre aziende ritornano 404 (non 403, per
@@ -765,6 +766,37 @@ async def archivia_programma(
     await session.commit()
     await session.refresh(p)
     return p
+
+
+@router.delete("/{programma_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def elimina_programma(
+    programma_id: int,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Elimina definitivamente un programma (hard delete con CASCADE).
+
+    Ammesso solo per programmi in stato ``bozza`` o ``archiviato``. Un
+    programma ``attivo`` è in produzione: per eliminarlo va prima
+    archiviato esplicitamente — protezione contro perdita accidentale di
+    lavoro pubblicato.
+
+    Cascade automatico (FK ``ondelete=CASCADE``):
+    ``programma_regola_assegnazione``, ``giro_materiale`` (con catena
+    ``giro_giornata``/``giro_corsa``/...), ``builder_run``,
+    ``materiale_thread``, ``regola_invio_sosta``.
+
+    SET NULL: ``corsa_import_run.programma_id`` (l'import del PdE
+    sopravvive) e ``programma_genitore_id`` di eventuali figli.
+    """
+    p = await _get_programma_or_404(session, programma_id, user.azienda_id)
+    if p.stato == "attivo":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="programma attivo: archivialo prima di eliminarlo",
+        )
+    await session.delete(p)
+    await session.commit()
 
 
 # =====================================================================
