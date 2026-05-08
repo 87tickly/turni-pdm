@@ -25,7 +25,6 @@ from colazione.domain.builder_pdc.split_cv import (
 )
 from colazione.models.giri import GiroBlocco
 
-
 # =====================================================================
 # Helper costruzione fixture
 # =====================================================================

@@ -28,7 +28,6 @@ from colazione.domain.builder_giro import (
 )
 from colazione.domain.builder_giro.fusione_cluster_a1 import fonde_cluster_simili
 
-
 # =====================================================================
 # Stub corsa identificabile per Jaccard
 # =====================================================================

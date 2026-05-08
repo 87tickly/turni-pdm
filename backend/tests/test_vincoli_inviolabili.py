@@ -27,7 +27,6 @@ import pytest
 from colazione.domain.vincoli import carica_vincoli, valida_regola
 from colazione.domain.vincoli.inviolabili import Vincolo
 
-
 # =====================================================================
 # Fixtures
 # =====================================================================

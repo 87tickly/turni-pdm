@@ -139,10 +139,14 @@ def test_gap_oltre_max_chiude_la_catena() -> None:
 
 
 def test_gap_entro_max_incatena() -> None:
-    """gap di 5h59 (= 359 min) entro gap_max=360 → catena unica."""
+    """gap di 4h59 (= 299 min) entro gap_max=300 → catena unica.
+
+    Sprint 8.0 MR-3 entry 222: default gap_max abbassato da 360 a 300
+    ("non voglio soste >5h diurne"). Test aggiornato di conseguenza.
+    """
     a = _c("MI", "BG", (8, 0), (9, 0))
-    # 9:00 + 5h59 = 14:59 → entro gap_max=360
-    b = _c("BG", "BS", (14, 59), (15, 30))
+    # 9:00 + 4h59 = 13:59 → entro gap_max=300
+    b = _c("BG", "BS", (13, 59), (14, 30))
     catene = costruisci_catene([a, b])
     assert len(catene) == 1
     assert catene[0].corse == (a, b)
@@ -154,7 +158,7 @@ def test_gap_max_personalizzato() -> None:
     """
     a = _c("MI", "BG", (8, 0), (9, 0))
     b = _c("BG", "BS", (12, 0), (12, 30))  # gap 3h = 180 min
-    # Default gap_max=360 → catena unica
+    # Default gap_max=300 → catena unica (180 < 300)
     assert len(costruisci_catene([a, b])) == 1
     # gap_max=120 → 2 catene (gap 180 > 120)
     catene = costruisci_catene([a, b], ParamCatena(gap_max=120))

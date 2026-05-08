@@ -16,7 +16,6 @@ from __future__ import annotations
 import os
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.api.variazioni_impatto import (
     calcola_impatto_su_programmi,

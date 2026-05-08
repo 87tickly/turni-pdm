@@ -12,7 +12,6 @@ non in sessione) e ``Depot`` in-memory.
 from __future__ import annotations
 
 from datetime import time
-from typing import Any
 
 import httpx
 import pytest

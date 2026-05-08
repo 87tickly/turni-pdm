@@ -21,7 +21,9 @@ from colazione.db import Base, session_scope
 # Sprint 7.9 MR ζ entry 145: +5 tabelle Sprint 7.9 (LocalitaSosta,
 # RegolaInvioSosta, MaterialeIstanza, MaterialeThread,
 # MaterialeThreadEvento, MaterialeDotazioneAzienda) → 38 + 5 = 43.
-EXPECTED_TABLE_COUNT = 43
+# Sprint 8.0 MR-E entry 236: +2 tabelle (AreaMetropolitana,
+# AreaStazioneMembri, migration 0040) → 43 + 2 = 45.
+EXPECTED_TABLE_COUNT = 45
 
 
 def _db_available() -> bool:

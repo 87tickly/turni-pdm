@@ -10,6 +10,137 @@
 
 ---
 
+## 2026-05-08 (238) — MR-G: debug + pulizia post Sprint 8.0 (con Fausto)
+
+### Contesto
+
+Decisione utente: "prepara un bel debug e una pulizia codice morto
+insieme a fausto". Sessione di hardening dopo serie di MR Sprint 8.0
+(entry 232–237, 6 commit consecutivi: MR-A/B/C/D/E/F). Obiettivo:
+baseline pulita, niente bug residui, niente dead code.
+
+### Fase 1 — Baseline
+
+| Check | Esito |
+|---|---|
+| ruff src backend | ✅ clean |
+| mypy --strict src | ✅ clean (80 file) |
+| ruff tests backend | 🟡 12 errori (9 auto-fix I001 imports + 1 F401 + 1 B008 pre-esistente + 1 B017) |
+| pnpm tsc --noEmit | ✅ clean |
+| pnpm build | ✅ ok (1805 moduli) |
+| pytest (997 collected) | 🔴 686 pass / 13 skip / 262 errors / 38 fail |
+
+I 262 errors + 36 dei 38 fail sono **Postgres locale down** (port 5432
+refused), non bug. **2 test FAIL veri** scoperti, entrambi causati da
+modifiche recenti Sprint 8.0.
+
+### Fase 2 — Bug veri (test stale post-Sprint 8.0)
+
+**`tests/test_models.py:24`** — `EXPECTED_TABLE_COUNT=43` ma DB ha 45
+tabelle. MR-E entry 236 (migration 0040) ha aggiunto
+`area_metropolitana` + `area_stazione_membri`. Costante non aggiornata.
+→ Fix: 43 → 45 + commento storico.
+
+**`tests/test_catena.py::test_gap_entro_max_incatena`** — usa gap=359'
+contro `gap_max=360` ma il default è ora 300 (MR-3 entry 222: "non
+voglio soste >5h diurne"). Test obsoleto. → Fix: gap reale 4h59=299'
+con `gap_max=300` + aggiornato anche commento di
+`test_gap_max_personalizzato` (riga 156) che era ancora stale.
+
+### Fase 3 — Inventory dead code (knip frontend + grep backend)
+
+Frontend (knip):
+- File non importati: `src/components/ui/Table.tsx`,
+  `src/routes/pianificatore-giro/PlaceholderPage.tsx` → **rimossi**.
+- Dipendenze non usate: `@dnd-kit/utilities`,
+  `@radix-ui/react-dropdown-menu`, `@radix-ui/react-slot`,
+  `@radix-ui/react-toast` → **rimosse via pnpm remove** (–220 righe
+  pnpm-lock.yaml).
+
+Backend (grep):
+- `domain/revisioni/__init__.py` (0 byte, package senza altri file,
+  zero importatori) → **directory rimossa**. Nota: `models/revisioni.py`
+  e `schemas/revisioni.py` restano (sono attivi via
+  `api/pianificatore_pdc.py`, M2 del `CODE-REVIEW-2026-05-01.md`
+  parzialmente chiuso).
+
+Cleanup minor:
+- `builder_pdc/builder.py:997` `datetime.utcnow()` → `datetime.now(UTC)`
+  (chiude finding **I1** del code review post 7.4 — deprecation Python 3.12).
+- `tests/test_live_arturo_client.py:313` `pytest.raises(Exception)` →
+  `pytest.raises(AttributeError)` (B017, dataclass frozen mutation).
+- `ruff check tests --fix` su 9 errori I001 (import sorting).
+
+### Fausto consulenza
+
+`mcp__grok__code_review` su `catena.py` MR-E con focus
+"regressioni/edge case introdotti dal rilassamento area metropolitana".
+Brief autosufficiente: tie-break esatto vs area, short-circuit
+None/dict vuoto, deadlock, stessa area cross-stazione.
+
+**Risposta Fausto**: niente HIGH bug strutturali. Tie-break esatto
+sempre preferito su area a parità ora_partenza (verificato). Short-circuit
+`area_per_stazione=None` e `{}` corretti (entrambi → `False`). Niente
+race nel `visitate` set. Suggerimenti minor: docstring più chiaro su
+edge mezzanotte, naming italiano (lasciato — coerenza con resto file).
+
+→ MR-E è **strutturalmente sano**. I 2 test fail erano costanti stale,
+non regressioni.
+
+### Verifiche post-fix
+
+- ✅ `ruff check src tests` → 2 errori B008 pre-esistenti (FastAPI
+  `Depends(require_role(...))`, già noti da entry 236).
+- ✅ `mypy --strict src` → clean (79 file, –1 per rimozione
+  `domain/revisioni/`).
+- ✅ `pytest test_models test_catena test_live_arturo_client` → **39
+  passed**.
+- ✅ `pnpm tsc --noEmit` clean.
+- ✅ `pnpm build` → bundle `index-DhquHQcy.js`, 1805 moduli, 893 kB
+  (invariato — le 4 deps rimosse erano già tree-shaken).
+
+### Stato
+
+- ✅ MR-G chiuso. Test stale chiusi, dead code conservativo rimosso.
+- ⏳ Commit + push + deploy backend + frontend.
+
+### Residui dichiarati (non chiusi in questa sessione)
+
+**Non triviali / decisione utente**:
+
+- **I5** `updated_at` senza `onupdate=func.now()` su `giri.py`,
+  `turni_pdc.py`: richiede migration alter_column su tutte le tabelle
+  con `updated_at`. ~30 min + migration. Da promuovere quando si
+  vorrà tracking modifica per audit log.
+- **C6** `STAZIONI_CV_DEROGA = {"MORTARA", "TIRANO"}` hardcoded
+  (`split_cv.py:59`): da verificare il codice DB reale di TIRANO
+  post-import #1289 (potrebbe non matchare). Soluzione strutturale:
+  promuovere a regola configurabile per programma.
+- **Frontend bundle 893 kB > 500 kB warning**: opportunità code-splitting
+  via dynamic import / manualChunks. Performance MVP locale ok,
+  rilevante post-deploy CDN.
+
+**Frontend export/tipi unused (knip TIER 3)**: 10 export + 7 tipi
+flagged. Conservativi — alcuni sono API surface intenzionale (`CardTitle`,
+`CardFooter`, `DialogPortal`, `DialogOverlay`, `PopoverAnchor`). Da
+verificare uno per uno con `pnpm tsc --noEmit` dopo rimozione mirata.
+Rinviato per evitare regressioni silenziose.
+
+**Pytest 262 errors / 36 fail DB-dipendenti**: ambiente test richiede
+Postgres locale. Non sono bug del codice. Da risolvere sistemicamente
+con docker-compose dev o pytest-postgresql + skip marker quando DB
+non disponibile.
+
+### Per l'utente
+
+- Sessione di hardening: niente cambiamento funzionale visibile.
+- Test stale baseline ora passano: 39/39 verdi sui 3 file fixati.
+- Codebase più snello: rimossi 90 righe code dead (2 file frontend +
+  1 init backend) + 4 deps + 220 righe lockfile.
+- Costo Fausto: 1 chiamata `code_review` su catena.py (~3-5 cent xAI).
+
+---
+
 ## 2026-05-08 (237) — MR-F: snellimento UX (accordion BloccoDialog + menu Azioni + expander corse)
 
 ### Contesto

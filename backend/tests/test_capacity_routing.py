@@ -31,7 +31,6 @@ from colazione.domain.builder_giro import (
 )
 from colazione.domain.builder_giro.capacity_routing import ribilancia_per_capacity
 
-
 # =====================================================================
 # Stub
 # =====================================================================

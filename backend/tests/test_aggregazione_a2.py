@@ -28,7 +28,6 @@ from colazione.domain.builder_giro import (
     aggrega_a2,
 )
 
-
 # =====================================================================
 # Stub corsa minimo (compatibile con BloccoAssegnato).
 # =====================================================================

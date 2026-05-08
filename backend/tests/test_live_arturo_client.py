@@ -24,7 +24,6 @@ from colazione.integrations.live_arturo import (
     trova_treno_vettura,
 )
 
-
 # =====================================================================
 # _hhmm_to_min
 # =====================================================================
@@ -311,5 +310,5 @@ def test_treno_vettura_dataclass_immutabile() -> None:
         arrivo_min=780,
         durata_min=60,
     )
-    with pytest.raises(Exception):
+    with pytest.raises(AttributeError):
         t.numero = "2"  # type: ignore[misc]

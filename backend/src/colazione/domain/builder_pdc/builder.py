@@ -33,7 +33,7 @@ ciclo settimanale completo, S.COMP, assegnazione persone.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from typing import Any
 
 from sqlalchemy import select
@@ -994,7 +994,7 @@ async def _persisti_un_turno_pdc(
         "giro_numero_turno": giro.numero_turno,
         "violazioni": violazioni,
         "stazione_sede": stazione_sede,
-        "generato_at": datetime.utcnow().isoformat(),
+        "generato_at": datetime.now(UTC).isoformat(),
         "builder_version": "mvp-7.9-eta",
         # Sprint 7.7 MR 3: il giro materiale è ora UN pattern
         # calendariale specifico (etichetta_tipo) — niente più

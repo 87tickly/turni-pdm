@@ -16,7 +16,6 @@ from colazione.domain.builder_giro import (
 )
 from colazione.domain.builder_giro.sourcing import arricchisci_sourcing
 
-
 # =====================================================================
 # Stubs minimi
 # =====================================================================
