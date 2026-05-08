@@ -2855,6 +2855,10 @@ async def sposta_blocco(
     # MR-A entry 231: cross-turno richiede stesso programma_id (i giri
     # devono appartenere allo stesso programma per garantire coerenza
     # PdE, regole, dotazione).
+    # MR-G2 (Fausto F6 LOW): defensive check — la select è già filtrata
+    # per `azienda_id == user.azienda_id`, ma esplicitare l'assert
+    # documenta l'invariante e protegge da future modifiche della query
+    # che dimentichino il filtro.
     if target_giro_id is not None and target_giro_id != giro_id:
         target_giro = giri_by_id.get(target_giro_id)
         if target_giro is None:
@@ -2862,6 +2866,10 @@ async def sposta_blocco(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="giro_target non trovato",
             )
+        assert target_giro.azienda_id == user.azienda_id, (
+            "invariante violata: target_giro.azienda_id != user.azienda_id "
+            "(la select pessimistica avrebbe dovuto filtrarlo)"
+        )
         if target_giro.programma_id != giro.programma_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -2962,6 +2970,13 @@ async def sposta_blocco(
     sim_origine = [b for b in origine_blocchi if b.id != blocco.id]
 
     # Sequenza simulata variante target (post inserimento del blocco).
+    # MR-G2 (Fausto F7): chiarimento semantica seq_target.
+    # - Payload `seq_target` è 1-based (`Field(..., ge=1)` su request).
+    # - `pos_inserimento` è 0-based (indice dentro `target_senza`).
+    # - Conversione: `seq_target - 1`. Clamp a [0, len(target_senza)]
+    #   per accettare append in coda (`seq_target == len + 1`) e
+    #   inserimento in testa (`seq_target == 1` → pos 0).
+    # - Se `seq_target is None` → append in coda.
     target_senza = [b for b in target_blocchi if b.id != blocco.id]
     pos_inserimento = (
         len(target_senza)

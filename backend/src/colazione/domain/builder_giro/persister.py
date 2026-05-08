@@ -305,13 +305,23 @@ def _numero_vuoto_da_treno_commerciale(numero_treno_commerciale: str | None) -> 
 
     Args:
         numero_treno_commerciale: numero treno della corsa commerciale
-            "ancora" (primo o ultimo della variante/giro). Se ``None``
-            (caso degenere variante senza corse commerciali, non
-            dovrebbe accadere) → fallback a ``"90000"`` per evitare
-            crash.
+            "ancora" (primo o ultimo della variante/giro).
+
+    Raises:
+        ValueError: se ``numero_treno_commerciale`` è ``None`` o vuoto.
+            MR-G2 (Fausto F2 HIGH): il vecchio fallback ``"90000"``
+            avrebbe causato collisioni multiple sull'unique constraint
+            di ``corsa_materiale_vuoto.numero_treno_vuoto`` non appena
+            si fossero verificate 2 varianti senza corse commerciali.
+            Il caso è degenere ("non dovrebbe accadere"): fail loud
+            invece di mascherarlo con un fallback colliding.
     """
     if numero_treno_commerciale is None or not numero_treno_commerciale:
-        return "90000"
+        raise ValueError(
+            "numero_treno_commerciale richiesto per generare il numero "
+            "vuoto associato (variante senza corse commerciali = stato "
+            "degenere non gestibile dal persister)."
+        )
     return f"9{numero_treno_commerciale}"
 
 
@@ -874,6 +884,7 @@ async def _crea_blocco_uscita_sede(
     stazione_da: str,
     stazione_a: str,
     ora_arrivo: Any,
+    numero_treno_associato: str,
 ) -> None:
     """Sprint 7.9 MR 7C: blocco "uscita_sede" simmetrico al rientro.
 
@@ -894,10 +905,12 @@ async def _crea_blocco_uscita_sede(
     partenza_min = (h * 60 + m - 30) % (24 * 60)
     ora_partenza = _time(partenza_min // 60, partenza_min % 60)
     # Sprint 7.9 MR β2-2: pattern parlante (anche se questa funzione
-    # non è più chiamata dopo il rollback MR 7C — restano per
-    # estendibilità futura). Il caller passerà eventualmente il
-    # `numero_treno_associato`; per ora fallback "90000".
-    numero = _numero_vuoto_da_treno_commerciale(None)
+    # non è più chiamata dopo il rollback MR 7C — resta per
+    # estendibilità futura). MR-G2 (Fausto F2): rimosso il vecchio
+    # fallback ``None → "90000"`` che avrebbe causato collisioni unique
+    # se la funzione fosse riattivata. Caller obbligato a passare
+    # ``numero_treno_associato`` reale.
+    numero = _numero_vuoto_da_treno_commerciale(numero_treno_associato)
 
     cmv = CorsaMaterialeVuoto(
         azienda_id=azienda_id,

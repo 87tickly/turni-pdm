@@ -10,6 +10,138 @@
 
 ---
 
+## 2026-05-08 (240) — MR-G2: review estesa Sprint 8.0 con Fausto (4 file)
+
+### Contesto
+
+Decisione utente entry 238: estendere review Fausto agli altri file
+toccati da Sprint 8.0 (oltre a `catena.py` già coperto in MR-G).
+Brief: `api/giri.py` (sposta/elimina/aggiungi vuoto + lock multi-giro),
+`builder_giro/persister.py` (vuoto intra-area + numero_vuoto + km_annua),
+`GiroDettaglioRoute.tsx` (DnD + accordion), `TurnoAggregatoRoute.tsx`
+(DnD cross-turno + virtualization).
+
+### Review Fausto — 4 chiamate `mcp__grok__code_review` parallele
+
+40+ finding inventoriati. Filtrati i 6 finding TIER 1 (alto valore +
+basso rischio + scrivibili in <1h totale) da fixare in questo MR.
+TIER 2/3 dichiarati come residui motivati.
+
+### Fix applicati TIER 1
+
+**F1 HIGH — `GiroDettaglioRoute.tsx:4169` AccordionSection state
+managed**: il pattern `<details open={defaultOpen}>` in React forza
+l'attributo `open` ad ogni re-render, **sovrascrivendo il toggle
+dell'utente**. Quando l'utente apre/chiude una sezione e il parent
+ri-renderizza (es. cambio blocco selezionato), l'accordion ritorna
+allo stato `defaultOpen` invece di preservare l'interazione. Fix:
+`useState(defaultOpen)` + `onToggle={(e) => setIsOpen(e.currentTarget.open)}`.
+Stato governato da React, persiste finché `AccordionSection` è montato.
+
+**F2 HIGH — `persister.py:292-316` `_numero_vuoto` raise invece di
+fallback**: il vecchio fallback `None → "90000"` avrebbe causato
+**collisioni multiple sull'unique constraint** di
+`corsa_materiale_vuoto.numero_treno_vuoto` non appena 2 varianti
+senza corse commerciali fossero passate dal persister. Caso degenere
+("non dovrebbe accadere" da commento storico) → fail loud con
+`ValueError`. Aggiornata anche la signature di `_crea_blocco_uscita_sede`
+(funzione zombie post rollback MR 7C, mantenuta per estendibilità):
+ora richiede `numero_treno_associato: str` esplicito invece di
+chiamare con `None`.
+
+**F6 LOW — `api/giri.py:2858+` cross-azienda assert esplicito**:
+defensive check post-lock che `target_giro.azienda_id == user.azienda_id`
+(la `select` pessimistica già filtra, ma esplicitare l'invariante
+documenta + protegge da future modifiche dimentiche del filtro).
+
+**F7 MED — `api/giri.py:2966+` pos_inserimento docstring chiarito**:
+commento esplicativo `seq_target` 1-based payload vs `pos_inserimento`
+0-based interno + clamp a `[0, len(target_senza)]` per supportare
+append in coda (`seq_target == len + 1`) e inserimento in testa
+(`seq_target == 1` → pos 0).
+
+**F11** false positive di Fausto: tutti i bottoni "Forza ..." in
+`GiroDettaglioRoute.tsx` (sposta/elimina/aggiungi) e
+`TurnoAggregatoRoute.tsx` hanno **già** `disabled={mutation.isPending}`
++ label dinamica ("Sposto…", "Elimino…", "Aggiungo…"). Niente da fare.
+
+### Residui dichiarati TIER 2/3 (motivati, non chiusi)
+
+**TIER 2** (chirurgico, decisione utente):
+
+- **F4 HIGH virtualization `react-window`** su `TurnoAggregatoRoute`
+  (200-300 righe DOM con DnD = freeze su mobile). 1-2h impl. Già
+  dichiarato deferred da MR-B.4 entry 234.
+- **F5 MED race mutateAsync** dryRun→applica: utente droppa altro
+  blocco prima del dialog conferma → `pendingMove` sovrascritto.
+  Soluzione: `isDragPending` global che disabilita sensors + bottoni.
+  30 min, ma tocca DnD intero entrambe le route.
+- **F10 MED `window.alert` → toast pattern**: pattern toast da
+  scaffolding (vedere se hook `useToast` esiste, sennò creazione).
+  30 min.
+- **F12 MED N+1 endpoint batch giri-dettaglio**: 30+ HTTP request da
+  `useQueries` su `TurnoAggregatoRoute`. Soluzione: nuovo endpoint
+  `GET /api/programmi/{id}/giri-dettaglio?ids=...`. 1h backend +
+  frontend.
+
+**TIER 3** (richiede contesto esterno):
+
+- **F3 HIGH legacy `90001+` collision check**: verifica empirica DB
+  prod (`SELECT WHERE numero_treno_vuoto LIKE '9%'`) per capire se
+  esistono numeri pre-MR-β2-2 che potrebbero collidere col nuovo
+  schema `9{commerciale}`. Migration backfill se serve.
+- **F8 MED FK pre-lookup vuoto intra-area**: `persister.py:559-593`
+  non fa pre-lookup FK sulle stazioni del vuoto intra-area (assume
+  pre-condizione `catena.py`). FK violation late se stazione assente.
+  Soluzione: pre-caricare set stazioni del programma in 1 query +
+  check in-memory. Refactor mediato, fuori scope quick fix.
+- **F9 MED double-counting `_km_media_annua_giro`**: se 2 varianti
+  calendariali della stessa giornata sovrappongono `dates_apply`
+  (caso A2 cluster), double count. Verificare invariant mutually
+  exclusive con assert + test dedicato. Richiede approfondimento
+  modello A2.
+- **F14 LOW a11y `KeyboardSensor` coordinateGetter custom**: drag&drop
+  con tastiera su timeline/accordion non standard. Test reale screen
+  reader necessario.
+
+### Verifiche post-fix
+
+- ✅ `mypy --strict src` clean (79 file).
+- ✅ `ruff check src` clean (2 errori B008 pre-esistenti FastAPI
+  Depends, già documentati MR-G entry 238).
+- ✅ `pnpm tsc --noEmit` clean.
+- ✅ `pnpm build` ok (1805 moduli, bundle invariato).
+- ✅ Pytest no-DB sui file toccati: 22 passed, errors solo Postgres-down
+  (ambiente locale, non bug).
+- ✅ Preview F1 smoke: frontend dev server, login page renderizza,
+  niente errori console/server. Test funzionale completo richiede
+  Postgres locale (non disponibile) o ambiente Railway post-deploy.
+
+### Costo Fausto
+
+4 chiamate `code_review` parallele, ognuna con brief autosufficiente
+(file completo o sezioni mirate + vincoli + domande secche). Stima
+totale: ~15-20 cent xAI.
+
+### Per l'utente
+
+- F1 visibile: aprire/chiudere accordion del BloccoDialog + cambiare
+  blocco selezionato → l'apertura adesso persiste (non resetta più
+  a `defaultOpen` ad ogni re-render).
+- F2 invisibile fino a fault: se in futuro qualche edge produce un
+  giro senza corse commerciali → ora si vede `ValueError` in log
+  invece di un crash silenzioso da unique violation.
+- F6/F7 invisibili: hardening difensivo + clarity.
+
+### Prossimo step
+
+I residui TIER 2/3 sono decisioni tue (priorità + scope). F4
+virtualization è il più impattante user-facing se la vista aggregata
+diventa lenta con molti turni — possiamo affrontarlo come MR-I
+dedicato.
+
+---
+
 ## 2026-05-08 (239) — MR-H: eliminazione definitiva programmi (hard delete)
 
 ### Contesto

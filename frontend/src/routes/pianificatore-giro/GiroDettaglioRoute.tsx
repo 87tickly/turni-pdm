@@ -4177,6 +4177,12 @@ function AccordionSection({
   tone?: "default" | "rose" | "blue" | "amber";
   children: React.ReactNode;
 }) {
+  // MR-G2 (Fausto F1 HIGH): senza managed state, React forza l'attributo
+  // `open={defaultOpen}` ad ogni re-render, sovrascrivendo il toggle
+  // dell'utente. Con useState + onToggle lo stato di apertura è
+  // governato dal componente e persiste finché AccordionSection è
+  // montata.
+  const [isOpen, setIsOpen] = useState(defaultOpen);
   const headerTone: Record<typeof tone, string> = {
     default:
       "border-border bg-muted/30 text-foreground hover:bg-muted/50",
@@ -4187,7 +4193,8 @@ function AccordionSection({
   };
   return (
     <details
-      open={defaultOpen}
+      open={isOpen}
+      onToggle={(e) => setIsOpen(e.currentTarget.open)}
       className={cn(
         "group rounded-md border transition-colors",
         headerTone[tone],
