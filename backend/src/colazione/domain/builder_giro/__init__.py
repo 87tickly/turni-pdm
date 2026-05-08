@@ -47,6 +47,11 @@ from colazione.domain.builder_giro.aggregazione_a2 import (
     VarianteGiornata,
     aggrega_a2,
 )
+from colazione.domain.builder_giro.backtracking_esplorativo import (
+    ParamBacktracking,
+    StatBacktracking,
+    tenta_estensione_giri_corti,
+)
 from colazione.domain.builder_giro.builder import (
     BuilderResult,
     BuilderVersionNonSupportata,
@@ -157,6 +162,7 @@ __all__ = [
     "LocalitaSenzaStazioneError",
     "MotivoChiusura",
     "BuilderVersionNonSupportata",
+    "ParamBacktracking",
     "ParamCatena",
     "ParamChiusuraPost",
     "PdcDipendentiError",
@@ -166,6 +172,7 @@ __all__ = [
     "ProgrammaNonAttivoError",
     "ProgrammaNonTrovatoError",
     "RegolaAmbiguaError",
+    "StatBacktracking",
     "StrictModeViolation",
     "Tier",
     "TipoEvento",
@@ -193,6 +200,7 @@ __all__ = [
     "rileva_eventi_composizione",
     "risolvi_corsa",
     "risolvi_corsa_esplorativo",
+    "tenta_estensione_giri_corti",
     "tier_vincoli_default",
     "wrap_assegnato_in_aggregato",
 ]

@@ -57,6 +57,10 @@ from colazione.domain.builder_giro.aggregazione_a2 import (
     VarianteGiornata,
     aggrega_a2,
 )
+from colazione.domain.builder_giro.backtracking_esplorativo import (
+    ParamBacktracking,
+    tenta_estensione_giri_corti,
+)
 from colazione.domain.builder_giro.capacity_routing import (
     aggrega_corse_residue_da_scartati,
     carica_dotazione_per_azienda,
@@ -1748,6 +1752,51 @@ async def genera_giri(
             min_servizio_giornata_pct=programma.min_servizio_giornata_pct,
         )
         giri_regola = costruisci_giri_multigiornata(catene_per_d, param_mg)
+
+        # Sprint 8.1 MR-A4 (entry 245): backtracking esplorativo
+        # opt-in via builder_mode='esplorativo' (decisione utente
+        # 2026-05-08 seguendo dissenso V4 Pro su MR-A3 design beam=3
+        # depth=1 "troppo debole"). Per ogni giro corto (motivo
+        # 'sotto_min'|'non_chiuso' E len(giornate)<n_min), prova
+        # estensione cross-notte con beam search (k=8) + backtracking
+        # profondo (depth dinamico fino a n_giornate_max-len) + pruning
+        # km_cap. Risultato: i giri corti possono raggiungere n_min e
+        # chiudere "naturale" invece di restare 'sotto_min'.
+        if programma.builder_mode == "esplorativo":
+            # Costruisce mapping idx_giro→materiale per il backtracking.
+            # Tutti i giri di una regola hanno lo stesso materiale
+            # (regola → composizione → materiale_per_regola).
+            mat_regola = materiale_per_regola.get(regola.id, "")
+            if mat_regola:
+                materiale_per_giro_idx = {
+                    idx: mat_regola for idx in range(len(giri_regola))
+                }
+                # Pool catene per data del materiale corrente
+                # (filtra catene_per_d a quelle del materiale).
+                catene_per_data_mat: dict[date, list[CatenaPosizionata]] = {}
+                for d_iter, lista in catene_per_d.items():
+                    catene_per_data_mat[d_iter] = list(lista)
+                catene_per_data_per_materiale: dict[
+                    str, dict[date, list[CatenaPosizionata]]
+                ] = {mat_regola: catene_per_data_mat}
+                giri_regola_estesi, stat_back = tenta_estensione_giri_corti(
+                    giri_regola,
+                    catene_per_data_per_materiale,
+                    materiale_per_giro_idx,
+                    param_mg,
+                    ParamBacktracking(),
+                )
+                if stat_back.n_giri_estesi > 0:
+                    warnings.append(
+                        f"Backtracking esplorativo regola {regola.id}: "
+                        f"{stat_back.n_giri_estesi}/{stat_back.n_giri_processati} "
+                        f"giri estesi, "
+                        f"avg_depth={stat_back.avg_depth_raggiunta:.1f}, "
+                        f"branches={stat_back.n_branches_esplorati}."
+                    )
+                if stat_back.warnings:
+                    warnings.extend(stat_back.warnings)
+                giri_regola = giri_regola_estesi
 
         # Sprint 8.1 MR-A2 (entry 243): closure post-pass opt-in via
         # ``programma.builder_mode == 'esplorativo'`` (foundation MR-A1).

@@ -10,6 +10,156 @@
 
 ---
 
+## 2026-05-08 (246) — Sprint 8.1 MR-A4: backtracking esplorativo profondo + Triple Validation (FAUSTO+V4 Flash+V4 Pro)
+
+### Contesto
+
+Quarto MR del refactor builder esplora-e-rilassa. Sintomi target:
+~50% giri 1g sul programma 17 (sotto n_min=4), molti giri
+'sotto_min'/'non_chiuso' che il greedy legacy chiude prematuramente.
+
+Obiettivo: aggiungere fase di **beam search + backtracking profondo**
+DOPO `costruisci_giri_multigiornata` per "salvare" i giri corti
+estendendoli con catene cross-notte che il greedy ha mancato.
+
+### Triple Validation (NINO+FAUSTO+V4 Flash+V4 Pro)
+
+Prima di scrivere codice, ho fatto validazione cross-ausilio del
+piano + 4 decisioni architetturali A1-A3. AMILCARE V4 Pro era 401
+sul setup OpenRouter; per coinvolgerlo ho:
+
+1. Diagnostica chiave OpenRouter: HTTP 401 anche via curl diretto =
+   chiave invalida (non è MCP layer).
+2. Switch a DeepSeek API diretta. Server.py riscritto con 2 tool:
+   - `mcp__amilcare__reason` → `deepseek-v4-pro` (top reasoning)
+   - `mcp__amilcare__code` → `deepseek-v4-flash` (V3-equivalent coder)
+3. Aggiunto `AMILCARE_TIMEOUT_SEC` env (default 300s) per evitare
+   timeout 120s su brief V4 Pro architetturali.
+
+**Triple Validation risultati**:
+
+| # | NINO filter | FAUSTO | V4 Flash | V4 Pro | Convergenza |
+|---|---|---|---|---|---|
+| D1 tier metadata premature | non-issue | ✅ | ✅ | ✅ | unanime |
+| D2 corse_perimetro=6500 | monitor A7 | ✅ | ✅ | ⚠️ ALERT (test calendario completo, no spot) | convergente |
+| D3 Tier 1 affinità sede | falso positivo | ✅ | ✅ | ✅ | unanime |
+| D4 closure intra-area MVP | scope A5 | ✅ | ✅ | ✅ | unanime |
+| **Piano A4 beam=3/depth=1** | sufficiente | ✅ | ✅ | ❌ **DISSENTO**: "troppo debole, serve backtracking profondo o ottim. globale" | **3 vs 1 ma V4 Pro è il modello più potente** |
+
+**Decisione utente**: seguire V4 Pro su A4. Implementare backtracking
+PROFONDO + parametrizzato. NO LNS/ILP (V4 Pro ha detto "o" come
+alternativa, NINO ha scelto backtracking come allineamento stack).
+
+### Modifiche MR-A4
+
+**Modulo nuovo `domain/builder_giro/backtracking_esplorativo.py`** (~340 righe):
+
+- `dataclass ParamBacktracking(beam_k=8, depth_max_oltre_min=2,
+  tolleranza_km_cap_pct=10.0, log_level='info')`. Default V4 Pro:
+  beam 2.7× rispetto al 3 originale, depth dinamico fino a
+  `n_giornate_max-len(giornate)`.
+- `dataclass StatBacktracking` per logging empirico A7.
+- `_StatoBacktracking` privato con `frozenset[id]` visitate.
+- `_trova_continuazioni_top_k`: variante esplorativa di
+  `_trova_continuazione` che ritorna fino a k candidati invece di 1.
+- `_score_stato`: bilanciamento km×0.5 + n_corse×1.0 + 50 (chiude
+  in whitelist) + 30 (raggiunge n_min) - 0.5×n_giornate.
+- `_estendi_ricorsivo`: backtracking ricorsivo con beam + pruning
+  km_cap (scarta branch oltre `cap × (1 + tolleranza%)`).
+- `_ricalcola_motivo`: applica logica `multi_giornata.py:644-669`
+  allo stato esteso.
+- `tenta_estensione_giri_corti(...)`. Pure function, idempotente.
+
+**Integrazione `builder.py`**:
+
+- Import `ParamBacktracking, tenta_estensione_giri_corti`.
+- Nel loop `for regola in regole_della_sede`, DOPO
+  `costruisci_giri_multigiornata` e PRIMA del closure post-pass A2,
+  applica backtracking se `programma.builder_mode == 'esplorativo'`.
+- Logging warning del tipo `"Backtracking regola N: M/X giri estesi,
+  avg_depth=Y.Y, branches=Z"`.
+
+Flusso esplorativo finale: `costruisci_catene → posiziona_su_localita
+→ costruisci_giri_multigiornata → backtracking_esplorativo (A4) →
+closure_post_pass (A2) → Fix C2 troncamento legacy (skipped per
+ciclo_aperto_irrisolto)`.
+
+**Re-export `__init__.py`**: `ParamBacktracking`, `StatBacktracking`,
+`tenta_estensione_giri_corti`.
+
+**Test** (`tests/test_backtracking_esplorativo.py`, 13 test no DB):
+- ParamBacktracking validation (beam_k>=1, depth>=0, tolleranza>=0,
+  log_level enum).
+- Pass-through per motivi non eligibili (parametrizzato).
+- Pass-through giro già lungo / vuoto / materiale non mappato.
+- Estensione giro 1g con catena disponibile.
+- Estensione che chiude `naturale` (4g + km_cap raggiunto + sede whitelist).
+- Pruning km_cap (branch sforante tolleranza scartato).
+- Idempotenza.
+- StatBacktracking metriche.
+- Re-export.
+
+### Verifiche
+
+- ✅ `ruff check src tests`: clean (auto-fix 4 I001 + 1 B905).
+- ✅ `mypy --strict src`: **82 file clean**.
+- ✅ `pytest A1+A2+A3+A4 + regression`: **135 passed in 0.50s**.
+- ✅ `pnpm tsc --noEmit`: clean.
+
+### Stato
+
+- ✅ MR-A4 chiuso. Backtracking esplorativo profondo pronto.
+- ✅ AMILCARE V4 Pro/Flash operativo via DeepSeek API diretto.
+- ✅ Triple validation completata: dissenso V4 Pro su A4 RECEPITO
+  integralmente (parametri V4 Pro applicati).
+- ⏳ Commit + push + deploy Railway backend.
+- ⏳ **SEVERO invocato post-commit** (regola 9 CLAUDE.md aggiornata
+  entry 245: "obbligatorio post-MR significativo"). MR-A4 = L
+  effort, qualifica come significativo.
+- ⏳ MR-A7 prossimo: validazione su programma 17 reale per
+  benchmark del backtracking + verifica sintomi reali.
+
+### Per l'utente
+
+Ora il flusso esplorativo end-to-end (A1+A2+A3+A4) è attivabile per
+programma:
+1. `PATCH /api/programmi/{ID}` con `{"builder_mode": "esplorativo"}`.
+2. Rigenera giri (force=true).
+3. Vedrai nei warning del run il logging del backtracking:
+   `"Backtracking regola N: M/X giri estesi, avg_depth=Y.Y, branches=Z"`.
+4. I giri 1g 'sotto_min' che possono raggiungere n_min via beam
+   search saranno estesi automaticamente; se chiudono in sede
+   diventano 'naturale'.
+
+**Limite noto MR-A4**: il backtracking lavora sulle catene di UNA
+regola alla volta (non cross-regola). Le 150 corse non coperte che
+richiedono pool cross-regola = scope MR-A5.
+
+### Prossimo step: MR-A7 + critica SEVERO
+
+1. **SEVERO post-commit** (subito dopo questo push): critica
+   sostanziale del MR-A4 con AMILCARE V4 Pro come motore. Output in
+   `docs/critiche/`. Eventuali finding → MR successivo (mai fix
+   in-place del MR criticato, regola 9).
+2. **MR-A7 validazione** (richiede te): screen pre/post programma 17
+   con `builder_mode='esplorativo'`. I numeri dicono se A4 risolve
+   il sintomo "troppi giri 1g" e se A1+A2+A3+A4 insieme bastano,
+   oppure se serve A5.
+
+### Note tracciabilità
+
+- **AMILCARE V4 Pro**: dissenso su A4 RECEPITO. Parametri default
+  seguono V4 Pro: beam_k=8 (vs 3 originale), depth_max_oltre_min=2,
+  tolleranza_km_cap_pct=10%.
+- **AMILCARE V4 Flash**: usato come fallback rapido. Conferma 5/5.
+- **FAUSTO**: Conferma 5/5.
+- **V4 Pro alert D2**: "test su intero calendario, no spot" → MR-A7
+  deve girare sul periodo completo, non sample.
+- **V4 Flash alert D3**: tie-break determinismo → confermato già
+  presente nel codice.
+
+---
+
 ## 2026-05-08 (245) — SEVERO: 4° attore framework ausili (critico permanente, motore AMILCARE)
 
 ### Contesto
