@@ -105,6 +105,29 @@
     una riga di config)
 - **Costo**: il subagent stesso è gratuito (è Claude); il giudizio
   delegato ad AMILCARE costa quanto una review AMILCARE classica.
+- **Limite operativo — caricamento al boot** (lezione entry 248):
+  Claude Code carica i subagent custom (`.claude/agents/*.md`) al
+  **boot della sessione**. Se aggiungi/modifichi `severo.md` a metà
+  sessione → `Agent(subagent_type=severo)` risponde "not found"
+  finché non riavvii Claude Code. **Modalità fallback**: NINO può
+  produrre la critica manualmente seguendo il system prompt di
+  `severo.md`, chiamando AMILCARE direttamente via
+  `mcp__amilcare__reason` e dichiarando nel campo "Motore usato"
+  della critica: *"AMILCARE V4 Pro via mcp__amilcare__reason;
+  orchestratore SEVERO eseguito manualmente da NINO"*. Pattern
+  validato dalle critiche MR-A4 (entry 246) e MR-A3 (entry 248).
+- **Brief AMILCARE snello — pattern obbligatorio** (lezione entry 248):
+  brief gigante (~30KB con diff verbatim integrale) = **timeout MCP
+  `-32001`**. Brief snello (~3KB con sintesi diff + zone grigie
+  pre-identificate da NINO) = AMILCARE risponde in pochi secondi.
+  Target 3-5KB, hard cap ~10KB. Dettaglio del format brief in
+  `.claude/agents/severo.md` sezione "Brief AMILCARE snello".
+- **Bias NINO smascherato** (lezione entry 248): se NINO scrive
+  critica **senza** AMILCARE (timeout, AMILCARE giù), il voto è
+  auto-compiacente verso il proprio codice. Esempio reale: stesso
+  MR-A3, fallback NINO 6/10 → AMILCARE 4/10. Il fallback puro NINO
+  va sempre dichiarato come tale + marcato "da rifare con AMILCARE
+  operativo".
 
 ---
 

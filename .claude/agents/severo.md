@@ -233,6 +233,134 @@ Meglio una critica mezza fatta ma onesta che una piena ma falsa.
 
 ---
 
+## Limite operativo: caricamento al boot e modalità fallback
+
+**Lezione appresa entry 248 (2026-05-08)**: Claude Code carica i
+subagent custom (`.claude/agents/*.md`) **al boot della sessione**.
+Aggiungere o modificare il file `severo.md` a metà sessione → il
+subagent NON è invocabile via `Agent(subagent_type=severo)` finché
+non si restarta Claude Code. Il tool risponde con:
+`Error: Agent type 'severo' not found. Available agents: ...`.
+
+### Quando il subagent SEVERO è invocabile
+
+- Sessione iniziata **dopo** che `severo.md` è stato creato/aggiornato
+- L'utente conferma di aver fatto restart
+- `Agent(subagent_type=severo)` non risponde più con "not found"
+
+### Modalità fallback: NINO orchestra manualmente seguendo questo file
+
+Quando il subagent non è invocabile (file appena modificato in sessione
+corrente, prima invocazione, ecc.) NINO può comunque produrre una
+critica equivalente, eseguendo manualmente il metodo a 6 passi sopra:
+
+1. NINO legge il diff, l'entry TN-UPDATE, i doc di contesto.
+2. NINO **chiama AMILCARE direttamente** via `mcp__amilcare__reason`
+   con un brief snello (vedi sezione successiva).
+3. NINO filtra l'output di AMILCARE.
+4. NINO scrive la critica in `docs/critiche/...md` con il format
+   canonico **e dichiara esplicitamente nel campo "Motore usato"**:
+   *"AMILCARE V4 Pro via mcp__amilcare__reason; orchestratore SEVERO
+   eseguito manualmente da NINO (subagent custom non bootato in
+   sessione corrente)."*
+5. NINO aggiorna `docs/critiche/README.md`.
+6. NINO **NON committa** (la decisione resta di NINO+utente come
+   sempre).
+
+**Cosa NON contare come fallback valido**: NINO che scrive critica
+**senza** AMILCARE (es. timeout, errore MCP). In quel caso la critica
+è "fallback NINO puro" e va dichiarata come tale + marcata
+*"da rifare con AMILCARE operativo"*. Il bias di auto-compiacenza
+verso il proprio codice è inevitabile e va smascherato dichiarandolo
+(rif. entry 248: voto fallback NINO 6/10 → con AMILCARE 4/10 sullo
+stesso MR).
+
+---
+
+## Brief AMILCARE snello — pattern e anti-pattern
+
+**Lezione appresa entry 248**: la prima invocazione di AMILCARE in
+modalità SEVERO è andata in **timeout MCP `-32001`** con un brief
+~30KB (diff completo verbatim + tutto il contesto). Lo stesso giudizio
+è arrivato in pochi secondi al secondo tentativo con brief ~3KB.
+
+### Anti-pattern: brief gigante
+
+❌ NON fare:
+
+- Incollare verbatim il `git show <SHA>` completo (può essere migliaia
+  di righe).
+- Includere file integrali di documentazione (NORMATIVA-PDC.md è 1300
+  righe, MODELLO-DATI.md è 40KB).
+- Ripetere ogni decisione utente storica del progetto.
+- "Tutto il contesto possibile" per "non perdersi nulla".
+
+Risultato: timeout, costo alto, AMILCARE non risponde.
+
+### Pattern: brief sintetico (3-5KB target)
+
+✅ Fare:
+
+```
+## Contesto progetto (5 righe)
+
+<Cos'è COLAZIONE in 5 righe + cos'è lo Sprint corrente>
+
+## Decisioni utente storiche rilevanti per QUESTO MR (2-4 punti)
+
+<Solo le decisioni che impattano il MR criticato, non l'intero
+storico del progetto>
+
+## Diff sintesi (file principali, snippet condensati)
+
+<Per ogni file toccato, 5-15 righe di sintesi del cambiamento.
+NON il diff intero. Marca con commenti "# NEW" o "# CAMBIO"
+i punti chiave>
+
+## Test sintesi (titoli, non corpo)
+
+<Lista titoli dei test nuovi/modificati. AMILCARE infera dal nome>
+
+## Claim entry TN-UPDATE (verbatim, ma solo le righe-claim)
+
+<"Strangler 100% byte-per-byte", "mypy clean", "sblocca sintomo X" —
+le frasi che il MR si autoaccredita>
+
+## METODO 7 regole / CLAUDE.md regole rilevanti
+
+<Solo quelle pertinenti al MR — di solito R2/R5 e §7 NIENTE PIGRIZIA>
+
+## N zone grigie pre-identificate da NINO
+
+<5-10 punti che NINO ha già visto e su cui chiede AMILCARE
+indipendente. Per ognuno: 1-2 righe>
+
+## Domanda secca + format output atteso
+
+<TL;DR + finding HIGH/CRITICAL + finding MED + voto X/10 + cosa
+non hai potuto controllare>
+```
+
+### Limiti hard da rispettare
+
+- **Diff verbatim**: max ~500 righe condensate (snippet, no integrale).
+- **Brief totale**: target 3-5KB, hard cap ~10KB.
+- **Output AMILCARE atteso**: ~500-1000 parole strutturate.
+- **Timeout AMILCARE**: configurato a `AMILCARE_TIMEOUT_SEC=300s`
+  (vedi entry 246 setup DeepSeek API diretta). Se va in timeout
+  comunque, il brief è troppo grosso o il modello sta saturando —
+  riduci e riprova.
+
+### Esempio reale: critica MR-A3 (entry 248)
+
+Brief usato: ~3KB. Output AMILCARE: ~700 parole, 4 finding HIGH/CRITICAL
++ 2 MED + voto 4/10. Tempo di risposta: ~secondi. Costo: ~1-2 centesimi.
+
+Vedi `docs/critiche/SPRINT-8.1-MR-A3-vincolo-soft-tier-based.md` per il
+risultato finale e la sezione "Tracciabilità" per il pattern.
+
+---
+
 ## Riferimenti
 
 - `docs/AUSILI-CODICE.md` — framework completo NINO/FAUSTO/AMILCARE/SEVERO
@@ -240,3 +368,5 @@ Meglio una critica mezza fatta ma onesta che una piena ma falsa.
 - `docs/METODO-DI-LAVORO.md` — le 7 regole comportamentali
 - `TN-UPDATE.md` — diario operativo da cui leggi il contesto del MR
 - `docs/critiche/` — output canonico delle tue critiche
+- `docs/critiche/SPRINT-8.1-MR-A4-backtracking-esplorativo.md` — esempio critica AMILCARE-driven (voto 2/10)
+- `docs/critiche/SPRINT-8.1-MR-A3-vincolo-soft-tier-based.md` — esempio critica AMILCARE-driven (voto 4/10)

@@ -10,6 +10,133 @@
 
 ---
 
+## 2026-05-08 (250) — Chiusura progetto iniziale SEVERO: consolidamento lezioni apprese in subagent + framework
+
+### Contesto
+
+Sessione 2026-05-08 sera: l'utente ha chiesto di "concludere il
+progetto iniziale" (= setup SEVERO + verifica funzionante). Funzionalmente
+era già concluso (entry 245 setup, entry 246 critica MR-A4, entry 248
+critica MR-A3, entry 247/249 MR-A4-bis e MR-A3-bis), ma 2 residui di
+pigrizia mascherata aperti che SEVERO stesso punterebbe se gli si
+desse questa sessione:
+
+1. **Lezioni apprese in entry 248** (brief AMILCARE snello, modalità
+   fallback NINO-orchestrata, limite caricamento boot) **non
+   consolidate** in `.claude/agents/severo.md` né in `docs/AUSILI-CODICE.md`
+   → chi userà SEVERO nelle prossime sessioni le riscoprirà a sue spese.
+2. **Modalità fallback** (subagent non bootato → workflow manuale)
+   non documentata nel system prompt → buco operativo.
+
+Test del residuo §7: <2h totali → CHIUDILO. Procedo.
+
+### Modifiche
+
+**`.claude/agents/severo.md`** (nuova sezione finale prima di Riferimenti):
+
+- Sezione **"Limite operativo: caricamento al boot e modalità fallback"**
+  - Quando il subagent è invocabile (sessione iniziata dopo creazione/update)
+  - Modalità fallback NINO-orchestrata (6 passi: legge diff, chiama
+    AMILCARE diretto, dichiara motore usato, ecc.)
+  - Distinzione "fallback con AMILCARE" vs "fallback NINO puro" (il
+    secondo va dichiarato + marcato "da rifare")
+
+- Sezione **"Brief AMILCARE snello — pattern e anti-pattern"**
+  - Anti-pattern: brief gigante (~30KB con diff verbatim integrale) →
+    timeout MCP `-32001`
+  - Pattern target ~3-5KB con template strutturato (contesto progetto
+    5 righe + decisioni rilevanti + diff sintesi snippet + test
+    titoli + claim entry + zone grigie pre-identificate + format
+    output)
+  - Limiti hard: diff verbatim max ~500 righe condensate, brief totale
+    target 3-5KB hard cap ~10KB
+  - Esempio reale: critica MR-A3 entry 248 (brief ~3KB → output ~700
+    parole, ~secondi, ~1-2 centesimi)
+
+- Sezione "Riferimenti" estesa: aggiunti i 2 file critiche come esempi
+  di pattern AMILCARE-driven (MR-A4 voto 2/10, MR-A3 voto 4/10).
+
+**`docs/AUSILI-CODICE.md`** §1 SEVERO (stessi punti, condensati):
+
+- Voce **"Limite operativo — caricamento al boot"**: rimanda al system
+  prompt di `severo.md` per il dettaglio fallback.
+- Voce **"Brief AMILCARE snello — pattern obbligatorio"**: target
+  3-5KB, hard cap ~10KB, dettaglio in `.claude/agents/severo.md`.
+- Voce **"Bias NINO smascherato"**: esempio numerico MR-A3 (fallback
+  NINO 6/10 vs AMILCARE 4/10).
+
+### Stato
+
+✅ **Progetto iniziale SEVERO chiuso senza residui di pigrizia
+mascherata**. Le 4 lezioni apprese in entry 248 sono ora persistenti
+nei file operativi (system prompt + framework doc), non più solo nel
+diario.
+
+### Verifiche
+
+- ✅ `.claude/agents/severo.md`: 2 nuove sezioni inserite prima dei
+  Riferimenti, struttura coerente.
+- ✅ `docs/AUSILI-CODICE.md` §1 SEVERO: 3 nuove voci aggiunte alla
+  scheda (limite boot, brief snello, bias NINO).
+- ✅ Riferimenti incrociati: severo.md cita le 2 critiche, AUSILI-CODICE
+  cita severo.md per il dettaglio.
+- ⏸️ **Restart Claude Code non eseguito** (richiesto utente per
+  attivare `Agent(subagent_type=severo)` come subagent isolato).
+  Nelle prossime sessioni post-restart, SEVERO sarà invocabile in
+  modo isolato; nel frattempo modalità fallback NINO-orchestrata
+  resta valida (e ora documentata).
+
+### Bilancio sessione 2026-05-08 (sera)
+
+Da inizio sessione a chiusura:
+
+| # | Entry | Fatto da | Output |
+|---|---|---|---|
+| 245 | Setup SEVERO (4° attore framework) | NINO | subagent file + doc + indice |
+| 248 | Critica SEVERO retroattiva MR-A3 con AMILCARE V4 Pro | NINO | voto 4/10, MR-A3-bis priorità |
+| 250 | Chiusura progetto iniziale SEVERO (consolidamento lezioni) | NINO | system prompt + framework aggiornati |
+
+In parallelo (altra sessione): entry 246 MR-A4 + entry 247 MR-A4-bis
++ entry 249 MR-A3-bis. Riassetto completo del builder esplora-e-rilassa
++ qualità garantita da 2 critiche SEVERO che hanno smascherato 4 HIGH+1
+CRITICAL+vari MED (tutti chiusi nelle bis-MR).
+
+### Lezioni meta-progettuali (da meditare)
+
+- **SEVERO ha funzionato come previsto**: ha smascherato pigrizie reali
+  (MR-A4 score arbitraria + vincoli MR-4 non replicati = bug REALE;
+  MR-A3 penalty arbitraria + claim non dimostrato + tie-break su
+  metadati ignorati). I voti severi (2/10 e 4/10) hanno generato fix
+  immediati (MR-A4-bis e MR-A3-bis). Senza SEVERO, quei finding
+  sarebbero arrivati molto più tardi (in MR-A7 reale o produzione).
+- **Bias NINO è oggettivamente misurabile**: stesso MR, stesso codice,
+  stesso reviewer "umano" (utente) → 6/10 fallback NINO vs 4/10
+  AMILCARE. AMILCARE indipendente vale 2 punti di voto su 10.
+- **Chiudere bene è economico**: i 2 residui di entry 250 hanno
+  richiesto ~30min totali. Lasciarli aperti avrebbe pesato sulle
+  prossime invocazioni di SEVERO (chi riapre il file?).
+
+### Prossimo step
+
+Decisione utente. Tre direzioni naturali:
+
+- (a) **Restartare Claude Code** per attivare `Agent(subagent_type=severo)`
+  → critiche future via subagent isolato invece che fallback manuale
+  NINO-orchestrato
+- (b) **MR-A7 reale** (validazione end-to-end programma 17 con
+  `builder_mode='esplorativo'` post A3-bis + A4-bis, ora con tutti
+  i HIGH/CRITICAL chiusi)
+- (c) **Sprint 7.3** (Dashboard Pianificatore Turno PdC, 2° ruolo —
+  era nel piano CLAUDE.md "Stato Sprint 7" prima di Sprint 8.1)
+
+### Costo
+
+- Tempo NINO: ~30min (cleanup focalizzato, no scope-creep)
+- Costo ausili: 0$ (nessuna chiamata ad AMILCARE/FAUSTO in questo
+  consolidamento)
+
+---
+
 ## 2026-05-08 (249) — Sprint 8.1 MR-A3-bis: chiude CRITICAL+HIGH+MED SEVERO post-critica MR-A3 (penalty matrice + tie-break + filtro perimetro + vincoli pre-pool)
 
 ### Contesto
