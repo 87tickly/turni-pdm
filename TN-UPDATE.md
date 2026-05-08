@@ -10,6 +10,123 @@
 
 ---
 
+## 2026-05-08 (249) — Sprint 8.1 MR-A3-bis: chiude CRITICAL+HIGH+MED SEVERO post-critica MR-A3 (penalty matrice + tie-break + filtro perimetro + vincoli pre-pool)
+
+### Contesto
+
+SEVERO via AMILCARE V4 Pro (entry 248) ha votato MR-A3 **4/10** con
+CRITICAL-1 + 3 HIGH + 2 MED + 2 MED-NINO. MR-A3-bis chiude tutti i
+finding meno HIGH-1 (validazione E2E = scope MR-A7 dichiarato).
+
+### Modifiche MR-A3-bis
+
+**`risolvi_corsa.py`**:
+
+- **CRITICAL-1 fix**: `TIER_1_PENALTY` 50 → **20**. Allineato a peso
+  LINEA tier 1 di `vincoli_soft.tier_vincoli_default()`
+  (`materiale_compatibile`). Commento riscritto: il valore 20 è
+  derivato dalla matrice tier, non più magic number.
+- **HIGH-3 fix**: tie-break Tier 1 in `risolvi_corsa_esplorativo`
+  cambia da `(-priorita, -len(filtri_json), id)` a
+  `(-priorita, id ASC)`. I filtri sono volontariamente ignorati al
+  Tier 1 → ordinarli per "specificità" è bias su metadato non
+  valutato.
+- **MED-NINO-2 fix**: Tier 1 esclude regole con
+  `is_composizione_manuale=True` (override mirati per scope
+  specifici, non per fallback generico).
+
+**`builder.py`**:
+
+- **HIGH-2 fix**: in modo esplorativo NON
+  `corse_perimetro = list(corse)`. Definito
+  `_corsa_in_perimetro_esplorativo(c)` che usa
+  `_trova_regola_dominante_esplorativa` (Tier 0 OR Tier 1 con
+  vincoli rispettati): se nessuna regola della sede accetta la
+  corsa neanche al Tier 1, esclusa dal pool. Riduce drammaticamente
+  il pool quando vincoli inviolabili sono configurati.
+- **MEDIUM-1 + MED-NINO-1 fix**: `_trova_regola_dominante_esplorativa`
+  aggiunge `vincoli_inviolabili` + `stazioni_lookup` come kw-only.
+  Tier 1 ora filtra regole incompatibili coi vincoli (allineato
+  con `risolvi_corsa_esplorativo`). Asimmetria firme risolta.
+  Aggiunto import `from collections.abc import Sequence`.
+- **HIGH-2 + MED-NINO-1 caller**: chiamata in builder.py riga ~1525
+  passa `vincoli_inviolabili` + `stazioni_lookup` solo in modo
+  esplorativo. Modo rigido invariato.
+
+**MEDIUM-2 verificato (no patch)**: `rg AssegnazioneRisolta` ha
+rivelato 6 consumer (composizione, sourcing, aggregazione_a2,
+persister, capacity_routing, fusione_cluster_a1). Tutti accedono
+solo a campi legacy. Strangler 100% confermato byte-per-byte.
+
+**Test** (`tests/test_risolvi_corsa_esplorativo.py`): 15 test totali
+(11 pre + 4 A3-bis):
+- Aggiornato `test_a3bis_tier1_esclude_is_composizione_manuale`
+  (era `test_tier1_composizione_manuale_skippa_accoppiamento`).
+- Nuovo `test_a3bis_critical1_tier_1_penalty_allineato_matrice`:
+  asserisce `TIER_1_PENALTY == 20`.
+- Nuovo `test_a3bis_high3_tie_break_tier1_no_len_filtri`: 2 regole
+  stessa priorità, len_filtri 1 vs 5, vince id ASC.
+- Nuovo `test_a3bis_high3_tie_break_id_asc_anche_se_meno_filtri`:
+  conferma id ASC vince anche con MENO filtri.
+
+### Verifiche
+
+- ✅ `ruff check src tests`: 2 B008 pre-esistenti, nessuna regressione.
+- ✅ `mypy --strict src`: **82 file clean**.
+- ✅ `pytest A1+A2+A3+A3-bis+A4+A4-bis+regression`:
+  **144 passed in 2.05s**.
+- ✅ `pnpm tsc --noEmit`: clean.
+
+### Stato
+
+- ✅ MR-A3-bis chiuso. Tutti i finding SEVERO MR-A3 chiusi tranne
+  HIGH-1 (= scope MR-A7).
+- ✅ Strangler 100% preservato: legacy `'rigido'` invariato.
+- ⏳ Commit + push + deploy Railway backend.
+- ⏳ MR-A7 SBLOCCATO. Tutti i pre-requisiti chiusi:
+  - HIGH-1 cap branches (chiuso A4-bis entry 247)
+  - HIGH-2 vincoli MR-4 (chiuso A4-bis entry 247)
+  - HIGH-2 perimetro esplorativo (chiuso A3-bis entry 249)
+  - HIGH-3 tie-break Tier 1 (chiuso A3-bis entry 249)
+  - CRITICAL-1 penalty matrice (chiuso A3-bis entry 249)
+
+### Per l'utente
+
+Cosa cambia per `builder_mode='esplorativo'`:
+- Pool corse esplorativo filtrato (no giri spuri, meno costo).
+- Tier 1 fallback esclude `is_composizione_manuale=True`.
+- Tie-break Tier 1: priorità + id ASC (no bias len_filtri).
+- Penalty Tier 1 = 20 (allineato matrice tier).
+- Vincoli inviolabili applicati anche al pre-pool.
+
+Nessun cambio in `'rigido'` (default).
+
+### Prossimo step: MR-A7 (richiede TE)
+
+Validazione end-to-end su programma 17 reale. Tutti i pre-requisiti
+chiusi. Procedura:
+1. Conferma programma test (programma 17 esistente o nuovo).
+2. Backup pre-test (`pg_dump` Railway).
+3. PATCH `/api/programmi/{ID}` con `{"builder_mode": "esplorativo"}`.
+4. Rigenera giri (`force=true`).
+5. Screen pre/post: n giri, n_corse coperte/non-coperte,
+   distribuzione `motivo_chiusura`, lunghezza giri, warnings.
+
+I numeri post-A7 decidono A4-tris (se cap troppo stretto), A5 (se
+non-coperte cross-regola), A8 (switch default).
+
+### Note tracciabilità
+
+- **SEVERO MR-A3 voto 4/10** → CRITICAL-1 + 3 HIGH + 2 MED +
+  2 MED-NINO → tutti chiusi in A3-bis (eccetto HIGH-1 = A7 scope).
+- **AMILCARE V4 Pro motore SEVERO** operativo via DeepSeek diretto
+  + timeout 300s.
+- **Doppia review SEVERO chiusa pre-A7**: A4-bis fix MR-A4 (247),
+  A3-bis fix MR-A3 (249). Pre-A7 produzione **safe** per programmi
+  `'esplorativo'`.
+
+---
+
 ## 2026-05-08 (248) — Critica SEVERO retroattiva MR-A3 con AMILCARE V4 Pro (voto 4/10, MR-A3-bis priorità)
 
 ### Contesto

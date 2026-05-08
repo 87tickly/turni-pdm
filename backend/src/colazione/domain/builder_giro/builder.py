@@ -44,6 +44,7 @@ Spec:
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
@@ -705,32 +706,39 @@ def _trova_regola_dominante_per_corsa(
 def _trova_regola_dominante_esplorativa(
     prima_corsa: Any,
     regole: list[ProgrammaRegolaAssegnazione],
+    *,
+    vincoli_inviolabili: Sequence[Any] = (),
+    stazioni_lookup: dict[str, str] | None = None,
 ) -> ProgrammaRegolaAssegnazione | None:
     """Sprint 8.1 MR-A3 (entry 244): variante esplorativa di
     ``_trova_regola_dominante_per_corsa``. Ammette anche regole che
     NON matchano sui filtri (Tier 1: materiale compatibile).
 
+    Sprint 8.1 MR-A3-bis (entry 248) HIGH-3 + MED-NINO-1 + MED-NINO-2 fix:
+    - Tie-break Tier 1 NON usa ``len(filtri_json)`` (filtri ignorati,
+      bias su metadato non valutato). Usa ``(-priorita, id ASC)``.
+    - ``vincoli_inviolabili`` + ``stazioni_lookup`` opzionali: se passati,
+      anche al Tier 1 vengono filtrate le regole con materiale
+      incompatibile per la corsa (allineamento con ``risolvi_corsa_esplorativo``).
+    - Tier 1 esclude regole con ``is_composizione_manuale=True`` (override
+      mirati, non per fallback generico).
+
     Algoritmo:
 
     1. **Tier 0**: chiama ``_trova_regola_dominante_per_corsa``
        (filtri AND-rigido). Se trova una regola → ritorna.
-    2. **Tier 1**: se Tier 0 fallisce, considera **tutte** le regole
-       come candidate (filtri ignorati). Sceglie per priorità DESC,
-       specificità DESC, id ASC.
-
-    NON applica controlli su vincoli inviolabili o accoppiamento qui:
-    quei controlli arrivano in ``risolvi_corsa_esplorativo`` quando
-    ``composizione.assegna_materiali`` viene chiamato sui giri
-    costruiti. Lo scopo di questo helper è SOLO determinare a quale
-    materiale assegnare la corsa per il pre-processing pool del
-    builder (raggruppamento per materiale prima delle catene).
+    2. **Tier 1**: se Tier 0 fallisce, considera regole come candidate
+       (filtri ignorati) MA filtra per:
+       - ``vincoli_inviolabili``: la corsa deve essere ammessa per ogni
+         materiale della composizione della regola.
+       - ``is_composizione_manuale=False``: skip override manuali.
+       Sceglie per priorità DESC, id ASC (no len_filtri).
 
     Decisione utente Q1=b: regole = vincolo SOFT con fallback
     governato. Se nessuna regola match esattamente, allarga al
-    materiale di una regola "vicina" (per priorità del pianificatore).
+    materiale di una regola "vicina" (per priorità del pianificatore),
+    ma solo se i vincoli inviolabili lo permettono.
     """
-    from colazione.domain.builder_giro.risolvi_corsa import matches_all  # noqa: F401
-
     # === Tier 0: legacy match esatto.
     rigid = _trova_regola_dominante_per_corsa(prima_corsa, regole)
     if rigid is not None:
@@ -739,9 +747,37 @@ def _trova_regola_dominante_esplorativa(
     # === Tier 1: filtri ignorati, sceglie per priorità.
     if not regole:
         return None
-    candidate = sorted(
-        regole, key=lambda r: (-r.priorita, -len(r.filtri_json), r.id)
-    )
+
+    # MR-A3-bis MED-NINO-2: escludere is_composizione_manuale=True.
+    candidate = [r for r in regole if not r.is_composizione_manuale]
+
+    # MR-A3-bis MED-NINO-1: filtra per vincoli inviolabili anche al Tier 1.
+    if vincoli_inviolabili and stazioni_lookup is not None:
+        from colazione.domain.vincoli.inviolabili import (
+            corsa_ammessa_per_materiale,
+        )
+
+        candidate = [
+            r
+            for r in candidate
+            if all(
+                corsa_ammessa_per_materiale(
+                    corsa=prima_corsa,
+                    materiale_tipo_codice=str(item["materiale_tipo_codice"]),
+                    stazioni_lookup=stazioni_lookup,
+                    vincoli=vincoli_inviolabili,
+                )
+                for item in r.composizione_json
+            )
+        ]
+
+    if not candidate:
+        return None
+
+    # MR-A3-bis HIGH-3 fix: tie-break senza len_filtri (filtri ignorati
+    # al Tier 1, ordinare per "specificità" è bias su metadato non
+    # valutato). Solo (-priorita, id ASC) per determinismo cronologico.
+    candidate.sort(key=lambda r: (-r.priorita, r.id))
     return candidate[0]
 
 
@@ -1457,10 +1493,24 @@ async def genera_giri(
             matches_all(r.filtri_json, c, "feriale") for r in regole_della_sede
         )
 
+    # Sprint 8.1 MR-A3-bis (entry 248) HIGH-2 fix: in esplorativo NON
+    # usare ``list(corse)`` (era SEVERO HIGH-2 critica MR-A3 voto 4/10:
+    # rischio 6500 corse processate, costo computazionale + giri spuri).
+    # Definisco un perimetro esplorativo che include corse con almeno
+    # una regola compatibile (Tier 0 OR Tier 1 con vincoli rispettati).
+    # Una corsa fuori scope (nessuna regola la prende neanche al Tier 1)
+    # viene esclusa dal pool, evitando lavoro inutile e composizioni
+    # spurie.
+    def _corsa_in_perimetro_esplorativo(c: Any) -> bool:
+        return _trova_regola_dominante_esplorativa(
+            c,
+            regole_della_sede,
+            vincoli_inviolabili=vincoli_inviolabili,
+            stazioni_lookup=stazioni_lookup,
+        ) is not None
+
     if programma.builder_mode == "esplorativo":
-        # Tier 0 + Tier 1: tutte le corse dell'azienda sono candidate
-        # (il filtro materiale arriva nel Tier 1 di `risolvi_corsa_esplorativo`).
-        corse_perimetro = list(corse)
+        corse_perimetro = [c for c in corse if _corsa_in_perimetro_esplorativo(c)]
     else:
         corse_perimetro = [c for c in corse if _corsa_in_perimetro(c)]
 
@@ -1470,23 +1520,26 @@ async def genera_giri(
     # sedi. Le corse senza regola dominante in questa sede sono
     # escluse dal builder ma contate come orfane.
     #
-    # MR-A3: in modo esplorativo usiamo `_trova_regola_dominante_esplorativa`
-    # che ammette Tier 1 (filtri ignorati) come fallback. Le corse
-    # ricevono il materiale della regola di priorità più alta come
-    # tentativo; ulteriore validazione (vincoli) avviene in
-    # composizione.py via `risolvi_corsa_esplorativo`.
+    # MR-A3-bis: in modo esplorativo usiamo `_trova_regola_dominante_esplorativa`
+    # con vincoli inviolabili (MED-NINO-1 fix). Le corse ricevono il
+    # materiale della regola di priorità più alta che NON viola vincoli
+    # del programma; ulteriore validazione composizione/accoppiamento
+    # avviene in composizione.py via `risolvi_corsa_esplorativo`.
     materiale_per_corsa: dict[int, str] = {}
     regola_per_corsa_id: dict[int, ProgrammaRegolaAssegnazione] = {}
     materiale_per_regola: dict[int, str] = {
         r.id: _materiale_da_regola(r) for r in regole_della_sede
     }
-    risolutore_dominante = (
-        _trova_regola_dominante_esplorativa
-        if programma.builder_mode == "esplorativo"
-        else _trova_regola_dominante_per_corsa
-    )
     for c in corse_perimetro:
-        regola_dom = risolutore_dominante(c, regole_della_sede)
+        if programma.builder_mode == "esplorativo":
+            regola_dom = _trova_regola_dominante_esplorativa(
+                c,
+                regole_della_sede,
+                vincoli_inviolabili=vincoli_inviolabili,
+                stazioni_lookup=stazioni_lookup,
+            )
+        else:
+            regola_dom = _trova_regola_dominante_per_corsa(c, regole_della_sede)
         if regola_dom is None:
             continue
         mat = materiale_per_regola.get(regola_dom.id, "")

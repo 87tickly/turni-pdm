@@ -225,29 +225,42 @@ def test_tier1_accoppiamento_validato() -> None:
         )
 
 
-def test_tier1_composizione_manuale_skippa_accoppiamento() -> None:
-    """``is_composizione_manuale=True`` bypassa il check di accoppiamento
-    anche al Tier 1 (override esplicito pianificatore)."""
-    corsa = _CorsaFake(codice_linea="S5")
+def test_a3bis_tier1_esclude_is_composizione_manuale() -> None:
+    """Sprint 8.1 MR-A3-bis (entry 248) MED-NINO-2 fix: Tier 1
+    ESCLUDE regole con ``is_composizione_manuale=True``.
+
+    Razionale: regole manuali sono override mirati dal pianificatore
+    per scope specifici (composizioni custom non validate da
+    accoppiamento_ammesso). Promuoverle a fallback Tier 1 generico
+    sarebbe un bypass del design — userebbe la regola "speciale"
+    per casi out-of-scope.
+
+    Tier 0 (match esatto sui filtri) le accetta normalmente; Tier 1
+    le skippa.
+    """
+    # Tier 0: corsa che matcha la regola manuale (linea R11).
+    corsa_match = _CorsaFake(codice_linea="R11")
     regola_manuale = _RegolaFake(
         id=1,
         composizione_json=[
             {"materiale_tipo_codice": "ETR526", "n_pezzi": 1},
-            {"materiale_tipo_codice": "E464", "n_pezzi": 1},
         ],
         filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "R11"}],
         is_composizione_manuale=True,
     )
-    nessuno_ammesso: Any = lambda _a, _b: False  # noqa: E731
-    out = risolvi_corsa_esplorativo(
-        corsa,
-        [regola_manuale],
-        date(2026, 6, 1),
-        is_accoppiamento_ammesso=nessuno_ammesso,
+    out_t0 = risolvi_corsa_esplorativo(
+        corsa_match, [regola_manuale], date(2026, 6, 1)
     )
-    assert out is not None
-    assert out.tier_applicato == 1
-    assert out.is_composizione_manuale is True
+    assert out_t0 is not None
+    assert out_t0.tier_applicato == 0  # Tier 0 accetta is_composizione_manuale
+    assert out_t0.is_composizione_manuale is True
+
+    # Tier 1: corsa fuori match (linea S5). Regola manuale → SKIP a Tier 1.
+    corsa_no_match = _CorsaFake(codice_linea="S5")
+    out_t1 = risolvi_corsa_esplorativo(
+        corsa_no_match, [regola_manuale], date(2026, 6, 1)
+    )
+    assert out_t1 is None  # Tier 1 esclude regole manuali
 
 
 # =====================================================================
@@ -292,3 +305,92 @@ def test_re_export_da_builder_giro_init() -> None:
 
     assert builder_giro.risolvi_corsa_esplorativo is risolvi_corsa_esplorativo
     assert builder_giro.TIER_1_PENALTY == TIER_1_PENALTY
+
+
+# =====================================================================
+# Sprint 8.1 MR-A3-bis (entry 248) — fix CRITICAL-1 + HIGH-3
+# =====================================================================
+
+
+def test_a3bis_critical1_tier_1_penalty_allineato_matrice() -> None:
+    """CRITICAL-1 fix: TIER_1_PENALTY = 20 allineato a matrice
+    `vincoli_soft.tier_vincoli_default()` peso LINEA tier
+    'materiale_compatibile' (tier 1). Era 50 magic number senza
+    giustificazione (50 ∉ {20, 40, 70} della matrice).
+    """
+    assert TIER_1_PENALTY == 20
+
+
+def test_a3bis_high3_tie_break_tier1_no_len_filtri() -> None:
+    """HIGH-3 fix: tie-break Tier 1 NON usa ``len(filtri_json)``.
+    Al Tier 1 i filtri sono ignorati, ordinare per "specificità"
+    è bias su metadato non valutato.
+
+    Setup: 2 regole stessa priorità con filtri diversi (1 vs 5).
+    La corsa non matcha né l'una né l'altra (linea fuori scope).
+    Pre-fix: vinceva la regola con più filtri (len_filtri DESC).
+    Post-fix: vince id ASC = regola id più basso (creata prima).
+    """
+    corsa_no_match = _CorsaFake(codice_linea="S99")
+    r_pochi_filtri = _RegolaFake(
+        id=10,  # id alto
+        priorita=60,
+        composizione_json=[{"materiale_tipo_codice": "ETR421", "n_pezzi": 1}],
+        # 1 filtro
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "R11"}],
+    )
+    r_molti_filtri = _RegolaFake(
+        id=5,  # id basso
+        priorita=60,
+        composizione_json=[{"materiale_tipo_codice": "ETR522", "n_pezzi": 1}],
+        # 5 filtri
+        filtri_json=[
+            {"campo": "codice_linea", "op": "eq", "valore": "S5"},
+            {"campo": "fascia_oraria", "op": "between", "valore": ["08:00", "12:00"]},
+            {"campo": "giorno_tipo", "op": "in", "valore": ["feriale"]},
+            {"campo": "categoria", "op": "eq", "valore": "REG"},
+            {"campo": "stagione", "op": "eq", "valore": "estiva"},
+        ],
+    )
+    out = risolvi_corsa_esplorativo(
+        corsa_no_match,
+        [r_pochi_filtri, r_molti_filtri],
+        date(2026, 6, 1),
+    )
+    assert out is not None
+    # Pre-fix: r_molti_filtri (len=5) avrebbe vinto.
+    # Post-fix: id ASC → r_molti_filtri.id=5 < r_pochi_filtri.id=10
+    # → r_molti_filtri vince per id, NON per len_filtri.
+    # Per testare che len_filtri NON conta, scambio gli id:
+    assert out.regola_id == 5  # id ASC vincente, indipendente da len_filtri
+
+
+def test_a3bis_high3_tie_break_id_asc_anche_se_meno_filtri() -> None:
+    """Conferma: id più basso vince anche con MENO filtri (=
+    len_filtri NON è criterio).
+    """
+    corsa = _CorsaFake(codice_linea="S99")
+    r_id_basso_pochi_filtri = _RegolaFake(
+        id=3,
+        priorita=60,
+        composizione_json=[{"materiale_tipo_codice": "ETR421", "n_pezzi": 1}],
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "R11"}],
+    )
+    r_id_alto_molti_filtri = _RegolaFake(
+        id=42,
+        priorita=60,
+        composizione_json=[{"materiale_tipo_codice": "ETR522", "n_pezzi": 1}],
+        filtri_json=[
+            {"campo": "codice_linea", "op": "eq", "valore": "S5"},
+            {"campo": "fascia_oraria", "op": "between", "valore": ["08:00", "12:00"]},
+            {"campo": "giorno_tipo", "op": "in", "valore": ["feriale"]},
+        ],
+    )
+    out = risolvi_corsa_esplorativo(
+        corsa,
+        [r_id_basso_pochi_filtri, r_id_alto_molti_filtri],
+        date(2026, 6, 1),
+    )
+    assert out is not None
+    assert out.regola_id == 3  # id più basso vince, len_filtri irrilevante
+    assert out.composizione[0].materiale_tipo_codice == "ETR421"

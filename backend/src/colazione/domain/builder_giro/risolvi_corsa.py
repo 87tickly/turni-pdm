@@ -475,15 +475,19 @@ def risolvi_corsa(
 # =====================================================================
 
 
-#: Penalty di default applicata al Tier 1 (materiale compatibile).
-#: Range AssegnazioneRisolta.penalty: 0 (esatto) → 100 (rilassamento
-#: massimo). Il valore 50 deriva dalla matrice tier in
-#: ``vincoli_soft.tier_vincoli_default()`` (peso LINEA al tier 1 = 20,
-#: tier 2 = 40, tier 3 = 70). Per il MR-A3 minimal viable il Tier 1
-#: pesato a 50 è un compromesso fra "abbastanza basso da preferire
-#: match esatto" e "abbastanza alto da rendere visibile il rilassamento
-#: nei warning del builder".
-TIER_1_PENALTY: int = 50
+#: Penalty applicata al Tier 1 (materiale compatibile, filtri ignorati).
+#: Range ``AssegnazioneRisolta.penalty``: 0 (esatto) → 100 (rilassamento
+#: massimo). Allineato con la matrice ``vincoli_soft.tier_vincoli_default()``:
+#: peso LINEA tier 1 = 20.
+#:
+#: Sprint 8.1 MR-A3-bis (entry 248) CRITICAL-1 fix: il valore originale
+#: 50 era un magic number senza giustificazione (50 ∉ {20, 40, 70} della
+#: matrice citata nel commento). Allineato a 20 = peso LINEA al tier
+#: ``materiale_compatibile`` di ``vincoli_soft.tier_vincoli_default()``,
+#: tier coerente con la semantica "regola match per materiale ma non
+#: per filtri" che è esattamente quello che fa Tier 1 di
+#: ``risolvi_corsa_esplorativo``.
+TIER_1_PENALTY: int = 20
 
 
 def risolvi_corsa_esplorativo(
@@ -580,14 +584,25 @@ def risolvi_corsa_esplorativo(
             )
         ]
 
+    # Sprint 8.1 MR-A3-bis (entry 248) MED-NINO-2 fix: al Tier 1
+    # escludere regole con ``is_composizione_manuale=True``. Sono
+    # override esplicitamente mirati dal pianificatore (composizioni
+    # custom non validate da accoppiamento_ammesso). Applicarle al
+    # fallback Tier 1 a corse non match diventerebbe un bypass del
+    # design: una regola "manuale per casi speciali" verrebbe
+    # promossa a fallback generico. Skippa al Tier 1 (Tier 0 invariato).
+    candidate_t1 = [r for r in candidate_t1 if not r.is_composizione_manuale]
     if not candidate_t1:
         return None
 
-    # Tie-break identico al legacy: priorità DESC, specificità DESC, id ASC.
-    # Dato che il Tier 1 ignora i filtri, la "specificità" è meno
-    # significativa, ma manteniamo lo stesso ordinamento per coerenza
-    # deterministica con il flusso rigido.
-    candidate_t1.sort(key=lambda r: (-r.priorita, -len(r.filtri_json), r.id))
+    # Sprint 8.1 MR-A3-bis (entry 248) HIGH-3 fix: tie-break Tier 1
+    # NON usa ``len(filtri_json)`` come specificità. Al Tier 1 i
+    # filtri sono volontariamente ignorati: ordinare per "specificità"
+    # premia regole con più filtri irrilevanti, creando bias su un
+    # metadato non valutato. Tie-break Tier 1 = solo
+    # ``(-priorita, id ASC)`` per determinismo cronologico (regola
+    # creata prima vince a parità di priorità).
+    candidate_t1.sort(key=lambda r: (-r.priorita, r.id))
     top = candidate_t1[0]
 
     composizione = _composizione_da_json(top)
