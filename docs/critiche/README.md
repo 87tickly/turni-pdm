@@ -54,5 +54,5 @@ In sintesi:
      - **YYYY-MM-DD** — [titolo](file.md) — voto: X/10 — sintesi 1 riga
 -->
 
-*(Nessuna critica ancora prodotta. Questa lista verrà popolata da
-SEVERO a partire dalla prima invocazione.)*
+- **2026-05-08** — [Sprint 8.1 MR-A4: backtracking esplorativo profondo](SPRINT-8.1-MR-A4-backtracking-esplorativo.md) — voto: **2/10** — beam×depth non misurato (HIGH-1), regressione vincoli MR-4 max_sosta_diurna/min_servizio_giornata (HIGH-2 BUG REALE), ordering A4→A2 con potenziale dispendio (HIGH-3 ridotto a MED da filtro NINO). + 3 MED auto-rilevati da NINO (score arbitraria, test no volume, regola 9 violata). **MR-A4-bis priorità #1 prima di A7**. Critica con AMILCARE V4 Pro operativo via DeepSeek diretto (entry 246).
+- **2026-05-08** — [Sprint 8.1 MR-A3: vincolo soft tier-based in risolvi_corsa](SPRINT-8.1-MR-A3-vincolo-soft-tier-based.md) — voto: 6/10 (provvisorio) — strangler tecnicamente pulito ma claim "sblocca sintomo" non dimostrato empiricamente, blind spot Tier 1 (specificità bugiarda, pre-pool senza vincoli, magic number `TIER_1_PENALTY`). ⚠️ Critica scritta in **fallback NINO** (AMILCARE timeout MCP `-32001`, MR diagnosi pendente entry 244): da rifare con AMILCARE operativo per rimuovere bias di auto-compiacenza.
