@@ -10,6 +10,178 @@
 
 ---
 
+## 2026-05-08 (243) — Sprint 8.1 MR-A2: closure post-pass (chiudi_giri_aperti con vuoto di rientro intra-area)
+
+### Contesto
+
+Secondo MR del refactor builder esplora-e-rilassa. Sintomo target:
+**cicli aperti accettati e persistiti** (es. G-FIO-026 #1357 da
+Alessandria a Milano Certosa, screen utente entry 242). Decisione
+utente Q2=b 2026-05-08: "Builder deve provare attivamente a chiuderli
+con vuoti; se proprio non riesce, persiste con marker chiaro per
+intervento manuale".
+
+Strangler pattern: opt-in via `programma.builder_mode == 'esplorativo'`
+(foundation MR-A1, entry 242). Programmi con `'rigido'` (default
+retrocompat) mantengono il comportamento legacy invariato.
+
+### Setup AMILCARE post-restart
+
+Prima del MR-A2 ho sistemato la config AMILCARE in
+`~/.claude/settings.json` (Claude Code) replicando il blocco
+`amilcare` che era solo in `~/Library/Application Support/Claude/claude_desktop_config.json`
+(Claude Desktop). Backup pre-modifica salvato in
+`settings.json.bak-pre-amilcare`.
+
+**Smoke test post-restart**: ancora HTTP 401 da OpenRouter. La sola
+config `~/.claude/settings.json` non è sufficiente per registrare il
+MCP server `amilcare` in Claude Code. Possibili cause da investigare
+in MR dedicato:
+
+- Claude Code potrebbe non leggere il blocco `mcpServers` da
+  `settings.json` (solo `grok` funzionava perché registrato altrove?).
+- Forse serve il comando CLI `claude mcp add amilcare ...` con
+  payload esplicito.
+- Oppure il subprocess MCP non riceve env vars (ruolo della shell
+  parent: zsh vs Login shell).
+- L'API key OpenRouter potrebbe essere scaduta/revocata (245 char,
+  sembra plausibile ma da verificare con un curl manuale).
+
+MR-A2 procede quindi con **fallback su FAUSTO** per review post-MR
+(matrice §2 AUSILI: file singolo + scope contenuto = FAUSTO è
+appropriato comunque).
+
+### Modifiche MR-A2
+
+**Backend**:
+
+- **Esteso `MotivoChiusura` Literal** in
+  `domain/builder_giro/multi_giornata.py` con 2 nuovi valori:
+  `chiuso_con_vuoto` (post-pass ha aggiunto vuoto di rientro) e
+  `ciclo_aperto_irrisolto` (post-pass ha tentato ma nessuna area
+  comune con whitelist sede). Persistiti in
+  `generation_metadata_json` (JSONB), **niente migration** richiesta
+  (il campo `motivo_chiusura` non è colonna SQL ma chiave JSON).
+
+- **Modulo nuovo `domain/builder_giro/chiusura_post.py`** (~290 righe):
+  - `dataclass ParamChiusuraPost(whitelist_sede, area_per_stazione,
+    gap_vuoto_rientro_min=10)`.
+  - Funzione pura `chiudi_giri_aperti(giri, params) -> list[Giro]`:
+    immutable transform via `dataclasses.replace`. Idempotente.
+  - Helpers `_ultima_stazione_giro`, `_ultima_ora_arrivo`,
+    `_trova_target_intra_area` (deterministico: ordine alfabetico
+    se più whitelist nella stessa area), `_aggiungi_minuti`
+    (gestisce wrap-around mezzanotte).
+  - Cast esplicito `cast(str, ...)` / `cast(time, ...)` per
+    `Catena.corse: tuple[Any, ...]` (catena.py usa Protocol
+    `_CorsaLike` per duck typing).
+  - **Scope intra-area metropolitana**: riusa
+    `area_metropolitana` / `area_stazione_membri` (migration 0040,
+    MR-E entry 236). Niente grafo arbitrario di tratti vuoti
+    (= MR-A4 / MR-A5 scope).
+
+- **Integrazione `builder.py:genera_giri()`** (riga 1678+):
+  ```
+  giri_regola = costruisci_giri_multigiornata(catene_per_d, param_mg)
+  if programma.builder_mode == "esplorativo":
+      giri_regola = chiudi_giri_aperti(
+          giri_regola,
+          ParamChiusuraPost(whitelist, area_per_stazione),
+      )
+  # Fix C2 troncamento legacy invariato.
+  for giro in giri_regola:
+      if giro.motivo_chiusura == "ciclo_aperto_irrisolto":
+          giri_dom.append(giro)  # marker visibile, no troncamento
+          continue
+      ...
+  ```
+  In `'rigido'` (default) il branch `if programma.builder_mode ==
+  'esplorativo'` non si esegue → nessun giro ha
+  `ciclo_aperto_irrisolto` → branch successivo è no-op.
+  **Comportamento legacy 100% invariato**.
+
+- **Re-export in `__init__.py`** di `ParamChiusuraPost` e
+  `chiudi_giri_aperti`.
+
+**Test** (`tests/test_chiusura_post.py`, 19 test no DB):
+- Pass-through per `naturale`/`max_giornate`/`km_cap`/`sotto_min`
+  (parametrizzato).
+- Idempotenza per `chiuso_con_vuoto`/`ciclo_aperto_irrisolto`.
+- Chiusura con vuoto coda generato (verifica origine, destinazione,
+  ora_partenza/arrivo, motivo='coda', `chiusa_a_localita=True`).
+- Determinismo target alfabetico (più whitelist stessa area → prima).
+- Cross-mezzanotte accettato (es. 23:55 + 15 min → 00:10).
+- Marker per: nessuna area in comune; staz_arrivo fuori da qualsiasi
+  area; whitelist vuota; area_per_stazione vuoto.
+- Defensive: giro senza giornate; giornata senza corse; arrivo già
+  in whitelist (passa-through per visibilità bug upstream).
+- Immutabilità input (input non mutato dalla pure function).
+- Lista vuota = output vuoto.
+- Re-export accessibile da `colazione.domain.builder_giro`.
+
+### Verifiche
+
+- ✅ `ruff check` su tutti i file toccati: clean (3 fix automatici
+  durante la stesura: 2× I001 import sorting test/modulo, 1× nuovo
+  I001 dopo aggiunta `from typing import cast`).
+- ✅ `mypy --strict src`: 81 file clean (+1 chiusura_post.py rispetto
+  a entry 242, da 80→81). Cast espliciti risolvono no-any-return su
+  `Catena.corse[-1].codice_destinazione/ora_arrivo`.
+- ✅ `pytest test_chiusura_post.py test_vincoli_soft.py
+  test_aggregazione_a2.py test_catena.py`: **74 passed in 0.35s**
+  (19 nuovi A2 + 24 A1 + 31 regression aggregazione/catena).
+- ✅ `pnpm tsc --noEmit`: clean (frontend invariato).
+- ✅ Comportamento legacy preservato: i programmi con
+  `builder_mode='rigido'` (tutti, post-A1 default) NON entrano nel
+  branch post-pass; nessun cambiamento osservabile rispetto a entry 242.
+
+### Stato
+
+- ✅ MR-A2 chiuso. Closure post-pass pronto e attivabile per programma
+  via `PATCH /api/programmi/{id}` con `builder_mode='esplorativo'`.
+- ✅ Niente migration DB (motivo_chiusura in JSONB, Literal extension
+  type-only).
+- ⏳ Commit + push + deploy Railway backend.
+
+### Per l'utente
+
+- **Tu**: appena questo MR è in prod, puoi testare il post-pass su
+  un programma di prova:
+  1. `PATCH /api/programmi/{ID}` con body `{"builder_mode": "esplorativo"}`
+  2. Rigenera i giri della sede.
+  3. I giri che terminano in stazioni Milano (Centrale, Cadorna,
+     Garibaldi superficie) e hanno sede FIO (whitelist=Certosa) saranno
+     **chiusi** con un vuoto di 10 min Centrale→Certosa, marker
+     `chiuso_con_vuoto`.
+  4. I giri come G-FIO-026 (Alessandria→Certosa, 93 km, fuori area
+     Milano) verranno marcati `ciclo_aperto_irrisolto`: visibili in
+     lista per intervento manuale.
+- **Niente UI nuova ancora**. Il marker `ciclo_aperto_irrisolto`
+  apparirà nel campo `motivo_chiusura` del JSON `generation_metadata`
+  letto dal frontend; serve un MR dedicato (MR-A8 o sotto-MR UX) per
+  badge visibile in lista giri.
+
+### Prossimo step
+
+**MR-A3: Vincolo soft tier-based in `risolvi_corsa.py`**. Sblocca il
+sintomo bloccante "regola unica linea=R11 → 0 giri": se il match
+esatto fallisce, prova tier 1 (materiale compatibile) → tier 2 (linea
+adiacente) → tier 3 (qualsiasi con vuoto) → tier 4 (marker). Opt-in
+via `builder_mode='esplorativo'` come questo. Effort M, rischio basso
+(funzione parallela `risolvi_corsa_esplorativo`, legacy intoccato).
+Userò FAUSTO per il ragionamento iniziale (AMILCARE ancora 401, MR
+dedicato per la diagnosi config in coda).
+
+### Note tracciabilità
+
+- **AMILCARE**: 401 ancora dopo restart. MR dedicato in TODO per
+  investigazione (forse serve `claude mcp add` CLI invece di
+  settings.json, oppure verificare validità chiave OpenRouter).
+- **FAUSTO**: usato per ragionamento architetturale entry 242, da
+  riutilizzare per review post-MR-A2 (segue questo commit).
+
+---
+
 ## 2026-05-08 (242) — Sprint 8.1 MR-A1: foundation builder esplorativo (feature flag + dataclass VincoloSoft)
 
 ### Contesto

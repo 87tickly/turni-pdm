@@ -83,7 +83,22 @@ from colazione.domain.builder_giro.posizionamento import CatenaPosizionata
 
 
 MotivoChiusura = Literal[
-    "naturale", "max_giornate", "km_cap", "non_chiuso", "sotto_min"
+    "naturale",
+    "max_giornate",
+    "km_cap",
+    "non_chiuso",
+    "sotto_min",
+    # Sprint 8.1 MR-A2 (entry 243): marker prodotti dal post-pass
+    # `chiudi_giri_aperti` (`domain/builder_giro/chiusura_post.py`).
+    # ``chiuso_con_vuoto`` = il post-pass ha aggiunto un vuoto di
+    # rientro intra-area metropolitana per chiudere geograficamente.
+    # ``ciclo_aperto_irrisolto`` = il post-pass ha tentato ma non c'è
+    # area metropolitana comune tra ultima stazione e whitelist sede;
+    # marker visibile nell'UI per intervento manuale (decisione utente
+    # Q2=b 2026-05-08). Persistiti in ``generation_metadata_json``
+    # (JSONB), niente migration.
+    "chiuso_con_vuoto",
+    "ciclo_aperto_irrisolto",
 ]
 
 

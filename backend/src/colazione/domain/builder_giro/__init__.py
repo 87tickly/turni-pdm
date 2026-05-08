@@ -63,6 +63,10 @@ from colazione.domain.builder_giro.catena import (
     ParamCatena,
     costruisci_catene,
 )
+from colazione.domain.builder_giro.chiusura_post import (
+    ParamChiusuraPost,
+    chiudi_giri_aperti,
+)
 from colazione.domain.builder_giro.composizione import (
     BloccoAssegnato,
     CorsaResidua,
@@ -151,6 +155,7 @@ __all__ = [
     "MotivoChiusura",
     "BuilderVersionNonSupportata",
     "ParamCatena",
+    "ParamChiusuraPost",
     "PdcDipendentiError",
     "ParamMultiGiornata",
     "ParamPosizionamento",
@@ -171,6 +176,7 @@ __all__ = [
     "calcola_etichetta_giro",
     "calcola_etichetta_variante",
     "carica_festivita_periodo",
+    "chiudi_giri_aperti",
     "costruisci_catene",
     "costruisci_giri_multigiornata",
     "determina_giorno_tipo",

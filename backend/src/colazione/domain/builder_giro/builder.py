@@ -66,6 +66,10 @@ from colazione.domain.builder_giro.catena import (
     ParamCatena,
     costruisci_catene,
 )
+from colazione.domain.builder_giro.chiusura_post import (
+    ParamChiusuraPost,
+    chiudi_giri_aperti,
+)
 from colazione.domain.builder_giro.composizione import (
     BloccoAssegnato,
     GiroAssegnato,
@@ -1677,6 +1681,24 @@ async def genera_giri(
         )
         giri_regola = costruisci_giri_multigiornata(catene_per_d, param_mg)
 
+        # Sprint 8.1 MR-A2 (entry 243): closure post-pass opt-in via
+        # ``programma.builder_mode == 'esplorativo'`` (foundation MR-A1).
+        # Per ogni giro ``motivo_chiusura == 'non_chiuso'``: tenta
+        # chiusura con vuoto di rientro intra-area metropolitana
+        # (riusa ``area_per_stazione``); se area comune trovata →
+        # ``chiuso_con_vuoto``, altrimenti → ``ciclo_aperto_irrisolto``
+        # (decisione utente Q2=b: marker visibile, intervento manuale).
+        # In ``'rigido'`` (default): post-pass non eseguito, comportamento
+        # legacy invariato.
+        if programma.builder_mode == "esplorativo":
+            giri_regola = chiudi_giri_aperti(
+                giri_regola,
+                ParamChiusuraPost(
+                    whitelist_sede=whitelist,
+                    area_per_stazione=area_per_stazione,
+                ),
+            )
+
         # Sprint 7.7 MR 1 hotfix Fix C2 (decisione utente 2026-05-02:
         # "dobbiamo sempre chiudere i giri"): per ogni giro che NON termina
         # in zona sede (whitelist), TRONCARE all'ultima giornata in
@@ -1687,6 +1709,14 @@ async def genera_giri(
         # whitelist → giro inutilizzabile (sede non coerente con regola).
         sede_codice = localita.stazione_collegata_codice
         for giro in giri_regola:
+            # MR-A2: i giri marcati ``ciclo_aperto_irrisolto`` dal
+            # post-pass saltano il troncamento Fix C2. L'utente li vede
+            # in UI con marker per intervento manuale (Q2=b). In modo
+            # 'rigido' nessun giro ha questo motivo, quindi il branch
+            # è no-op per il flusso legacy.
+            if giro.motivo_chiusura == "ciclo_aperto_irrisolto":
+                giri_dom.append(giro)
+                continue
             if _giro_chiude_in_whitelist(giro, whitelist, sede_codice):
                 giri_dom.append(giro)
                 continue
