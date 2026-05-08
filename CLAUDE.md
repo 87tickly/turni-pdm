@@ -146,80 +146,46 @@ Il programma serve **persone con ruoli diversi**:
 Ogni ruolo ha una propria dashboard con schermate, azioni, permessi.
 Non costruire un'interfaccia unica.
 
-### 9. Ausilio Grok Code (alias FAUSTO) — consulta, non delegare
+### 9. Codice scritto SEMPRE con ausilio — NINO + FAUSTO + AMILCARE
 
-Il progetto ha un MCP server `grok` configurato user-level
-(`~/.claude/mcp-servers/grok/`) con modello `grok-code-fast-1` e
-chiave `XAI_API_KEY` in `~/.zshrc` + `~/.claude/settings.json`. I
-tool si chiamano `mcp__grok__*` (`code_review`, `ask`, `brainstorm`,
-`chat`, `run_code`, ecc.). **Alias progetto: FAUSTO.** Quando
-l'utente dice *"fatti aiutare da Fausto"*, *"delega Fausto"*, o
-*"chiedi a Fausto"* → usa i tool `mcp__grok__*`.
+**Decisione 2026-05-08**: ogni riga di codice del programma COLAZIONE
+è scritta da **NINO** (Claude Code, driver principale) con l'ausilio
+di **FAUSTO** e **AMILCARE**. NINO da solo è ammesso solo per task
+triviali (rename, typo, una riga di config). Per qualunque altra cosa
+l'ausilio è **la norma, non l'eccezione**.
 
-È **ausilio**, non sostituto: la sintesi architetturale resta del
-driver principale.
+**Il framework completo (matrice di decisione, workflow, brief,
+costi, privacy, trigger linguistici) sta in
+`docs/AUSILI-CODICE.md`** — leggilo a inizio sessione insieme a
+TN-UPDATE e METODO.
 
-**Consulta Fausto per:**
+**Riassunto attori (il dettaglio è nel doc):**
 
-- **Code review indipendente** post-refactor (a iniziativa chiusa,
-  non a metà — occhi freschi su regressioni/blind spot).
-- **Cleanup pattern ripetitivi** senza contesto (errori mypy
-  uniformi su N file, rename, fix typing).
-- **Edge case test addizionali** su codice già stabilizzato.
-- **Stesura di codice circoscritto e ben specificato**: Fausto sa
-  scrivere bene se la specifica è precisa (es. "scrivi una funzione
-  X con questa firma e questi vincoli"). Ottimo per task lineari ben
-  definiti.
-- **Second opinion** su scelte di design ambigue: presenti opzioni
-  A/B/C, sintesi resta tua.
-- **Verifica indipendente di numeri/ipotesi** quando regola 2 METODO
-  richiede controprova esterna.
+- **NINO** = Claude Code. Driver principale. Possiede contesto della
+  sessione, memoria del progetto, decisioni utente storiche. Non
+  delega mai: architettura, scope, sintesi finale, decisioni di
+  dominio.
+- **FAUSTO** = Grok Code (`grok-code-fast-1` via xAI). MCP server
+  `grok` user-level (`~/.claude/mcp-servers/grok/`), tool namespace
+  `mcp__grok__*`. Forte di velocità, review veloci, stesura di
+  codice circoscritto, cleanup ripetitivi.
+- **AMILCARE** = DeepSeek V4 Pro (`deepseek/deepseek-v4-pro` via
+  OpenRouter). MCP server `~/Developer/deepseek-claude-MCP-server/`,
+  tool namespace `mcp__amilcare__*`. Forte di ragionamento esteso,
+  context 1M token, edge case profondi, refactor architetturali.
+  Modello scelto = il top (V4 Pro, non Flash) per qualità del
+  ragionamento. SWE-bench 80.6%, LiveCodeBench 93.5%.
 
-**NON delegare a Fausto:**
+**Trigger linguistici**:
+- *"chiedi a Fausto"* / *"delega Fausto"* → `mcp__grok__*`
+- *"chiedi ad Amilcare"* / *"chiedi a deepseek"* → `mcp__amilcare__*`
+- Quando l'utente non specifica, NINO sceglie in base alla taglia
+  e natura del task (vedi matrice §2 di `docs/AUSILI-CODICE.md`).
 
-- Lavori in cui il contesto della sessione è essenziale (briefarlo >
-  eseguire).
-- MR in corso o sequenze con dipendenze fitte (rischio conflitti
-  git/stilistici).
-- Decisioni che richiedono memoria di dominio (TN-UPDATE, scelte
-  utente storiche, normativa PdC).
-- Architettura, pianificazione, scope: la sintesi resta del driver
-  principale.
-- Task < 5-10 min: overhead di brief + verifica supera il beneficio.
-
-**Come consultarlo bene:**
-
-1. **Brief autosufficiente**: Fausto non vede la sessione. Includi
-   file/righe specifiche, decisioni utente rilevanti (es. "A1 strict"
-   del refactor bug 5), vincoli noti, output atteso.
-2. **Domanda secca con vincoli**: "review file X per regressioni
-   dopo refactor Y". No domande aperte tipo "che ne pensi?".
-3. **Verifica prima di applicare**: output Fausto = come una PR
-   review esterna. Mai accettare patch alla cieca. Vale regola 5
-   METODO (build + test prima del commit).
-4. **Traccia in TN-UPDATE**: se Fausto identifica un bug o suggerisce
-   un fix, l'entry deve citarlo (es. "review Fausto ha segnalato X,
-   applicato fix Y"). Tracciabilità del contributo.
-
-**Costo e privacy:**
-
-- **Costo monitorato**: ogni chiamata consuma token xAI
-  (`grok-code-fast-1`). Una review tipica costa qualche centesimo,
-  ma N chiamate automatizzate sommano. Niente loop di review massive
-  senza ragione, niente review preventivi su file invariati. In
-  dubbio: chiedi all'utente prima di consultare Fausto.
-- **Scope privacy**: il codice/contesto inviato a Fausto **esce dal
-  repo locale e va all'API xAI**. Per COLAZIONE (greenfield, no
-  segreti dichiarati) non è un blocker, ma vale come consapevolezza
-  permanente. **Mai inviare a Fausto**: chiavi API, password, dati
-  personali reali (anche di test), credenziali DB, contenuti
-  integrali di CLAUDE.md o memorie operative se non strettamente
-  necessari per il task.
-
-**Regola guida**: Fausto aiuta a **eseguire** o **verificare**, non
-a **decidere**. La sintesi architetturale, il piano dei MR, le
-decisioni di scope restano del driver principale. Se ti accorgi di
-aver delegato il pensare, fermati e riprendi in mano.
+**Regola guida**: FAUSTO e AMILCARE aiutano a **eseguire** o
+**verificare**, non a **decidere**. La sintesi architetturale resta
+sempre di NINO. Ogni intervento dei due ausili va **tracciato in
+TN-UPDATE** con finding e azione presa (false positive inclusi).
 
 ---
 
@@ -349,6 +315,7 @@ Riassunto rapido. Per il dettaglio normativo vedi `docs/NORMATIVA-PDC.md`.
 
 - `TN-UPDATE.md` — diario operativo (cronologia modifiche)
 - `docs/METODO-DI-LAVORO.md` — framework comportamentale
+- `docs/AUSILI-CODICE.md` — NINO + FAUSTO + AMILCARE (regola §9)
 - `docs/NORMATIVA-PDC.md` — fonte verità dominio
 - `docs/MODELLO-DATI.md` v0.5 — modello concettuale
 - `docs/CODE-REVIEW-2026-05-01.md` — review post Sprint 7.4 (24 finding)

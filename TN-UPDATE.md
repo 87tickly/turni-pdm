@@ -10,6 +10,81 @@
 
 ---
 
+## 2026-05-08 (241) — Framework "codice con ausilio": NINO + FAUSTO + AMILCARE
+
+### Contesto
+
+Decisione utente 2026-05-08: da oggi il codice di COLAZIONE non è
+più scritto solo da NINO (Claude Code) con FAUSTO occasionale, ma
+**sempre** in modalità a tre attori. Aggiunto AMILCARE (DeepSeek
+V4 Pro via OpenRouter MCP) come secondo coder accanto a FAUSTO
+(grok-code-fast-1).
+
+Modello scelto per AMILCARE: **`deepseek/deepseek-v4-pro`** (il top,
+non Flash). Decisione utente esplicita: "usa il migliore". Bench di
+riferimento (maggio 2026): SWE-bench Verified 80.6%, LiveCodeBench
+93.5%, Codeforces 3206, Terminal-Bench 2.0 67.9%. MoE 1.6T totali /
+49B attivati, context 1M token. Costo: $0.435/M input + $0.87/M
+output.
+
+### Modifiche
+
+**Nuovo documento `docs/AUSILI-CODICE.md`** (10 sezioni):
+1. Chi è chi (NINO driver principale, FAUSTO coder veloce,
+   AMILCARE coder profondo) con identità tecnica, MCP path,
+   namespace tool, variabili env, costi.
+2. Matrice di decisione "quando usare cosa" (12 tipi di task ×
+   3 attori).
+3. Workflow standard "codice con ausilio" (8 step canonici).
+4. Come briefare un ausilio (autosufficienza, vincoli, output atteso).
+5. Verifica prima di applicare (no patch alla cieca, build+test,
+   regola 5 METODO).
+6. Tracciabilità in TN-UPDATE (esempio template).
+7. Costi e quando preoccuparsi.
+8. Privacy (cosa non mandare; nota specifica AMILCARE su routing
+   OpenRouter).
+9. Regola guida: ausilio aiuta a eseguire/verificare, non a decidere.
+10. Trigger linguistici dell'utente (Fausto vs Amilcare).
+
+**`CLAUDE.md` sezione 9 riscritta**: vecchio "Ausilio Grok Code"
+sostituito da "Codice scritto SEMPRE con ausilio — NINO + FAUSTO +
+AMILCARE". Versione compatta che linka al doc esteso. Aggiunto
+riferimento a `docs/AUSILI-CODICE.md` nella sezione Riferimenti
+finale.
+
+**Setup tecnico AMILCARE già completato** (in questa stessa
+sessione):
+- MCP server `HarshJ23/deepseek-claude-MCP-server` clonato in
+  `~/Developer/deepseek-claude-MCP-server/`
+- venv `uv` con `mcp[cli]` + `httpx`
+- Blocco `amilcare` aggiunto in
+  `~/Library/Application Support/Claude/claude_desktop_config.json`
+  con `OPENROUTER_API_KEY`, `DEEPSEEK_MODEL=deepseek/deepseek-v4-pro`,
+  `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`.
+- Tool `mcp__amilcare__reason` visibile sia in Claude Desktop
+  che in Claude Code (stesso config).
+
+### Stato
+
+✅ Framework documentato (`docs/AUSILI-CODICE.md` + sezione 9
+CLAUDE.md aggiornata).
+✅ AMILCARE operativo lato infrastruttura (MCP registrato, modello
+configurato).
+⏸️ Test funzionale di chiamata reale a OpenRouter (verificare
+chiave valida + modello esistente): rimandato al prossimo task di
+sviluppo, dove AMILCARE verrà chiamato per la prima volta in un
+contesto reale (non finto).
+
+Modifica solo a `*.md` → niente deploy Railway (regola 2 CLAUDE.md).
+
+### Prossimo step
+
+Sprint 7.3 — Dashboard Pianificatore Turno PdC (2° ruolo). Primo
+task in cui applicare il nuovo framework: NINO progetta + scrive,
+review post a FAUSTO o AMILCARE in base alla taglia del MR.
+
+---
+
 ## 2026-05-08 (240) — MR-G2: review estesa Sprint 8.0 con Fausto (4 file)
 
 ### Contesto
