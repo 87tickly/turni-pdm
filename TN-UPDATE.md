@@ -10,6 +10,174 @@
 
 ---
 
+## 2026-05-08 (248) — Critica SEVERO retroattiva MR-A3 con AMILCARE V4 Pro (voto 4/10, MR-A3-bis priorità)
+
+### Contesto
+
+Subito dopo aver setup SEVERO (entry 245), ho tentato la prima
+invocazione effettiva sul commit fresco MR-A3 (entry 244, commit
+`12399ef`) come banco di prova del workflow. Tentativo svolto in
+parallelo all'avanzamento MR-A4 (entry 246) e MR-A4-bis (entry 247)
+dell'altra sessione.
+
+### Due ostacoli al primo tentativo
+
+1. **Subagent `severo` non disponibile in sessione corrente**:
+   Claude Code carica i subagent custom (`.claude/agents/*.md`) al
+   **boot**. SEVERO è stato creato a metà sessione → `Agent` tool
+   risponde "Agent type 'severo' not found". Workflow eseguito
+   manualmente da NINO seguendo `.claude/agents/severo.md` (stesso
+   pattern del file MR-A4 in entry 246).
+
+2. **AMILCARE in timeout MCP `-32001`** alla prima invocazione (brief
+   ~30KB con diff completo): la richiesta `mcp__amilcare__reason` non
+   rispondeva entro il timeout → fallback a NINO che scrive critica
+   diretta. Voto fallback NINO: 6/10 (provvisorio, dichiarato
+   "auto-compiacente" nel file).
+
+### Sblocco AMILCARE V4 Pro (parallelo entry 246)
+
+Durante il tempo di NINO sul fallback, l'utente in altra sessione
+(MR-A4) ha:
+
+- Diagnosticato HTTP 401 OpenRouter come **chiave invalida** (no MCP
+  layer issue).
+- Switchato `~/Developer/deepseek-claude-MCP-server/server.py` a
+  **DeepSeek API diretta** con 2 tool:
+  - `mcp__amilcare__reason` → `deepseek-v4-pro`
+  - `mcp__amilcare__code` → `deepseek-v4-flash`
+- Aggiunto `AMILCARE_TIMEOUT_SEC=300s` per evitare timeout su brief
+  V4 Pro architetturali.
+
+Setup operativo confermato dal successo della Triple Validation +
+critica MR-A4 in entry 246.
+
+### Secondo tentativo: critica MR-A3 con AMILCARE V4 Pro
+
+Brief più snello (~3KB invece di ~30KB):
+- Sintesi MR-A3 in 5 righe + diff principali condensato
+- 10 zone grigie pre-identificate da NINO (incl. fallback findings)
+- Format request strutturato (TL;DR + HIGH×N + MED×N + voto)
+
+**AMILCARE V4 Pro ha risposto** con output ~700 parole. Output
+applicato col pattern verbatim AMILCARE + filtro NINO (allineato al
+file MR-A4):
+
+| # | Finding | Severità AMILCARE | Filtro NINO |
+|---|---|---|---|
+| 1 | E2E rimandata, "sblocca sintomo" non dimostrato | HIGH | ✅ accettato HIGH (concorda fallback NINO S1) |
+| 2 | `corse_perimetro=list(corse)` no filtro = giri spuri | HIGH | ✅ alzato da MED→HIGH (NINO sotto-stimato; AMILCARE coglie il rischio semantico oltre performance) |
+| 3 | Tie-break Tier 1 su `len(filtri_json)` con filtri ignorati | HIGH | ✅ accettato HIGH (concorda fallback NINO S5) |
+| 4 | `TIER_1_PENALTY=50` contraddice matrice 20/40/70 | **CRITICAL** | ✅ alzato da MED→CRITICAL (NINO sotto-stimato; AMILCARE coglie il debito di tracciabilità) |
+| 5 | Asimmetria firme `_trova_regola_dominante_esplorativa` | MEDIUM | ✅ accettato MED (unisce S2+S7 NINO in disallineamento contrattuale) |
+| 6 | "Strangler 100%" non verificato sui consumer | MEDIUM | ✅ accettato MED (concorda S8 NINO) |
+
+**Finding aggiunti da NINO non rilevati da AMILCARE**:
+
+- **MED-NINO-1**: pre-pool `_trova_regola_dominante_esplorativa` senza
+  vincoli (corse fantasma + spreco computazionale)
+- **MED-NINO-2**: `is_composizione_manuale=True` al Tier 1 (regola
+  manuale fuori scope può vincere)
+- **LOW-NINO-1**: filtro `all()` su composizione doppia poco
+  autodocumentato
+
+**Voto finale SEVERO**: **4/10** (vs 6/10 fallback NINO — AMILCARE è
+più severo, giustamente. Il mio fallback era auto-compiacente).
+
+### Modifiche
+
+**Output critica (rewrite completo)**:
+
+- `docs/critiche/SPRINT-8.1-MR-A3-vincolo-soft-tier-based.md`:
+  riscritto da fallback NINO (~300 righe, voto 6/10) a versione
+  AMILCARE-driven (~250 righe, voto 4/10) col pattern verbatim
+  AMILCARE + filtro NINO + finding aggiunti NINO + tracciabilità.
+
+**Indice**:
+
+- `docs/critiche/README.md`: riga MR-A3 aggiornata (voto 6→4, citato
+  AMILCARE operativo, MR-A3-bis come priorità).
+
+### Stato
+
+- ✅ Workflow SEVERO validato anche in **modalità manuale orchestrata
+  da NINO** (subagent custom non bootato): pattern AMILCARE+filtro NINO
+  riproducibile, 2 critiche prodotte oggi (MR-A4 in entry 246, MR-A3
+  in entry 248) col medesimo formato.
+- ✅ AMILCARE V4 Pro come motore di SEVERO confermato: setup
+  DeepSeek API diretta + timeout 300s funziona.
+- ✅ Bias auto-compiacente NINO smascherato: dal 6/10 fallback al 4/10
+  AMILCARE, lo scarto è esattamente quello che SEVERO doveva trovare
+  (motore esterno indipendente).
+
+### Lezioni apprese (da consolidare in `.claude/agents/severo.md`)
+
+1. **Subagent custom richiedono boot**. Aggiungere `.claude/agents/*.md`
+   a metà sessione = inattivo fino a restart. Da documentare in
+   `docs/AUSILI-CODICE.md` come limite operativo.
+2. **Brief AMILCARE deve essere snello** (~3-5KB, non ~30KB). Diff
+   completo verbatim → rischio timeout MCP. Sintesi diff + zone grigie
+   pre-identificate → AMILCARE risponde.
+3. **Pattern verbatim AMILCARE + filtro NINO** è riproducibile e
+   leggibile. Allineato tra MR-A4 (entry 246) e MR-A3 (entry 248).
+4. **Bias NINO è reale**: 6/10 → 4/10 quando il motore è esterno. Mai
+   accettare il fallback NINO come "buono come AMILCARE" — è un
+   placeholder.
+
+### MR-A3-bis (priorità prima di A7)
+
+Lavoro stimato totale ~7-12h:
+- HIGH-1 fix: test E2E con fixture mini → 2-4h
+- HIGH-2 fix: filtro perimetro morbido in esplorativo → 1-2h
+- HIGH-3 fix: rimuovere `len(filtri_json)` dal Tier 1 → 30min + 2 test
+- CRITICAL-1 fix: `TIER_1_PENALTY=20` + commento veritiero → 30min
+- MEDIUM-1 fix: armonizzare firma `_trova_regola_dominante_esplorativa` → 15min
+- MEDIUM-2 fix: `rg AssegnazioneRisolta` + verifica consumer → 1h
+- MED-NINO-1 fix: pre-pool vincoli inviolabili → 1-2h
+- MED-NINO-2 fix: `is_composizione_manuale` esclusa dal Tier 1 → 30min + 1 test
+
+### Priorità: MR-A3-bis vs MR-A4-bis (entry 247)
+
+MR-A4-bis è già stato fatto (entry 247: cap branches + vincoli MR-4).
+MR-A3-bis è il prossimo cleanup pre-A7. Indipendenti — toccano file
+diversi (A3 in `risolvi_corsa.py`/`builder.py` pre-pool, A4 in
+`backtracking_esplorativo.py`). Suggerimento NINO: **A3-bis prossimo**
+prima di A7 reale per:
+1. HIGH-1 (test fixture mini) sblocca le verifiche E2E che servono
+   anche per validare A4
+2. CRITICAL-1 (`TIER_1_PENALTY` arbitrario) si pagherà in tutti i
+   ranking futuri se non risolto subito
+
+### Note tracciabilità
+
+- **AMILCARE V4 Pro**: brief sintetico (~3KB) → output ~700 parole
+  strutturato. Tempo di risposta accettabile, no timeout.
+- **AMILCARE V4 Flash**: non chiamato in questo rodaggio (V4 Pro
+  sufficiente per critica retroattiva su MR scope contenuto).
+- **FAUSTO**: non invocato. SEVERO usa AMILCARE per design.
+- **Subagent severo**: non invocato come `Agent(subagent_type=severo)`
+  perché non ancora bootato. Workflow eseguito manualmente da NINO.
+
+### Costo
+
+- Tempo NINO: ~60min sessione (~30min fallback + ~30min rewrite con
+  AMILCARE)
+- Costo AMILCARE: ~1-2 centesimi (1 chiamata `mcp__amilcare__reason`
+  brief ~3KB + output ~700 parole, V4 Pro)
+
+### Prossimo step
+
+Decisione utente. Tre opzioni in ordine di urgenza tecnica:
+- (a) **MR-A3-bis** prima di tutto (HIGH-1 fix sblocca E2E per A7,
+  CRITICAL-1 risolve debito tracciabilità penalty)
+- (b) **MR-A7 reale** (validazione end-to-end programma 17 con
+  builder_mode='esplorativo' post A4-bis)
+- (c) **Restartare Claude Code** per attivare SEVERO come `subagent_type`
+  → critiche future via `Agent(subagent_type=severo)` invece che
+  manuale NINO
+
+---
+
 ## 2026-05-08 (247) — Sprint 8.1 MR-A4-bis: fix HIGH SEVERO post-critica MR-A4 (cap branches + vincoli MR-4)
 
 ### Contesto
