@@ -280,6 +280,11 @@ class ProgrammaMaterialeRead(BaseModel):
     # builder. ``"v1"`` = legacy (default), ``"v2"`` = pipeline
     # ``costruisci_turni_v2`` (entry 202).
     builder_version: Literal["v1", "v2"] = "v1"
+    # Sprint 8.1 MR-A1 (migration 0041, entry 242): logica assegnazione
+    # corsa→regola. ``"rigido"`` (default) = filtra-e-scarta legacy.
+    # ``"esplorativo"`` = esplora-e-rilassa con vincoli soft + fallback
+    # governato. Ortogonale a ``builder_version``.
+    builder_mode: Literal["rigido", "esplorativo"] = "rigido"
     created_by_user_id: int | None = None
     # Sprint dashboard 1° ruolo (entry 88): popolato via JOIN con `app_user`
     # quando la query usa `joinedload(ProgrammaMateriale.created_by)`.
@@ -380,6 +385,11 @@ class ProgrammaMaterialeCreate(BaseModel):
     # calendariali (PDF Trenord). Migration 0038 setta tutti i programmi
     # esistenti a ``"v1"`` server_default.
     builder_version: Literal["v1", "v2"] = "v1"
+    # Sprint 8.1 MR-A1 (entry 242): logica assegnazione corsa→regola.
+    # Default ``"rigido"`` (retrocompat). Il pianificatore può esplicitare
+    # ``"esplorativo"`` quando MR-A3+ saranno mergeati per attivare il
+    # builder esplora-e-rilassa con vincoli soft.
+    builder_mode: Literal["rigido", "esplorativo"] = "rigido"
     regole: list[ProgrammaRegolaAssegnazioneCreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -421,6 +431,12 @@ class ProgrammaMaterialeUpdate(BaseModel):
     # legacy ("v1") e nuova ("v2"). Cambio invasivo: rigenerare i giri
     # del programma dopo il PATCH.
     builder_version: Literal["v1", "v2"] | None = None
+    # Sprint 8.1 MR-A1 (entry 242): switch tra logica assegnazione
+    # legacy ("rigido") ed esplorativa ("esplorativo"). Cambio invasivo
+    # come builder_version: rigenerare i giri dopo il PATCH per vedere
+    # l'effetto. Foundation in MR-A1: il valore è settabile ma nessun
+    # consumatore lo legge fino a MR-A3.
+    builder_mode: Literal["rigido", "esplorativo"] | None = None
 
 
 # =====================================================================

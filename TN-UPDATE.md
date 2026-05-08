@@ -10,6 +10,273 @@
 
 ---
 
+## 2026-05-08 (242) — Sprint 8.1 MR-A1: foundation builder esplorativo (feature flag + dataclass VincoloSoft)
+
+### Contesto
+
+L'utente ha aperto la **revisione del builder turno materiale** dopo
+sintomi reali sul programma 17 (UI screens):
+
+- **150 corse del PdE non coperte** dal builder (22 "sosta condivisa"
+  alias `sovrapposizione_stazioni`, 128 "linea disgiunta").
+- **Troppi giri da 1 sola giornata** (~50% dei 26 giri generati,
+  programma chiede minimo 4).
+- **Cicli aperti accettati e persistiti**: G-FIO-026 (#1357) parte
+  Alessandria, termina Milano Certosa, 93 km, 1 corsa.
+- **Bloccante**: programma con regola unica "linea = R11" (Colico-
+  Chiavenna) sede FIO → builder genera 0 giri. L'utente vuole che
+  provi ad allacciare con altre linee compatibili come materiale.
+
+Diagnosi tecnica con file:riga su 5 punti rigidi del codice attuale:
+
+1. `risolvi_corsa.py:matches_all()` — filtri AND-rigido senza fallback.
+   Regola "linea=R11" + corsa non-R11 → `False`, scartata.
+2. `risolvi_corsa.py:risolvi_corsa()` — `if not candidate: return None`.
+   Zero esplorazione su materiali compatibili o regole più generali.
+3. `multi_giornata.py:647-659` — accetta cicli aperti
+   `motivo_chiusura="non_chiuso"` invece di provare chiusura attiva.
+4. `concatenazione_ciclica.py:174-194` — DFS ciclo hamiltoniano hard,
+   troppo rigido (versione v2 al contrario).
+5. `api/giri.py:913-925` — classificazione "linea_disgiunta" /
+   "sovrapposizione_stazioni" è solo diagnostica post-hoc, non
+   meccanismo di recovery.
+
+### Decisioni utente vincolanti (2026-05-08)
+
+- **Q1 = (b)** Regole = vincolo SOFT con fallback governato. Builder
+  prova prima il vincolo (es. R11), se non basta a coprire/chiudere
+  allarga con criterio (materiali compatibili, vuoti di rientro,
+  linee adiacenti). NON ignora la regola — la **degrada in modo
+  controllato**.
+- **Q2 = (b)** Cicli aperti tollerati ma marcati. Builder deve provare
+  attivamente a chiuderli con vuoti; se proprio non riesce, persiste
+  aperto con marker chiaro per intervento manuale.
+- **Approccio**: revisione profonda modulo per modulo (mantenere
+  solido, sostituire marcio). NO rewrite from scratch.
+- **Strangler pattern obbligato**: PdC dipendono dai giri
+  (FK ondelete=RESTRICT). Refactor invasivi richiedono coesistenza
+  legacy + nuovo via feature flag, switch graduale.
+
+### Brief AMILCARE → fallback FAUSTO (HTTP 401)
+
+Tentativo di chiamare AMILCARE (`mcp__amilcare__reason`) per il
+ragionamento architetturale: **HTTP 401 "Missing Authentication
+header"** da OpenRouter. Diagnosi: `~/.claude/settings.json` ha solo
+il blocco `grok` (FAUSTO); manca registrazione MCP `amilcare` per
+Claude Code (la registrazione di Claude Desktop non passa l'env al
+subprocess MCP di Code). Era il "test funzionale rimandato" dell'entry
+241. Sistemare la config diventa un MR dedicato (vedi prossimo step).
+
+Fallback su **FAUSTO** (`mcp__grok__chat`) per il ragionamento. Brief
+autosufficiente con i 5 punti rigidi, decisioni Q1/Q2, vincoli
+architetturali. Risposta strutturata in 4 sezioni (modello concettuale,
+mappa moduli, sequenza MR, dilemmi). NINO ha **filtrato** la risposta
+(regola §5 AUSILI):
+
+- ✅ Concordato: vincoli FORTI = ammissibilità materiale + capacity +
+  chiusura geografica con marker; SOFT = linea, sede, durata.
+  D1 → tier ordinati con fallback gerarchico (più semplice e
+  governabile di score function unica). D2 → post-pass per chiusura.
+- ❌ Filtrato: FAUSTO proponeva LNS (Large Neighborhood Search) come
+  algoritmo. **Overkill** per il nostro scope (500-2000 corse,
+  runtime secondi-minuti). Greedy con backtracking limitato + beam
+  su scelte soft è sufficiente e già allineato a `catena.py`.
+- ❌ Filtrato: ordine MR proposto da FAUSTO partiva da
+  `risolvi_corsa` (alto rischio breaking) verso il consumatore.
+  Riordinato in **strangler pattern**: foundation parallela,
+  switch graduale via feature flag.
+- ❌ Filtrato: FAUSTO sottovalutava `capacity_routing` /
+  `capacity_temporale` marcandoli SOLIDO; in realtà saranno toccati
+  in MR-A6 (capacity-aware esplorazione).
+
+### Piano MR strangler pattern (8 MR ordinati)
+
+A1 (foundation, XS, additivo) → A2 (closure post-pass, M, additivo)
+→ A3 (vincolo soft tier-based opt-in, M) → A4 (backtracking
+esplorativo opt-in, L) → A5 (fill gap + nuovi giri non coperte, M)
+→ A6 (capacity-aware esplorazione, S) → A7 (validazione programma 17
++ benchmark, S) → A8 (switch default + cleanup legacy, S, no-return).
+
+Ordine vincolante per dipendenze: A1+A2 in parallelo possibili
+(entrambi additivi); A3 richiede A1; A4 richiede A3; A5 può seguire
+A4 o essere parallela; A6 dopo A4; A7 e A8 finali.
+
+### Modifiche MR-A1 (questa entry)
+
+**Scope minimo viable, additivo puro, rischio nullo**: introdurre il
+flag `programma_materiale.builder_mode` + le strutture dati
+(`VincoloSoft`, `Tier`, factory `tier_vincoli_default`) che MR-A3+
+useranno per il fallback gerarchico. Nessun consumatore legge ancora
+il flag in MR-A1 — è foundation pura.
+
+**Backend**:
+
+- **Migration `0041_programma_builder_mode.py`**: aggiunge colonna
+  `builder_mode VARCHAR(20) NOT NULL DEFAULT 'rigido'` con CHECK
+  constraint `IN ('rigido', 'esplorativo')`. Tutti i programmi
+  esistenti restano `'rigido'` via `server_default`.
+- **Modello `models/programmi.py`**: campo `builder_mode: Mapped[str]`
+  con default + server_default `'rigido'`, ortogonale a
+  `builder_version` (pipeline architetturale v1/v2 di MR-1110 sotto-MR
+  10, migration 0038).
+- **Schemi `schemas/programmi.py`** (3 punti):
+  `ProgrammaMaterialeRead.builder_mode: Literal["rigido", "esplorativo"] = "rigido"`,
+  stesso in `ProgrammaMaterialeCreate` con default,
+  `ProgrammaMaterialeUpdate` con `| None = None` per PATCH parziale.
+- **API `api/programmi.py`**: `create_programma` propaga
+  `builder_mode=payload.builder_mode` esplicitamente al modello
+  (pattern campo-per-campo dell'endpoint). PATCH usa già setattr
+  automatico via `model_dump(exclude_unset=True)` — nessun cambio.
+- **Modulo nuovo `domain/builder_giro/vincoli_soft.py`** (~270 righe):
+  - Enum `TipoVincoloSoft` (StrEnum): `LINEA`, `MATERIALE`,
+    `SEDE_CHIUSURA`, `DURATA_GIORNATE`, `SOSTA_DIURNA`,
+    `SERVIZIO_GIORNATA`.
+  - Enum `TipoRilassamento` (StrEnum): `PREFERENZA`,
+    `FALLBACK_GOVERNATO`, `HARD_BLOCK`.
+  - Dataclass frozen `VincoloSoft(tipo, valore_target, peso[0..100],
+    rilassamento, metadata)` con validazione peso al __post_init__.
+  - Dataclass frozen `Tier(livello, nome, vincoli, descrizione)` con
+    validazione livello>=0.
+  - Factory `tier_vincoli_default()` → 5 tier ordinati:
+    0=`esatto` (legacy, no rilassamento) →
+    1=`materiale_compatibile` (peso 20) →
+    2=`linea_adiacente` (peso 40) →
+    3=`qualsiasi_con_vuoto` (peso 70+60) →
+    4=`marker` (HARD_BLOCK, ciclo aperto irrisolto, decisione Q2=b).
+  - Pesi crescenti garantiscono fallback graduale del motore esplorativo.
+- **`__init__.py` builder_giro**: re-export di `Tier`,
+  `TipoRilassamento`, `TipoVincoloSoft`, `VincoloSoft`,
+  `tier_vincoli_default`. Aggiornato `__all__` ordinato.
+
+**Test** (`tests/test_vincoli_soft.py`, 24 test, no DB):
+
+- Enum: valori string corretti per ogni membro.
+- VincoloSoft: default peso=50, default rilassamento, frozen,
+  validazione peso fuori range (parametrizzato -1/101/-100/200) e
+  in range (0/1/50/100).
+- Tier: frozen, validazione livello negativo, default vincoli=()
+  e descrizione="".
+- Factory `tier_vincoli_default`: 5 tier, livelli [0..4] crescenti,
+  nomi attesi e unici, tier 0 senza vincoli (legacy), tier 4 con
+  HARD_BLOCK, pesi LINEA crescenti lungo i tier 1→4, factory
+  deterministica (a == b).
+- Re-export builder_giro: tutti i simboli accessibili dal package.
+
+**Frontend**: nessuna modifica. Il TS type
+`ProgrammaMaterialeRead` non ha mai esposto neanche `builder_version`,
+quindi il backend lo ritorna ma frontend lo ignora (extra fields
+permessi). UI per attivare `'esplorativo'` arriva in MR-A8 quando
+il refactor è validato.
+
+### Verifiche
+
+- ✅ `ruff check vincoli_soft.py + file toccati`: clean (3 fix
+  applicati: 2× UP042 `class(str, Enum)` → `StrEnum` Python 3.11+,
+  1× I001 import sorting).
+- ✅ `ruff check src tests`: solo 2 errori B008 pre-esistenti
+  (`anagrafiche.py:282`, `pianificatore_pdc.py:109` su
+  `Depends(require_role(...))`, già documentati entry 240).
+  Nessuna regressione nuova.
+- ✅ `mypy --strict src`: 80 file, clean (+1 vincoli_soft.py).
+- ✅ `pytest tests/test_vincoli_soft.py -v`: **24 passed in 0.51s**.
+- ✅ `pytest tests/test_programmi.py tests/test_programmi_api.py
+  --collect-only`: 76 test collected, no syntax error.
+- ✅ `pnpm tsc --noEmit`: clean.
+- ✅ `pnpm build`: 1805 moduli, 894 kB (invariato — nessuna nuova
+  feature frontend).
+- ⚠️ Test DB-bound non eseguiti localmente (Postgres locale giù da
+  entry 238). Migration 0041 verrà applicata al boot Railway via
+  `alembic upgrade head` (CMD backend). I 76 test programmi
+  gireranno verdi in CI Railway post-deploy.
+
+### Review FAUSTO post-MR (vincoli_soft.py)
+
+`mcp__grok__code_review` su file singolo (matrice §2 AUSILI: review
+veloce su file singolo = FAUSTO). Brief con vincolo "max 400 parole,
+no scope creep, finding ranked HIGH/MED/LOW". FAUSTO ha risposto
+verboso (~1500 parole, vincolo non rispettato) con 5 categorie. NINO
+ha filtrato (regola §5 AUSILI):
+
+**Finding genuino accettato**:
+
+- **MED — `valore_target` typed `Any` senza validazione per `tipo`**:
+  ragionevole. In MR-A3 quando il motore esplorativo consuma
+  `valore_target` rischia type errors silenti se valori incoerenti
+  col `tipo` (es. `SEDE_CHIUSURA` con `valore_target=42` invece di
+  string). **Scope creep per MR-A1** (foundation strutture dati pure):
+  annotato come TODO per MR-A3 quando aggiungerò la logica di
+  applicazione. Fix tipico: validazione type-specific in
+  `__post_init__` o discriminated union.
+
+**Falsi positivi rifiutati esplicitamente**:
+
+- ❌ "Internazionalizza: rinomina `TipoVincoloSoft` → `SoftConstraintType`,
+  messaggi errore in inglese". Contro decisione utente cementata
+  (CLAUDE.md "Convenzioni": termini italiani per dominio). Skip.
+- ❌ "Cache `_DEFAULT_TIERS` come modulo-level constant". 5 tier ricreati
+  per ogni call sono negligibili (`test_tier_default_deterministic`
+  verifica `a == b` per valore, non identità). Cachare cambierebbe
+  la semantica del test e introdurrebbe stato globale per zero benefit.
+  Skip.
+- ❌ "Refactor in sub-moduli (`types.py` + `defaults.py`)". 270 righe
+  non sono grandi, e separarli ora introdurrebbe import chain inutile.
+  Skip.
+- ❌ "Hard-coded weights → config esterna". Scope creep su A1 foundation;
+  i pesi sono parte del modello concettuale e vivono nel codice
+  finché MR-A8 non valida la sequenza. Skip.
+- ❌ "Aggiungi black/flake8". Già usiamo `ruff` (verifies sopra).
+  Skip.
+
+**Costo**: 1 chiamata `mcp__grok__code_review`, ~1-2 cent xAI.
+
+### Stato
+
+- ✅ MR-A1 chiuso. Foundation flag pronta, dataclass VincoloSoft
+  pronte, factory tier default pronta, test 24/24.
+- ✅ Modificato `programma_materiale` schema (`builder_mode` colonna).
+  Schema rimane retrocompat: tutti i programmi esistenti restano
+  `'rigido'`, nessun comportamento legacy cambia.
+- ✅ Review FAUSTO eseguita: 1 finding genuino MED annotato per
+  MR-A3, 5 falsi positivi rifiutati con motivazione.
+- ⏳ Commit + push + deploy Railway backend.
+
+### Per l'utente
+
+- **Tu**: nessun cambio visibile lato UI in MR-A1. È foundation pura.
+  Il flag `builder_mode` esiste in DB e API ma il builder non lo legge
+  ancora. Continuerai a vedere lo stesso comportamento legacy fino a
+  MR-A3+.
+- **Cosa cambia**: il PATCH `/api/programmi/{id}` accetta ora
+  `builder_mode: 'rigido' | 'esplorativo'` (così potrai opt-in i
+  programmi di test quando MR-A3 sarà mergeato senza dover ri-creare
+  il programma).
+
+### Prossimo step
+
+**MR-A2: Closure post-pass `chiudi_giri_aperti()`**. Modulo nuovo
+che opera DOPO `multi_giornata.py`: identifica i giri con
+`motivo_chiusura='non_chiuso'`, tenta chiusura con vuoto di rientro
+a stazione whitelist sede; se riesce, marca chiuso con vuoto; se no,
+marca esplicitamente `ciclo_aperto_irrisolto` (decisione Q2=b).
+Wrappa, NON sostituisce. Effort M, rischio basso (additivo).
+
+Impatto utente atteso: i cicli aperti come G-FIO-026 (Alessandria →
+Milano Certosa) verranno chiusi automaticamente con un vuoto di
+rientro Certosa → Alessandria (94 km, ~1h), oppure marcati con icona
+"ciclo aperto irrisolto" se la sede è raggiungibile solo con vuoti
+inammissibili.
+
+### Note di tracciabilità
+
+- **AMILCARE 401**: MR dedicato in coda alle TODO per sistemare
+  registrazione MCP in `~/.claude/settings.json` + chiave
+  `OPENROUTER_API_KEY`. Da fare a freddo prima del prossimo refactor
+  architetturale che richiede ragionamento profondo.
+- **FAUSTO usato per**: ragionamento architetturale (filtrato), review
+  post-MR-A1 prevista in coda di questo MR (vedi commit successivo).
+
+---
+
 ## 2026-05-08 (241) — Framework "codice con ausilio": NINO + FAUSTO + AMILCARE
 
 ### Contesto

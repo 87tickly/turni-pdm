@@ -333,6 +333,7 @@ async def create_programma(
         strict_options_json=payload.strict_options_json.model_dump(),
         stazioni_sosta_extra_json=payload.stazioni_sosta_extra_json,
         materiali_disponibili_codici_json=payload.materiali_disponibili_codici_json,
+        builder_mode=payload.builder_mode,
         created_by_user_id=user.user_id,
     )
     session.add(programma)

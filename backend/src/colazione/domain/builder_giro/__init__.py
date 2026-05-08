@@ -115,6 +115,13 @@ from colazione.domain.builder_giro.risolvi_corsa import (
     matches_filtro,
     risolvi_corsa,
 )
+from colazione.domain.builder_giro.vincoli_soft import (
+    Tier,
+    TipoRilassamento,
+    TipoVincoloSoft,
+    VincoloSoft,
+    tier_vincoli_default,
+)
 
 __all__ = [
     "ETICHETTE_AMMESSE",
@@ -152,8 +159,12 @@ __all__ = [
     "ProgrammaNonTrovatoError",
     "RegolaAmbiguaError",
     "StrictModeViolation",
+    "Tier",
     "TipoEvento",
+    "TipoRilassamento",
+    "TipoVincoloSoft",
     "VarianteGiornata",
+    "VincoloSoft",
     "aggrega_a2",
     "assegna_e_rileva_eventi",
     "assegna_materiali",
@@ -172,5 +183,6 @@ __all__ = [
     "primo_tipo_materiale",
     "rileva_eventi_composizione",
     "risolvi_corsa",
+    "tier_vincoli_default",
     "wrap_assegnato_in_aggregato",
 ]

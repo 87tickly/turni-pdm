@@ -167,6 +167,16 @@ class ProgrammaMateriale(Base):
         String(5), default="v1", server_default="v1", nullable=False
     )
 
+    # Sprint 8.1 MR-A1 (migration 0041, 2026-05-08): logica di assegnazione
+    # corsa→regola. ``"rigido"`` (default, retrocompat) = filtra-e-scarta
+    # legacy. ``"esplorativo"`` = esplora-e-rilassa con vincoli soft
+    # pesati e fallback governato (decisione utente Q1=b). Ortogonale a
+    # ``builder_version``. Foundation flag in MR-A1: nessun consumatore
+    # lo legge ancora; i branching arrivano da MR-A3.
+    builder_mode: Mapped[str] = mapped_column(
+        String(20), default="rigido", server_default="rigido", nullable=False
+    )
+
     # Tracking
     created_by_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("app_user.id"))
     created_by: Mapped["AppUser | None"] = relationship(foreign_keys=[created_by_user_id])
