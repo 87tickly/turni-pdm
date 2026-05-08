@@ -10,6 +10,137 @@
 
 ---
 
+## 2026-05-08 (245) — SEVERO: 4° attore framework ausili (critico permanente, motore AMILCARE)
+
+### Contesto
+
+Decisione utente 2026-05-08 (sera, questa sessione): introdurre un
+**4° attore** nel framework NINO + FAUSTO + AMILCARE — un **critico
+permanente** del codice committato. Motivazione utente testuale:
+
+> "dobbiamo creare un agente qui dentro che commenti, giudichi con
+> tono ogni lavoro che committiamo, valutando e partendo dal
+> presupposto che forse si poteva fare meglio."
+>
+> "io non voglio che sia dalla mia parte"
+
+Discussione di proposta (2 turni di dialogo): scelta del motore di
+giudizio sostanziale.
+
+- ❌ NINO stesso con persona critica → autocompiacenza verso il
+  proprio codice
+- ❌ FAUSTO (Grok Code Fast 1) → veloce ma superficiale, rischio
+  "review da junior frettoloso"
+- ✅ **AMILCARE** (DeepSeek V4 Pro) → modello esterno (no bias
+  Claude), ragionamento profondo + 1M context, no memoria delle
+  decisioni utente storiche → ti vede a freddo come uno che entra
+  ora nel progetto
+
+Naming proposto e scelto: **SEVERO** (esplicito sulla funzione,
+sta bene nella famiglia italiana NINO/FAUSTO/AMILCARE/SEVERO).
+
+Modalità invocazione (decisa nella stessa sessione):
+- **Obbligatoria** a fine Sprint o dopo MR significativo
+- **On-demand** quando l'utente lo chiede esplicitamente
+- **Non invocare** sui micro-commit (typo, doc, rename triviale)
+
+### Modifiche
+
+**Definizione subagent**:
+
+- `.claude/agents/severo.md` (nuovo, ~250 righe): subagent Claude
+  Code con system prompt critico. Identità, metodo (6 passi),
+  tono ("severo ma utile"), format canonico critica con
+  file:riga/severità/fix/costo/voto, scala voto 1-10, lista esplicita
+  di cosa NON fare (no codice, no commit, no edit TN-UPDATE/MR).
+  Motore sostanziale = AMILCARE via `mcp__amilcare__reason`. Output
+  canonico in `docs/critiche/`.
+
+**Documentazione del framework**:
+
+- `docs/AUSILI-CODICE.md`:
+  - Header: "NINO + FAUSTO, AMILCARE e SEVERO" (era 3 attori → 4)
+  - Sez. 1 "Chi è chi": aggiunta scheda SEVERO (identità, ruolo,
+    invocazione, forte di, quando/quando-non, costo)
+  - Sez. 2 matrice: estesa con colonna SEVERO + 2 nuove righe
+    ("Chiusura Sprint", "Critica MR significativo"). Aggiunto box
+    "Differenza review vs critica"
+  - Sez. 3 workflow: aggiunto passo 9 (SEVERO critica per MR
+    significativo / fine Sprint)
+  - Sez. 9 regola guida: estesa — "FAUSTO/AMILCARE eseguono o
+    verificano; SEVERO critica; nessuno decide"
+  - Sez. 10 trigger linguistici: aggiunti "chiedi a SEVERO",
+    "fai criticare", "review severa", "giudica l'ultimo commit"
+    + box "Differenza review vs critica"
+  - Sez. Riferimenti: aggiunti `.claude/agents/severo.md` e
+    `docs/critiche/`
+
+**Regole operative**:
+
+- `CLAUDE.md` regola 9:
+  - Titolo aggiornato a 4 attori
+  - Aggiunto blocco "Decisione 2026-05-08 (sera)" con SEVERO
+  - Lista attori estesa con scheda SEVERO
+  - Trigger linguistici estesi
+  - Regola guida estesa (criticare = 3a modalità, oltre eseguire/
+    verificare)
+  - Nuovo blocco "**Invocazione SEVERO — quando è obbligatorio**"
+    con elenco casi sì/no e nota che output critiche non è
+    direttiva da applicare alla cieca (eventuali fix → nuovi MR,
+    mai correzioni in-place del MR criticato)
+  - Sez. Riferimenti: aggiunti `.claude/agents/severo.md` +
+    `docs/critiche/`
+
+**Output critiche**:
+
+- `docs/critiche/` (nuova directory)
+- `docs/critiche/README.md`: indice cronologico inverso, convenzione
+  naming, cosa SEVERO è/non è, quando viene invocato, lista critiche
+  vuota (verrà popolata dalla prima invocazione)
+
+### Stato
+
+✅ chiuso. SEVERO operativo. Invocabile via:
+
+- `Agent` tool con `subagent_type=severo` (NINO chiama il subagent
+  in modo programmatico)
+- Trigger utente: "chiedi a SEVERO", "fai criticare", "review
+  severa", "giudica l'ultimo commit", "che ne dice SEVERO?"
+- Obbligatorio a fine Sprint o dopo MR significativo
+  (regola 9 CLAUDE.md, sezione "Invocazione SEVERO")
+
+### Verifiche
+
+- ✅ File creato `.claude/agents/severo.md` (frontmatter YAML
+  valido con `name`/`description`, system prompt esteso)
+- ✅ Edit `docs/AUSILI-CODICE.md` (header, intro, sez. 1, 2, 3,
+  9, 10, riferimenti)
+- ✅ Edit `CLAUDE.md` (sez. 9 estesa, sez. riferimenti)
+- ✅ Creato `docs/critiche/README.md` (indice)
+- ⏸️ **Non testato**: prima invocazione effettiva di SEVERO su un
+  MR. Verrà fatta alla prossima chiusura di Sprint o MR significativo
+  (Sprint 7.3 dashboard PdC, oppure Sprint 8.1 prosecuzione MR-A4/A5).
+
+### Prossimo step
+
+Decisione utente:
+
+- (a) Sprint 7.3 — Dashboard Pianificatore Turno PdC (2° ruolo,
+  prossimo per `CLAUDE.md` "Stato Sprint 7")
+- (b) Sprint 8.1 prosecuzione — MR-A4/A5 builder esplorativo
+  (tier 2/3 con grafo stazioni, tratti vuoti)
+- (c) Prima invocazione SEVERO sul commit MR-A3 (entry 244) per
+  rodare il workflow
+
+### Costo
+
+- ~0$ per setup (solo file scritti/aggiornati, nessuna chiamata
+  ad ausili in questa sessione)
+- Costo SEVERO a regime = quello di una review AMILCARE per
+  invocazione (varia con dimensione MR; tipico 1-3 centesimi)
+
+---
+
 ## 2026-05-08 (244) — Sprint 8.1 MR-A3: vincolo soft tier-based in risolvi_corsa (sblocca caso "linea unica → 0 giri")
 
 ### Contesto

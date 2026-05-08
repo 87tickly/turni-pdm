@@ -1,4 +1,4 @@
-# AUSILI ALLO SVILUPPO CODICE — NINO con FAUSTO e AMILCARE
+# AUSILI ALLO SVILUPPO CODICE — NINO con FAUSTO, AMILCARE e SEVERO
 
 > **Decisione 2026-05-08**: da oggi ogni riga di codice del programma
 > COLAZIONE è scritta da **NINO** con l'ausilio di **FAUSTO** e
@@ -6,9 +6,17 @@
 > typo, una riga di config); per qualunque altra cosa l'ausilio è la
 > norma, non l'eccezione.
 >
+> **Decisione 2026-05-08 (sera)**: aggiunto **SEVERO**, quarto attore.
+> SEVERO non scrive né esegue codice — è il **critico permanente** che
+> giudica i commit a fine Sprint o dopo MR significativo, partendo dal
+> presupposto che si poteva fare meglio. Motore di ragionamento =
+> AMILCARE (no bias auto-compiacenza). Definizione subagent in
+> `.claude/agents/severo.md`.
+>
 > Questo documento sostituisce ed estende la sezione 9 di
 > `CLAUDE.md` (vecchia "Ausilio Grok Code"), che ora copriva solo
-> FAUSTO. Da ora il framework è **a tre attori**.
+> FAUSTO. Da ora il framework è **a quattro attori**: tre coder
+> (NINO, FAUSTO, AMILCARE) + un critico (SEVERO).
 
 ---
 
@@ -71,25 +79,63 @@
   comparabile a FAUSTO; su context grandi pesa di più — monitorare
   bolletta OpenRouter.
 
+### SEVERO — il critico permanente
+
+- **Identità**: subagent Claude Code con system prompt critico.
+  Non è un modello esterno autonomo: è una **istanza di Claude
+  Code** definita in `.claude/agents/severo.md`, ma il giudizio
+  sostanziale lo delega ad **AMILCARE** via `mcp__amilcare__reason`
+  (no bias di auto-compiacenza verso codice scritto da NINO).
+- **Invocazione**: tramite `Agent` tool con `subagent_type=severo`,
+  oppure trigger linguistici utente (vedi §10).
+- **Ruolo**: criticare i commit. Mai scrivere codice. Mai committare.
+  Mai modificare `TN-UPDATE.md` o i file del MR criticato.
+- **Forte di**:
+  - Indipendenza dal codice appena scritto da NINO
+  - Indipendenza dalle decisioni dell'utente (non è "dalla sua parte")
+  - Format canonico in `docs/critiche/` (file:riga, severità, fix
+    proposto, costo del fix, voto)
+  - Aderenza ai documenti operativi (CLAUDE.md §7 NIENTE PIGRIZIA,
+    METODO 7 regole)
+- **Quando invocarlo**:
+  - **Obbligatorio**: a fine Sprint, dopo MR significativo (multi-file,
+    cambio architetturale, refactor di dominio)
+  - **On-demand**: quando l'utente lo chiede
+  - **Non invocare**: micro-commit (typo, doc, rename triviale,
+    una riga di config)
+- **Costo**: il subagent stesso è gratuito (è Claude); il giudizio
+  delegato ad AMILCARE costa quanto una review AMILCARE classica.
+
 ---
 
 ## 2. Quando usare cosa — matrice di decisione
 
-| Tipo di task | NINO | FAUSTO | AMILCARE |
-|---|---|---|---|
-| Architettura, scope, piano MR | ✅ unico decisore | ❌ | ❌ |
-| Decisione utente / dominio (normativa, modello dati) | ✅ unico decisore | ❌ | ❌ |
-| Codice routine (CRUD, schema Pydantic, migration semplice) | ✅ esegue | ☑️ second opinion se serve | ❌ overkill |
-| Refactor cross-file di logica di dominio | ✅ esegue + sintesi | ☑️ review post | ✅ ragionamento iniziale |
-| Algoritmo non-banale (builder, validazione PdC) | ✅ esegue | ☑️ stesura blocchi circoscritti | ✅ review esteso + edge case |
-| Code review post-MR (file principale) | ✅ orchestra | ✅ review veloce | ✅ review profondo se MR grosso |
-| Bug oscuro che non si sblocca | ✅ esegue fix | ☑️ second pair eyes | ✅ ragionamento alternativo |
-| Cleanup pattern uniforme su N file | ✅ orchestra | ✅ esegue tutto | ❌ overkill |
-| Test edge case su codice stabilizzato | ✅ orchestra | ✅ stesura | ☑️ se vincoli sottili |
-| Stesura funzione X con firma + vincoli noti | ☑️ supervisiona | ✅ scrive | ❌ overkill |
-| Verifica indipendente di un calcolo / formula | ✅ pone domanda | ✅ controprova | ✅ controprova |
+| Tipo di task | NINO | FAUSTO | AMILCARE | SEVERO |
+|---|---|---|---|---|
+| Architettura, scope, piano MR | ✅ unico decisore | ❌ | ❌ | ❌ |
+| Decisione utente / dominio (normativa, modello dati) | ✅ unico decisore | ❌ | ❌ | ❌ |
+| Codice routine (CRUD, schema Pydantic, migration semplice) | ✅ esegue | ☑️ second opinion se serve | ❌ overkill | ❌ overkill |
+| Refactor cross-file di logica di dominio | ✅ esegue + sintesi | ☑️ review post | ✅ ragionamento iniziale | ✅ critica post-commit |
+| Algoritmo non-banale (builder, validazione PdC) | ✅ esegue | ☑️ stesura blocchi circoscritti | ✅ review esteso + edge case | ✅ critica post-commit |
+| Code review post-MR (file principale) | ✅ orchestra | ✅ review veloce | ✅ review profondo se MR grosso | ☑️ se MR significativo |
+| Bug oscuro che non si sblocca | ✅ esegue fix | ☑️ second pair eyes | ✅ ragionamento alternativo | ❌ inutile prima del fix |
+| Cleanup pattern uniforme su N file | ✅ orchestra | ✅ esegue tutto | ❌ overkill | ❌ micro-commit |
+| Test edge case su codice stabilizzato | ✅ orchestra | ✅ stesura | ☑️ se vincoli sottili | ❌ |
+| Stesura funzione X con firma + vincoli noti | ☑️ supervisiona | ✅ scrive | ❌ overkill | ❌ |
+| Verifica indipendente di un calcolo / formula | ✅ pone domanda | ✅ controprova | ✅ controprova | ❌ controprova non è critica |
+| Chiusura Sprint (giudizio complessivo sul lavoro fatto) | ☑️ orchestra | ❌ | ❌ | ✅ obbligatorio |
+| Critica di un MR significativo già committato | ☑️ orchestra | ❌ | ❌ via SEVERO | ✅ obbligatorio |
 
 Legenda: ✅ usalo, ☑️ valutalo (opzionale), ❌ non serve / spreco.
+
+**Differenza review vs critica**:
+
+- **Review** (FAUSTO/AMILCARE) = giudizio di qualità tecnica
+  *prima del commit*, per migliorare il codice prima di chiuderlo.
+- **Critica** (SEVERO) = giudizio post-commit, *retrospettivo*,
+  che valuta il lavoro come un tutto contro le regole del progetto
+  (NIENTE PIGRIZIA, METODO 7 regole, debito tecnico segnalato in
+  modo coerente). Non sostituisce le review, le segue.
 
 ---
 
@@ -116,9 +162,16 @@ Sequenza canonica per un task di sviluppo non triviale:
 7. **NINO filtra i finding** — applica solo quelli che comprende e
    accetta. False positive vanno annotati nell'entry TN-UPDATE.
 8. **Entry TN-UPDATE + commit + push** (regola 2 CLAUDE.md).
+9. **(Solo MR significativo o fine Sprint) — SEVERO critica**:
+   NINO invoca SEVERO via `Agent` tool con `subagent_type=severo`.
+   SEVERO legge il diff, delega ad AMILCARE il giudizio sostanziale,
+   scrive critica in `docs/critiche/SPRINT-X.Y-MR-Z-titolo.md`,
+   aggiorna `docs/critiche/README.md`. **NINO + utente** decidono
+   se accettare/rimandare/ignorare i finding. Eventuali fix
+   diventano nuovi MR (mai correzioni in-place del MR criticato).
 
 Per task triviali (rename, typo, fix banale di un'ora) è ammesso
-saltare 3 e 6. **Mai** saltarli per task non banali.
+saltare 3, 6 e 9. **Mai** saltarli per task non banali.
 
 ---
 
@@ -210,16 +263,25 @@ sensibili, riconsiderare.
 
 ## 9. Regola guida
 
-> FAUSTO e AMILCARE aiutano a **eseguire** o **verificare**, non a
-> **decidere**.
+> **FAUSTO** e **AMILCARE** aiutano a **eseguire** o **verificare**,
+> non a **decidere**.
+>
+> **SEVERO** aiuta a **criticare**, non a eseguire né a decidere.
+> SEVERO scrive critiche, non codice; non committa, non aggiorna
+> TN-UPDATE; le sue critiche sono input per NINO + utente, non
+> direttive da applicare alla cieca.
 >
 > La sintesi architetturale, il piano dei MR, le scelte di scope
-> e le decisioni di dominio restano di **NINO**.
+> e le decisioni di dominio restano di **NINO**. Anche dopo una
+> critica di SEVERO, è NINO + utente a decidere quali finding
+> accettare e quali rimandare.
 >
 > Se NINO si accorge di aver delegato il pensare — non l'esecuzione,
 > proprio il pensare — si ferma e riprende in mano. È sintomo di
 > stanchezza o di scope poco chiaro, non un legittimo risparmio di
-> tempo.
+> tempo. **Stesso vale per SEVERO**: se NINO accetta acriticamente
+> i finding di SEVERO ("AMILCARE ha detto X, applico X"), ha
+> abdicato. Filtra sempre.
 
 ---
 
@@ -232,15 +294,28 @@ Quando l'utente dice frasi tipo:
 - *"chiedi ad Amilcare"*, *"fatti aiutare da Amilcare"*,
   *"chiedi a deepseek"*
   → NINO usa `mcp__amilcare__*`
+- *"chiedi a SEVERO"*, *"fai criticare"*, *"review severa"*,
+  *"che ne dice SEVERO?"*, *"giudica l'ultimo commit"*
+  → NINO invoca il subagent `severo` via `Agent` tool con
+  `subagent_type=severo`. NON chiama AMILCARE direttamente:
+  è SEVERO che internamente delega.
 - *"second opinion"* / *"controprova"* senza specifica → NINO sceglie
   l'ausilio in base al task (vedi matrice §2)
 - *"review"* di un MR / file → NINO sceglie l'ausilio in base alla
-  taglia (file singolo → FAUSTO; MR multi-file → AMILCARE)
+  taglia (file singolo → FAUSTO; MR multi-file → AMILCARE).
+  Se l'utente specifica *"review severa"* o *"critica"* → SEVERO,
+  non FAUSTO/AMILCARE.
 
 Quando l'utente non specifica e il task lo richiede, NINO può
 proporre: *"questa cosa la faccio io oppure la passo a FAUSTO/AMILCARE,
 preferisci?"*. Non chiedere conferma su ogni minuzia, però — vale
 solo per chiamate non triviali.
+
+**Differenza importante review vs critica**: l'utente che dice
+"review" intende di solito *review tecnica* (FAUSTO/AMILCARE,
+pre-commit). L'utente che dice *critica*, *giudica*, *severa* o
+nomina *SEVERO* intende il critico permanente (post-commit,
+retrospettivo). Se ambiguo, chiedere.
 
 ---
 
@@ -251,6 +326,10 @@ solo per chiamate non triviali.
 - `docs/METODO-DI-LAVORO.md` — framework comportamentale (regola 5:
   build + test prima del commit, vale anche per patch da ausili)
 - `TN-UPDATE.md` — diario operativo (entry 241 e successive citano
-  esplicitamente FAUSTO/AMILCARE quando coinvolti)
+  esplicitamente FAUSTO/AMILCARE/SEVERO quando coinvolti)
 - `~/Library/Application Support/Claude/claude_desktop_config.json`
   — config MCP che registra `grok` (FAUSTO) e `amilcare` (AMILCARE)
+- `.claude/agents/severo.md` — definizione del subagent SEVERO
+  (system prompt critico, format canonico critica)
+- `docs/critiche/` — output canonico delle critiche di SEVERO
+  (un file per critica + `README.md` indice)

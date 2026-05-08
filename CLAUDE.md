@@ -146,13 +146,20 @@ Il programma serve **persone con ruoli diversi**:
 Ogni ruolo ha una propria dashboard con schermate, azioni, permessi.
 Non costruire un'interfaccia unica.
 
-### 9. Codice scritto SEMPRE con ausilio — NINO + FAUSTO + AMILCARE
+### 9. Codice scritto SEMPRE con ausilio — NINO + FAUSTO + AMILCARE + SEVERO
 
 **Decisione 2026-05-08**: ogni riga di codice del programma COLAZIONE
 è scritta da **NINO** (Claude Code, driver principale) con l'ausilio
 di **FAUSTO** e **AMILCARE**. NINO da solo è ammesso solo per task
 triviali (rename, typo, una riga di config). Per qualunque altra cosa
 l'ausilio è **la norma, non l'eccezione**.
+
+**Decisione 2026-05-08 (sera)**: aggiunto **SEVERO**, quarto attore.
+SEVERO non scrive né esegue codice — è il **critico permanente** che
+giudica i commit a fine Sprint o dopo MR significativo, partendo dal
+presupposto che si poteva fare meglio. Motore di ragionamento
+sostanziale = AMILCARE (no bias auto-compiacenza). Definizione
+subagent in `.claude/agents/severo.md`.
 
 **Il framework completo (matrice di decisione, workflow, brief,
 costi, privacy, trigger linguistici) sta in
@@ -175,17 +182,54 @@ TN-UPDATE e METODO.
   context 1M token, edge case profondi, refactor architetturali.
   Modello scelto = il top (V4 Pro, non Flash) per qualità del
   ragionamento. SWE-bench 80.6%, LiveCodeBench 93.5%.
+- **SEVERO** = subagent Claude Code definito in
+  `.claude/agents/severo.md`. Critico permanente post-commit,
+  giudica con tono partendo dal presupposto che si poteva fare
+  meglio. Non è dalla parte dell'utente né di NINO. Motore di
+  giudizio sostanziale = AMILCARE (delegato dal subagent). Output
+  canonico in `docs/critiche/`. Mai scrive codice, mai committa.
 
 **Trigger linguistici**:
 - *"chiedi a Fausto"* / *"delega Fausto"* → `mcp__grok__*`
 - *"chiedi ad Amilcare"* / *"chiedi a deepseek"* → `mcp__amilcare__*`
+- *"chiedi a SEVERO"* / *"fai criticare"* / *"review severa"* /
+  *"giudica l'ultimo commit"* → `Agent` tool con
+  `subagent_type=severo` (NON chiamare AMILCARE direttamente:
+  è SEVERO che internamente delega)
 - Quando l'utente non specifica, NINO sceglie in base alla taglia
   e natura del task (vedi matrice §2 di `docs/AUSILI-CODICE.md`).
 
 **Regola guida**: FAUSTO e AMILCARE aiutano a **eseguire** o
-**verificare**, non a **decidere**. La sintesi architetturale resta
-sempre di NINO. Ogni intervento dei due ausili va **tracciato in
-TN-UPDATE** con finding e azione presa (false positive inclusi).
+**verificare**; SEVERO aiuta a **criticare**; nessuno dei tre
+**decide**. La sintesi architetturale, le scelte di scope e le
+decisioni di dominio restano sempre di NINO + utente. Ogni
+intervento di FAUSTO/AMILCARE/SEVERO va **tracciato in TN-UPDATE**
+con finding e azione presa (false positive inclusi).
+
+**Invocazione SEVERO — quando è obbligatorio**:
+
+SEVERO va invocato in modo sistematico (non opzionale) nei seguenti
+casi:
+
+1. **A fine Sprint** (es. Sprint 7.3, 8.1, ecc.) — prima di marcare
+   lo Sprint come ✅ chiuso in CLAUDE.md o nell'entry TN-UPDATE
+   conclusiva.
+2. **Dopo un MR significativo** — multi-file, refactor di logica
+   di dominio, cambio architetturale, nuovo algoritmo, nuova
+   entità nel modello dati, nuovo endpoint API non triviale.
+3. **Quando l'utente lo chiede esplicitamente** — vedi trigger
+   linguistici sopra.
+
+SEVERO **NON** va invocato per:
+- Micro-commit (typo, doc, rename triviale, una riga di config)
+- Hotfix urgenti (riprendere dopo)
+- Quando NINO o l'utente sono incerti sull'esito ma vogliono
+  procedere comunque (la critica è retrospettiva, non blocca)
+
+L'output di SEVERO (file in `docs/critiche/`) **non è una direttiva**
+da applicare alla cieca: è input per la decisione successiva di
+NINO + utente. Eventuali fix accettati diventano nuovi MR (mai
+correzioni in-place del MR criticato).
 
 ---
 
@@ -315,7 +359,9 @@ Riassunto rapido. Per il dettaglio normativo vedi `docs/NORMATIVA-PDC.md`.
 
 - `TN-UPDATE.md` — diario operativo (cronologia modifiche)
 - `docs/METODO-DI-LAVORO.md` — framework comportamentale
-- `docs/AUSILI-CODICE.md` — NINO + FAUSTO + AMILCARE (regola §9)
+- `docs/AUSILI-CODICE.md` — NINO + FAUSTO + AMILCARE + SEVERO (regola §9)
+- `.claude/agents/severo.md` — definizione subagent SEVERO (critico)
+- `docs/critiche/` — output canonico critiche di SEVERO + indice
 - `docs/NORMATIVA-PDC.md` — fonte verità dominio
 - `docs/MODELLO-DATI.md` v0.5 — modello concettuale
 - `docs/CODE-REVIEW-2026-05-01.md` — review post Sprint 7.4 (24 finding)

@@ -83,5 +83,10 @@ backend/data/pde-input/*
 # =====================================================================
 # Claude Code
 # =====================================================================
-.claude/
+# Tutto sotto .claude/ è privato (settings.local.json, launch.json,
+# worktrees/) TRANNE i subagent definiti dal progetto, che vanno
+# condivisi col team.
+.claude/*
+!.claude/agents/
+!.claude/agents/**
 
