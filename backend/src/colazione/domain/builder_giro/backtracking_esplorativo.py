@@ -57,6 +57,8 @@ from colazione.domain.builder_giro.multi_giornata import (
     MotivoChiusura,
     ParamMultiGiornata,
     _km_giornata,
+    _minuti_diurni_sosta_intergiornata,
+    _pct_servizio_catena,
     _time_to_min,
 )
 from colazione.domain.builder_giro.posizionamento import CatenaPosizionata
@@ -95,6 +97,20 @@ class ParamBacktracking:
     depth_max_oltre_min: int = 2
     tolleranza_km_cap_pct: float = 10.0
     log_level: str = "info"
+    # MR-A4-bis (entry 247) HIGH-1 fix: hard cap sui nodi visitati
+    # nell'intero run del backtracking. Previene esplosione 8^11 worst
+    # case su programmi con n_giornate_max alto. Default 100k = ~1s
+    # CPU Python su nodo medio. Quando raggiunto, abort + warning.
+    n_branches_max: int = 100_000
+    # MR-A4-bis (entry 247) MED-NINO-1 fix: pesi score parametrizzati.
+    # Erano hardcoded in `_score_stato`. Default = valori MR-A4 originali
+    # (km×0.5 + n_corse×1 + 50 chiude + 30 raggiunge_min - 0.5 n_giornate)
+    # da calibrare empiricamente in MR-A7.
+    peso_km: float = 0.5
+    peso_corse: float = 1.0
+    peso_chiude_sede: float = 50.0
+    peso_raggiunge_min: float = 30.0
+    peso_n_giornate: float = -0.5
 
     def __post_init__(self) -> None:
         if self.beam_k < 1:
@@ -115,6 +131,11 @@ class ParamBacktracking:
             raise ValueError(
                 f"ParamBacktracking.log_level deve essere "
                 f"'silent'|'info'|'debug', ricevuto {self.log_level!r}"
+            )
+        if self.n_branches_max < 1:
+            raise ValueError(
+                f"ParamBacktracking.n_branches_max deve essere >= 1, "
+                f"ricevuto {self.n_branches_max}"
             )
 
 
@@ -178,21 +199,20 @@ def _trova_continuazioni_top_k(
 def _score_stato(
     stato: _StatoBacktracking,
     params_mg: ParamMultiGiornata,
+    params_back: ParamBacktracking,
 ) -> float:
     """Score di uno stato: più alto = giro migliore.
 
-    Componenti:
-    - ``km_cumulati × 0.5``: km coperti (più copertura = meglio).
-    - ``n_corse × 1.0``: corse PdE coperte (lineare).
-    - ``+50`` se ultima stazione in ``whitelist_sede`` (chiusura
-      geografica, vincolo principale).
-    - ``+30`` se ``len(giornate) >= n_giornate_min`` (raggiunge soft floor).
-    - ``-0.5 × n_giornate``: piccola penalità per preferire giri
-      compatti a parità di copertura.
-
-    Pesi scelti per allineamento con motivo_chiusura: 'naturale'
-    (chiude_in_sede + km_cap o min) ottiene il bonus +50, 'sotto_min'
-    senza chiusura no.
+    Componenti (pesi parametrizzati in ``ParamBacktracking`` da
+    MR-A4-bis entry 247):
+    - ``km_cumulati × peso_km`` (default 0.5): km coperti.
+    - ``n_corse × peso_corse`` (default 1.0): corse PdE coperte.
+    - ``peso_chiude_sede`` (default 50) se ultima stazione in
+      ``whitelist_sede`` (chiusura geografica, vincolo principale).
+    - ``peso_raggiunge_min`` (default 30) se ``len(giornate) >=
+      n_giornate_min`` (raggiunge soft floor).
+    - ``peso_n_giornate × n_giornate`` (default -0.5): piccola
+      penalità per preferire giri compatti a parità di copertura.
     """
     n_giornate = len(stato.giornate)
     if n_giornate == 0:
@@ -208,11 +228,11 @@ def _score_stato(
     chiude_in_sede = ultima_staz in params_mg.whitelist_sede
     raggiunge_min = n_giornate >= params_mg.n_giornate_min
     return (
-        stato.km_cumulati * 0.5
-        + n_corse * 1.0
-        + (50.0 if chiude_in_sede else 0.0)
-        + (30.0 if raggiunge_min else 0.0)
-        - n_giornate * 0.5
+        stato.km_cumulati * params_back.peso_km
+        + n_corse * params_back.peso_corse
+        + (params_back.peso_chiude_sede if chiude_in_sede else 0.0)
+        + (params_back.peso_raggiunge_min if raggiunge_min else 0.0)
+        + n_giornate * params_back.peso_n_giornate
     )
 
 
@@ -235,6 +255,13 @@ def _estendi_ricorsivo(
     chiamante seleziona il migliore via ``_score_stato``.
     """
     n_branches[0] += 1
+
+    # MR-A4-bis (entry 247) HIGH-1 fix: hard cap globale sui nodi
+    # visitati. Quando raggiunto, abort qualsiasi ulteriore esplorazione
+    # (lo stato corrente viene comunque restituito come terminale).
+    # Il caller logga warning quando il cap è stato hittato.
+    if n_branches[0] >= params_back.n_branches_max:
+        return [stato]
 
     # Stop condition: depth esaurita o n_giornate_max raggiunto.
     if depth_remaining <= 0:
@@ -280,6 +307,33 @@ def _estendi_ricorsivo(
         if km_cap > 0 and nuovo_km > km_cap_max:
             # Sforerebbe la tolleranza, skip questo branch.
             continue
+
+        # MR-A4-bis (entry 247) HIGH-2 fix: replicare i vincoli
+        # MR-4 (entry 224) che il greedy legacy in
+        # multi_giornata.py:601-623 rispetta. Senza questi check, il
+        # backtracking estendeva giri violando max_sosta_diurna_min e
+        # min_servizio_giornata_pct configurati dal pianificatore.
+        # **Regressione di vincolo identificata da SEVERO critica
+        # MR-A4 (voto 2/10)**.
+        if not cat_pos.catena.corse:
+            # Già gestito sopra (return [stato]) ma defensive
+            continue
+        ultima_corsa_orig = cat_pos.catena.corse[-1]
+        prima_corsa_prossima = prossima.catena.corse[0]
+
+        if params_mg.max_sosta_diurna_min is not None:
+            diurno_sosta = _minuti_diurni_sosta_intergiornata(
+                ultima_corsa_orig.ora_arrivo,
+                prima_corsa_prossima.ora_partenza,
+            )
+            if diurno_sosta > params_mg.max_sosta_diurna_min:
+                continue
+
+        if params_mg.min_servizio_giornata_pct is not None:
+            pct = _pct_servizio_catena(prossima)
+            if pct < params_mg.min_servizio_giornata_pct:
+                continue
+
         nuova_giornata = GiornataGiro(
             data=d_prossima, catena_posizionata=prossima
         )
@@ -445,11 +499,25 @@ def tenta_estensione_giri_corti(
         )
         n_branches_total += n_branches_local[0]
 
+        # MR-A4-bis (entry 247) HIGH-1 fix: log warning quando il cap
+        # n_branches_max è stato hittato per questo giro. Indica
+        # che il backtracking è stato troncato prematuramente; il
+        # giro potrebbe essere migliorabile aumentando n_branches_max
+        # in ParamBacktracking ma a costo di runtime. Dato per A7
+        # tuning empirico.
+        if n_branches_local[0] >= params_back.n_branches_max:
+            warnings.append(
+                f"giro idx={idx}: backtracking abortito al cap "
+                f"n_branches_max={params_back.n_branches_max} "
+                f"(esplorazione troncata, possibile soluzione migliore "
+                f"con cap più alto)"
+            )
+
         # Seleziona miglior stato per score
         miglior_stato = stato_init
-        miglior_score = _score_stato(stato_init, params_mg)
+        miglior_score = _score_stato(stato_init, params_mg, params_back)
         for s in stati_finali:
-            sc = _score_stato(s, params_mg)
+            sc = _score_stato(s, params_mg, params_back)
             if sc > miglior_score:
                 miglior_score = sc
                 miglior_stato = s

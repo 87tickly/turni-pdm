@@ -10,6 +10,159 @@
 
 ---
 
+## 2026-05-08 (247) — Sprint 8.1 MR-A4-bis: fix HIGH SEVERO post-critica MR-A4 (cap branches + vincoli MR-4)
+
+### Contesto
+
+SEVERO (entry 246) ha votato MR-A4 **2/10** con 2 finding HIGH bug
+reali. MR-A4-bis è la fix urgente, **priorità #1 prima di A7**:
+senza A4-bis i programmi `builder_mode='esplorativo'` producono
+soluzioni che violano vincoli MR-4 entry 224 (regressione).
+
+### Modifiche MR-A4-bis
+
+**`backtracking_esplorativo.py`**:
+
+- **HIGH-1 cap n_branches_max**: aggiunto campo
+  `n_branches_max: int = 100_000` a `ParamBacktracking`. Hard cap
+  globale (lista mutabile `n_branches[0]` condivisa nella ricorsione).
+  In `_estendi_ricorsivo` early abort `return [stato]` quando cap
+  hit. Previene esplosione 8^11 worst case su programmi con
+  `n_giornate_max` alto. Validazione `n_branches_max >= 1` nel
+  `__post_init__`.
+
+- **HIGH-2 vincoli MR-4 replicati**: in `_estendi_ricorsivo` prima
+  di accettare un branch, replicare check legacy
+  `multi_giornata.py:601-623`:
+  - `if max_sosta_diurna_min is not None`: verifica
+    `_minuti_diurni_sosta_intergiornata` (ora arrivo ultima corsa
+    del padre, ora partenza prima corsa del candidato) e skip se
+    `> max_sosta_diurna_min`.
+  - `if min_servizio_giornata_pct is not None`: verifica
+    `_pct_servizio_catena(prossima)` e skip se `< pct`.
+  Helpers importati direttamente da `multi_giornata.py` (DRY: niente
+  duplicazione logica). Fix di **regressione reale**: backtracking
+  ora rispetta gli stessi vincoli del greedy legacy.
+
+- **MED-NINO-1 pesi score parametrizzati**: aggiunti a
+  `ParamBacktracking` 5 campi `peso_km=0.5`, `peso_corse=1.0`,
+  `peso_chiude_sede=50.0`, `peso_raggiunge_min=30.0`,
+  `peso_n_giornate=-0.5`. Default = valori MR-A4 originali per
+  retrocompat. `_score_stato` ora prende `params_back` come 3°
+  parametro e usa i pesi parametrizzati.
+
+- **HIGH-1 logging cap warning**: `tenta_estensione_giri_corti`
+  aggiunge a `StatBacktracking.warnings` un messaggio `"giro idx=N:
+  backtracking abortito al cap n_branches_max=K (esplorazione
+  troncata, possibile soluzione migliore con cap più alto)"` quando
+  il cap è hit per quel giro. Visibile in A7 tuning.
+
+**Test** (`tests/test_backtracking_esplorativo.py`, +6 test, totale 26):
+- `test_a4bis_cap_n_branches_max_abort`: cap=1, warning nel
+  `StatBacktracking.warnings`.
+- `test_a4bis_param_n_branches_max_invalido`: validation 0 → ValueError.
+- `test_a4bis_vincolo_max_sosta_diurna_blocca_branch`: sosta lunga
+  (cp1 ore 13:00 + cp2 ore 12:00 giorno dopo = 900 min diurni),
+  soglia 300 → branch scartato.
+- `test_a4bis_vincolo_max_sosta_diurna_passthrough_se_none`:
+  `max_sosta_diurna_min=None` → estensione applicata (vincolo OFF).
+- `test_a4bis_pesi_score_parametrizzati_default`: i 5 pesi default
+  combaciano con valori MR-A4 originali.
+- `test_a4bis_pesi_score_override_funziona`: `peso_chiude_sede=0` +
+  `peso_n_giornate=-100` → giro 1g preferito a 2g (override score
+  cambia decisione).
+
+### Review AMILCARE.code post-stesura (regola 9 CLAUDE.md)
+
+`mcp__amilcare__code` (V4 Flash) chiamato con diff compatto. Trovato
+1 finding:
+
+- **HIGH-1 AMILCARE.code**: "early abort ritorna `[stato]` come
+  terminal, downstream potrebbe considerarlo finale invece che
+  troncato".
+  - **Filtro NINO**: in pratica il best-score selector
+    (`_score_stato`) scarta naturalmente stati incompleti (score più
+    basso). Il fallback `if miglior_stato is stato_init: risultato.
+    append(giro)` preserva il giro originale se nessun ramo migliora.
+    Niente regressione manifesta.
+  - **Tech debt MED**: per pulizia, sostituire `return [stato]` con
+    `return []` quando cap hit. Annoto come MR-A4-tris se A7 mostra
+    pattern di "giri parzialmente estesi accettati per errore".
+    Non bloccante per produzione ora.
+
+### Verifiche
+
+- ✅ `ruff check src tests`: solo 2 B008 pre-esistenti (entry 240),
+  niente regressioni nuove.
+- ✅ `mypy --strict src`: **82 file clean**.
+- ✅ `pytest tutto`: **141 passed in 2.37s** (24 A1 + 19 A2 + 11 A3 +
+  26 A4+A4-bis + 61 regression).
+- ✅ `pnpm tsc --noEmit`: clean.
+
+### Stato
+
+- ✅ MR-A4-bis chiuso. HIGH-1 + HIGH-2 + MED-NINO-1 fix applicati.
+- ✅ Review AMILCARE.code post-stesura completata (regola 9
+  rispettata anche se NINO ha scritto la fix da solo: review
+  cattura l'intento "ausilio").
+- ✅ MED-NINO-2 (test volume reale N=20/100/200) **NON in A4-bis**:
+  scope decisione = MR-A7 dove eseguo benchmark vero su programma 17
+  invece di volume sintetico.
+- ✅ Tech debt MED AMILCARE (`return []` invece di `[stato]` su
+  cap): annotato per MR-A4-tris se A7 lo richiede.
+- ⏳ Commit + push + deploy Railway backend.
+- ⏳ MR-A7 ora SBLOCCATO: la regressione vincoli MR-4 è chiusa,
+  posso procedere con validazione su programma 17 reale.
+
+### Per l'utente
+
+- **Ora il flusso esplorativo (A1+A2+A3+A4+A4-bis)** rispetta tutti i
+  vincoli configurati per il programma:
+  - Linea / materiale (A3 tier-based)
+  - max_sosta_diurna_min (A4-bis HIGH-2 fix)
+  - min_servizio_giornata_pct (A4-bis HIGH-2 fix)
+  - km_max_ciclo + tolleranza (A4 pruning)
+  - n_giornate_min/max (A4 depth dinamico)
+  - whitelist sede (A2 closure post-pass)
+- **Cap esplorazione 100k branches** (~1-2s CPU Python). Visibile
+  warning in A7 se hit (= signal che il programma è "duro" per il
+  backtracking corrente).
+
+### Prossimo step: MR-A7 (richiede te)
+
+Validazione end-to-end su programma 17 reale. Serve te:
+
+1. **Conferma programma**: programma 17 esistente con regola R11 +
+   sede FIO, oppure ne creiamo uno nuovo dedicato (più safe).
+2. **Backup pre-test**: `pg_dump` o snapshot DB Railway (sicurezza).
+3. **PATCH** `/api/programmi/{ID}` con `{"builder_mode": "esplorativo"}`.
+4. **Rigenera giri** con `force=true`.
+5. **Mandami screen**:
+   - n giri totali (rigido vs esplorativo)
+   - n_corse coperte vs non_coperte
+   - distribuzione `motivo_chiusura`: naturale / km_cap / sotto_min /
+     non_chiuso / chiuso_con_vuoto / ciclo_aperto_irrisolto
+   - distribuzione lunghezza giri (1g, 2g, ...)
+   - warnings del builder, in particolare quelli del Backtracking
+     (`"Backtracking regola N: ..."` e `"giro idx=N: backtracking
+     abortito al cap"`)
+
+Da quei numeri decidiamo:
+- A4-tris se cap troppo stretto / pesi score sub-ottimali
+- A5 se non-coperte cross-regola sono molte
+- A8 switch default se i numeri sono ottimi
+
+### Note tracciabilità
+
+- **SEVERO**: voto 2/10 su MR-A4 → 2 HIGH chiusi in A4-bis.
+- **AMILCARE V4 Pro**: motore SEVERO. 1 HIGH-3 ridotto a MED da
+  filtro NINO (lettura errata flusso A4→A2 sequenziale).
+- **AMILCARE V4 Flash (code)**: review post-stesura A4-bis. 1 HIGH
+  ridotto a tech debt MED (early abort = stato fittizio terminale).
+- **FAUSTO**: non coinvolto in A4-bis (review già fatta su A4 base).
+
+---
+
 ## 2026-05-08 (246) — Sprint 8.1 MR-A4: backtracking esplorativo profondo + Triple Validation (FAUSTO+V4 Flash+V4 Pro)
 
 ### Contesto

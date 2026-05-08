@@ -94,13 +94,19 @@ def _make_giro(
 
 
 def _params_mg(
-    n_min: int = 4, n_max: int = 12, km_cap: float | None = None
+    n_min: int = 4,
+    n_max: int = 12,
+    km_cap: float | None = None,
+    max_sosta_diurna_min: int | None = None,
+    min_servizio_giornata_pct: int | None = None,
 ) -> ParamMultiGiornata:
     return ParamMultiGiornata(
         n_giornate_max=n_max,
         n_giornate_min=n_min,
         km_max_ciclo=km_cap,
         whitelist_sede=frozenset({"S_FIO"}),
+        max_sosta_diurna_min=max_sosta_diurna_min,
+        min_servizio_giornata_pct=min_servizio_giornata_pct,
     )
 
 
@@ -355,3 +361,132 @@ def test_re_export_da_builder_giro_init() -> None:
     assert builder_giro.ParamBacktracking is ParamBacktracking
     assert builder_giro.StatBacktracking is StatBacktracking
     assert builder_giro.tenta_estensione_giri_corti is tenta_estensione_giri_corti
+
+
+# =====================================================================
+# MR-A4-bis (entry 247) HIGH-1: cap n_branches_max + abort
+# =====================================================================
+
+
+def test_a4bis_cap_n_branches_max_abort() -> None:
+    """SEVERO HIGH-1 fix: con n_branches_max stretto, il backtracking
+    aborta e logga warning. Lo stato esplorato (anche se troncato) è
+    comunque ritornato.
+    """
+    cp1 = _make_catena_pos("S_A", "S_B", time(8, 0), time(9, 0), km=100.0)
+    cp2 = _make_catena_pos("S_B", "S_C", time(10, 0), time(11, 0), km=80.0)
+    g = _make_giro([cp1], motivo="sotto_min", km_cumulati=100.0)
+
+    out, stat = tenta_estensione_giri_corti(
+        [g],
+        {"ETR421": {date(2026, 6, 2): [cp2]}},
+        {0: "ETR421"},
+        _params_mg(n_min=4),
+        ParamBacktracking(n_branches_max=1),  # cap stretto
+    )
+    # Cap hit logged in warnings
+    assert any("n_branches_max=1" in w for w in stat.warnings)
+
+
+def test_a4bis_param_n_branches_max_invalido() -> None:
+    with pytest.raises(ValueError, match="n_branches_max"):
+        ParamBacktracking(n_branches_max=0)
+
+
+# =====================================================================
+# MR-A4-bis (entry 247) HIGH-2: vincoli MR-4 replicati
+# =====================================================================
+
+
+def test_a4bis_vincolo_max_sosta_diurna_blocca_branch() -> None:
+    """SEVERO HIGH-2 fix: branch con sosta diurna intergiornata
+    > max_sosta_diurna_min è scartato (regressione vincolo MR-4
+    risolta).
+
+    cp1 finisce alle 13:00 (giorno k), cp2 parte alle 12:00 giorno k+1.
+    Sosta = (1440-780) + 720 = 1380 min. Diurno (escludendo
+    [22:00-06:00)): 540 (13:00→22:00 = 9h) + 360 (06:00→12:00 = 6h)
+    = 900 min. Soglia 300 → 900 > 300 → branch scartato.
+    """
+    cp1 = _make_catena_pos("S_A", "S_B", time(8, 0), time(13, 0))
+    cp2_lunga_sosta = _make_catena_pos(
+        "S_B", "S_FIO", time(12, 0), time(15, 0)
+    )
+    g = _make_giro([cp1], motivo="sotto_min", km_cumulati=100.0)
+
+    out, stat = tenta_estensione_giri_corti(
+        [g],
+        {"ETR421": {date(2026, 6, 2): [cp2_lunga_sosta]}},
+        {0: "ETR421"},
+        _params_mg(n_min=4, max_sosta_diurna_min=300),
+    )
+    # Branch scartato → giro originale invariato
+    assert len(out[0].giornate) == 1
+    assert stat.n_giri_estesi == 0
+
+
+def test_a4bis_vincolo_max_sosta_diurna_passthrough_se_none() -> None:
+    """Se max_sosta_diurna_min=None (default), nessun check applicato:
+    il backtracking estende anche con sosta lunga.
+    """
+    cp1 = _make_catena_pos("S_A", "S_B", time(8, 0), time(13, 0))
+    cp2 = _make_catena_pos("S_B", "S_FIO", time(12, 0), time(15, 0))
+    g = _make_giro([cp1], motivo="sotto_min", km_cumulati=100.0)
+
+    out, stat = tenta_estensione_giri_corti(
+        [g],
+        {"ETR421": {date(2026, 6, 2): [cp2]}},
+        {0: "ETR421"},
+        _params_mg(n_min=4, max_sosta_diurna_min=None),  # vincolo OFF
+    )
+    # Estensione applicata (vincolo non attivo)
+    assert len(out[0].giornate) == 2
+    assert stat.n_giri_estesi == 1
+
+
+# =====================================================================
+# MR-A4-bis (entry 247) MED: pesi score parametrizzati
+# =====================================================================
+
+
+def test_a4bis_pesi_score_parametrizzati_default() -> None:
+    """Pesi default = valori MR-A4 originali (km×0.5, n_corse×1, ...)."""
+    p = ParamBacktracking()
+    assert p.peso_km == 0.5
+    assert p.peso_corse == 1.0
+    assert p.peso_chiude_sede == 50.0
+    assert p.peso_raggiunge_min == 30.0
+    assert p.peso_n_giornate == -0.5
+
+
+def test_a4bis_pesi_score_override_funziona() -> None:
+    """Pesi override modificano effettivamente la scelta."""
+    cp1 = _make_catena_pos("S_A", "S_B", time(8, 0), time(9, 0), km=100.0)
+    cp2 = _make_catena_pos("S_B", "S_FIO", time(10, 0), time(11, 0), km=80.0)
+    g = _make_giro([cp1], motivo="sotto_min", km_cumulati=100.0)
+
+    # Con pesi default, l'estensione a 2g ha score migliore (chiude
+    # in S_FIO whitelist + più km/corse).
+    out_default, _ = tenta_estensione_giri_corti(
+        [g],
+        {"ETR421": {date(2026, 6, 2): [cp2]}},
+        {0: "ETR421"},
+        _params_mg(n_min=4),
+    )
+    assert len(out_default[0].giornate) == 2
+
+    # Con peso_chiude_sede=0 e peso_n_giornate molto negativo,
+    # lo score originale (1g, no chiusura) può vincere su 2g (chiusa
+    # ma con penalità giornate).
+    # km_default=100×0.5+1×1=51, vs km_2g=180×0.5+2×1+50−1=141.
+    # Con peso_chiude_sede=0 e peso_n_giornate=-100:
+    # score_1g=51-100=-49, score_2g=180×0.5+2-200=-108 → 1g vince.
+    out_pesi_estremi, _ = tenta_estensione_giri_corti(
+        [g],
+        {"ETR421": {date(2026, 6, 2): [cp2]}},
+        {0: "ETR421"},
+        _params_mg(n_min=4),
+        ParamBacktracking(peso_chiude_sede=0.0, peso_n_giornate=-100.0),
+    )
+    # Con questi pesi estremi, lo stato originale 1g è preferito
+    assert len(out_pesi_estremi[0].giornate) == 1
