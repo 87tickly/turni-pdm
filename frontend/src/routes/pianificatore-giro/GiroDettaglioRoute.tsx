@@ -3469,37 +3469,42 @@ function BloccoDialogBody({
           </div>
         )}
 
-        {/* MR η-bis: configurazione doppia/sgancio sul blocco. */}
-        <BloccoConfigDoppiaSgancio giroId={giro.id} blocco={blocco} />
-
-        {/* Sprint 8.0 MR-B.2 (entry 232): elimina blocco vuoto. */}
-        {blocco.tipo_blocco === "materiale_vuoto" && (
-          <BloccoEliminaVuoto giroId={giro.id} blocco={blocco} />
-        )}
-
-        {/* Sprint 8.0 MR-B.2.2 (entry 235): aggiungi vuoto manuale
-            DOPO questo blocco. Disponibile per qualunque tipo blocco
-            (commerciale, vuoto, ecc.) — l'utente decide. */}
-        {location !== null && (
-          <BloccoAggiungiVuotoDopo
-            giroId={giro.id}
-            blocco={blocco}
-            giornataNumero={location.giornata}
-            variantIndex={(() => {
-              for (const g of giro.giornate) {
-                if (g.numero_giornata !== location.giornata) continue;
-                const idx = g.varianti.findIndex((v) =>
-                  v.blocchi.some((b) => b.id === blocco.id),
-                );
-                return idx >= 0 ? idx : 0;
-              }
-              return 0;
-            })()}
-          />
-        )}
-
-        {/* Metadata */}
-        <BloccoMetadata blocco={blocco} />
+        {/* Sprint 8.0 MR-F (entry 237): pannelli azione collassabili
+            in stile accordion. Solo "Configurazione operativa" è
+            aperta di default; gli altri sono collassati per ridurre
+            cognitive load (decisione utente "snellire un po'"). */}
+        <div className="mt-4 space-y-1.5">
+          <AccordionSection title="Configurazione operativa" defaultOpen>
+            <BloccoConfigDoppiaSgancio giroId={giro.id} blocco={blocco} />
+          </AccordionSection>
+          {blocco.tipo_blocco === "materiale_vuoto" && (
+            <AccordionSection title="Elimina vuoto" tone="rose">
+              <BloccoEliminaVuoto giroId={giro.id} blocco={blocco} />
+            </AccordionSection>
+          )}
+          {location !== null && (
+            <AccordionSection title="Aggiungi vuoto dopo" tone="blue">
+              <BloccoAggiungiVuotoDopo
+                giroId={giro.id}
+                blocco={blocco}
+                giornataNumero={location.giornata}
+                variantIndex={(() => {
+                  for (const g of giro.giornate) {
+                    if (g.numero_giornata !== location.giornata) continue;
+                    const idx = g.varianti.findIndex((v) =>
+                      v.blocchi.some((b) => b.id === blocco.id),
+                    );
+                    return idx >= 0 ? idx : 0;
+                  }
+                  return 0;
+                })()}
+              />
+            </AccordionSection>
+          )}
+          <AccordionSection title="Metadata">
+            <BloccoMetadata blocco={blocco} />
+          </AccordionSection>
+        </div>
 
         {blocco.descrizione !== null && blocco.descrizione !== "" && (
           <div className="mt-4 rounded border border-border bg-muted/40 p-3 text-[11px] italic text-muted-foreground">
@@ -3598,10 +3603,7 @@ function BloccoConfigDoppiaSgancio({
   };
 
   return (
-    <div className="mt-4 rounded-md border border-primary/30 bg-primary/5 p-3">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-primary">
-        Configurazione operativa (MR η-bis)
-      </div>
+    <div className="pt-1">
       <div className="flex flex-col gap-2 text-sm">
         <label className="flex items-start gap-2">
           <input
@@ -3725,11 +3727,8 @@ function BloccoEliminaVuoto({
 
   return (
     <>
-      <div className="mt-4 rounded-md border border-rose-300/50 bg-rose-50/40 p-3">
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-800">
-          Elimina vuoto
-        </div>
-        <p className="mb-2 text-sm text-rose-900/80">
+      <div className="pt-1">
+        <p className="mb-2 text-sm text-muted-foreground">
           Rimuovi questo blocco se il convoglio non deve fare il
           posizionamento (es. "dorme" qui). I seq successivi vengono
           ricompattati automaticamente.
@@ -3852,7 +3851,6 @@ function BloccoAggiungiVuotoDopo({
   giornataNumero: number;
   variantIndex: number;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const stazioniQuery = useStazioni();
   const aggiungiMutation = useAggiungiVuoto();
 
@@ -3890,7 +3888,6 @@ function BloccoAggiungiVuotoDopo({
     setDescrizione("");
     setError(null);
     setViolazioni(null);
-    setExpanded(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blocco.id]);
 
@@ -3933,7 +3930,6 @@ function BloccoAggiungiVuotoDopo({
           giroId,
           payload: buildPayload(false, false),
         });
-        setExpanded(false);
       } else {
         setViolazioni(dryRes.violazioni);
       }
@@ -3951,7 +3947,6 @@ function BloccoAggiungiVuotoDopo({
         giroId,
         payload: buildPayload(false, true),
       });
-      setExpanded(false);
     } catch (err) {
       const msg =
         err instanceof ApiError ? err.message : (err as Error).message;
@@ -3963,27 +3958,12 @@ function BloccoAggiungiVuotoDopo({
 
   return (
     <>
-      <div className="mt-4 rounded-md border border-blue-300/50 bg-blue-50/40 p-3">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-xs font-semibold uppercase tracking-wide text-blue-800">
-            Aggiungi vuoto dopo
-          </div>
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="text-xs text-blue-700 underline hover:text-blue-900"
-          >
-            {expanded ? "Chiudi" : "Apri form"}
-          </button>
-        </div>
-        {!expanded ? (
-          <p className="text-xs text-blue-900/80">
-            Inserisci un blocco vuoto dopo il blocco seq #{blocco.seq}{" "}
-            (es. posizionamento, rientro, manovra). Default precompilati
-            dal blocco corrente.
-          </p>
-        ) : (
-          <div className="grid grid-cols-2 gap-2 text-sm">
+      <div className="pt-1">
+        <p className="mb-2 text-xs text-muted-foreground">
+          Inserisci un blocco vuoto dopo il blocco seq #{blocco.seq}.
+          Default precompilati dal blocco corrente.
+        </p>
+        <div className="grid grid-cols-2 gap-2 text-sm">
             <div>
               <Label
                 htmlFor="vuoto-staz-da"
@@ -4107,7 +4087,6 @@ function BloccoAggiungiVuotoDopo({
               </Button>
             </div>
           </div>
-        )}
       </div>
 
       {/* Dialog conferma se violazioni */}
@@ -4179,6 +4158,55 @@ function BloccoAggiungiVuotoDopo({
     </>
   );
 }
+
+/**
+ * Sprint 8.0 MR-F (entry 237) — accordion section per il BloccoDialog.
+ *
+ * Header cliccabile (HTML <details>) + contenuto figlio. Default chiuso
+ * salvo `defaultOpen=true`. Tone (`default|rose|blue|amber`) per
+ * coerenza visiva col pannello interno.
+ */
+function AccordionSection({
+  title,
+  defaultOpen = false,
+  tone = "default",
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  tone?: "default" | "rose" | "blue" | "amber";
+  children: React.ReactNode;
+}) {
+  const headerTone: Record<typeof tone, string> = {
+    default:
+      "border-border bg-muted/30 text-foreground hover:bg-muted/50",
+    rose: "border-rose-300/50 bg-rose-50/40 text-rose-900 hover:bg-rose-50/70",
+    blue: "border-blue-300/50 bg-blue-50/40 text-blue-900 hover:bg-blue-50/70",
+    amber:
+      "border-amber-300/50 bg-amber-50/40 text-amber-900 hover:bg-amber-50/70",
+  };
+  return (
+    <details
+      open={defaultOpen}
+      className={cn(
+        "group rounded-md border transition-colors",
+        headerTone[tone],
+      )}
+    >
+      <summary
+        className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide [&::-webkit-details-marker]:hidden"
+      >
+        <span>{title}</span>
+        <ChevronDown
+          className="h-4 w-4 transition-transform group-open:rotate-180"
+          aria-hidden
+        />
+      </summary>
+      <div className="px-3 pb-2">{children}</div>
+    </details>
+  );
+}
+
 
 function BloccoMetadata({ blocco }: { blocco: GiroBlocco }) {
   const items: Array<[string, string]> = [];

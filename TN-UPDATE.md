@@ -10,6 +10,82 @@
 
 ---
 
+## 2026-05-08 (237) — MR-F: snellimento UX (accordion BloccoDialog + menu Azioni + expander corse)
+
+### Contesto
+
+Decisione utente entry 236:
+> "fai tutto quello che serve... ti consiglio di snellire un pò è tutto
+> troppo poco intuitivo."
+
+Confermati 3 fix UX in MR-F:
+
+### F.1 — BloccoDialog accordion
+
+**`GiroDettaglioRoute.tsx`** — il `BloccoDialogBody` aveva 4 pannelli
+sempre visibili (Configurazione operativa + Elimina vuoto +
+Aggiungi vuoto + Metadata) → cognitive load alta.
+
+Soluzione: nuovo componente `<AccordionSection>` (basato su `<details>`
+HTML nativo, accessibile by default + chevron rotante). I 4 pannelli
+vengono wrappati. Default solo "Configurazione operativa" è aperta.
+
+Pulizia interna dei 3 pannelli:
+- Rimosso wrapper colorato esterno (border + bg) — ora fornito
+  dall'accordion (tone="rose" per elimina, tone="blue" per aggiungi).
+- Rimosso toggle "Apri form / Chiudi" interno di
+  `BloccoAggiungiVuotoDopo` (era duplicato dell'accordion esterno).
+- Rimosso state `expanded` non più necessario.
+
+### F.2 — ProgrammaGiriRoute menu "Azioni"
+
+**`ProgrammaGiriRoute.tsx`** — header con 3 bottoni (Wizard linee +
+Cerca treno + Apri dettaglio programma) in barra orizzontale = clutter.
+
+Soluzione: i 2 bottoni "azione" (Wizard + Cerca) collassati in un
+`<Popover>` "Azioni" con icona `MoreHorizontal`. Click apre menu
+verticale con ognuno descritto + sub-label esplicativa.
+
+Lascia visibile solo "Apri dettaglio programma" (è navigation, non
+azione).
+
+### F.3 — Corse non coperte expander
+
+**`ProgrammaGiriRoute.tsx::CorseNonCoperteSection`** — la tabella
+"Corse non coperte" era sempre espansa. Su programma giugno 2026
+con 236 corse → tabella fissa di 340px sotto la lista turni che
+ingombrava la pagina.
+
+Soluzione: tabella wrappata in `<details>` collapsabile. Default
+**aperto** se ≤50 corse, **chiuso** altrimenti. Header summary
+sempre visibile con count + chevron. L'header amber con stats
+(linee disgiunte / soste condivise) e i bottoni "Riempi gap" /
+"Genera nuovi giri" restano sempre fuori dall'expander → l'utente
+vede subito il problema e le azioni anche se la lista è collassata.
+
+### Verifiche
+
+- ✅ `pnpm build` → bundle `index-68yCcyB7.js`, 1805 moduli.
+- Niente backend modifiche.
+
+### Stato
+
+- ✅ MR-F chiuso. Solo modifica frontend.
+- ⏳ Deploy frontend Railway.
+
+### Per l'utente
+
+1. **BloccoDialog**: clicca un blocco → vedi 1 sezione aperta
+   ("Configurazione operativa"). Le altre 3 (Elimina/Aggiungi/Metadata)
+   sono header cliccabili. Apri solo quelle che ti servono.
+2. **ProgrammaGiriRoute**: menu **"Azioni"** in alto a destra →
+   dropdown con Wizard linee + Cerca treno (con descrizioni).
+3. **Corse non coperte**: header amber sempre visibile (count +
+   stats + bottoni). Tabella collassata se >50 corse, click per
+   aprire.
+
+---
+
 ## 2026-05-07 (236) — MR-E + MR-D: aree metropolitane + fix UI varianti/wizard
 
 ### Contesto

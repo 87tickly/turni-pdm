@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  MoreHorizontal,
   Pencil,
   Plus,
   Search,
@@ -28,6 +29,11 @@ import {
   DialogTitle,
 } from "@/components/ui/Dialog";
 import { Spinner } from "@/components/ui/Spinner";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/Popover";
 import { useLocalitaManutenzione } from "@/hooks/useAnagrafiche";
 import {
   useCorseNonCoperte,
@@ -185,29 +191,64 @@ export function ProgrammaGiriRoute() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setWizardLineeOpen(true)}
-            title="Wizard: imposta un materiale + linee → genera tutti i giri necessari per coprire le corse del PdE"
-          >
-            <Wand2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            Wizard linee → materiale
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCercaTrenoOpen(true)}
-            disabled={giri.length === 0}
-            title={
-              giri.length === 0
-                ? "Nessun giro generato ancora"
-                : "Cerca un treno tra i giri di questo programma"
-            }
-          >
-            <Search className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            Cerca treno
-          </Button>
+          {/* Sprint 8.0 MR-F (entry 237): wizard + cerca treno
+              raccolti in menu "Azioni" per ridurre clutter dell'header.
+              Decisione utente: snellire UX. */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm">
+                <MoreHorizontal
+                  className="mr-1.5 h-3.5 w-3.5"
+                  aria-hidden
+                />
+                Azioni
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-64 p-1">
+              <button
+                type="button"
+                onClick={() => setWizardLineeOpen(true)}
+                className="flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted"
+              >
+                <Wand2
+                  className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary"
+                  aria-hidden
+                />
+                <span>
+                  <span className="block font-medium text-foreground">
+                    Wizard linee → materiale
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    Imposta un materiale e le linee da coprire
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCercaTrenoOpen(true)}
+                disabled={giri.length === 0}
+                className="flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                title={
+                  giri.length === 0
+                    ? "Nessun giro generato ancora"
+                    : undefined
+                }
+              >
+                <Search
+                  className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary"
+                  aria-hidden
+                />
+                <span>
+                  <span className="block font-medium text-foreground">
+                    Cerca treno
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    Tra i giri di questo programma
+                  </span>
+                </span>
+              </button>
+            </PopoverContent>
+          </Popover>
           <Link
             to={`/pianificatore-giro/programmi/${programmaId}`}
             className="inline-flex items-center gap-2 rounded-md border border-border bg-white px-3.5 py-2 text-sm text-foreground hover:bg-muted"
@@ -1588,6 +1629,11 @@ function CorseNonCoperteSection({ programmaId }: { programmaId: number }) {
     (it) => it.motivo_presunto === "sovrapposizione_stazioni",
   ).length;
 
+  // Sprint 8.0 MR-F (entry 237): tabella collassabile di default se
+  // >50 corse non coperte (snellisce la pagina su programmi grandi).
+  // Decisione utente "snellire un po'".
+  const tabellaDefaultOpen = items.length <= 50;
+
   // Stato alert — almeno 1 corsa non coperta.
   return (
     <>
@@ -1655,7 +1701,22 @@ function CorseNonCoperteSection({ programmaId }: { programmaId: number }) {
             </Button>
           </div>
         </div>
-        <div className="max-h-[340px] overflow-y-auto">
+        <details
+          open={tabellaDefaultOpen}
+          className="group border-t border-amber-300/30"
+        >
+          <summary className="flex cursor-pointer list-none items-center justify-between bg-amber-50/30 px-5 py-2 text-xs font-medium text-amber-900 hover:bg-amber-50 [&::-webkit-details-marker]:hidden">
+            <span>
+              {tabellaDefaultOpen
+                ? "Lista corse non coperte"
+                : `Mostra lista corse non coperte (${items.length} righe)`}
+            </span>
+            <ChevronDown
+              className="h-4 w-4 transition-transform group-open:rotate-180"
+              aria-hidden
+            />
+          </summary>
+          <div className="max-h-[340px] overflow-y-auto">
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-white text-[11px] uppercase tracking-wide text-muted-foreground">
               <tr className="border-b border-border">
@@ -1673,7 +1734,8 @@ function CorseNonCoperteSection({ programmaId }: { programmaId: number }) {
               ))}
             </tbody>
           </table>
-        </div>
+          </div>
+        </details>
       </Card>
       {/* Dialog conferma "Riempi gap" — anteprima dry_run prima di apply. */}
       <RiempiGapConfirmDialog
