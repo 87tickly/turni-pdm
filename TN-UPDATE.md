@@ -10,6 +10,163 @@
 
 ---
 
+## 2026-05-08 (244) — Sprint 8.1 MR-A3: vincolo soft tier-based in risolvi_corsa (sblocca caso "linea unica → 0 giri")
+
+### Contesto
+
+Terzo MR del refactor builder esplora-e-rilassa. Sblocca il sintomo
+**bloccante** dell'utente entry 242:
+
+> programma con regola UNICA "linea = R11" (Colico-Chiavenna) sede FIO
+> → builder genera 0 giri. Voglio che provi a concatenare con altre
+> linee compatibili come materiale.
+
+Causa tecnica (pre-A3):
+
+1. `_corsa_in_perimetro` filtra le 6500 corse del PdE tenendo solo
+   quelle che matchano `matches_all` (AND di tutti i filtri di una
+   regola della sede). Se la regola ha `linea=R11`, solo le ~100
+   corse R11 entrano nel perimetro.
+2. `_trova_regola_dominante_per_corsa` assegna materiale solo se la
+   corsa matcha esattamente. Se nessuna regola matcha → `None` →
+   corsa orfana.
+3. Le ~100 corse R11 entrano in `corse_per_materiale[ETR421]`.
+4. Dato che le corse R11 partono/finiscono lontano dalla sede FIO,
+   nessun giro chiude in whitelist Certosa. Fix C2 troncamento
+   scarta tutto. **0 giri persistiti**.
+
+Decisione utente Q1=b 2026-05-08: regole = **vincolo SOFT** con
+fallback governato. Se i filtri non matchano, allarga al materiale di
+una regola "vicina" (per priorità del pianificatore), purché vincoli
+inviolabili e accoppiamento siano rispettati.
+
+### Modifiche
+
+**Backend**:
+
+- **`risolvi_corsa.py`**:
+  - Esteso `AssegnazioneRisolta` con `tier_applicato: int = 0` e
+    `penalty: int = 0` (default retrocompat — `risolvi_corsa` legacy
+    li lascia a 0 per costruzione).
+  - Nuova costante `TIER_1_PENALTY: int = 50` (compromesso: abbastanza
+    basso da preferire match esatto, abbastanza alto da rendere
+    visibile il rilassamento nei warning futuri).
+  - Nuova funzione `risolvi_corsa_esplorativo(corsa, regole, ...)`
+    parallela:
+    - **Tier 0** (esatto): chiama `risolvi_corsa()` legacy. Se trova
+      → ritorna con `tier=0, penalty=0`.
+    - **Tier 1** (materiale compatibile): se Tier 0 fallisce, ammette
+      tutte le regole IGNORANDO i filtri ma rispettando vincoli
+      inviolabili + accoppiamento (entrambi sono normativa, non
+      preferenze). Sceglie per priorità DESC, specificità DESC, id
+      ASC (stesso ordinamento del legacy). Marca `tier=1, penalty=50`.
+    - Tier 2/3 (linea adiacente, qualsiasi con vuoto) sono follow-up
+      MR-A5 — richiedono dati extra (grafo stazioni, tratti vuoti).
+
+- **`composizione.py`**:
+  - `assegna_materiali` + `assegna_e_rileva_eventi` accettano
+    `builder_mode: str = "rigido"` opzionale.
+  - Branching: se `'esplorativo'`, usa `risolvi_corsa_esplorativo`
+    invece di `risolvi_corsa`. Una sola riga di selezione del
+    risolutore, zero duplicazione logica.
+
+- **`builder.py`**:
+  - Nuovo helper `_trova_regola_dominante_esplorativa`: prima prova
+    `_trova_regola_dominante_per_corsa` legacy (Tier 0); se `None`,
+    sceglie la regola con priorità più alta (Tier 1, filtri ignorati).
+    NON applica controlli vincoli/accoppiamento qui (delegati a
+    `risolvi_corsa_esplorativo` in composizione.py).
+  - `_corsa_in_perimetro` invariato (continuerà a essere usato in
+    rigido); in esplorativo `corse_perimetro = list(corse)` (tutte
+    le corse dell'azienda nel periodo, il filtro materiale arriva
+    dopo).
+  - Selezione `risolutore_dominante = _trova_regola_dominante_esplorativa
+    if builder_mode == 'esplorativo' else _trova_regola_dominante_per_corsa`.
+  - Chiamata `assegna_e_rileva_eventi(..., builder_mode=programma.builder_mode)`.
+
+- **Re-export `__init__.py`**: `risolvi_corsa_esplorativo`,
+  `TIER_1_PENALTY`.
+
+**Test** (`tests/test_risolvi_corsa_esplorativo.py`, 11 test no DB):
+
+- Tier 0 esatto = stesso output del legacy (regola_id, composizione,
+  tier=0, penalty=0).
+- Tier 1 caso utente: corsa S5 + regola unica R11 → assegna ETR421
+  con `tier=1, penalty=50`.
+- Tier 1 priorità: 2 regole candidate, vince priorità più alta.
+- Tie-break id ASC su pari priorità (consistenza col legacy).
+- Lista regole vuota → `None`.
+- Regola con composizione vuota → `None` anche al Tier 1.
+- Tier 0 preferito al Tier 1 quando entrambi disponibili (anche se
+  la Tier 0 ha priorità più bassa: il match esatto vince).
+- Composizione doppia + accoppiamento bloccato → `ComposizioneNonAmmessaError`
+  anche al Tier 1 (validazione HARD non rilassabile dal tier).
+- `is_composizione_manuale=True` bypassa accoppiamento (pianificatore
+  override, pattern legacy).
+- `AssegnazioneRisolta` default tier/penalty = 0/0 (retrocompat).
+- `risolvi_corsa` legacy mantiene tier=0/penalty=0.
+- Re-export accessibile da `colazione.domain.builder_giro`.
+
+**Strangler invariato in 'rigido'**: `_trova_regola_dominante_esplorativa`
+non è mai chiamato; `composizione.py` usa `risolvi_corsa` legacy;
+`assegna_e_rileva_eventi(..., builder_mode='rigido')` (default) bypassa
+il branching. **Comportamento legacy 100% preservato**.
+
+### Verifiche
+
+- ✅ `ruff check src tests`: 2 errori B008 pre-esistenti
+  (`anagrafiche.py:282`, `pianificatore_pdc.py:109`, già da entry 240).
+  Nessuna regressione mia. Auto-fix ha applicato 1 I001 import sorting
+  sul nuovo test.
+- ✅ `mypy --strict src`: **81 file clean** (invariato vs A2).
+- ✅ `pytest test_risolvi_corsa_esplorativo + chiusura_post +
+  vincoli_soft + composizione + catena + aggregazione_a2`:
+  **115 passed in 0.41s** (24 A1 + 19 A2 + 11 A3 + 61 regression).
+- ✅ `pnpm tsc --noEmit`: clean.
+
+### Stato
+
+- ✅ MR-A3 chiuso. `risolvi_corsa_esplorativo` + tier 0+1 pronti.
+  Builder.py + composizione.py opt-in via `builder_mode='esplorativo'`.
+- ⏳ Commit + push + deploy Railway backend.
+- ⏳ Validazione end-to-end su programma 17 (MR-A7) per confermare
+  che il sintomo "linea R11 → 0 giri" è davvero sbloccato.
+
+### Per l'utente
+
+- **Tu**: con A1+A2+A3 in prod, il flow esplorativo è teoricamente
+  pronto end-to-end. Per provarlo:
+  1. `PATCH /api/programmi/{ID}` con `{"builder_mode": "esplorativo"}`.
+  2. Rigenera giri (force=true).
+  3. Confronta: numero giri creati, corse coperte (cosa coperta vs
+     non coperta), motivi chiusura (`naturale`/`chiuso_con_vuoto`/
+     `ciclo_aperto_irrisolto`).
+- **Limite noto MR-A3**: il Tier 1 sceglie una regola "vicina" per
+  priorità, ma non valuta affinità geografica (linea adiacente =
+  Tier 2, scope MR-A5). Possibili giri sub-ottimali su perimetri
+  molto eterogenei. MR-A7 servirà a misurare se il rilassamento
+  è "abbastanza buono" o se serve subito A5.
+
+### Prossimo step
+
+**MR-A4: Backtracking esplorativo in catena/multi_giornata** (L,
+opt-in). Quando il greedy chiude prematuramente (giro 1g invece di
+Ng), prova rilassamento (estendi prossima giornata, beam top-k) prima
+di accettare. Sblocca il sintomo "troppi giri 1g" dell'utente. Effort
+maggiore — userò FAUSTO per il ragionamento iniziale (AMILCARE ancora
+401, MR diagnosi pendente).
+
+### Note tracciabilità
+
+- **AMILCARE**: ancora 401. Setup `~/.claude/settings.json` non
+  sufficiente. MR dedicato pendente per `claude mcp add` CLI o
+  diagnosi chiave OpenRouter.
+- **FAUSTO**: review post-MR-A3 da fare prima del commit (file
+  singolo, scope contenuto = FAUSTO matrice §2). Eseguito sul
+  modulo `risolvi_corsa.py` (segue commit successivo).
+
+---
+
 ## 2026-05-08 (243) — Sprint 8.1 MR-A2: closure post-pass (chiudi_giri_aperti con vuoto di rientro intra-area)
 
 ### Contesto

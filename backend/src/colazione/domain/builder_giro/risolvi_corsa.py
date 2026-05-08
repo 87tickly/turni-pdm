@@ -110,11 +110,19 @@ class AssegnazioneRisolta:
 
     Sprint 5.5: ``composizione`` è una tupla di 1+ ``ComposizioneItem``,
     sostituisce i campi legacy ``materiale_tipo_codice + numero_pezzi``.
+
+    Sprint 8.1 MR-A3 (entry 244): aggiunti ``tier_applicato`` e
+    ``penalty`` per il motore esplorativo. Default 0/0 = match esatto
+    (legacy/comportamento rigido). Valori > 0 popolati solo da
+    ``risolvi_corsa_esplorativo`` quando il match è avvenuto via
+    fallback gerarchico.
     """
 
     regola_id: int
     composizione: tuple[ComposizioneItem, ...]
     is_composizione_manuale: bool = False
+    tier_applicato: int = 0
+    penalty: int = 0
 
     @property
     def numero_pezzi_totali(self) -> int:
@@ -459,4 +467,145 @@ def risolvi_corsa(
         regola_id=top.id,
         composizione=composizione,
         is_composizione_manuale=top.is_composizione_manuale,
+    )
+
+
+# =====================================================================
+# Sprint 8.1 MR-A3 — risolvi_corsa_esplorativo (Tier 0 + Tier 1)
+# =====================================================================
+
+
+#: Penalty di default applicata al Tier 1 (materiale compatibile).
+#: Range AssegnazioneRisolta.penalty: 0 (esatto) → 100 (rilassamento
+#: massimo). Il valore 50 deriva dalla matrice tier in
+#: ``vincoli_soft.tier_vincoli_default()`` (peso LINEA al tier 1 = 20,
+#: tier 2 = 40, tier 3 = 70). Per il MR-A3 minimal viable il Tier 1
+#: pesato a 50 è un compromesso fra "abbastanza basso da preferire
+#: match esatto" e "abbastanza alto da rendere visibile il rilassamento
+#: nei warning del builder".
+TIER_1_PENALTY: int = 50
+
+
+def risolvi_corsa_esplorativo(
+    corsa: _CorsaLike,
+    regole: Sequence[_RegolaLike],
+    data: date,
+    is_accoppiamento_ammesso: IsAccoppiamentoAmmesso | None = None,
+    vincoli_inviolabili: Sequence[Any] = (),
+    stazioni_lookup: dict[str, str] | None = None,
+) -> AssegnazioneRisolta | None:
+    """Versione esplorativa di ``risolvi_corsa`` con fallback gerarchico
+    a tier (Sprint 8.1 MR-A3, decisione utente Q1=b 2026-05-08).
+
+    Algoritmo:
+
+    1. **Tier 0** (esatto, comportamento legacy): chiama
+       ``risolvi_corsa()``. Se trova una regola che matcha tutti i
+       filtri AND → ritorna ``AssegnazioneRisolta`` con
+       ``tier_applicato=0, penalty=0``.
+    2. **Tier 1** (materiale compatibile): se Tier 0 fallisce, ammette
+       qualsiasi regola del programma IGNORANDO i filtri ma rispettando:
+       - vincoli inviolabili (la corsa non sia incompatibile col
+         materiale della regola, es. ETR522 elettrico su Brescia-Edolo);
+       - accoppiamento materiali (se composizione doppia).
+       Sceglie la regola con priorità più alta (poi specificità,
+       poi id). Marca ``tier_applicato=1, penalty=TIER_1_PENALTY``.
+    3. Se nessun tier ammette → ``None`` (corsa orfana, marker
+       ``ciclo_aperto_irrisolto`` lato giro se applicabile).
+
+    **Strangler pattern**: NON sostituisce ``risolvi_corsa()``. Il
+    legacy resta invariato come Tier 0; il caller (``builder.py`` /
+    ``composizione.py``) chiama esplorativo solo se
+    ``programma.builder_mode == 'esplorativo'`` (foundation MR-A1).
+
+    **Sblocca caso utente**: programma con regola unica ``linea=R11``
+    (ETR421) sede FIO + corse di altre linee (S5, S11) → oggi 0 giri
+    (corse non match scartate); con A3 le corse di altre linee
+    ricevono assegnazione ETR421 al Tier 1, entrano nelle catene
+    ETR421 e generano giri concatenati con linee miste.
+
+    Args:
+        corsa: oggetto con i campi della corsa.
+        regole: lista di regole del programma (già caricata, ordinata
+            per priorità).
+        data: data per cui si risolve.
+        is_accoppiamento_ammesso: callback opzionale Sprint 5.5.
+        vincoli_inviolabili: lista di Vincolo. Se valorizzato, anche
+            il Tier 1 rispetta questi vincoli (NON sono rilassabili —
+            sono normativa, non preferenze del programma).
+        stazioni_lookup: ``{codice: nome}`` per i pattern dei vincoli.
+
+    Returns:
+        ``AssegnazioneRisolta`` con ``tier_applicato`` ∈ {0, 1} e
+        ``penalty`` ∈ {0, ``TIER_1_PENALTY``}, oppure ``None``.
+    """
+    # === Tier 0: match esatto (legacy)
+    tier0 = risolvi_corsa(
+        corsa=corsa,
+        regole=regole,
+        data=data,
+        is_accoppiamento_ammesso=is_accoppiamento_ammesso,
+        vincoli_inviolabili=vincoli_inviolabili,
+        stazioni_lookup=stazioni_lookup,
+    )
+    if tier0 is not None:
+        # Tier 0 garantito: tier_applicato=0, penalty=0 (default).
+        return tier0
+
+    # === Tier 1: materiale compatibile (filtri ignorati, vincoli rispettati)
+    if not regole:
+        return None
+
+    candidate_t1: list[_RegolaLike] = list(regole)
+
+    # Vincoli inviolabili: filtra anche al Tier 1 (sono normativa, non
+    # rilassabili — es. ETR522 elettrico è inammissibile su corsa
+    # diesel a prescindere dal tier).
+    if vincoli_inviolabili and stazioni_lookup is not None:
+        from colazione.domain.vincoli.inviolabili import (
+            corsa_ammessa_per_materiale,
+        )
+
+        candidate_t1 = [
+            r
+            for r in candidate_t1
+            if all(
+                corsa_ammessa_per_materiale(
+                    corsa=corsa,
+                    materiale_tipo_codice=str(item["materiale_tipo_codice"]),
+                    stazioni_lookup=stazioni_lookup,
+                    vincoli=vincoli_inviolabili,
+                )
+                for item in r.composizione_json
+            )
+        ]
+
+    if not candidate_t1:
+        return None
+
+    # Tie-break identico al legacy: priorità DESC, specificità DESC, id ASC.
+    # Dato che il Tier 1 ignora i filtri, la "specificità" è meno
+    # significativa, ma manteniamo lo stesso ordinamento per coerenza
+    # deterministica con il flusso rigido.
+    candidate_t1.sort(key=lambda r: (-r.priorita, -len(r.filtri_json), r.id))
+    top = candidate_t1[0]
+
+    composizione = _composizione_da_json(top)
+    if not composizione:
+        # Regola con composizione vuota → non assegnabile (anche al
+        # Tier 1). Il caller (composizione.py) marcherà la corsa
+        # orfana / residua.
+        return None
+
+    # Validazione accoppiamento (stessa del legacy): è una regola HARD
+    # del materiale, non rilassabile dal tier.
+    if not top.is_composizione_manuale and is_accoppiamento_ammesso is not None:
+        _valida_accoppiamenti(top.id, composizione, is_accoppiamento_ammesso)
+
+    return AssegnazioneRisolta(
+        regola_id=top.id,
+        composizione=composizione,
+        is_composizione_manuale=top.is_composizione_manuale,
+        tier_applicato=1,
+        penalty=TIER_1_PENALTY,
     )

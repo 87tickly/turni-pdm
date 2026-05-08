@@ -54,6 +54,7 @@ from colazione.domain.builder_giro.risolvi_corsa import (
     ComposizioneItem,
     IsAccoppiamentoAmmesso,
     risolvi_corsa,
+    risolvi_corsa_esplorativo,
 )
 
 # =====================================================================
@@ -225,6 +226,7 @@ def assegna_materiali(
     is_accoppiamento_ammesso: IsAccoppiamentoAmmesso | None = None,
     vincoli_inviolabili: Sequence[Any] = (),
     stazioni_lookup: dict[str, str] | None = None,
+    builder_mode: str = "rigido",
 ) -> GiroAssegnato:
     """Assegna composizione a ogni corsa del giro chiamando ``risolvi_corsa``.
 
@@ -267,12 +269,23 @@ def assegna_materiali(
     residue: list[CorsaResidua] = []
     incompat: list[IncompatibilitaMateriale] = []
 
+    # Sprint 8.1 MR-A3 (entry 244): seleziona il risolutore in base al
+    # builder_mode del programma. 'rigido' (default) = legacy
+    # `risolvi_corsa` (filtri AND-rigido). 'esplorativo' = nuova
+    # `risolvi_corsa_esplorativo` (Tier 0 esatto + Tier 1 materiale
+    # compatibile, decisione utente Q1=b).
+    risolutore = (
+        risolvi_corsa_esplorativo
+        if builder_mode == "esplorativo"
+        else risolvi_corsa
+    )
+
     for giornata in giro.giornate:
         blocchi: list[BloccoAssegnato] = []
         tipi_materiale: set[str] = set()
 
         for corsa in giornata.catena_posizionata.catena.corse:
-            assegnazione = risolvi_corsa(
+            assegnazione = risolutore(
                 corsa,
                 regole,
                 giornata.data,
@@ -430,6 +443,7 @@ def assegna_e_rileva_eventi(
     is_accoppiamento_ammesso: IsAccoppiamentoAmmesso | None = None,
     vincoli_inviolabili: Sequence[Any] = (),
     stazioni_lookup: dict[str, str] | None = None,
+    builder_mode: str = "rigido",
 ) -> list[GiroAssegnato]:
     """Pipeline completa: ``assegna_materiali`` + ``rileva_eventi_composizione``
     su tutti i giri in input.
@@ -451,6 +465,7 @@ def assegna_e_rileva_eventi(
                 is_accoppiamento_ammesso,
                 vincoli_inviolabili=vincoli_inviolabili,
                 stazioni_lookup=stazioni_lookup,
+                builder_mode=builder_mode,
             )
         )
         for g in giri

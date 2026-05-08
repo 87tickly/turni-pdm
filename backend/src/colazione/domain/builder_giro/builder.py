@@ -698,6 +698,49 @@ def _trova_regola_dominante_per_corsa(
     return top[bucket]
 
 
+def _trova_regola_dominante_esplorativa(
+    prima_corsa: Any,
+    regole: list[ProgrammaRegolaAssegnazione],
+) -> ProgrammaRegolaAssegnazione | None:
+    """Sprint 8.1 MR-A3 (entry 244): variante esplorativa di
+    ``_trova_regola_dominante_per_corsa``. Ammette anche regole che
+    NON matchano sui filtri (Tier 1: materiale compatibile).
+
+    Algoritmo:
+
+    1. **Tier 0**: chiama ``_trova_regola_dominante_per_corsa``
+       (filtri AND-rigido). Se trova una regola → ritorna.
+    2. **Tier 1**: se Tier 0 fallisce, considera **tutte** le regole
+       come candidate (filtri ignorati). Sceglie per priorità DESC,
+       specificità DESC, id ASC.
+
+    NON applica controlli su vincoli inviolabili o accoppiamento qui:
+    quei controlli arrivano in ``risolvi_corsa_esplorativo`` quando
+    ``composizione.assegna_materiali`` viene chiamato sui giri
+    costruiti. Lo scopo di questo helper è SOLO determinare a quale
+    materiale assegnare la corsa per il pre-processing pool del
+    builder (raggruppamento per materiale prima delle catene).
+
+    Decisione utente Q1=b: regole = vincolo SOFT con fallback
+    governato. Se nessuna regola match esattamente, allarga al
+    materiale di una regola "vicina" (per priorità del pianificatore).
+    """
+    from colazione.domain.builder_giro.risolvi_corsa import matches_all  # noqa: F401
+
+    # === Tier 0: legacy match esatto.
+    rigid = _trova_regola_dominante_per_corsa(prima_corsa, regole)
+    if rigid is not None:
+        return rigid
+
+    # === Tier 1: filtri ignorati, sceglie per priorità.
+    if not regole:
+        return None
+    candidate = sorted(
+        regole, key=lambda r: (-r.priorita, -len(r.filtri_json), r.id)
+    )
+    return candidate[0]
+
+
 def _raggruppa_corse_per_regola_dominante(
     corse: list[CorsaCommerciale],
     regole: list[ProgrammaRegolaAssegnazione],
@@ -1394,6 +1437,15 @@ async def genera_giri(
 
     # Pool perimetro (= corse coperte da ALMENO UNA regola DELLA SEDE).
     # Stesso comportamento di Sprint 5.6 ma scoped per sede del run.
+    #
+    # Sprint 8.1 MR-A3 (entry 244): in modo 'esplorativo' (decisione
+    # utente Q1=b), il perimetro include ANCHE corse che non matchano
+    # alcuna regola sui filtri ma che potrebbero ricevere assegnazione
+    # via Tier 1 (materiale compatibile, filtri ignorati). Sblocca il
+    # caso "regola unica linea=R11 → 0 giri" allargando il pool a
+    # tutte le corse dell'azienda nel periodo, lasciando poi a
+    # ``risolvi_corsa_esplorativo`` (in composizione.py) il controllo
+    # vincoli inviolabili + accoppiamento per scartare le incompatibili.
     from colazione.domain.builder_giro.risolvi_corsa import matches_all
 
     def _corsa_in_perimetro(c: Any) -> bool:
@@ -1401,20 +1453,36 @@ async def genera_giri(
             matches_all(r.filtri_json, c, "feriale") for r in regole_della_sede
         )
 
-    corse_perimetro = [c for c in corse if _corsa_in_perimetro(c)]
+    if programma.builder_mode == "esplorativo":
+        # Tier 0 + Tier 1: tutte le corse dell'azienda sono candidate
+        # (il filtro materiale arriva nel Tier 1 di `risolvi_corsa_esplorativo`).
+        corse_perimetro = list(corse)
+    else:
+        corse_perimetro = [c for c in corse if _corsa_in_perimetro(c)]
 
     # Annota ogni corsa con il MATERIALE (derivato dalla regola
     # dominante DELLA SEDE per quella corsa). La regola dominante usa
     # solo le regole_della_sede così non assegnamo materiali di altre
     # sedi. Le corse senza regola dominante in questa sede sono
     # escluse dal builder ma contate come orfane.
+    #
+    # MR-A3: in modo esplorativo usiamo `_trova_regola_dominante_esplorativa`
+    # che ammette Tier 1 (filtri ignorati) come fallback. Le corse
+    # ricevono il materiale della regola di priorità più alta come
+    # tentativo; ulteriore validazione (vincoli) avviene in
+    # composizione.py via `risolvi_corsa_esplorativo`.
     materiale_per_corsa: dict[int, str] = {}
     regola_per_corsa_id: dict[int, ProgrammaRegolaAssegnazione] = {}
     materiale_per_regola: dict[int, str] = {
         r.id: _materiale_da_regola(r) for r in regole_della_sede
     }
+    risolutore_dominante = (
+        _trova_regola_dominante_esplorativa
+        if programma.builder_mode == "esplorativo"
+        else _trova_regola_dominante_per_corsa
+    )
     for c in corse_perimetro:
-        regola_dom = _trova_regola_dominante_per_corsa(c, regole_della_sede)
+        regola_dom = risolutore_dominante(c, regole_della_sede)
         if regola_dom is None:
             continue
         mat = materiale_per_regola.get(regola_dom.id, "")
@@ -1749,13 +1817,16 @@ async def genera_giri(
                 )
 
     # 5. Assegnazione regole + eventi composizione (Sprint 5.5: validazione
-    #    accoppiamenti via callback)
+    #    accoppiamenti via callback). Sprint 8.1 MR-A3 (entry 244):
+    #    propaga ``builder_mode`` per attivare ``risolvi_corsa_esplorativo``
+    #    (Tier 0 + Tier 1) quando ``programma.builder_mode == 'esplorativo'``.
     giri_assegnati = assegna_e_rileva_eventi(
         giri_dom,
         regole,
         is_accoppiamento_ammesso,
         vincoli_inviolabili=vincoli_inviolabili,
         stazioni_lookup=stazioni_lookup,
+        builder_mode=programma.builder_mode,
     )
 
     # 6. Strict mode pre-persistenza (sui giri pre-aggregazione)

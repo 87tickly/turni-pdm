@@ -108,6 +108,7 @@ from colazione.domain.builder_giro.posizionamento import (
     posiziona_su_localita,
 )
 from colazione.domain.builder_giro.risolvi_corsa import (
+    TIER_1_PENALTY,
     AssegnazioneRisolta,
     ComposizioneItem,
     ComposizioneNonAmmessaError,
@@ -118,6 +119,7 @@ from colazione.domain.builder_giro.risolvi_corsa import (
     matches_all,
     matches_filtro,
     risolvi_corsa,
+    risolvi_corsa_esplorativo,
 )
 from colazione.domain.builder_giro.vincoli_soft import (
     Tier,
@@ -130,6 +132,7 @@ from colazione.domain.builder_giro.vincoli_soft import (
 __all__ = [
     "ETICHETTE_AMMESSE",
     "PERSISTER_VERSION",
+    "TIER_1_PENALTY",
     "AssegnazioneRisolta",
     "BloccoAssegnato",
     "BloccoMaterialeVuoto",
@@ -189,6 +192,7 @@ __all__ = [
     "primo_tipo_materiale",
     "rileva_eventi_composizione",
     "risolvi_corsa",
+    "risolvi_corsa_esplorativo",
     "tier_vincoli_default",
     "wrap_assegnato_in_aggregato",
 ]
