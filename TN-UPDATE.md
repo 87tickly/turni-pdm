@@ -10,6 +10,45 @@
 
 ---
 
+## 2026-05-08 (237) — Code Review post Sprint 8.0 MR-E
+
+### Contesto
+
+Review completa del repo COLAZIONE condotta come senior engineer indipendente,
+dopo Sprint 8.0 MR-E (entry 236, aree metropolitane). Nessuna modifica al codice
+di produzione — solo diagnostica con finding `file:riga`.
+
+### Modifiche
+
+`docs/CODE-REVIEW-2026-05-08.md` — creato. 23 finding totali:
+- **7 CRITICI** (C1–C7): violazioni normativa, bug latenti, debito bloccante
+  - C1: `split_cv._eccede_limiti` usa `is_notturno` troppo largo → split errati su turni serali (violazione §11.8)
+  - C2: `STAZIONI_CV_DEROGA` usa nomi umani vs codici S-prefixed → TIRANO mai ammessa a CV (linea Valtellina ko)
+  - C3: Builder PdC usa PK come default per gap ≥ 65 min → violazione normativa §6
+  - C4: ACCp preriscaldo (80' dic-feb) non implementato → violazione §3.3
+  - C5: Anti-rigeneration TurnoPdc: full table scan in RAM su tutta l'azienda
+  - C6: `updated_at` mai aggiornato (manca `onupdate`) → campo stale da sempre
+  - C7: Access token 72h default → utenti disattivati hanno ancora accesso 3 giorni
+- **11 IMPORTANTI** (I1–I11): unique constraint mancanti, test coverage, design
+- **5 MINORI** (M1–M5): stile, duplicazioni, naming
+
+### Priorità di intervento
+
+**Immediata** (prima del deploy successivo): C2, C1, C7 (fix piccoli, impatto diretto).
+**Sprint successivo**: C5, C6, I1+I2+I3 (constraint DB), I6 (test coverage).
+**Iterazione futura**: C3, C4, I5 (refactor più ampi).
+
+### Stato
+
+✅ Review completa consegnata. Nessuna modifica al codice di produzione.
+
+### Prossimo step
+
+Attende decisione utente su quali finding del CRITICO affrontare per primi
+(C2+C1 sono fix di 4-5 righe ciascuno, candidati naturali per il prossimo MR).
+
+---
+
 ## 2026-05-07 (236) — MR-E + MR-D: aree metropolitane + fix UI varianti/wizard
 
 ### Contesto
