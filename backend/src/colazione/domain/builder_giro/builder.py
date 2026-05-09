@@ -1427,20 +1427,50 @@ async def _genera_giri_linea_centrica(
     # ``MISTO`` non esiste in ``materiale_tipo``).  Con questo dict
     # ricaviamo il materiale dalla regola direttamente.
     materiale_per_regola: dict[int, str] = {}
+
+    # MR-D5f-tris: pre-calcola mappa direttrice → linee (estratta dalle
+    # corse del programma). Necessario perché le regole prog 17 (e in
+    # generale le regole reali Trenord) filtrano per `direttrice`
+    # (es. "TIRANO-SONDRIO-LECCO-MILANO"), non per `codice_linea`. Senza
+    # questa espansione, `regola_per_segmento` resta vuoto → tutti i
+    # giri orfani con regola_id=None → tutti scartati downstream
+    # (e2e prog 17 v3/v4: 1302 corse processate ma 0 giri persistiti).
+    direttrice_to_linee: dict[str, set[str]] = {}
+    for c in corse:
+        d = getattr(c, "direttrice", None)
+        cl = getattr(c, "codice_linea", None)
+        if d and cl:
+            direttrice_to_linee.setdefault(str(d), set()).add(str(cl))
+
     for r in regole:
         mat = _materiale_da_regola(r)
         if not mat:
             continue
         materiale_per_regola[r.id] = mat
-        # Estrai linee dal filtro
-        linee_regola: list[str] = []
+        # Estrai linee dal filtro: campo `codice_linea` (diretto)
+        # E campo `direttrice` (espanso via direttrice_to_linee).
+        # MR-D5f-tris: se il filtro è solo direttrice (caso prog 17),
+        # senza espansione `regola_per_segmento` è vuoto.
+        linee_regola: set[str] = set()
         for f in r.filtri_json or []:
-            if isinstance(f, dict) and f.get("campo") == "codice_linea":
-                val = f.get("valore")
+            if not isinstance(f, dict):
+                continue
+            campo = f.get("campo")
+            val = f.get("valore")
+            if campo == "codice_linea":
                 if isinstance(val, list):
-                    linee_regola.extend(str(v) for v in val)
+                    linee_regola.update(str(v) for v in val)
                 elif isinstance(val, str):
-                    linee_regola.append(val)
+                    linee_regola.add(val)
+            elif campo == "direttrice":
+                # Espande direttrice → linee via mappa pre-calcolata
+                direttrici = (
+                    [str(v) for v in val]
+                    if isinstance(val, list)
+                    else ([val] if isinstance(val, str) else [])
+                )
+                for d_codice in direttrici:
+                    linee_regola.update(direttrice_to_linee.get(d_codice, set()))
         # Per ogni linea, mappa i potenziali segmenti
         for linea in linee_regola:
             materiale_per_segmento[f"{linea}_completo"] = mat
