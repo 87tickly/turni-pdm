@@ -136,9 +136,14 @@ class _SegmentoTurno:
 
 
 def _eccede_cap_prestazione(draft: _GiornataPdcDraft) -> bool:
-    """True se prestazione del draft eccede il cap applicabile."""
+    """True se prestazione del draft eccede il cap applicabile.
+
+    Sprint 8.2 SEVERO S1 fix: usa ``draft.is_cap_notturno`` invece di
+    ``draft.is_notturno`` (superinclusivo per UI). Cap 420 si applica
+    SOLO con presa servizio 01:00-04:59 (NORMATIVA-PDC §3).
+    """
     cap = (
-        PRESTAZIONE_MAX_NOTTURNO if draft.is_notturno else PRESTAZIONE_MAX_STANDARD
+        PRESTAZIONE_MAX_NOTTURNO if draft.is_cap_notturno else PRESTAZIONE_MAX_STANDARD
     )
     return draft.prestazione_min > cap
 
@@ -809,6 +814,7 @@ async def _aggiungi_vettura_partenza(
         condotta_min=draft.condotta_min,
         refezione_min=draft.refezione_min,
         is_notturno=draft.is_notturno,
+        is_cap_notturno=draft.is_cap_notturno,
         violazioni=draft.violazioni,
     )
 
@@ -901,8 +907,9 @@ async def _aggiungi_vettura_rientro(
         nuova_prest = nuova_fine_min - inizio_prest_min
 
     nuove_violazioni = list(draft.violazioni)
+    # Sprint 8.2 SEVERO S1 fix: cap notturno solo con presa 01-05.
     cap_prest = (
-        PRESTAZIONE_MAX_NOTTURNO if draft.is_notturno else PRESTAZIONE_MAX_STANDARD
+        PRESTAZIONE_MAX_NOTTURNO if draft.is_cap_notturno else PRESTAZIONE_MAX_STANDARD
     )
     if nuova_prest > cap_prest and not any(
         v.startswith("prestazione_max") for v in nuove_violazioni
@@ -924,6 +931,7 @@ async def _aggiungi_vettura_rientro(
         condotta_min=draft.condotta_min,  # vettura non è condotta
         refezione_min=draft.refezione_min,
         is_notturno=draft.is_notturno,
+        is_cap_notturno=draft.is_cap_notturno,
         violazioni=nuove_violazioni,
     )
     return nuovo_draft, treno

@@ -65,10 +65,10 @@ from colazione.domain.builder_pdc.builder import (
 from colazione.domain.builder_pdc.vettura_resolver import (
     PRESTAZIONE_MAX_NOTTURNO_MIN,
     PRESTAZIONE_MAX_STANDARD_MIN,
-    ScelzaMM,
-    ScelzaRientro,
-    ScelzaVettura,
-    ScelzaVOCTAXI,
+    SceltaMM,
+    SceltaRientro,
+    SceltaVettura,
+    SceltaVOCTAXI,
     risolvi_rientro,
 )
 from colazione.integrations.live_arturo import PartenzeCache
@@ -92,7 +92,7 @@ logger = logging.getLogger(__name__)
 def _inserisci_blocco_rientro(
     *,
     blocchi: list[_BloccoPdcDraft],
-    rientro: ScelzaRientro,
+    rientro: SceltaRientro,
     deposito_stazione: str,
     stazione_chiusura: str,
     ora_fine_acca_min: int,
@@ -113,7 +113,7 @@ def _inserisci_blocco_rientro(
         Tupla ``(nuovi_blocchi, ora_inizio_rientro_min, ora_fine_rientro_min)``.
         Le ore servono per ricalcolare la prestazione.
 
-    Note: ``rientro.durata_min == 0`` per ScelzaVOCTAXI con chiusura
+    Note: ``rientro.durata_min == 0`` per SceltaVOCTAXI con chiusura
     coincidente al deposito è un caso degenere che NON dovrebbe
     arrivare qui (filtrato a monte). Per robustezza, se durata=0
     ritorna i blocchi invariati.
@@ -133,10 +133,10 @@ def _inserisci_blocco_rientro(
         return blocchi, ora_fine_acca_min, ora_fine_acca_min
 
     # Caso degenere: rientro durata 0 (chiusura == deposito) → no-op.
-    if isinstance(rientro, ScelzaVOCTAXI) and rientro.durata_min == 0:
+    if isinstance(rientro, SceltaVOCTAXI) and rientro.durata_min == 0:
         return blocchi, ora_fine_acca_min, ora_fine_acca_min
 
-    if isinstance(rientro, ScelzaVettura):
+    if isinstance(rientro, SceltaVettura):
         treno = rientro.treno
         ora_inizio_rientro_min = treno.partenza_min
         ora_fine_rientro_min = treno.arrivo_min
@@ -158,7 +158,7 @@ def _inserisci_blocco_rientro(
         ora_inizio_rientro_min = ora_fine_acca_min
         ora_fine_rientro_min = (ora_fine_acca_min + rientro.durata_min) % (24 * 60)
         tipo_evento = rientro.tipo  # "MM" or "VOCTAXI"
-        if isinstance(rientro, ScelzaMM):
+        if isinstance(rientro, SceltaMM):
             note = f"Rientro MM → {deposito_stazione} ({rientro.motivo})"
         else:
             note = f"Rientro VOCTAXI → {deposito_stazione} ({rientro.motivo})"
@@ -290,7 +290,7 @@ async def costruisci_giornata_deposito_first(
         stazione_chiusura_codice=draft.stazione_fine,
         ora_presa_min=ora_presa_min,
         ora_chiusura_servizio_min=ora_fine_acca_min,
-        is_notturno=draft.is_notturno,
+        is_cap_notturno=draft.is_cap_notturno,
         live_client=live_client,
         cache=cache,
     )
@@ -313,7 +313,7 @@ async def costruisci_giornata_deposito_first(
     # 7. HARD cap prestazione post-rientro.
     cap_prestazione = (
         PRESTAZIONE_MAX_NOTTURNO_MIN
-        if draft.is_notturno
+        if draft.is_cap_notturno
         else PRESTAZIONE_MAX_STANDARD_MIN
     )
     if nuova_prestazione_min > cap_prestazione:

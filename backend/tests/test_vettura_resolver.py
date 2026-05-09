@@ -21,9 +21,9 @@ from colazione.domain.builder_pdc.vettura_resolver import (
     PRESTAZIONE_MAX_NOTTURNO_MIN,
     PRESTAZIONE_MAX_STANDARD_MIN,
     VOCTAXI_DURATA_DEFAULT_MIN,
-    ScelzaMM,
-    ScelzaVettura,
-    ScelzaVOCTAXI,
+    SceltaMM,
+    SceltaVettura,
+    SceltaVOCTAXI,
     risolvi_rientro,
 )
 from colazione.integrations.live_arturo import TrenoVettura
@@ -59,7 +59,7 @@ def fake_client() -> Any:
 
 
 # =====================================================================
-# Scenario 1 — vettura ok, non sfora cap → ScelzaVettura
+# Scenario 1 — vettura ok, non sfora cap → SceltaVettura
 # =====================================================================
 
 
@@ -80,11 +80,11 @@ async def test_vettura_ok_non_sfora_ritorna_scelza_vettura(
             stazione_chiusura_codice="TIRANO",
             ora_presa_min=12 * 60,  # 12:00 → fine 20:15 → 8h15 < 8h30 OK
             ora_chiusura_servizio_min=18 * 60 - 30,  # 17:30 fine ACCa
-            is_notturno=False,
+            is_cap_notturno=False,
             live_client=fake_client,
         )
 
-    assert isinstance(out, ScelzaVettura)
+    assert isinstance(out, SceltaVettura)
     assert out.tipo == "VETTURA"
     assert out.treno is treno
     # prestazione_finale = arrivo_vettura + 15min - presa = 20:15 - 12:00 = 8h15 = 495 min
@@ -93,7 +93,7 @@ async def test_vettura_ok_non_sfora_ritorna_scelza_vettura(
 
 
 # =====================================================================
-# Scenario 2 — vettura sfora cap, deposito Milano → ScelzaMM
+# Scenario 2 — vettura sfora cap, deposito Milano → SceltaMM
 # =====================================================================
 
 
@@ -116,11 +116,11 @@ async def test_vettura_sfora_milano_ritorna_scelza_mm(
             stazione_chiusura_codice="TIRANO",
             ora_presa_min=12 * 60,
             ora_chiusura_servizio_min=19 * 60 + 30,
-            is_notturno=False,
+            is_cap_notturno=False,
             live_client=fake_client,
         )
 
-    assert isinstance(out, ScelzaMM)
+    assert isinstance(out, SceltaMM)
     assert out.tipo == "MM"
     assert out.durata_min == MM_DURATA_FORFETTARIA_MIN
     assert "sfora" in out.motivo
@@ -128,7 +128,7 @@ async def test_vettura_sfora_milano_ritorna_scelza_mm(
 
 
 # =====================================================================
-# Scenario 3 — vettura sfora cap, deposito periferico → ScelzaVOCTAXI
+# Scenario 3 — vettura sfora cap, deposito periferico → SceltaVOCTAXI
 # =====================================================================
 
 
@@ -150,18 +150,18 @@ async def test_vettura_sfora_periferico_ritorna_scelza_voctaxi(
             stazione_chiusura_codice="TIRANO",
             ora_presa_min=12 * 60,
             ora_chiusura_servizio_min=19 * 60 + 30,
-            is_notturno=False,
+            is_cap_notturno=False,
             live_client=fake_client,
         )
 
-    assert isinstance(out, ScelzaVOCTAXI)
+    assert isinstance(out, SceltaVOCTAXI)
     assert out.tipo == "VOCTAXI"
     assert out.durata_min == VOCTAXI_DURATA_DEFAULT_MIN
     assert "non in" in out.motivo or "non Milano" in out.motivo or "periferic" in out.motivo.lower()
 
 
 # =====================================================================
-# Scenario 4 — nessuna vettura disponibile, deposito Milano → ScelzaMM
+# Scenario 4 — nessuna vettura disponibile, deposito Milano → SceltaMM
 # =====================================================================
 
 
@@ -181,16 +181,16 @@ async def test_nessuna_vettura_milano_ritorna_scelza_mm(
             stazione_chiusura_codice="MILANO_PG",
             ora_presa_min=6 * 60,
             ora_chiusura_servizio_min=14 * 60,
-            is_notturno=False,
+            is_cap_notturno=False,
             live_client=fake_client,
         )
 
-    assert isinstance(out, ScelzaMM)
+    assert isinstance(out, SceltaMM)
     assert "nessuna vettura" in out.motivo.lower()
 
 
 # =====================================================================
-# Scenario 5 — nessuna vettura, deposito periferico → ScelzaVOCTAXI
+# Scenario 5 — nessuna vettura, deposito periferico → SceltaVOCTAXI
 # =====================================================================
 
 
@@ -209,11 +209,11 @@ async def test_nessuna_vettura_periferico_ritorna_scelza_voctaxi(
             stazione_chiusura_codice="MANTOVA",
             ora_presa_min=6 * 60,
             ora_chiusura_servizio_min=14 * 60,
-            is_notturno=False,
+            is_cap_notturno=False,
             live_client=fake_client,
         )
 
-    assert isinstance(out, ScelzaVOCTAXI)
+    assert isinstance(out, SceltaVOCTAXI)
     assert "nessuna vettura" in out.motivo.lower()
 
 
@@ -237,13 +237,13 @@ async def test_chiusura_uguale_deposito_ritorna_voctaxi_no_op(
             stazione_chiusura_codice="BERGAMO",  # identica
             ora_presa_min=6 * 60,
             ora_chiusura_servizio_min=14 * 60,
-            is_notturno=False,
+            is_cap_notturno=False,
             live_client=fake_client,
         )
     # API non deve essere chiamata (short-circuit prima dello step 1)
     mock_trova.assert_not_called()
 
-    assert isinstance(out, ScelzaVOCTAXI)
+    assert isinstance(out, SceltaVOCTAXI)
     assert out.durata_min == 0
     assert "nullo" in out.motivo or "coincide" in out.motivo
 
@@ -271,12 +271,12 @@ async def test_vettura_notturno_cap_420(fake_client: httpx.AsyncClient) -> None:
             stazione_chiusura_codice="VARESE",
             ora_presa_min=2 * 60,
             ora_chiusura_servizio_min=7 * 60 + 30,
-            is_notturno=True,
+            is_cap_notturno=True,
             live_client=fake_client,
         )
 
     # Cap notturno è 420 → vettura sfora → fallback MM (Milano)
-    assert isinstance(out, ScelzaMM)
+    assert isinstance(out, SceltaMM)
     assert str(PRESTAZIONE_MAX_NOTTURNO_MIN) in out.motivo
 
 

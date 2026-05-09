@@ -20,7 +20,7 @@ fine giornata (NORMATIVA-PDC §7.2):
   speculare ma con vincoli temporali diversi (non c'è cap 8h30 prima
   della presa servizio). Modulo separato in MR-PD3 parte 2 se serve.
 
-L'output è un dataclass ``ScelzaRientro`` discriminated union con il
+L'output è un dataclass ``SceltaRientro`` discriminated union con il
 tipo (``VETTURA``/``MM``/``VOCTAXI``) e i dettagli operativi necessari
 al builder per costruire il blocco corrispondente nel TurnoPdc.
 """
@@ -102,7 +102,7 @@ VOCTAXI_DURATA_DEFAULT_MIN: int = 30
 
 
 @dataclass(frozen=True)
-class ScelzaVettura:
+class SceltaVettura:
     """Tipo VETTURA: il PdC viaggia come passeggero su un treno
     commerciale via API ``live.arturo.travel``."""
 
@@ -114,7 +114,7 @@ class ScelzaVettura:
 
 
 @dataclass(frozen=True)
-class ScelzaMM:
+class SceltaMM:
     """Tipo MM: il PdC rientra in metropolitana. Tempo forfettario."""
 
     tipo: Literal["MM"]
@@ -127,7 +127,7 @@ class ScelzaMM:
 
 
 @dataclass(frozen=True)
-class ScelzaVOCTAXI:
+class SceltaVOCTAXI:
     """Tipo VOCTAXI: il PdC rientra in taxi. Fallback finale."""
 
     tipo: Literal["VOCTAXI"]
@@ -139,7 +139,7 @@ class ScelzaVOCTAXI:
     "vettura sfora 8h30 + deposito non Milano"). Visibile in UI."""
 
 
-ScelzaRientro = ScelzaVettura | ScelzaMM | ScelzaVOCTAXI
+SceltaRientro = SceltaVettura | SceltaMM | SceltaVOCTAXI
 
 
 # =====================================================================
@@ -154,10 +154,10 @@ async def risolvi_rientro(
     stazione_chiusura_codice: str,
     ora_presa_min: int,
     ora_chiusura_servizio_min: int,
-    is_notturno: bool,
+    is_cap_notturno: bool,
     live_client: httpx.AsyncClient,
     cache: PartenzeCache | None = None,
-) -> ScelzaRientro:
+) -> SceltaRientro:
     """Risolve il rientro PdC al deposito secondo NORMATIVA-PDC §7.2.
 
     Args:
@@ -177,27 +177,30 @@ async def risolvi_rientro(
             fine servizio operativo (= dopo ACCa o ultimo blocco
             condotta + ACCa). La vettura cerca treni dopo
             ``ora_chiusura_servizio_min + VETTURA_GAP_PRE_MIN``.
-        is_notturno: True se il turno è notturno (presa 01:00-04:59).
-            Discrimina cap prestazione 510 vs 420 min.
+        is_cap_notturno: Sprint 8.2 SEVERO S1 fix. True se applicare
+            cap prestazione 420 min (presa servizio 01:00-04:59 da
+            NORMATIVA §3). Distinto dal flag UI ``is_notturno``
+            superinclusivo che marca anche turni che finiscono dopo
+            le 22 o cross-mezzanotte.
         live_client: Client httpx già aperto, condiviso con il builder
             per riusare la connessione TLS.
         cache: ``PartenzeCache`` opzionale per riusare le response
             ``/api/partenze/{stazione}`` fra più chiamate del builder.
 
     Returns:
-        ``ScelzaVettura`` (priorità 1), ``ScelzaMM`` (priorità 2 se
-        Milano), ``ScelzaVOCTAXI`` (fallback finale).
+        ``SceltaVettura`` (priorità 1), ``SceltaMM`` (priorità 2 se
+        Milano), ``SceltaVOCTAXI`` (fallback finale).
     """
     # Caso degenere: il PdC è già al deposito → no-op.
     if stazione_chiusura_codice == deposito_stazione_codice:
-        return ScelzaVOCTAXI(
+        return SceltaVOCTAXI(
             tipo="VOCTAXI",
             durata_min=0,
             motivo="rientro nullo: chiusura coincide col deposito",
         )
 
     cap_prestazione = (
-        PRESTAZIONE_MAX_NOTTURNO_MIN if is_notturno else PRESTAZIONE_MAX_STANDARD_MIN
+        PRESTAZIONE_MAX_NOTTURNO_MIN if is_cap_notturno else PRESTAZIONE_MAX_STANDARD_MIN
     )
 
     # Step 1: cerca vettura via API live.arturo.travel.
@@ -222,7 +225,7 @@ async def risolvi_rientro(
             prestazione_finale = 24 * 60
 
         if prestazione_finale <= cap_prestazione:
-            return ScelzaVettura(
+            return SceltaVettura(
                 tipo="VETTURA",
                 treno=treno,
                 prestazione_finale_min=prestazione_finale,
@@ -245,7 +248,7 @@ async def risolvi_rientro(
             )
         else:
             motivo = "nessuna vettura utile; fallback MM (deposito Milano)"
-        return ScelzaMM(
+        return SceltaMM(
             tipo="MM",
             durata_min=MM_DURATA_FORFETTARIA_MIN,
             motivo=motivo,
@@ -263,7 +266,7 @@ async def risolvi_rientro(
             f"nessuna vettura utile; deposito {deposito_codice} non in "
             f"area Milano-MM → VOCTAXI"
         )
-    return ScelzaVOCTAXI(
+    return SceltaVOCTAXI(
         tipo="VOCTAXI",
         durata_min=VOCTAXI_DURATA_DEFAULT_MIN,
         motivo=motivo,
@@ -275,10 +278,10 @@ __all__ = [
     "MM_DURATA_FORFETTARIA_MIN",
     "PRESTAZIONE_MAX_NOTTURNO_MIN",
     "PRESTAZIONE_MAX_STANDARD_MIN",
-    "ScelzaMM",
-    "ScelzaRientro",
-    "ScelzaVOCTAXI",
-    "ScelzaVettura",
+    "SceltaMM",
+    "SceltaRientro",
+    "SceltaVOCTAXI",
+    "SceltaVettura",
     "VETTURA_ATTESA_MAX_MIN",
     "VETTURA_GAP_PRE_MIN",
     "VOCTAXI_DURATA_DEFAULT_MIN",

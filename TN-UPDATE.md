@@ -10,6 +10,103 @@
 
 ---
 
+## 2026-05-09 (269) — Sprint 8.2 MR-PD-FIX-SEVERO 1: chiude S1 CRITICAL (cap notturno superinclusivo) + S4 HIGH + S7 LOW
+
+### Contesto
+
+Critica SEVERO MR-PD3 (entry 268) ha rilevato 11 finding sul cuore
+architetturale builder deposito-first. Voto 4.5/10 fallback FAUSTO
+(AMILCARE V4 Pro 4 timeout). Pre-MR-PD7 obbligatori secondo SEVERO:
+S1+S2+S4+S5+S7 ~6-8h. Questa entry chiude **3 dei 5** finding più
+chirurgici (S1, S4, S7); S2 (modulo `giornata_base.py` shared) e
+S5 (integration test) → MR-PD-FIX-SEVERO 2 (separato, costo
+maggiore).
+
+### Modifiche
+
+**S1 CRITICAL — `is_notturno` superinclusivo applicato come
+discriminante cap prestazione.**
+
+Bug pre-esistente da builder MVP Sprint 7.2 ereditato a tutti i
+moduli builder PdC: la variabile `is_notturno` (definita
+`builder.py:331`) è superinclusiva (`presa<05 OR fine>22 OR
+wrap-mezzanotte`) per scopi UI (badge luna nel Gantt). Ma il cap
+prestazione 420 min si applica **solo** se la presa servizio è
+01:00-04:59 (NORMATIVA-PDC §3). Conseguenza: turni con presa 06:00
+e fine 23:00 (= `is_notturno=True` per UI) venivano scartati con
+cap 420 invece di 510, generando `prestazione_max_hard` falsi
+positivi.
+
+Fix: nuova property `is_cap_notturno: bool` in `_GiornataPdcDraft`
+(`builder.py:165-170`), calcolata come `60 <= ora_presa < 5 * 60`.
+Distinta da `is_notturno` (UI). Rinominato uso del cap-discriminator
+in 5 moduli:
+
+- `builder.py:336` → usa `is_cap_notturno`
+- `vettura_resolver.py:157,200` → param `is_cap_notturno` (rename
+  da `is_notturno`)
+- `deposito_first.py:296,316` → passa `draft.is_cap_notturno`
+- `multi_turno.py:141,905` → usa `draft.is_cap_notturno`
+- `split_cv.py:152` → usa `draft.is_cap_notturno`
+
+Tutti i 4 punti di costruzione `_GiornataPdcDraft` (builder.py:355,
+builder.py:925, multi_turno.py:802, multi_turno.py:920) aggiornati
+per includere `is_cap_notturno`.
+
+**S4 HIGH — test ambivalente `test_prestazione_post_rientro_eccede_cap_scartata`.**
+
+Il test originale aveva `if draft is None: assert ... else:
+assert ...` accettando entrambi gli esiti. Test green-phase
+compromesso. Riscritto con assertion netta: VOCTAXI 120' su
+giornata 06:00-12:00 → prestazione finale 9h50 = 590 min > 510 cap
+→ HARD scartata. `assert draft is None` + `assert
+"prestazione_max_hard" in violazioni`.
+
+**S7 LOW — refuso "Scelza" → "Scelta".**
+
+Replace_all in 4 file: `vettura_resolver.py`, `deposito_first.py`,
+`test_vettura_resolver.py`, `test_deposito_first.py`. Simboli
+rinominati: `ScelzaVettura/ScelzaMM/ScelzaVOCTAXI/ScelzaRientro`
+→ `SceltaVettura/SceltaMM/SceltaVOCTAXI/SceltaRientro`.
+
+### Verifiche
+
+- ✅ pytest test PdC core (4 file): 17 passed (8 vettura_resolver
+  con `is_cap_notturno` + 9 deposito_first). 3 xfailed
+  intenzionali MR-PD1.
+- ✅ pytest suite PdC completa (10 file): 124 passed, 3 xfailed,
+  6 fail pre-esistenti **fuori scope** confermati via stash:
+  - 2 fail cross-role 403 (`test_list_giri_pianificatore_giro_ok`,
+    `test_list_turni_pianificatore_giro_ok`) — pre-esistenti
+    da entry 262
+  - 3 fail nuovi cross-test contamination da turno orfano
+    `TEST_AA_auto_persiste_pct_T` lasciato da altro test —
+    pre-esistenti, manifestati ora a causa dell'ordine test.
+    NON causati da S1/S4/S7 fix (verificato via stash).
+- ✅ mypy --strict: clean
+- ✅ ruff check: clean
+
+### S2 e S5 in MR-PD-FIX-SEVERO 2
+
+Rimandati a entry separata:
+- **S2** (~2-3h): estrarre `giornata_base.py` modulo helper
+  pubblico per `_BloccoPdcDraft, _GiornataPdcDraft, _t, _from_min,
+  _build_giornata_pdc, ...` per evitare import privati
+  cross-modulo. Refactor non urgente.
+- **S5** (~2-3h): integration test smoke pre-endpoint
+  `genera_turni_pdc_deposito_first` con DB reale (azienda + depot
+  + giro + giornate + varianti + blocchi).
+
+### Stato
+
+- ✅ MR-PD-FIX-SEVERO 1 chiuso. S1+S4+S7 chiusi.
+- ⏳ MR-PD-FIX-SEVERO 2 (futuro): S2+S5.
+- ⏳ MR-PD6 parte 2 (futuro): label stazioni acronimi + estrazione
+  altri componenti shared.
+- ⏳ MR-PD7: §11.4 + §15 + §6 PK opt-in.
+
+---
+
 ## 2026-05-09 (268) — Sprint 8.2 MR-PD6 (parte 1): banda notturna fra giornate + bar CONDOTTA/VETTURA h-3 stile giro
 
 ### Contesto

@@ -163,6 +163,14 @@ class _GiornataPdcDraft:
     condotta_min: int
     refezione_min: int
     is_notturno: bool
+    """True se il turno tocca la notte (per UI: badge luna, ecc.).
+    Superinclusivo: copre presa <05:00 OR fine >22:00 OR wrap mezzanotte.
+    NON usare per discriminare il cap prestazione: usare ``is_cap_notturno``."""
+    is_cap_notturno: bool
+    """Sprint 8.2 SEVERO S1 fix: True se applicare cap prestazione 420 min
+    (NORMATIVA-PDC §3 "presa servizio 01:00-04:59"). Distinto da
+    ``is_notturno`` (superinclusivo per UI). Usato dal cap-discriminator nei
+    builder + vettura_resolver."""
     violazioni: list[str]
 
 
@@ -329,12 +337,15 @@ def _build_giornata_pdc(
     refezione_min = sum(d.durata_min for d in drafts if d.tipo_evento == "REFEZ")
 
     is_notturno = ora_presa < 5 * 60 or ora_fine_servizio > 22 * 60 or ora_fine_servizio < ora_presa
+    # Sprint 8.2 SEVERO S1 fix: cap prestazione 420 min applicato SOLO
+    # per turni con presa 01:00-04:59 (NORMATIVA-PDC §3). is_notturno
+    # per UI è superinclusivo (presa <05 OR fine >22 OR wrap), ma il
+    # cap normativo è più stretto. Distinguiamo i due flag esplicitamente.
+    is_cap_notturno = 60 <= ora_presa < 5 * 60
 
     violazioni: list[str] = []
     cap_prestazione = (
-        PRESTAZIONE_MAX_NOTTURNO
-        if 60 <= ora_presa < 5 * 60
-        else PRESTAZIONE_MAX_STANDARD
+        PRESTAZIONE_MAX_NOTTURNO if is_cap_notturno else PRESTAZIONE_MAX_STANDARD
     )
     if prestazione_min > cap_prestazione:
         violazioni.append(
@@ -357,6 +368,7 @@ def _build_giornata_pdc(
         condotta_min=condotta_min,
         refezione_min=refezione_min,
         is_notturno=is_notturno,
+        is_cap_notturno=is_cap_notturno,
         violazioni=violazioni,
     )
 
@@ -922,6 +934,7 @@ async def _genera_un_turno_pdc(
                 condotta_min=ramo.condotta_min,
                 refezione_min=ramo.refezione_min,
                 is_notturno=ramo.is_notturno,
+                is_cap_notturno=ramo.is_cap_notturno,
                 violazioni=ramo.violazioni,
             )
             risultato_ramo = await _persisti_un_turno_pdc(

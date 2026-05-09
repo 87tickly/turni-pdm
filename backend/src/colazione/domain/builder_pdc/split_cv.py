@@ -148,8 +148,10 @@ def _eccede_limiti(draft: _GiornataPdcDraft) -> bool:
     prestazione, e il builder già lo fa quando trova un PK ≥30' in
     finestra.
     """
+    # Sprint 8.2 SEVERO S1 fix: cap notturno solo con presa 01-05
+    # (NORMATIVA-PDC §3), non per turni con `is_notturno=True` per UI.
     cap_prestazione = (
-        PRESTAZIONE_MAX_NOTTURNO if draft.is_notturno else PRESTAZIONE_MAX_STANDARD
+        PRESTAZIONE_MAX_NOTTURNO if draft.is_cap_notturno else PRESTAZIONE_MAX_STANDARD
     )
     return (
         draft.prestazione_min > cap_prestazione

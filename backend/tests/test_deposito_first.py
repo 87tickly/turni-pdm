@@ -32,9 +32,9 @@ from colazione.domain.builder_pdc.deposito_first import (
     costruisci_giornata_deposito_first,
 )
 from colazione.domain.builder_pdc.vettura_resolver import (
-    ScelzaMM,
-    ScelzaVettura,
-    ScelzaVOCTAXI,
+    SceltaMM,
+    SceltaVettura,
+    SceltaVOCTAXI,
 )
 from colazione.integrations.live_arturo import TrenoVettura
 
@@ -159,7 +159,7 @@ async def test_violazione_c_giornata_chiude_sempre_in_deposito_via_vettura(
     with patch(
         "colazione.domain.builder_pdc.deposito_first.risolvi_rientro",
         new=AsyncMock(
-            return_value=ScelzaVettura(
+            return_value=SceltaVettura(
                 tipo="VETTURA",
                 treno=treno_rientro,
                 prestazione_finale_min=430,
@@ -212,7 +212,7 @@ async def test_violazione_d_ultimo_blocco_e_rientro_non_fine(
     with patch(
         "colazione.domain.builder_pdc.deposito_first.risolvi_rientro",
         new=AsyncMock(
-            return_value=ScelzaVettura(
+            return_value=SceltaVettura(
                 tipo="VETTURA",
                 treno=treno_rientro,
                 prestazione_finale_min=430,
@@ -243,7 +243,7 @@ async def test_violazione_d_ultimo_blocco_e_rientro_non_fine(
 async def test_rientro_mm_inserito_in_coda(
     fake_client: httpx.AsyncClient,
 ) -> None:
-    """Quando il resolver ritorna ScelzaMM, il builder deve inserire un
+    """Quando il resolver ritorna SceltaMM, il builder deve inserire un
     blocco MM con durata forfettaria 30' tra ACCa e FINE.
     """
     depot = _StubDepot(codice="FIORENZA", stazione_principale_codice="MILANO_CERTOSA")
@@ -255,7 +255,7 @@ async def test_rientro_mm_inserito_in_coda(
     with patch(
         "colazione.domain.builder_pdc.deposito_first.risolvi_rientro",
         new=AsyncMock(
-            return_value=ScelzaMM(
+            return_value=SceltaMM(
                 tipo="MM",
                 durata_min=30,
                 motivo="fallback MM (vettura sfora)",
@@ -287,7 +287,7 @@ async def test_rientro_mm_inserito_in_coda(
 async def test_rientro_voctaxi_inserito_in_coda(
     fake_client: httpx.AsyncClient,
 ) -> None:
-    """Quando il resolver ritorna ScelzaVOCTAXI, il builder inserisce
+    """Quando il resolver ritorna SceltaVOCTAXI, il builder inserisce
     un blocco VOCTAXI."""
     depot = _StubDepot(codice="CREMONA", stazione_principale_codice="CREMONA")
     blocchi = [
@@ -298,7 +298,7 @@ async def test_rientro_voctaxi_inserito_in_coda(
     with patch(
         "colazione.domain.builder_pdc.deposito_first.risolvi_rientro",
         new=AsyncMock(
-            return_value=ScelzaVOCTAXI(
+            return_value=SceltaVOCTAXI(
                 tipo="VOCTAXI",
                 durata_min=30,
                 motivo="deposito periferico",
@@ -408,7 +408,7 @@ async def test_prestazione_post_rientro_eccede_cap_scartata(
         _b(2, 11, 30, 12, 0, "MANTOVA", "VENEZIA"),  # 8h+ apparente
     ]
 
-    voctaxi_lungo = ScelzaVOCTAXI(
+    voctaxi_lungo = SceltaVOCTAXI(
         tipo="VOCTAXI",
         durata_min=120,  # 2h
         motivo="taxi lungo per test",
@@ -425,13 +425,13 @@ async def test_prestazione_post_rientro_eccede_cap_scartata(
             live_client=fake_client,
         )
 
-    # Atteso scartata se prestazione finale > 510
-    if draft is None:
-        assert any("prestazione_max_hard" in v for v in violazioni)
-    else:
-        # Se è entrata sotto cap, almeno il blocco VOCTAXI è in coda
-        # e stazione_fine = deposito.
-        assert draft.stazione_fine == "CREMONA"
+    # Sprint 8.2 SEVERO S4 fix: assert netta, non ambivalente.
+    # Calcolo: presa 06:00−55=05:05, fine giornata 12:00, ACCa 12:40,
+    # VOCTAXI 120' → 14:40, FINE 14:55. Prestazione 14:55−05:05 = 9h50
+    # = 590min > 510 cap standard. HARD scartata.
+    assert draft is None
+    assert violazioni
+    assert any("prestazione_max_hard" in v for v in violazioni)
 
 
 # =====================================================================
