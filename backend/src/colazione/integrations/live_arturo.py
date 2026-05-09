@@ -231,6 +231,7 @@ async def trova_treno_vettura(
     max_attesa_min: int = 120,
     client: httpx.AsyncClient | None = None,
     cache: PartenzeCache | None = None,
+    esclusi: frozenset[tuple[str, str | None]] | None = None,
 ) -> TrenoVettura | None:
     """Cerca il primo treno passante per (partenza, arrivo) dopo
     ``ora_min_partenza``.
@@ -240,6 +241,11 @@ async def trova_treno_vettura(
     ``cache``. Una sola chiamata HTTP per stazione, indipendentemente
     da quante coppie (partenza, arrivo, finestra) la usano.
 
+    Sprint 8.2 MR-PD-FIX-SEVERO 3b A1: parametro ``esclusi`` opt-in
+    permette al chiamante (resolver) di passare un set di chiavi
+    ``(numero_treno, operatore)`` da escludere PRIMA dell'ordinamento.
+    Default ``None`` non rompe il contratto legacy.
+
     Strategia:
     1. Recupera (o cacha) la lista treni passanti per
        ``stazione_partenza_codice`` da ``/api/partenze/{stazione}``.
@@ -247,10 +253,12 @@ async def trova_treno_vettura(
        - hanno una fermata con ``stazione_id == stazione_arrivo_codice``
        - partono da ``stazione_partenza_codice`` dopo
          ``ora_min_partenza`` (con attesa ≤ ``max_attesa_min``).
+       - **se ``esclusi`` valorizzato**: NON sono in ``esclusi`` per
+         chiave ``(numero, operatore)``.
     3. Tra i candidati, sceglie quello con ``partenza_min`` minimo.
 
     Returns ``None`` se nessun treno trovato (nessun passante in
-    finestra, API down dopo retry, stazione errata, ecc.).
+    finestra, API down dopo retry, stazione errata, esclusi tutti, ecc.).
     """
     own_client = client is None
     try:
@@ -287,8 +295,17 @@ async def trova_treno_vettura(
                 ora_min_partenza=ora_min_partenza,
                 max_attesa_min=max_attesa_min,
             )
-            if cand is not None:
-                candidati.append(cand)
+            if cand is None:
+                continue
+            # Sprint 8.2 MR-PD-FIX-SEVERO 3b A1: filtro esclusi pre-ordinamento.
+            if esclusi is not None and (cand.numero, cand.operatore) in esclusi:
+                logger.debug(
+                    "Treno %s (%s) escluso da registro vetture",
+                    cand.numero,
+                    cand.operatore,
+                )
+                continue
+            candidati.append(cand)
         except (KeyError, TypeError, ValueError) as e:
             logger.debug("Treno scartato (parsing): %s", e)
             continue

@@ -66,6 +66,9 @@ from colazione.domain.builder_pdc.giornata_base import (
     persisti_un_turno_pdc,
     to_minuti,
 )
+from colazione.domain.builder_pdc.programma_context import (
+    BuilderProgrammaContext,
+)
 from colazione.domain.builder_pdc.vettura_resolver import (
     PRESTAZIONE_MAX_NOTTURNO_MIN,
     PRESTAZIONE_MAX_STANDARD_MIN,
@@ -156,6 +159,9 @@ def _inserisci_blocco_rientro(
                 f"Vettura rientro {treno.categoria} {treno.numero} "
                 f"({treno.operatore or '—'}) → {deposito_stazione}"
             ),
+            # Sprint 8.2 MR-PD-FIX-SEVERO 3b A1: campo strutturato per
+            # registro cross-PdC. Sostituisce parsing regex su accessori_note.
+            numero_treno_vettura=treno.numero,
         )
     else:
         # MM o VOCTAXI: durata forfettaria, parte subito dopo ACCa.
@@ -215,6 +221,8 @@ async def costruisci_giornata_deposito_first(
     blocchi_giro: list[GiroBlocco],
     live_client: httpx.AsyncClient,
     cache: PartenzeCache | None = None,
+    context: BuilderProgrammaContext | None = None,
+    data_operativa: date | None = None,
 ) -> tuple[GiornataPdcDraft | None, list[str]]:
     """Costruisce 1 giornata di turno PdC ancorata al deposito.
 
@@ -240,12 +248,29 @@ async def costruisci_giornata_deposito_first(
         live_client: client httpx aperto, condiviso col builder
             principale per riusare connessione TLS.
         cache: ``PartenzeCache`` opzionale per riusare le response
-            ``/api/partenze/{stazione}`` fra giornate.
+            ``/api/partenze/{stazione}`` fra giornate. Se ``context``
+            è valorizzato, ``cache`` viene **sovrascritta** da
+            ``context.cache`` (S2 SEVERO: dependency injection).
+        context: Sprint 8.2 MR-PD-FIX-SEVERO 3b A2.
+            ``BuilderProgrammaContext`` opzionale per condividere cache
+            + registro vetture cross-PdC fra le invocazioni della stessa
+            request endpoint. Se valorizzato: ``cache`` e ``registro``
+            vengono presi da ``context``.
+        data_operativa: Sprint 8.2 MR-PD-FIX-SEVERO 3b A1. Data del
+            turno PdC corrente, propagata al resolver per chiave
+            registro. Richiesta SE ``context`` è valorizzato.
 
     Returns:
         ``(draft, [])`` se la giornata è valida e chiusa al deposito.
         ``(None, [violazione_str])`` se SCARTATA per cap o invarianti.
     """
+    # Sprint 8.2 MR-PD-FIX-SEVERO 3b: se context valorizzato, le sue
+    # dependency injection sovrascrivono i parametri legacy (cache,
+    # data_operativa). Permette di chiamare la funzione sia in modalità
+    # "vecchio MVP" (cache opzionale, no registro) sia in modalità
+    # "endpoint MR-PD5" (context obbligatorio).
+    cache_eff = context.cache if context is not None else cache
+    registro_eff = context.registro if context is not None else None
     deposito_stazione = depot.stazione_principale_codice
     if deposito_stazione is None:
         return None, [
@@ -296,8 +321,26 @@ async def costruisci_giornata_deposito_first(
         ora_chiusura_servizio_min=ora_fine_acca_min,
         is_cap_notturno=draft.is_cap_notturno,
         live_client=live_client,
-        cache=cache,
+        cache=cache_eff,
+        registro=registro_eff,
+        data_operativa=data_operativa,
     )
+
+    # Sprint 8.2 MR-PD-FIX-SEVERO 3b A1: registra vettura nel context
+    # per le chiamate successive nello stesso run (in-memory, prima
+    # del POST-INSERT del persister). Il POST-INSERT in giornata_base
+    # è solo per i turni futuri (cross-request); per intra-request,
+    # questa registrazione anticipa.
+    if (
+        context is not None
+        and data_operativa is not None
+        and isinstance(rientro, SceltaVettura)
+    ):
+        context.registro.assegna(
+            numero_treno=rientro.treno.numero,
+            operatore=rientro.treno.operatore,
+            data_operativa=data_operativa,
+        )
 
     # 5. Inserisci blocco rientro + sposta FINE.
     nuovi_blocchi, _ora_in, ora_fine_rientro = _inserisci_blocco_rientro(
@@ -487,14 +530,24 @@ async def genera_turni_pdc_deposito_first(
             blocchi_per_giornata.setdefault(gg_id, []).append(b)
 
     # 6. Costruisci giornate via deposito-first builder.
+    # Sprint 8.2 MR-PD-FIX-SEVERO 3b: BuilderProgrammaContext shared
+    # cross-build (cache + registro vetture cross-PdC). Inizializzato
+    # una volta per request, propagato a tutte le giornate del turno.
     valido_da_eff = valido_da or date.today()
     settings = get_settings()
     live_client = httpx.AsyncClient(timeout=settings.live_arturo_timeout_sec)
-    cache = PartenzeCache()
 
+    # MVP: data_operativa = valido_da per tutte le giornate. Helper
+    # enumera_date_giornata (S4 TODO) raffinerà per varianti
+    # calendariali multi-data.
     drafts: list[GiornataPdcDraft] = []
     violazioni_giornate_scartate: list[str] = []
     try:
+        context = await BuilderProgrammaContext.crea_per_programma(
+            session,
+            programma_id=giro.programma_id,
+            live_client=live_client,
+        )
         for gg in giornate_giro:
             blocchi = blocchi_per_giornata.get(gg.id, [])
             if not blocchi:
@@ -508,7 +561,8 @@ async def genera_turni_pdc_deposito_first(
                 variante_calendario=validita,
                 blocchi_giro=blocchi,
                 live_client=live_client,
-                cache=cache,
+                context=context,
+                data_operativa=valido_da_eff,
             )
             if draft is not None:
                 drafts.append(draft)

@@ -30,7 +30,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Literal
+from datetime import date
+from typing import TYPE_CHECKING, Literal
 
 import httpx
 
@@ -39,6 +40,11 @@ from colazione.integrations.live_arturo import (
     TrenoVettura,
     trova_treno_vettura,
 )
+
+if TYPE_CHECKING:
+    from colazione.domain.builder_pdc.registro_vetture import (
+        RegistroVettureAssegnate,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +179,8 @@ async def risolvi_rientro(
     is_cap_notturno: bool,
     live_client: httpx.AsyncClient,
     cache: PartenzeCache | None = None,
+    registro: RegistroVettureAssegnate | None = None,
+    data_operativa: date | None = None,
 ) -> SceltaRientro:
     """Risolve il rientro PdC al deposito secondo NORMATIVA-PDC §7.2.
 
@@ -202,6 +210,21 @@ async def risolvi_rientro(
             per riusare la connessione TLS.
         cache: ``PartenzeCache`` opzionale per riusare le response
             ``/api/partenze/{stazione}`` fra più chiamate del builder.
+            Sprint 8.2 MR-PD-FIX-SEVERO 3b A2: dovrebbe essere
+            obbligatoria per garantire idempotenza intra-request, ma
+            mantengo opzionale per backward compat con i test legacy.
+            Il chiamante endpoint MR-PD5 la passa sempre via
+            ``BuilderProgrammaContext.cache``.
+        registro: Sprint 8.2 MR-PD-FIX-SEVERO 3b A1. Registro
+            vetture cross-PdC. Se valorizzato + ``data_operativa``
+            valorizzato, le vetture già prenotate per quella data
+            vengono escluse dalle candidate (NORMATIVA-PDC §15.1-§15.2).
+            Default ``None`` mantiene comportamento legacy senza
+            esclusioni.
+        data_operativa: Sprint 8.2 MR-PD-FIX-SEVERO 3b A1. Data
+            operativa del turno PdC corrente, usata come chiave nel
+            registro per il match cross-PdC. Richiesta SE registro
+            è valorizzato; ignorata altrimenti.
 
     Returns:
         ``SceltaVettura`` (priorità 1), ``SceltaMM`` (priorità 2 se
@@ -218,6 +241,19 @@ async def risolvi_rientro(
     cap_prestazione = (
         PRESTAZIONE_MAX_NOTTURNO_MIN if is_cap_notturno else PRESTAZIONE_MAX_STANDARD_MIN
     )
+
+    # Sprint 8.2 MR-PD-FIX-SEVERO 3b A1: calcola esclusi cross-PdC dal
+    # registro per la data operativa corrente. None = comportamento
+    # legacy (no esclusioni).
+    esclusi: frozenset[tuple[str, str | None]] | None = None
+    if registro is not None and data_operativa is not None:
+        esclusi = registro.numeri_da_escludere(data_operativa=data_operativa)
+        if esclusi:
+            logger.debug(
+                "vettura_resolver: %d vetture escluse da registro per %s",
+                len(esclusi),
+                data_operativa,
+            )
 
     # Step 1: cerca vettura via API live.arturo.travel.
     # Sprint 8.2 MR-PD-FIX-SEVERO 3a (A3): difensivo + retry signal-based.
@@ -240,6 +276,7 @@ async def risolvi_rientro(
                 max_attesa_min=VETTURA_ATTESA_MAX_MIN,
                 client=live_client,
                 cache=cache,
+                esclusi=esclusi,
             )
         except Exception as e:  # noqa: BLE001
             # Difensivo: live_arturo non dovrebbe sollevare ma blindiamo

@@ -117,3 +117,8 @@ class TurnoPdcBlocco(Base):
     )
     accessori_note: Mapped[str | None] = mapped_column(Text)
     fonte_orario: Mapped[str] = mapped_column(String(20), default="parsed")
+    # Sprint 8.2 MR-PD-FIX-SEVERO 3b A1: numero treno commerciale usato
+    # come VETTURA rientro al deposito. Sostituisce parsing regex su
+    # accessori_note. Popolato SOLO per tipo_evento='VETTURA'.
+    # Indicizzato per lookup registro cross-PdC.
+    numero_treno_vettura: Mapped[str | None] = mapped_column(String(20), index=True)

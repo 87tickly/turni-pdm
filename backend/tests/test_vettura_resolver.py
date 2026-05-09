@@ -396,6 +396,99 @@ async def test_a3_cache_errori_signal_attiva_retry(
     assert "API live non raggiungibile" in out.motivo
 
 
+# =====================================================================
+# Sprint 8.2 MR-PD-FIX-SEVERO 3b A1 — registro vetture cross-PdC
+# =====================================================================
+
+
+@pytest.mark.asyncio
+async def test_a1_registro_propaga_esclusi_a_trova_treno_vettura(
+    fake_client: httpx.AsyncClient,
+) -> None:
+    """Verifica che il resolver passi il set ``esclusi`` corretto a
+    ``trova_treno_vettura`` quando registro+data_operativa valorizzati.
+
+    Setup: registro contiene vettura ('2425', 'TN', 2026-03-15).
+    Mock trova_treno_vettura riceve esclusi = {('2425', 'TN')} e ritorna
+    None (= simula filtro applicato, nessun candidato resta).
+    Output atteso: SceltaMM (deposito Milano) o VOCTAXI.
+    """
+    from datetime import date
+
+    from colazione.domain.builder_pdc.registro_vetture import (
+        RegistroVettureAssegnate,
+    )
+
+    registro = RegistroVettureAssegnate()
+    registro.assegna(
+        numero_treno="2425",
+        operatore="TN",
+        data_operativa=date(2026, 3, 15),
+    )
+
+    captured_esclusi: dict[str, frozenset[tuple[str, str | None]] | None] = {
+        "value": None
+    }
+
+    async def fake_trova(**kwargs: Any) -> TrenoVettura | None:
+        captured_esclusi["value"] = kwargs.get("esclusi")
+        return None  # simula filtro applicato
+
+    with patch(
+        "colazione.domain.builder_pdc.vettura_resolver.trova_treno_vettura",
+        new=AsyncMock(side_effect=fake_trova),
+    ):
+        out = await risolvi_rientro(
+            deposito_codice="GARIBALDI_TE",
+            deposito_stazione_codice="MILANO_PG",
+            stazione_chiusura_codice="TIRANO",
+            ora_presa_min=12 * 60,
+            ora_chiusura_servizio_min=19 * 60 + 30,
+            is_cap_notturno=False,
+            live_client=fake_client,
+            registro=registro,
+            data_operativa=date(2026, 3, 15),
+        )
+
+    # Esclusi propagato con la chiave corretta.
+    assert captured_esclusi["value"] is not None
+    assert ("2425", "TN") in captured_esclusi["value"]
+    # Output graceful (no crash, no doppione).
+    assert isinstance(out, SceltaMM)
+
+
+@pytest.mark.asyncio
+async def test_a1_registro_assente_esclusi_none(
+    fake_client: httpx.AsyncClient,
+) -> None:
+    """Backward compat: senza registro/data_operativa, esclusi=None
+    (nessun filtro), comportamento legacy preservato."""
+    from datetime import date  # noqa: F401 - import di parità con test sopra
+
+    captured: dict[str, frozenset[tuple[str, str | None]] | None] = {"value": ...}  # type: ignore[dict-item]
+
+    async def fake_trova(**kwargs: Any) -> TrenoVettura | None:
+        captured["value"] = kwargs.get("esclusi")
+        return None
+
+    with patch(
+        "colazione.domain.builder_pdc.vettura_resolver.trova_treno_vettura",
+        new=AsyncMock(side_effect=fake_trova),
+    ):
+        await risolvi_rientro(
+            deposito_codice="FIORENZA",
+            deposito_stazione_codice="MILANO_CERTOSA",
+            stazione_chiusura_codice="MILANO_PG",
+            ora_presa_min=6 * 60,
+            ora_chiusura_servizio_min=14 * 60,
+            is_cap_notturno=False,
+            live_client=fake_client,
+            # registro/data_operativa omessi → backward compat
+        )
+
+    assert captured["value"] is None  # nessun filtro applicato
+
+
 @pytest.mark.asyncio
 async def test_a3_cache_assente_no_signal_no_retry_inutile(
     fake_client: httpx.AsyncClient,

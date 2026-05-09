@@ -138,7 +138,7 @@ def _diff(start: time, end: time) -> int:
 @dataclass
 class _BloccoPdcDraft:
     seq: int
-    tipo_evento: str  # CONDOTTA, VETTURA, REFEZ, ACCp, ACCa, CVp, CVa, PK, SCOMP, PRESA, FINE
+    tipo_evento: str  # CONDOTTA, VETTURA, REFEZ, ACCp, ACCa, CVp, CVa, PK, SCOMP, PRESA, FINE, MM, VOCTAXI
     ora_inizio: time
     ora_fine: time
     durata_min: int
@@ -148,6 +148,10 @@ class _BloccoPdcDraft:
     corsa_materiale_vuoto_id: int | None = None
     giro_blocco_id: int | None = None
     accessori_note: str | None = None
+    # Sprint 8.2 MR-PD-FIX-SEVERO 3b A1: numero treno vettura (popolato
+    # SOLO per tipo_evento='VETTURA' rientro deposito). FK testuale al
+    # registro RegistroVettureAssegnate cross-PdC.
+    numero_treno_vettura: str | None = None
 
 
 @dataclass
@@ -1092,6 +1096,7 @@ async def _persisti_un_turno_pdc(
                     cv_parent_blocco_id=None,
                     accessori_note=b.accessori_note,
                     fonte_orario="builder",
+                    numero_treno_vettura=b.numero_treno_vettura,
                 )
             )
 

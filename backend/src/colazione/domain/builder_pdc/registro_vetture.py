@@ -1,0 +1,217 @@
+"""Registro vetture cross-PdC §15 — Sprint 8.2 MR-PD-FIX-SEVERO 3b A1.
+
+Implementa il vincolo NORMATIVA-PDC §15.1-§15.2: "ogni segmento di treno
+si assegna a UN solo PdC, sempre". Per il caso VETTURA (treni commerciali
+usati come deadhead per il rientro al deposito), il registro tiene
+traccia delle vetture già "prenotate" da turni PdC esistenti, in modo
+che il :func:`vettura_resolver.risolvi_rientro` possa escluderle dalle
+candidate per i nuovi turni.
+
+Chiave registro: tupla ``(numero_treno, operatore, data_operativa)``.
+- ``operatore`` può essere ``None`` (es. dati legacy senza operatore noto):
+  il match è strict (None matcha solo None).
+- ``data_operativa`` è la data del **turno PdC** che usa la vettura
+  (decisione NINO conservativa, vedi piano riga 220+ docs/piani/SPRINT-8.2-MR-PD-FIX-SEVERO-3b-piano.md).
+- ``data_operativa = None`` nel registro funziona come **wild card match**
+  (collide con qualunque data) — usato dal ``from_db`` MVP finché
+  ``enumera_date_giornata`` non viene scritto (S4 SEVERO TODO).
+
+NB: scope MVP = solo VETTURA. Le corse commerciali CONDOTTA sono già
+unicizzate dal modello giro 1:1 PdC + da ``MR-PD7a`` §15 intra-turno
+(entry 274). Cross-turno per CONDOTTA è scope MR-PD7+ globale.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from datetime import date
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from colazione.models.turni_pdc import TurnoPdcBlocco
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RegistroVettureAssegnate:
+    """Registro stateful delle vetture rientro già prenotate.
+
+    Stato pubblico minimo: una mappa ``(numero, operatore) →
+    set[date | None]``. La data ``None`` significa "wild card" =
+    collide con qualunque data operativa (usato per backfill di turni
+    storici quando ``enumera_date_giornata`` non è ancora implementato).
+    """
+
+    _vetture: dict[tuple[str, str | None], set[date | None]] = field(
+        default_factory=dict
+    )
+    """Storage interno: chiave (numero_treno, operatore) → set di date
+    (None = wild card). Privato perché l'accesso passa via metodi che
+    incapsulano la semantica wild-card."""
+
+    def assegna(
+        self,
+        *,
+        numero_treno: str,
+        operatore: str | None,
+        data_operativa: date | None,
+    ) -> None:
+        """Marca la vettura ``(numero, operatore)`` come assegnata
+        nella ``data_operativa``. Idempotente.
+
+        Args:
+            numero_treno: Numero treno commerciale (es. ``"2425"``,
+                ``"28335i"``). Stringa esattamente come in ``TrenoVettura.numero``.
+            operatore: Operatore (es. ``"TN"``, ``"TILO"``). ``None`` per
+                dati legacy o operatore non noto.
+            data_operativa: Data del turno PdC che usa la vettura, in
+                formato ``date``. ``None`` per wild card (= la vettura
+                è registrata per qualsiasi data, usato dal ``from_db``
+                MVP per turni storici).
+        """
+        chiave = (numero_treno, operatore)
+        self._vetture.setdefault(chiave, set()).add(data_operativa)
+
+    def is_assegnata(
+        self,
+        *,
+        numero_treno: str,
+        operatore: str | None,
+        data_operativa: date,
+    ) -> bool:
+        """Verifica se ``(numero, operatore)`` è già assegnata nella
+        ``data_operativa``. Match con wild card: se nel registro c'è
+        ``data_operativa=None`` per la chiave, ritorna True (la vettura
+        è bloccata per qualsiasi data).
+
+        Args:
+            numero_treno: Vedi :meth:`assegna`.
+            operatore: Vedi :meth:`assegna`. Match strict (None matcha
+                solo None).
+            data_operativa: Data concreta da verificare (NON nullable
+                qui: il chiamante resolver SA la data del turno corrente).
+
+        Returns:
+            ``True`` se la vettura è prenotata per quella data (anche
+            via wild card), ``False`` altrimenti.
+        """
+        chiave = (numero_treno, operatore)
+        date_assegnate = self._vetture.get(chiave)
+        if date_assegnate is None:
+            return False
+        return data_operativa in date_assegnate or None in date_assegnate
+
+    def numeri_da_escludere(
+        self, *, data_operativa: date
+    ) -> frozenset[tuple[str, str | None]]:
+        """Restituisce l'insieme di chiavi ``(numero, operatore)`` che
+        il resolver deve escludere dalle candidate vettura per la
+        ``data_operativa``. Include anche le entry wild card (``None``).
+
+        Usato dal ``vettura_resolver.risolvi_rientro`` per filtrare i
+        candidati PRIMA dell'ordinamento (vs loop esterno con
+        ``ora_min_partenza+1``, anti-pattern raccomandato da SEVERO S7).
+
+        Args:
+            data_operativa: Data concreta del turno corrente.
+
+        Returns:
+            Set frozen delle chiavi da escludere. Vuoto se nessuna
+            vettura è prenotata per quella data.
+        """
+        out: set[tuple[str, str | None]] = set()
+        for chiave, date_assegnate in self._vetture.items():
+            if data_operativa in date_assegnate or None in date_assegnate:
+                out.add(chiave)
+        return frozenset(out)
+
+    @property
+    def n_assegnate(self) -> int:
+        """Numero totale di entry (chiave, data) registrate. Utile per
+        log/diagnostica."""
+        return sum(len(s) for s in self._vetture.values())
+
+    @classmethod
+    async def from_db(
+        cls,
+        db: AsyncSession,
+        *,
+        programma_id: int,
+    ) -> RegistroVettureAssegnate:
+        """Factory che popola il registro dai turni PdC già esistenti
+        in DB per il programma indicato.
+
+        MVP wild card: legge i blocchi ``tipo_evento='VETTURA'`` con
+        ``numero_treno_vettura IS NOT NULL`` (campo introdotto da
+        migration 0046, MR-PD-FIX-SEVERO 3b A1). I blocchi storici
+        senza il campo popolato vengono ignorati (campo nullable, OK).
+
+        La ``data_operativa`` viene impostata a ``None`` (wild card)
+        perché ``TurnoPdcGiornata`` non ha ancora ``data: date``: è
+        identificato da numero giornata + variante calendariale, che
+        materializza in N date concrete via helper
+        ``enumera_date_giornata`` (TODO S4 SEVERO, scope MR-PD7+).
+
+        Per MVP è una scelta **conservativa**: una vettura registrata
+        wild-card collide con qualsiasi data operativa = il resolver
+        la esclude sempre. Effetto pratico: nessun turno PdC futuro
+        può usare una vettura già usata da un turno qualsiasi del
+        programma. Sovra-strict ma sicuro (no doppioni).
+
+        Quando ``enumera_date_giornata`` sarà disponibile, il
+        ``from_db`` userà la data concreta invece di ``None``, allenando
+        il match.
+
+        Args:
+            db: Sessione AsyncSession per la query.
+            programma_id: ID del programma del quale caricare i turni.
+
+        Returns:
+            Registro popolato (può essere vuoto se nessun turno
+            esistente).
+        """
+        # NB: il filtro per programma è transitive: turno_pdc_blocco →
+        # turno_pdc_giornata → turno_pdc → programma_id. Per ora una
+        # query SELECT semplice senza JOIN espliciti che restituisce
+        # *tutti* i blocchi VETTURA con campo non null. Il programma_id
+        # è ricevuto come hint (il filtro fine resta TODO S4: serve
+        # JOIN multi-tabella + filtro programma_id).
+        # Per MVP wild-card su scope-programma, tradiamo precisione per
+        # semplicità e siamo conservativi (sovra-include).
+        registro = cls()
+
+        stmt = select(
+            TurnoPdcBlocco.numero_treno_vettura,
+        ).where(
+            TurnoPdcBlocco.tipo_evento == "VETTURA",
+            TurnoPdcBlocco.numero_treno_vettura.is_not(None),
+        )
+        result = await db.execute(stmt)
+        rows = result.all()
+        for row in rows:
+            numero = row[0]
+            if numero is None:  # defensive
+                continue
+            # Operatore non recuperato dal DB MVP: chiave wild su
+            # operatore (None). Quando la migration aggiungerà
+            # operatore_treno_vettura, questo sarà raffinato.
+            registro.assegna(
+                numero_treno=numero,
+                operatore=None,
+                data_operativa=None,  # wild card S4 TODO
+            )
+        # programma_id ignorato per ora (sovra-include) ma loggato per
+        # tracciabilità del scope intenzionale.
+        logger.info(
+            "RegistroVettureAssegnate.from_db: %d vetture caricate "
+            "(scope wild-card, programma_id=%d ignorato MVP)",
+            registro.n_assegnate,
+            programma_id,
+        )
+        return registro
+
+
+__all__ = ["RegistroVettureAssegnate"]

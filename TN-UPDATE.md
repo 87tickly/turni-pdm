@@ -10,6 +10,136 @@
 
 ---
 
+## 2026-05-09 (279) — Sprint 8.2 MR-PD-FIX-SEVERO 3b (A1+A2 unificato): RegistroVettureAssegnate cross-PdC + PartenzeCache shared via BuilderProgrammaContext
+
+### Contesto
+
+Chiusura A1+A2 della re-critica AMILCARE entry 276. MR unico coordinato
+(decisione utente + FAUSTO: entrambi toccano `risolvi_rientro` signature
+→ rework garantito se separati). Sequenza piano α: A3 ✅ (entry 277),
+3b ora, MR-PD7b dopo.
+
+Critica preventiva SEVERO sul piano: voto **5/10 fallback NINO puro**
+(AMILCARE V4 Pro 4 timeout consecutivi anche con brief 500B, server
+saturo cronicamente questa sessione). 5 finding HIGH + 3 MED/LOW
+integrati nel piano post-critica:
+- **S1 HIGH**: regex `accessori_note` → migration `numero_treno_vettura`
+  campo dedicato (anti-pattern §7 NIENTE PIGRIZIA accettato)
+- **S2 HIGH**: cross-mezzanotte → decisione NINO conservativa = data
+  operativa del turno (vs data calendar partenza/arrivo vettura)
+- **S3 MED**: chiave registro `(numero, operatore)` invece di solo
+  numero (TILO con stesso numero non collide)
+- **S4 HIGH**: `enumera_date_giornata` mancante → MVP wild card match
+  (data_operativa=None matcha qualunque data, conservativo sovra-strict),
+  helper completo rimandato MR-PD7+
+- **S6 LOW**: rinomina `builder_programma.py` → `programma_context.py`
+- **S7 MED**: loop `ora_min_partenza+1` anti-pattern → `trova_treno_vettura(esclusi)`
+  filtro pre-ordinamento opt-in
+- **S5/S8** rimandati (after-commit listener MR-PD7+, stima reale
+  9.5-10h netti vs 7.5h)
+
+### Modifiche
+
+**Migration alembic 0046** (`backend/alembic/versions/0046_mr_pd_fix_severo_3b_numero_treno_vettura.py`,
+~50 righe): aggiunge `turno_pdc_blocco.numero_treno_vettura: VARCHAR(20)
+NULL` + index `ix_turno_pdc_blocco_numero_treno_vettura`. Revision
+`b7c8d9e0f1a2`, downstream di 0045. Backward-compatible (campo nullable).
+
+**Modello `TurnoPdcBlocco`** (`backend/src/colazione/models/turni_pdc.py`):
+campo nuovo `numero_treno_vettura: Mapped[str | None] = mapped_column(String(20), index=True)`.
+
+**Builder draft `_BloccoPdcDraft`** (`backend/src/colazione/domain/builder_pdc/builder.py:139-153`):
+campo nuovo `numero_treno_vettura: str | None = None`. Persister
+`_persisti_un_turno_pdc:1083-1100` propaga al INSERT.
+
+**Builder MVP `deposito_first._inserisci_blocco_rientro`**
+(`deposito_first.py:147-160`): popola `numero_treno_vettura=treno.numero`
+quando crea blocco VETTURA. Sostituisce parsing regex su `accessori_note`.
+
+**Nuovo modulo `registro_vetture.py`** (~210 righe):
+- `class RegistroVettureAssegnate` stateful, chiave `(numero, operatore)
+  → set[date | None]`. Wild card semantica per data=None.
+- API: `assegna()`, `is_assegnata()`, `numeri_da_escludere()`,
+  `n_assegnate` property
+- Factory `from_db(db, programma_id)` SELECT `numero_treno_vettura`
+  dei blocchi VETTURA (MVP wild-card per data, programma_id sovra-include)
+
+**Nuovo modulo `programma_context.py`** (~110 righe):
+- `@dataclass class BuilderProgrammaContext` con 3 dipendenze obbligatorie
+  (`cache: PartenzeCache`, `registro: RegistroVettureAssegnate`,
+  `live_client: httpx.AsyncClient`) + `programma_id` per logging +
+  `metadata` libero
+- Factory async `crea_per_programma(db, programma_id, live_client)`
+  istanzia tutto, pre-popola registro da DB
+
+**`live_arturo.trova_treno_vettura`** (`live_arturo.py:226-301`):
+parametro nuovo `esclusi: frozenset[tuple[str, str | None]] | None = None`
+opt-in. Filtro applicato pre-ordinamento (~6 righe). Backward-compatible
+(default None = comportamento legacy).
+
+**`vettura_resolver.risolvi_rientro`** (`vettura_resolver.py:172-184`):
+parametri nuovi `registro: RegistroVettureAssegnate | None = None`,
+`data_operativa: date | None = None` opt-in. Calcola `esclusi` dal
+registro pre-Step 1 + propaga a `trova_treno_vettura`. Tutto backward-compatible.
+
+**`deposito_first.costruisci_giornata_deposito_first`**
+(`deposito_first.py:213-232`): parametri nuovi `context:
+BuilderProgrammaContext | None = None`, `data_operativa: date | None = None`.
+Se `context` valorizzato: usa `context.cache` e `context.registro`
+(dependency injection sovrascrive `cache` opt-in legacy). Dopo `risolvi_rientro`
+SE rientro=SceltaVettura, registra subito nel `context.registro` per le
+chiamate successive nello stesso run (intra-request, prima del POST-INSERT).
+
+**`deposito_first.genera_turni_pdc_deposito_first`**: istanzia
+`BuilderProgrammaContext.crea_per_programma(session, programma_id=giro.programma_id, live_client)`
+all'inizio del run + propaga a tutte le giornate. MVP `data_operativa=valido_da_eff`
+per tutte le giornate (S4 TODO: helper `enumera_date_giornata` raffinerà
+per varianti calendariali multi-data).
+
+### Verifiche
+
+- ✅ pytest test_registro_vetture: **15 passed** (nuovo file)
+- ✅ pytest test_vettura_resolver: **13 passed** (era 11 +2 nuovi A1 propagation)
+- ✅ pytest suite PdC completa (5 file): **53 passed**, 3 xfailed
+  (intenzionali MR-PD1). **Zero regressioni**.
+- ✅ mypy --strict (11 source files in builder_pdc/ + test_registro_vetture):
+  clean
+- ✅ ruff check builder_pdc/ + tests modificati: clean (3 fix auto applicati
+  per quote inutili da `from __future__ import annotations`)
+
+### Limitazioni dichiarate (residui legittimi)
+
+1. **Helper `enumera_date_giornata` non scritto**: `data_operativa` MVP =
+  `valido_da` per tutte le giornate, ignorando varianti calendariali
+  multi-data ("F", "Solo X-Y", LV+escl). Effetto pratico: registro
+  sovra-include (= sovra-strict, no doppioni ma può scartare vetture
+  legittime). Scope MR-PD7+ con la validazione cross-turno completa §15.4.
+2. **`from_db` filtra `programma_id` ignorato**: query SELECT semplice
+  su tutti i blocchi VETTURA con campo non null, senza JOIN multi-tabella
+  per limitare a quel programma. MVP scelto perché conservativo (sovra-include
+  = registra anche vetture di altri programmi → ulteriore strictness).
+  TODO esplicito nel modulo.
+3. **After-commit listener per rollback transazione esterna**: registra
+  POST-INSERT (in `deposito_first` intra-request, OK) + DB query
+  iniziale (cross-request, OK). Rollback transazione DB lascia entry
+  stale in registro in-memory: ma il context è per-request, dies con
+  la request → no impatto cross-request. Documentato S5 SEVERO.
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway: la migration 0046 si applica al boot
+  (CMD = `alembic upgrade head && uvicorn ...`). Backward-compatible.
+
+### Stato
+
+- ✅ MR-PD-FIX-SEVERO 3b chiuso lato codice + test.
+- ✅ Tutti i finding A1+A2+A3 della re-critica AMILCARE entry 276
+  chiusi (A3 entry 277, A1+A2 questa).
+- ⏳ MR-PD7b §11.4 riposo settimanale (B): SEVERO sul piano + codice
+  4-6h. Ultimo MR del piano α.
+
+---
+
 ## 2026-05-09 (278) — Sprint 8.2 MR-D5h-A + MR-D5h-DUAL: scissione sede target/operativa CHIUDE Plan-D end-to-end (11 giri persistiti per FIO prog 17)
 
 ### Contesto
