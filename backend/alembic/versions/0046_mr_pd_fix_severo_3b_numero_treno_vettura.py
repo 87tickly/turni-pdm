@@ -22,7 +22,7 @@ Operazioni:
 
 Rollback: DROP INDEX + DROP COLUMN.
 
-Revision ID: b7c8d9e0f1a2
+Revision ID: c8d9e0f1a2b3
 Revises: a6b7c8d9e0f1
 Create Date: 2026-05-09
 """
@@ -32,7 +32,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "b7c8d9e0f1a2"
+revision: str = "c8d9e0f1a2b3"
 down_revision: str | None = "a6b7c8d9e0f1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
