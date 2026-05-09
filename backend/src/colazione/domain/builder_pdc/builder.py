@@ -176,6 +176,14 @@ class _GiornataPdcDraft:
     ``is_notturno`` (superinclusivo per UI). Usato dal cap-discriminator nei
     builder + vettura_resolver."""
     violazioni: list[str]
+    riposo_min_post: int = 0
+    """Sprint 8.2 MR-PD7b-2: riposo intraturno (in minuti) DOPO questa
+    giornata, ovvero il gap fra ``fine_prestazione`` di questa giornata
+    e ``inizio_prestazione`` della giornata successiva (wrap-around
+    per l'ultima giornata del ciclo). Popolato da
+    ``riposo_intraturno.calcola_riposi_intraturno`` post-build,
+    persistito in ``TurnoPdcGiornata.riposo_min`` (sostituisce
+    placeholder 0 di builder.py:1074 pre-MR-PD7b-2)."""
 
 
 # --- Costruzione di una singola giornata PdC ------------------------------
@@ -1071,7 +1079,7 @@ async def _persisti_un_turno_pdc(
             is_notturno=d.is_notturno,
             is_riposo=False,
             is_disponibile=False,
-            riposo_min=0,
+            riposo_min=d.riposo_min_post,
         )
         session.add(gg_orm)
         await session.flush()

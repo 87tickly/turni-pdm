@@ -588,7 +588,20 @@ async def genera_turni_pdc_deposito_first(
     # (nessun doppione di segmento commerciale o vuoto fra le N
     # giornate del turno).
     unicita_violazioni = _verifica_unicita_intra_turno(drafts)
-    violazioni_extra = list(fr_cap_violazioni) + unicita_violazioni
+
+    # 7.ter. Sprint 8.2 MR-PD7b-2 §11.5: calcola riposo intraturno
+    # (popola riposo_min_post di ogni draft + valida 11/14/16h).
+    # Side-effect: aggiorna draft.riposo_min_post per persistenza.
+    from colazione.domain.builder_pdc.riposo_intraturno import (
+        calcola_e_valida_riposi_intraturno,
+    )
+    riposo_intraturno_violazioni = calcola_e_valida_riposi_intraturno(drafts)
+
+    violazioni_extra = (
+        list(fr_cap_violazioni)
+        + unicita_violazioni
+        + riposo_intraturno_violazioni
+    )
 
     # 8. Persisti TurnoPdc + giornate + blocchi via helper builder.py
     codice = genera_codice_turno(giro, depot)
@@ -606,6 +619,7 @@ async def genera_turni_pdc_deposito_first(
             "is_ramo_split": False,
             "fr_cap_violazioni": fr_cap_violazioni,
             "unicita_violazioni": unicita_violazioni,
+            "riposo_intraturno_violazioni": riposo_intraturno_violazioni,
             "builder_strategy": "deposito_first",
             "violazioni_giornate_scartate": violazioni_giornate_scartate,
         },

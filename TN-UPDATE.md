@@ -10,6 +10,96 @@
 
 ---
 
+## 2026-05-10 (281) — Sprint 8.2 MR-PD7b-2: §11.5 riposo intraturno 11/14/16h (chiude prerequisito S2 SEVERO PIANO PD7b)
+
+### Contesto
+
+Secondo step opzione Z. Implementa NORMATIVA-PDC §11.5 RIGIDA:
+- 11h standard tra giornate consecutive
+- 14h dopo giornata che finisce tra 00:01-01:00
+- 16h dopo giornata notturna (fine 00:01-05:00)
+
+S2 SEVERO PIANO PD7b dichiarava `riposo_min=0` placeholder come bug
+prerequisito. Sostituito con calcolo reale + validazione + persistenza.
+
+### Modifiche
+
+**Nuovo modulo `backend/src/colazione/domain/builder_pdc/riposo_intraturno.py`** (~190 righe):
+- 3 costanti: `RIPOSO_INTRATURNO_STD_MIN=11*60`,
+  `RIPOSO_INTRATURNO_FINE_TARDA_MIN=14*60`,
+  `RIPOSO_INTRATURNO_NOTTURNO_MIN=16*60`
+- `riposo_richiesto_min(fine_prestazione: time) -> int`: applica regola
+  §11.5. Decisione conservativa NINO sull'overlap [00:01-01:00] (sia
+  "fine tarda" 14h che "notturno" 16h si applicherebbero, scelgo 16h
+  più cautelativo per il PdC).
+- `riposo_effettivo_min(fine_prec, inizio_succ) -> int`: gap fra fine
+  giornata i e inizio i+1 con wrap modulo 24h.
+- `calcola_e_valida_riposi_intraturno(drafts) -> list[str]`:
+  - Side effect: popola `draft.riposo_min_post` per ogni draft.
+  - Per coppie interne (i, i+1): valida riposo effettivo ≥ richiesto.
+  - Per ultima giornata (wrap-around): stima conservativa
+    `gap_singola_notte + 24h` (placeholder finché §11.4 MR-PD7b-3
+    non raffina).
+  - Ritorna lista violazioni testuali formato
+    `"riposo_intraturno_insufficiente:G{i}->G{j}:richiesti_{N}min:effettivi_{M}min"`.
+
+**Builder draft `_GiornataPdcDraft`** (`builder.py:178-185`):
+campo nuovo `riposo_min_post: int = 0` con docstring esplicita.
+
+**Persister `builder.py:1074`**: sostituisce `riposo_min=0` placeholder
+con `riposo_min=d.riposo_min_post` (popolato pre-persistenza dal
+validatore intraturno).
+
+**`deposito_first.genera_turni_pdc_deposito_first`**: nuovo step 7.ter
+chiama `calcola_e_valida_riposi_intraturno(drafts)` PRIMA del persister
++ propaga le violazioni a `violazioni_extra` + aggiunge
+`riposo_intraturno_violazioni` al `metadata_json`.
+
+### Test
+
+**Nuovo `backend/tests/test_riposo_intraturno.py`** (~150 righe), 18 test
+in 3 classi:
+
+- `TestRiposoRichiesto` (8 test): fasce orarie standard / mezzanotte
+  esatta / 00:30 / 03:00 / 04:59 / 05:00.
+- `TestRiposoEffettivo` (3 test): wrap-around 22→09, 23:30→13:30, 00:30→19.
+- `TestValidatoreIntraturno` (7 test): ciclo 2gg ok / insufficiente,
+  notturno, ciclo 3gg con 1 violazione, lista vuota, singola giornata
+  wrap-only.
+
+### Verifiche
+
+- ✅ pytest test_riposo_intraturno: 18 passed
+- ✅ pytest suite PdC completa (7 file): **88 passed**, 3 xfailed
+  (intenzionali). Zero regressioni.
+- ✅ mypy --strict 12 source files: clean
+- ✅ ruff: clean
+
+### Limitazioni dichiarate
+
+1. **Wrap-around ultima giornata**: stima conservativa
+   `gap_singola_notte + 24h`. Reale finestra settimanale dipende dal
+   ciclo (5+2 vs 7+0 vs irregular). Raffinamento in MR-PD7b-3 (§11.4
+   con date concrete via helper `enumera_date_giornata`).
+2. **Solo `genera_turni_pdc_deposito_first` integrato**: il vecchio
+   path `multi_turno.genera_turni_pdc_multi` continua col placeholder
+   `riposo_min=0`. MR-PD7b-2 NON tocca multi_turno (out-of-scope:
+   path opt-in deposito_first è quello da blindare per uso prod).
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway: builder modifica + nuovo modulo. Backward
+  compat (`riposo_min_post` default 0 = comportamento legacy se non
+  passato dal validatore).
+
+### Stato
+
+- ✅ MR-PD7b-2 chiuso. Prerequisito S2 SEVERO PIANO PD7b risolto.
+- ⏳ MR-PD7b-3 (§11.4 corretto + date concrete via enumera_date_giornata):
+  ULTIMO sub-MR del piano α. Costo 3-4h.
+
+---
+
 ## 2026-05-09 (280) — Sprint 8.2 MR-PD7b-1: helper enumera_date_giornata (prerequisito S4 SEVERO entry 279)
 
 ### Contesto
