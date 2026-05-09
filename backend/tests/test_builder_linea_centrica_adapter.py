@@ -24,6 +24,7 @@ from colazione.domain.builder_giro.aggregazione_a2 import (
 )
 from colazione.domain.builder_giro.builder import (
     _giro_linea_centrica_a_aggregato,
+    _traduce_e_filtra_giri_linea_centrica,
 )
 from colazione.domain.builder_giro.catena import Catena
 from colazione.domain.builder_giro.multi_giornata import (
@@ -55,6 +56,7 @@ def _giro(
     km: float = 100.0,
     n_giornate: int = 1,
     dates_apply: tuple[date, ...] | None = None,
+    regola_id: int | None = 42,
 ) -> Giro:
     catena = Catena(corse=(_CorsaFake(),))
     cat_pos = CatenaPosizionata(
@@ -64,7 +66,7 @@ def _giro(
         catena=catena,
         vuoto_coda=None,
         chiusa_a_localita=chiuso,
-        regola_id=42,
+        regola_id=regola_id,
     )
     giornate = tuple(
         GiornataGiro(
@@ -221,3 +223,121 @@ def test_adapter_catena_posizionata_preserved() -> None:
     )
     var = agg.giornate[0].varianti[0]
     assert var.catena_posizionata is cat_pos_originale
+
+
+# =====================================================================
+# Sprint 8.2 MR-D5f S2 — test traduce_e_filtra (chiude finding HIGH
+# critica SEVERO 4/10 entry 270: "manca test sul ramo regola_id=None
+# → scarto giro").
+# =====================================================================
+
+
+def test_traduce_e_filtra_caso_felice_giro_persiste() -> None:
+    """Giro con regola_id valida + sede del run → persistito."""
+    giro = _giro(localita="FIO", regola_id=42)
+    out = _traduce_e_filtra_giri_linea_centrica(
+        giri=(giro,),
+        materiale_per_regola={42: "ETR522"},
+        localita_codice_run="FIO",
+    )
+    giri_persistibili, n_no_mat, n_altra_sede, sedi_altre, warnings = out
+    assert len(giri_persistibili) == 1
+    assert giri_persistibili[0].materiale_tipo_codice == "ETR522"
+    assert n_no_mat == 0
+    assert n_altra_sede == 0
+    assert sedi_altre == set()
+    assert warnings == []
+
+
+def test_traduce_e_filtra_regola_id_none_scarta_giro() -> None:
+    """S2 RED-PHASE: giro con regola_id=None → scartato + warning +
+    counter, NON in `giri_persistibili`. Chiude finding HIGH SEVERO
+    sul ramo MR-D5e non testato.
+    """
+    giro = _giro(localita="FIO", regola_id=None)
+    out = _traduce_e_filtra_giri_linea_centrica(
+        giri=(giro,),
+        materiale_per_regola={42: "ETR522"},
+        localita_codice_run="FIO",
+    )
+    giri_persistibili, n_no_mat, n_altra_sede, sedi_altre, warnings = out
+    assert giri_persistibili == []
+    assert n_no_mat == 1
+    assert n_altra_sede == 0
+    assert sedi_altre == set()
+    # Almeno 1 warning con il pattern "Giro linea-centrica scartato"
+    assert any("Giro linea-centrica scartato" in w for w in warnings)
+    # Aggregazione finale "N giri scartati per materiale non risolto"
+    assert any(
+        "scartati per materiale non risolto" in w for w in warnings
+    )
+
+
+def test_traduce_e_filtra_regola_id_non_in_dict_scarta_giro() -> None:
+    """Giro con regola_id valida ma NON in `materiale_per_regola`
+    → scartato (caso composizione_json vuota a monte)."""
+    giro = _giro(localita="FIO", regola_id=999)
+    out = _traduce_e_filtra_giri_linea_centrica(
+        giri=(giro,),
+        materiale_per_regola={42: "ETR522"},  # 999 NON presente
+        localita_codice_run="FIO",
+    )
+    giri_persistibili, n_no_mat, n_altra_sede, _sedi, warnings = out
+    assert giri_persistibili == []
+    assert n_no_mat == 1
+    assert n_altra_sede == 0
+    assert any("regola_id=999" in w for w in warnings)
+
+
+def test_traduce_e_filtra_giro_altra_sede_non_persistito() -> None:
+    """MR-D5f filtro persistenza: giro per sede diversa dal run →
+    contato in `n_altra_sede` ma NON persistito (modello cumulativo)."""
+    giro = _giro(localita="CRE", regola_id=42)
+    out = _traduce_e_filtra_giri_linea_centrica(
+        giri=(giro,),
+        materiale_per_regola={42: "ATR803"},
+        localita_codice_run="FIO",  # run è FIO, giro è CRE
+    )
+    giri_persistibili, n_no_mat, n_altra_sede, sedi_altre, warnings = out
+    assert giri_persistibili == []
+    assert n_no_mat == 0
+    assert n_altra_sede == 1
+    assert sedi_altre == {"CRE"}
+    assert any(
+        "1 giri per sedi diverse da FIO" in w and "[CRE]" in w
+        for w in warnings
+    )
+
+
+def test_traduce_e_filtra_misti_alcuni_persisti_altri_scartati() -> None:
+    """3 giri: 1 sede del run OK, 1 altra sede, 1 senza regola →
+    1 persistito, contatori coerenti, sedi_altre popolato."""
+    giro_ok = _giro(localita="FIO", regola_id=42)
+    giro_altra = _giro(localita="CRE", regola_id=42)
+    giro_no_mat = _giro(localita="FIO", regola_id=None)
+    out = _traduce_e_filtra_giri_linea_centrica(
+        giri=(giro_ok, giro_altra, giro_no_mat),
+        materiale_per_regola={42: "ETR522"},
+        localita_codice_run="FIO",
+    )
+    giri_persistibili, n_no_mat, n_altra_sede, sedi_altre, _warnings = out
+    assert len(giri_persistibili) == 1
+    assert giri_persistibili[0].localita_codice == "FIO"
+    assert n_no_mat == 1
+    assert n_altra_sede == 1
+    assert sedi_altre == {"CRE"}
+
+
+def test_traduce_e_filtra_giri_vuoti_no_warnings() -> None:
+    """Edge case: nessun giro in input → output pulito, no warnings."""
+    out = _traduce_e_filtra_giri_linea_centrica(
+        giri=(),
+        materiale_per_regola={42: "ETR522"},
+        localita_codice_run="FIO",
+    )
+    giri_persistibili, n_no_mat, n_altra_sede, sedi_altre, warnings = out
+    assert giri_persistibili == []
+    assert n_no_mat == 0
+    assert n_altra_sede == 0
+    assert sedi_altre == set()
+    assert warnings == []

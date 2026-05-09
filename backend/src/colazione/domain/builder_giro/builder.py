@@ -290,6 +290,13 @@ class BuilderResult:
             geograficamente alla sede.
         n_eventi_composizione: blocchi aggancio/sgancio inseriti.
         n_incompatibilita_materiale: warning più tipi materiale per giornata.
+        n_giri_scartati: Sprint 8.2 MR-D5f S1: giri prodotti dalla pipeline
+            ma NON persistiti (= scarti silenziosi visibilizzati). Causa
+            tipica nel ramo linea-centrica: ``regola_id=None`` non risolve
+            a un materiale (entry 270), oppure giro generato per una sede
+            diversa da quella del run (modello cumulativo single-sede:
+            altre sedi vanno persistite con chiamate successive). Default
+            0 per il ramo legacy che non scarta.
         warnings: messaggi human-readable per il pianificatore (UI).
     """
 
@@ -302,6 +309,7 @@ class BuilderResult:
     n_eventi_composizione: int
     n_incompatibilita_materiale: int
     n_giri_km_cap: int = 0
+    n_giri_scartati: int = 0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -345,6 +353,48 @@ async def _carica_localita(
     if loc is None:
         raise LocalitaNonTrovataError(codice, azienda_id)
     return loc
+
+
+async def _carica_sedi_attive_azienda(
+    session: AsyncSession, azienda_id: int
+) -> dict[str, str]:
+    """Sprint 8.2 MR-D5f: pool COMPLETO delle sedi attive per il ramo
+    linea-centrica (chiude bug architetturale single-sede entry 270).
+
+    Restituisce ``{codice_localita: stazione_collegata_codice}`` per
+    tutte le `LocalitaManutenzione` con ``is_attiva=True`` E
+    ``stazione_collegata_codice IS NOT NULL`` (le sedi senza stazione
+    collegata non sono utilizzabili da MR-D2 per rilevare aderenza
+    capolinee).
+
+    Necessario perché MR-D2 (`assegna_convogli_linea`) applica
+    constraint HARD #2 SEVERO ("no ciclo aperto fuori area Milano")
+    confrontando i capolinee del segmento con TUTTE le aree delle
+    sedi disponibili. In single-sede (la modalità del ramo legacy
+    pre-MR-D5f) il constraint scartava il 98% dei segmenti per
+    capolinee non-Milano. Pool completo ripristina la corretta
+    operatività multi-sede mantenendo invariato il modello cumulativo
+    a livello di persistenza (filtro per ``localita.codice`` corrente
+    nel chiamante).
+
+    NOTA scope: il pool è dell'azienda, non del programma. Per
+    Trenord (azienda_id=2) sono ~7-8 sedi (FIO, NOV, CAM, LEC, CRE,
+    ISE + pool TILO). Per programmi che attivano solo regole su un
+    sottoinsieme delle sedi, le sedi "extra" del pool sono innocue
+    perché MR-D2 le scarta in fase di scoring (no segmenti
+    candidati). Filtraggio per programma è scope MR-D5g (se
+    necessario per performance).
+    """
+    stmt = select(LocalitaManutenzione).where(
+        LocalitaManutenzione.azienda_id == azienda_id,
+        LocalitaManutenzione.is_attiva.is_(True),
+        LocalitaManutenzione.stazione_collegata_codice.isnot(None),
+    )
+    sedi: dict[str, str] = {}
+    for loc in (await session.execute(stmt)).scalars().all():
+        if loc.stazione_collegata_codice is not None:
+            sedi[loc.codice] = loc.stazione_collegata_codice
+    return sedi
 
 
 async def _carica_whitelist_stazioni(session: AsyncSession, localita_id: int) -> frozenset[str]:
@@ -1194,6 +1244,103 @@ def _giro_linea_centrica_a_aggregato(
     )
 
 
+def _traduce_e_filtra_giri_linea_centrica(
+    *,
+    giri: Sequence[Giro],
+    materiale_per_regola: dict[int, str],
+    localita_codice_run: str,
+) -> tuple[list[GiroAggregato], int, int, set[str], list[str]]:
+    """Sprint 8.2 MR-D5f S2: funzione pura per traduzione + filtro
+    giri linea-centrica → GiroAggregato (chiamata da
+    `_genera_giri_linea_centrica`).
+
+    Estratta in helper indipendente per testabilità (red-phase test
+    `regola_id=None → scarto` non era coperto pre-MR-D5f, finding
+    HIGH critica SEVERO 4/10 entry 270).
+
+    Logica:
+
+    1. Per ogni giro, risolve il materiale via
+       ``materiale_per_regola[regola_id_giro]``. Se ``regola_id`` è
+       None o non risolve, scarta il giro con warning (chiude bug
+       FK MISTO MR-D5e).
+    2. Filtra per ``localita_codice_run``: solo i giri della sede
+       corrente vengono persistiti (modello cumulativo, decisione
+       utente 2026-05-01). Giri di altre sedi sono prodotti dalla
+       pipeline (multi-sede MR-D5f) ma persistiti in chiamate
+       successive — qui contati per warning trasparente.
+
+    Args:
+        giri: output ``result.giri`` della pipeline linea-centrica.
+        materiale_per_regola: lookup ``regola_id → materiale_tipo_codice``.
+        localita_codice_run: la sede del run corrente (filtro
+            persistenza).
+
+    Returns:
+        Tupla (giri_persistibili, n_scartati_no_materiale, n_altra_sede,
+        sedi_altre_set, warnings).
+    """
+    giri_aggregati_per_sede: list[tuple[GiroAggregato, str]] = []
+    n_scartati_no_materiale = 0
+    warnings: list[str] = []
+    for giro in giri:
+        regola_id_giro = (
+            giro.giornate[0].catena_posizionata.regola_id
+            if giro.giornate
+            else None
+        )
+        materiale: str | None = None
+        if regola_id_giro is not None:
+            materiale = materiale_per_regola.get(regola_id_giro)
+        if materiale is None:
+            warnings.append(
+                f"Giro linea-centrica scartato: regola_id={regola_id_giro!r} "
+                "non risolve a un materiale (composizione_json vuota o "
+                "regola assente)."
+            )
+            n_scartati_no_materiale += 1
+            continue
+        giri_aggregati_per_sede.append(
+            (
+                _giro_linea_centrica_a_aggregato(
+                    giro, materiale_tipo_codice=materiale
+                ),
+                giro.localita_codice,
+            )
+        )
+    if n_scartati_no_materiale:
+        warnings.append(
+            f"Pipeline linea-centrica: {n_scartati_no_materiale} giri "
+            "scartati per materiale non risolto (vedi warning specifici sopra)."
+        )
+
+    giri_per_sede_run: list[GiroAggregato] = []
+    n_altra_sede = 0
+    sedi_altre_set: set[str] = set()
+    for giro_agg, sede in giri_aggregati_per_sede:
+        if sede == localita_codice_run:
+            giri_per_sede_run.append(giro_agg)
+        else:
+            n_altra_sede += 1
+            sedi_altre_set.add(sede)
+    if n_altra_sede > 0:
+        sedi_altre_str = ", ".join(sorted(sedi_altre_set))
+        warnings.append(
+            f"Pipeline ha generato {n_altra_sede} giri per sedi diverse "
+            f"da {localita_codice_run}: [{sedi_altre_str}]. Esegui "
+            "genera-giri per ciascuna di queste sedi per persisterli "
+            "(modello cumulativo)."
+        )
+
+    return (
+        giri_per_sede_run,
+        n_scartati_no_materiale,
+        n_altra_sede,
+        sedi_altre_set,
+        warnings,
+    )
+
+
 async def _genera_giri_linea_centrica(
     *,
     programma: ProgrammaMateriale,
@@ -1232,7 +1379,6 @@ async def _genera_giri_linea_centrica(
     """
     warnings = list(warnings_esistenti)
 
-    # Costruisce sedi_disponibili dal solo localita del run (single-sede).
     if localita.stazione_collegata_codice is None:
         warnings.append(
             f"Sede {localita.codice!r} senza stazione_collegata: "
@@ -1249,9 +1395,22 @@ async def _genera_giri_linea_centrica(
             n_incompatibilita_materiale=0,
             warnings=warnings,
         )
-    sedi_disponibili: dict[str, str] = {
-        localita.codice: localita.stazione_collegata_codice
-    }
+    # Sprint 8.2 MR-D5f: pool COMPLETO sedi attive azienda (non più
+    # single-sede {localita}). Chiude bug architetturale entry 270:
+    # MR-D2 con 1 sola sede scartava il 98% dei segmenti per
+    # constraint HARD #2 SEVERO ("no ciclo aperto fuori area Milano").
+    # Modello cumulativo è preservato a livello di persistenza:
+    # vediamo sotto il filtro `g.localita_codice == localita.codice`.
+    sedi_disponibili = await _carica_sedi_attive_azienda(session, azienda_id)
+    if localita.codice not in sedi_disponibili:
+        # Edge case: la sede del run non è (più) censita nel pool
+        # completo (es. is_attiva=False). Forziamo l'inclusione del
+        # solo run; MR-D2 lavorerà ridotto come pre-MR-D5f.
+        sedi_disponibili[localita.codice] = localita.stazione_collegata_codice
+        warnings.append(
+            f"Sede {localita.codice!r} non risulta attiva nel pool azienda; "
+            "pipeline procede in modalità degradata single-sede."
+        )
 
     # Materiale per segmento: derivato dalle regole della sede.
     # MR-D1 produce segmenti con codice ``{codice_linea}_completo`` o
@@ -1326,57 +1485,27 @@ async def _genera_giri_linea_centrica(
     )
     warnings.extend(result.warnings)
 
-    # Adapter Giro → GiroAggregato
-    # MR-D5e: per ``result.turni`` il segmento può essere ``_tronco_X``;
-    # se ``materiale_per_segmento`` non lo copre, ricado su
-    # ``materiale_per_regola`` via ``regola_per_segmento``. Se ancora
-    # nulla → debug log "MISTO" (questo dict è solo informativo e non
-    # finisce nel DB).
-    materiale_per_giro: dict[int, str] = {}
-    for turno in result.turni:
-        mat_turno = materiale_per_segmento.get(turno.segmento_codice)
-        if mat_turno is None:
-            r_id_turno = regola_per_segmento.get(turno.segmento_codice)
-            if r_id_turno is not None:
-                mat_turno = materiale_per_regola.get(r_id_turno)
-        materiale_per_giro[id(turno)] = mat_turno or "MISTO"
+    # MR-D5f S6 (chiude critica SEVERO 4/10 entry 270): rimosso il
+    # dict ``materiale_per_giro`` info-only zombie pre-MR-D5f.
+    # Il loop `for turno in result.turni: mat = ...` non era letto da
+    # nessuno (commit message MR-D5e dichiarava "non persiste in DB"
+    # senza specificare un consumer). Codice morto eliminato.
 
-    giri_aggregati: list[GiroAggregato] = []
-    giri_skippati = 0
-    for giro in result.giri:
-        # MR-D5e: lookup diretto regola_id → materiale (autoritativo).
-        # ``materiale_per_segmento`` ha solo varianti ``_completo``;
-        # i segmenti ``_tronco_X`` di MR-D1 non sono mappati.
-        regola_id_giro = (
-            giro.giornate[0].catena_posizionata.regola_id
-            if giro.giornate
-            else None
-        )
-        materiale: str | None = None
-        if regola_id_giro is not None:
-            materiale = materiale_per_regola.get(regola_id_giro)
-        if materiale is None:
-            # Caso degenerato: regola priva di materiale (composizione
-            # vuota) o ``regola_id`` non popolato dalla pipeline. Salto
-            # il giro con warning invece di propagare ``"MISTO"`` →
-            # FK violation su ``materiale_thread`` (Sprint 8.2 MR-D5e).
-            warnings.append(
-                f"Giro linea-centrica scartato: regola_id={regola_id_giro!r} "
-                "non risolve a un materiale (composizione_json vuota o "
-                "regola assente)."
-            )
-            giri_skippati += 1
-            continue
-        giri_aggregati.append(
-            _giro_linea_centrica_a_aggregato(
-                giro, materiale_tipo_codice=materiale
-            )
-        )
-    if giri_skippati:
-        warnings.append(
-            f"Pipeline linea-centrica: {giri_skippati} giri scartati per "
-            "materiale non risolto (vedi warning specifici sopra)."
-        )
+    # MR-D5f S2: estratta funzione pura `_traduce_e_filtra_giri_linea_centrica`
+    # per testabilità del ramo `regola_id=None → scarto` (red-phase test
+    # `test_traduce_e_filtra_*` in test_builder_linea_centrica_adapter).
+    (
+        giri_aggregati,
+        giri_scartati_no_materiale,
+        giri_altra_sede,
+        sedi_altre_set,
+        warnings_traduzione,
+    ) = _traduce_e_filtra_giri_linea_centrica(
+        giri=tuple(result.giri),
+        materiale_per_regola=materiale_per_regola,
+        localita_codice_run=localita.codice,
+    )
+    warnings.extend(warnings_traduzione)
 
     # Persiste
     giri_da_persistere: list[GiroDaPersistere] = []
@@ -1404,10 +1533,14 @@ async def _genera_giri_linea_centrica(
     )
     await session.commit()
 
-    # Stats
+    # Stats. Per coerenza con la response API (n_giri_creati = giri
+    # PERSISTITI per la sede del run), filtro chiusi/non_chiusi su
+    # `giri_aggregati` (sede del run) invece di `result.giri` (tutte
+    # le sedi).
     n_corse_processate = sum(t.n_corse_totali for t in result.turni)
-    n_giri_chiusi = sum(1 for g in result.giri if g.chiuso)
-    n_giri_non_chiusi = sum(1 for g in result.giri if not g.chiuso)
+    n_giri_chiusi = sum(1 for ga in giri_aggregati if ga.chiuso)
+    n_giri_non_chiusi = sum(1 for ga in giri_aggregati if not ga.chiuso)
+    n_giri_scartati = giri_scartati_no_materiale + giri_altra_sede
 
     # Persisti BuilderRun
     run = BuilderRun(
@@ -1438,6 +1571,7 @@ async def _genera_giri_linea_centrica(
         n_giri_km_cap=0,
         n_eventi_composizione=0,
         n_incompatibilita_materiale=0,
+        n_giri_scartati=n_giri_scartati,
         warnings=warnings,
     )
 

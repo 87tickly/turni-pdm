@@ -107,6 +107,15 @@ class BuilderResultResponse(BaseModel):
         description="Blocchi aggancio/sgancio inseriti (da validare in editor)."
     )
     n_incompatibilita_materiale: int
+    n_giri_scartati: int = Field(
+        default=0,
+        description=(
+            "Sprint 8.2 MR-D5f S1: giri prodotti dalla pipeline ma non "
+            "persistiti. Cause tipiche (ramo linea_centrica): regola_id=None, "
+            "oppure giro per sede diversa dalla `localita_codice` del run "
+            "(modello cumulativo). Se >0 frontend mostra toast warning."
+        ),
+    )
     warnings: list[str]
 
 
@@ -120,6 +129,7 @@ def _to_response(result: BuilderResult) -> BuilderResultResponse:
         n_giri_non_chiusi=result.n_giri_non_chiusi,
         n_eventi_composizione=result.n_eventi_composizione,
         n_incompatibilita_materiale=result.n_incompatibilita_materiale,
+        n_giri_scartati=result.n_giri_scartati,
         warnings=result.warnings,
     )
 
