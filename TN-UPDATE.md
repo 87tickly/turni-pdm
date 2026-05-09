@@ -10,6 +10,124 @@
 
 ---
 
+## 2026-05-10 (284) — Sprint 8.2 MR-D5h-bis + MR-D6: pipeline Plan-D produce materiali misti + giri chiusi naturale (chiusura ciclo MR-D5e→MR-D6)
+
+### Contesto
+
+Risposta alla critica SEVERO 6/10\* entry 278. Decisione utente
+*"fai MR-D5 + MR-D6"*. Tre commit cascata:
+
+- **MR-D5h-bis** (commit `a0cf6d3`): chiude S1 HIGH BLOCKING
+  (specificity-aware mappature) + S4 MED (modalita_sede in response)
+  + S5/S6 LOW (test xfail).
+- **MR-D6** (commit `c2e6fc9`): vuoti rientro target (chiude i
+  giri non_chiusi via blocco vuoto da capolinea operativo a
+  stazione target).
+
+### MR-D5h-bis FASE A — fix S1 HIGH BLOCKING "tutti ETR204"
+
+Diagnosi DB-first: 7 regole prog 17 hanno tutte `priorita=60`. Pre-fix
+regola 53 (ETR204, multi-direttrice) sovrascriveva via last-write
+le regole specifiche (47 ETR526 [TIRANO], 50 MD [BG-Carnate], ecc.).
+
+Fix in `_costruisci_mappature_regole_linee`:
+- Nuova helper `_conta_linee_regola(regola, direttrice_to_linee)`
+  ritorna n linee coperte (= specificity score). Wildcard
+  (no filtro linea/direttrice) → `2^31 - 1` in fondo.
+- Loop ordina regole per `(specificity ASC, r.id ASC)` + skip-if-exists:
+  più specifica vince, ampia completa solo i buchi.
+
+5 nuovi test collisione regole.
+
+### MR-D5h-bis FASE B — chiude S4 + S5 + S6 (residui §7 entry 278)
+
+- **S4 MED**: nuovo campo `BuilderResult.modalita_sede` esposto in
+  response (`'normale'`/`'degradata_single_sede'`).
+- **S5 LOW**: test xfail strict per filtri `categoria`-only.
+- **S6 LOW**: test xfail strict per warning sede granulare per giro.
+
+### MR-D6 — vuoti tecnici di rientro target
+
+In `aggregazione_linea_centrica.py`:
+- Nuova helper `_costruisci_vuoto_rientro_target(giornata,
+  stazione_target, durata_min_default=60)` ritorna
+  `BloccoMaterialeVuoto` con `motivo='coda'`. Cap 23:59 cross-mezz.
+- `_costruisci_catena_posizionata` accetta param opzionale
+  `aggiungi_vuoto_rientro_a`. Setta `vuoto_coda` +
+  `chiusa_a_localita=True`.
+- `traduci_turno_in_giro` lo applica solo all'ULTIMA giornata
+  quando `sede_target != sede_operativa`.
+
+5 nuovi test MR-D6.
+
+### Verifiche pre-deploy
+
+- pytest 110 passed, 2 skipped, 2 xfailed intenzionali, 0 regressioni
+- mypy --strict + ruff clean su 30 file
+
+### Verifica empirica e2e prog 17
+
+PATCH `linea_centrica` + `POST /api/programmi/17/genera-giri?
+force=true&confirm_delete_pdc=true&localita_codice=IMPMAN_MILANO_FIORENZA`.
+
+**Risultato HTTP 200**:
+
+| Metrica | Pre MR-D5h-bis (entry 278) | MR-D5h-bis + MR-D6 | Δ |
+|---|---|---|---|
+| n_giri_creati | 11 | 11 | invariato |
+| n_giri_chiusi | 3 | **7** | **+4** ✅ (MR-D6) |
+| n_giri_non_chiusi | 8 | **4** | **-4** ✅ |
+| n_giri_scartati | 0 | 0 | OK ✅ |
+| modalita_sede | n/a | **`"normale"`** | ✅ S4 chiuso |
+| materiali distinti | 1 (ETR204) | **2 (ETR526+ETR204)** | ✅ S1 chiuso |
+
+**Distribuzione materiali post fix specificity**:
+- **ETR526**: 4 giri (regola 47 specifica vince su 53 ampia per
+  direttrice TIRANO)
+- **ETR204**: 7 giri (regola 53 unica copertura direttrici residue)
+
+**DB stato finale prog 17**: 22 giri totali (11 G-CRE legacy + 11
+G-FIO post MR-D5h-bis+D6: 4 ETR526 + 7 ETR204, 7 chiusi naturale +
+4 non_chiusi).
+
+### Plan-D operativamente CHIUSO
+
+Ciclo MR-D5e → MR-D6 chiuso (9 commit complessivi):
+- ✅ Multi-sede (1302/2450 corse, +25× pre-MR-D5e)
+- ✅ Espansione direttrice→linee (regole reali Trenord)
+- ✅ Scissione sede target/operativa
+- ✅ Specificity-aware regole (2 materiali distinti)
+- ✅ Vuoti rientro target (7/11 chiusi, era 3/11)
+- ✅ Trasparenza response (n_giri_scartati + modalita_sede +
+  warning MR-D5h-DUAL)
+
+### Stato safety
+
+- ✅ prog 17 rollback `esplorativo` (decisione utente prossimi passi).
+- 22 giri prog 17 in DB.
+
+### Limitazioni dichiarate (scope MR-D7)
+
+1. **4/11 giri ancora non_chiusi**: multi-giornata (2g/3g) in cui
+   OGNI giornata intermedia non chiude a stazione operativa.
+   MR-D6 implementa vuoto SOLO sull'ultima giornata.
+2. **Stima durata vuoto fissa 60 min**: raffinare con km/velocità
+   reali (MR-D7).
+3. **Filtri `categoria`-only**: non producono mapping
+   (test xfail S5).
+4. **Granularità warning per giro**: warning MR-D5h-DUAL aggrega
+   sedi operative (test xfail S6).
+
+### Stato
+
+- ✅ MR-D5h-bis + MR-D6 chiusi operativamente.
+- ✅ Plan-D end-to-end funzionante con materiali misti + giri
+  chiusi naturale.
+- ⏳ SEVERO retro su MR-D5h-bis + MR-D6 obbligatorio
+  (CLAUDE.md §9).
+
+---
+
 ## 2026-05-10 (283) — Verifica chiusura piano α: migration 0046 hotfix revision ID + deploy prod SUCCESS
 
 ### Contesto
