@@ -10,6 +10,121 @@
 
 ---
 
+## 2026-05-09 (267) — Sprint 8.2 MR-PD5: endpoint genera-turno-pdc opzione builder_strategy='deposito_first'
+
+### Contesto
+
+MR-PD5 collega il builder deposito-first (MR-PD3b entry 265) all'API
+pubblica `POST /api/giri/{giro_id}/genera-turno-pdc`. Strategia scelta:
+**flag opt-in** (default = `multi_turno` legacy). Migrazione
+progressiva, fallback safe in 1 secondo (cambio query string).
+
+Numerazione 267 perché 265-266 occupate dal Plan-D builder giro
+(MR-D5c, MR-D5b migration 0044).
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_pdc/deposito_first.py`**
+(esteso da 235 a 425 righe): nuovo entry-point async
+`genera_turni_pdc_deposito_first(session, azienda_id, giro_id,
+deposito_pdc_id, valido_da, force)`:
+
+1. Carica `GiroMateriale` + `Depot` (con scoping azienda + check
+   `is_attivo`); raise `GiroNonTrovatoError` /
+   `DepositoPdcNonTrovatoError`.
+2. Anti-rigenerazione su `(giro_id, deposito_pdc_id)`: se esistono
+   turni e `force=False` → `GiriEsistentiError`. Se `force=True` →
+   delete e ricrea.
+3. Carica giornate-tipo + varianti canoniche (`variant_index=0`) +
+   blocchi → stesso pattern di `multi_turno.genera_turni_pdc_multi`.
+4. Apre `httpx.AsyncClient` + `PartenzeCache` condivisi fra giornate.
+5. Per ogni giornata invoca `costruisci_giornata_deposito_first`.
+   Drafts validi accumulati; violazioni HARD aggregate per audit.
+6. Se nessuna giornata costruibile → `GiroVuotoError(violazioni)`.
+7. FR `_aggiungi_dormite_fr` + `_calcola_violazioni_cap_fr` cap §10.6.
+8. Persiste **1 turno** PdC con N giornate via
+   `_persisti_un_turno_pdc` (riusa helper builder.py).
+9. `extra_metadata` include `builder_strategy=deposito_first` +
+   `violazioni_giornate_scartate` per tracciabilità.
+
+**`backend/src/colazione/api/turni_pdc.py`** (modificato): nuovo
+query parameter `builder_strategy: str = "multi_turno"` (valori:
+`"multi_turno"` default, `"deposito_first"` nuovo). Validazione
+**early** (prima del DB lookup):
+
+- `builder_strategy ∉ {multi_turno, deposito_first}` → 422
+- `deposito_first` senza `deposito_pdc_id` → 422 con riferimento
+  NORMATIVA-PDC §2.3
+
+Il flag `legacy_monolitico` esistente è ignorato quando
+`builder_strategy=deposito_first` (documentato nel description del
+parametro).
+
+**`backend/tests/test_api_programmi_conferma.py`** (esteso): 2 test
+nuovi 422:
+- `test_genera_turno_pdc_strategia_invalida_422`
+- `test_genera_turno_pdc_deposito_first_senza_deposito_pdc_id_422`
+
+Entrambi usano `giro_id=999999` inesistente perché la validazione
+strategia è **early** e scatta prima del lookup giro.
+
+### Verifiche
+
+- ✅ pytest test_api_programmi_conferma -k genera_turno_pdc:
+  **5 passed** (3 esistenti backward-compatible + 2 nuovi 422)
+- ✅ pytest suite PdC completa (10 file): **128 passed, 3 xfailed
+  (red-phase MR-PD1), 2 fail pre-esistenti 403 cross-role**
+  (fuori scope, segnalati da entry 262)
+- ✅ mypy --strict: clean
+- ✅ ruff check: clean
+
+### Stato deploy
+
+- ✅ Push origin master
+- ⏳ Railway deploy backend: la modifica è additive (nuovo
+  query param `builder_strategy` con default `multi_turno`).
+  **Backward-compatible**: nessun client esistente è impattato.
+  Deploy può essere applicato senza rischio.
+
+### Backward compatibility
+
+- Endpoint senza `builder_strategy` → comportamento legacy
+  `multi_turno` invariato.
+- `legacy_monolitico=true` ancora supportato (solo se
+  `builder_strategy != deposito_first`).
+- API client esistenti (frontend Gantt PdC, dialog "Genera turno
+  PdC") **non richiedono modifiche** — possono adottare il flag
+  quando vorranno.
+
+### Limitazioni dichiarate
+
+1. **Test integration end-to-end NON aggiunto**: il nuovo orchestrator
+   richiede setup pesante (azienda + depot + giro + giornate +
+   varianti + blocchi). Coperto solo lato unit (9 test
+   `test_deposito_first.py` + 2 test 422 endpoint). Smoke
+   end-to-end → manuale via UI o script ad-hoc.
+2. **Builder legacy `multi_turno` resta default**: la migrazione
+   completa al deposito-first (= switch totale + delete legacy)
+   sarà MR-PD5b se l'utente conferma dopo smoke prod del nuovo
+   builder.
+3. **§7.3 condotta produttiva, §9 split CV, §10.3 FR g1+g2**:
+   restano fuori scope Sprint 8.2 (Sprint 8.3 dichiarato).
+
+### Stato
+
+- ✅ MR-PD5 chiuso lato codice + push.
+- ⏳ Deploy Railway backend: pronto, no rischio (additive).
+- ⏳ MR-PD6 (next): Gantt PdC riscritto stile giro + palette per
+  tipo evento (24-32h FAUSTO).
+- ⏳ MR-PD7: §11.4 + §15 + §6 PK opt-in (8-12h).
+
+### Critica SEVERO
+
+Lanciata in background sul cuore architetturale (MR-PD3a + PD3b+PD4)
+con motore AMILCARE V4 Pro. In attesa di output.
+
+---
+
 ## 2026-05-09 (265) — Sprint 8.2 MR-PD3b + MR-PD4: builder deposito-first core + 9 test green su 4 violazioni
 
 ### Contesto

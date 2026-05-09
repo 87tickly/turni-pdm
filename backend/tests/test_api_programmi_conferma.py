@@ -643,6 +643,37 @@ async def test_genera_turno_pdc_personale_assegnato_409(
     assert res.status_code == 409
 
 
+async def test_genera_turno_pdc_strategia_invalida_422(
+    client: TestClient,
+) -> None:
+    """Sprint 8.2 MR-PD5: builder_strategy ≠ {multi_turno, deposito_first}
+    → 422 early, prima del DB lookup. Giro inesistente non blocca la
+    validazione strategia.
+    """
+    res = client.post(
+        "/api/giri/999999/genera-turno-pdc?builder_strategy=foo",
+        headers=_h(_admin_token(client)),
+    )
+    assert res.status_code == 422, res.text
+    assert "builder_strategy" in res.json()["detail"]
+    assert "foo" in res.json()["detail"]
+
+
+async def test_genera_turno_pdc_deposito_first_senza_deposito_pdc_id_422(
+    client: TestClient,
+) -> None:
+    """Sprint 8.2 MR-PD5: builder_strategy='deposito_first' richiede
+    deposito_pdc_id valorizzato (NORMATIVA-PDC §2.3 il turno è ancorato
+    al deposito di residenza del PdC).
+    """
+    res = client.post(
+        "/api/giri/999999/genera-turno-pdc?builder_strategy=deposito_first",
+        headers=_h(_admin_token(client)),
+    )
+    assert res.status_code == 422, res.text
+    assert "deposito_pdc_id" in res.json()["detail"]
+
+
 # =====================================================================
 # Variazioni PdE (Sprint 8.0 MR 5, entry 170)
 # =====================================================================

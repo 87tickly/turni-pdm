@@ -36,17 +36,30 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
+from datetime import date
 
 import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from colazione.config import get_settings
 from colazione.domain.builder_pdc.builder import (
     ACCESSORI_MIN_STANDARD,
     CONDOTTA_MAX_MIN,
     FINE_SERVIZIO_MIN,
+    BuilderTurnoPdcResult,
+    DepositoPdcNonTrovatoError,
+    GiriEsistentiError,
+    GiroNonTrovatoError,
+    GiroVuotoError,
+    _aggiungi_dormite_fr,
     _BloccoPdcDraft,
     _build_giornata_pdc,
+    _calcola_violazioni_cap_fr,
     _from_min,
+    _genera_codice_turno,
     _GiornataPdcDraft,
+    _persisti_un_turno_pdc,
     _t,
 )
 from colazione.domain.builder_pdc.vettura_resolver import (
@@ -60,7 +73,13 @@ from colazione.domain.builder_pdc.vettura_resolver import (
 )
 from colazione.integrations.live_arturo import PartenzeCache
 from colazione.models.anagrafica import Depot
-from colazione.models.giri import GiroBlocco
+from colazione.models.giri import (
+    GiroBlocco,
+    GiroGiornata,
+    GiroMateriale,
+    GiroVariante,
+)
+from colazione.models.turni_pdc import TurnoPdc
 
 logger = logging.getLogger(__name__)
 
@@ -317,8 +336,225 @@ async def costruisci_giornata_deposito_first(
     )
 
 
+# =====================================================================
+# Orchestrator: persiste 1 giro = 1 turno PdC con N giornate
+# =====================================================================
+
+
+async def genera_turni_pdc_deposito_first(
+    *,
+    session: AsyncSession,
+    azienda_id: int,
+    giro_id: int,
+    deposito_pdc_id: int,
+    valido_da: date | None = None,
+    force: bool = False,
+) -> list[BuilderTurnoPdcResult]:
+    """Genera (e persiste) 1 turno PdC per il giro indicato, ancorato
+    al deposito.
+
+    A differenza di ``multi_turno.genera_turni_pdc_multi`` (DP che
+    spezza in N segmenti per stazioni CV), il builder deposito-first
+    produce **1 solo turno per giro** con N giornate consecutive,
+    tutte chiuse al deposito (eventualmente via vettura/MM/VOCTAXI in
+    coda — NORMATIVA-PDC §7.2). Niente split CV: scope MR-PD5
+    minimal, lo split CV resta a multi_turno.
+
+    Args:
+        session: AsyncSession SQLAlchemy.
+        azienda_id: scoping multi-tenant.
+        giro_id: id `GiroMateriale`.
+        deposito_pdc_id: ``Depot.id`` di residenza del PdC. **Obbligatorio**
+            per il builder deposito-first.
+        valido_da: data di validità del turno (default oggi).
+        force: se True, cancella turni preesistenti del (giro, deposito)
+            prima di rigenerare. Se False, alza ``GiriEsistentiError``.
+
+    Returns:
+        ``list[BuilderTurnoPdcResult]`` con 1 elemento (il turno
+        principale). La lista è per coerenza API con
+        ``genera_turni_pdc_multi``.
+
+    Raises:
+        ``GiroNonTrovatoError`` (404), ``DepositoPdcNonTrovatoError``
+        (404), ``GiroVuotoError`` (422), ``GiriEsistentiError`` (409).
+    """
+    # 1. Carica giro
+    giro = (
+        await session.execute(
+            select(GiroMateriale).where(
+                GiroMateriale.id == giro_id,
+                GiroMateriale.azienda_id == azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if giro is None:
+        raise GiroNonTrovatoError(
+            f"Giro {giro_id} non trovato per azienda {azienda_id}"
+        )
+
+    # 2. Carica depot
+    depot = (
+        await session.execute(
+            select(Depot).where(
+                Depot.id == deposito_pdc_id,
+                Depot.azienda_id == azienda_id,
+                Depot.is_attivo,
+            )
+        )
+    ).scalar_one_or_none()
+    if depot is None:
+        raise DepositoPdcNonTrovatoError(
+            f"Deposito PdC {deposito_pdc_id} non trovato o non attivo "
+            f"per azienda {azienda_id}"
+        )
+    if depot.stazione_principale_codice is None:
+        raise DepositoPdcNonTrovatoError(
+            f"Deposito {depot.codice} privo di stazione_principale_codice "
+            f"(richiesta dal builder deposito-first)"
+        )
+
+    # 3. Anti-rigenerazione su (giro, deposito).
+    existing = list(
+        (
+            await session.execute(
+                select(TurnoPdc).where(
+                    TurnoPdc.azienda_id == azienda_id,
+                    TurnoPdc.deposito_pdc_id == deposito_pdc_id,
+                )
+            )
+        ).scalars()
+    )
+    legati = [
+        t for t in existing
+        if (t.generation_metadata_json or {}).get("giro_materiale_id") == giro_id
+    ]
+    if legati and not force:
+        raise GiriEsistentiError(
+            f"Esistono già {len(legati)} turno/i PdC per giro {giro_id} "
+            f"deposito {depot.codice}: {legati[0].codice}"
+            + (f" ... +{len(legati)-1} altri" if len(legati) > 1 else "")
+        )
+    for t in legati:
+        await session.delete(t)
+    if legati:
+        await session.flush()
+
+    # 4. Carica giornate-tipo del giro
+    giornate_giro = list(
+        (
+            await session.execute(
+                select(GiroGiornata)
+                .where(GiroGiornata.giro_materiale_id == giro_id)
+                .order_by(GiroGiornata.numero_giornata)
+            )
+        ).scalars()
+    )
+    if not giornate_giro:
+        raise GiroVuotoError(f"Giro {giro_id} non ha giornate")
+
+    giornate_ids = [gg.id for gg in giornate_giro]
+
+    # 5. Varianti canoniche (variant_index=0) + blocchi
+    canonica_per_giornata: dict[int, GiroVariante] = {}
+    for v in (
+        await session.execute(
+            select(GiroVariante)
+            .where(GiroVariante.giro_giornata_id.in_(giornate_ids))
+            .order_by(GiroVariante.giro_giornata_id, GiroVariante.variant_index)
+        )
+    ).scalars():
+        canonica_per_giornata.setdefault(v.giro_giornata_id, v)
+
+    blocchi_per_giornata: dict[int, list[GiroBlocco]] = {}
+    canonica_ids = [v.id for v in canonica_per_giornata.values()]
+    if canonica_ids:
+        var_to_gg = {
+            v.id: v.giro_giornata_id for v in canonica_per_giornata.values()
+        }
+        for b in (
+            await session.execute(
+                select(GiroBlocco)
+                .where(GiroBlocco.giro_variante_id.in_(canonica_ids))
+                .order_by(GiroBlocco.giro_variante_id, GiroBlocco.seq)
+            )
+        ).scalars():
+            gg_id = var_to_gg[b.giro_variante_id]
+            blocchi_per_giornata.setdefault(gg_id, []).append(b)
+
+    # 6. Costruisci giornate via deposito-first builder.
+    valido_da_eff = valido_da or date.today()
+    settings = get_settings()
+    live_client = httpx.AsyncClient(timeout=settings.live_arturo_timeout_sec)
+    cache = PartenzeCache()
+
+    drafts: list[_GiornataPdcDraft] = []
+    violazioni_giornate_scartate: list[str] = []
+    try:
+        for gg in giornate_giro:
+            blocchi = blocchi_per_giornata.get(gg.id, [])
+            if not blocchi:
+                continue
+            canonica = canonica_per_giornata.get(gg.id)
+            validita = (canonica.validita_testo if canonica is not None else None) or "GG"
+
+            draft, violazioni = await costruisci_giornata_deposito_first(
+                depot=depot,
+                numero_giornata=gg.numero_giornata,
+                variante_calendario=validita,
+                blocchi_giro=blocchi,
+                live_client=live_client,
+                cache=cache,
+            )
+            if draft is not None:
+                drafts.append(draft)
+            if violazioni:
+                violazioni_giornate_scartate.extend(violazioni)
+    finally:
+        await live_client.aclose()
+
+    if not drafts:
+        raise GiroVuotoError(
+            f"Giro {giro_id}: nessuna giornata costruibile dal builder "
+            f"deposito-first. Violazioni: {violazioni_giornate_scartate}"
+        )
+
+    # 7. FR + violazioni cap (riusa helper builder.py)
+    fr_giornate = _aggiungi_dormite_fr(drafts, depot.stazione_principale_codice)
+    fr_cap_violazioni = _calcola_violazioni_cap_fr(
+        n_dormite_fr=len(fr_giornate),
+        ciclo_giorni=giro.numero_giornate,
+    )
+
+    # 8. Persisti TurnoPdc + giornate + blocchi via helper builder.py
+    codice = _genera_codice_turno(giro, depot)
+    risultato = await _persisti_un_turno_pdc(
+        session=session,
+        azienda_id=azienda_id,
+        giro=giro,
+        drafts=drafts,
+        codice=codice,
+        stazione_sede=depot.stazione_principale_codice,
+        valido_da_eff=valido_da_eff,
+        giornate_ids=giornate_ids,
+        extra_metadata={
+            "fr_giornate": fr_giornate,
+            "is_ramo_split": False,
+            "fr_cap_violazioni": fr_cap_violazioni,
+            "builder_strategy": "deposito_first",
+            "violazioni_giornate_scartate": violazioni_giornate_scartate,
+        },
+        depot_target=depot,
+        violazioni_ciclo_extra=fr_cap_violazioni,
+    )
+
+    await session.commit()
+    return [risultato]
+
+
 __all__ = [
     "costruisci_giornata_deposito_first",
+    "genera_turni_pdc_deposito_first",
 ]
 
 

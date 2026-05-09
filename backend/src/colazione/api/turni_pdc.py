@@ -36,6 +36,9 @@ from colazione.domain.builder_pdc.builder import (
     GiroVuotoError,
     genera_turno_pdc,
 )
+from colazione.domain.builder_pdc.deposito_first import (
+    genera_turni_pdc_deposito_first,
+)
 from colazione.domain.builder_pdc.multi_turno import genera_turni_pdc_multi
 from colazione.domain.builder_pdc.simulazione import (
     DepositoSuggerimento,
@@ -275,6 +278,18 @@ async def genera_turno_pdc_endpoint(
             "Default False = nuovo builder multi-turno con DP."
         ),
     ),
+    builder_strategy: str = Query(
+        default="multi_turno",
+        description=(
+            "Sprint 8.2 MR-PD5: scelta builder. "
+            "'multi_turno' (default): DP heuristic legacy. "
+            "'deposito_first' (NUOVO): turno ancorato al deposito casa-casa "
+            "con priorità rientro §7.2 vettura → MM → VOCTAXI. Richiede "
+            "deposito_pdc_id valorizzato. "
+            "Quando builder_strategy='deposito_first', il flag "
+            "legacy_monolitico è ignorato."
+        ),
+    ),
     user: CurrentUser = _authz_write_turni,
     session: AsyncSession = Depends(get_session),
 ) -> list[TurnoPdcGenerazioneResponse]:
@@ -305,6 +320,25 @@ async def genera_turno_pdc_endpoint(
       portato a ``PDC_GENERATO`` (la dashboard PIANIFICATORE_PDC
       mostra così quali programmi hanno turni da confermare).
     """
+    # Validazione strategia (Sprint 8.2 MR-PD5) — early, prima del DB lookup.
+    if builder_strategy not in {"multi_turno", "deposito_first"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"builder_strategy={builder_strategy!r} non valido. "
+                f"Valori ammessi: 'multi_turno', 'deposito_first'."
+            ),
+        )
+    if builder_strategy == "deposito_first" and deposito_pdc_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "builder_strategy='deposito_first' richiede deposito_pdc_id "
+                "valorizzato (NORMATIVA-PDC §2.3: il turno è ancorato al "
+                "deposito di residenza del PdC)."
+            ),
+        )
+
     # Pre-check freeze PdC + lookup programma_id (per side effect post-build).
     prog_row = (
         await session.execute(
@@ -339,8 +373,18 @@ async def genera_turno_pdc_endpoint(
         )
 
     try:
-        if legacy_monolitico:
-            results: list[BuilderTurnoPdcResult] = await genera_turno_pdc(
+        if builder_strategy == "deposito_first":
+            assert deposito_pdc_id is not None  # validato sopra
+            results: list[BuilderTurnoPdcResult] = await genera_turni_pdc_deposito_first(
+                session=session,
+                azienda_id=user.azienda_id,
+                giro_id=giro_id,
+                deposito_pdc_id=deposito_pdc_id,
+                valido_da=valido_da,
+                force=force,
+            )
+        elif legacy_monolitico:
+            results = await genera_turno_pdc(
                 session=session,
                 azienda_id=user.azienda_id,
                 giro_id=giro_id,
