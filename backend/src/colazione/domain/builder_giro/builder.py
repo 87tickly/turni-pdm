@@ -1365,18 +1365,24 @@ def _traduce_e_filtra_giri_linea_centrica(
        utente 2026-05-01). Giri di altre sedi sono prodotti dalla
        pipeline (multi-sede MR-D5f) ma persistiti in chiamate
        successive — qui contati per warning trasparente.
+    3. **MR-D5h-DUAL (entry 276)**: per i giri persistiti, segnala in
+       warning quelli dove ``sede_operativa_codice`` ≠ ``localita_codice``
+       (= MR-D2 ottimizzazione geometrica ha scelto sede diversa dalla
+       target). Questo segnala che servirà un blocco vuoto di rientro
+       fra capolinea operativa e sede target (MR-D6 implementerà la
+       logica). Nessuno scarto: il giro viene persistito comunque.
 
     Args:
         giri: output ``result.giri`` della pipeline linea-centrica.
         materiale_per_regola: lookup ``regola_id → materiale_tipo_codice``.
         localita_codice_run: la sede del run corrente (filtro
-            persistenza).
+            persistenza, dopo MR-D5h-DUAL = sede TARGET).
 
     Returns:
         Tupla (giri_persistibili, n_scartati_no_materiale, n_altra_sede,
         sedi_altre_set, warnings).
     """
-    giri_aggregati_per_sede: list[tuple[GiroAggregato, str]] = []
+    giri_pre_filtro: list[tuple[GiroAggregato, str, str | None]] = []
     n_scartati_no_materiale = 0
     warnings: list[str] = []
     for giro in giri:
@@ -1396,12 +1402,13 @@ def _traduce_e_filtra_giri_linea_centrica(
             )
             n_scartati_no_materiale += 1
             continue
-        giri_aggregati_per_sede.append(
+        giri_pre_filtro.append(
             (
                 _giro_linea_centrica_a_aggregato(
                     giro, materiale_tipo_codice=materiale
                 ),
                 giro.localita_codice,
+                giro.sede_operativa_codice,
             )
         )
     if n_scartati_no_materiale:
@@ -1413,12 +1420,21 @@ def _traduce_e_filtra_giri_linea_centrica(
     giri_per_sede_run: list[GiroAggregato] = []
     n_altra_sede = 0
     sedi_altre_set: set[str] = set()
-    for giro_agg, sede in giri_aggregati_per_sede:
-        if sede == localita_codice_run:
+    n_divergenza_target_operativa = 0
+    sedi_operative_divergenti: set[str] = set()
+    for giro_agg, sede_target, sede_operativa in giri_pre_filtro:
+        if sede_target == localita_codice_run:
             giri_per_sede_run.append(giro_agg)
+            if sede_operativa is not None:
+                # Divergenza sede target ≠ sede operativa: MR-D2 ha
+                # scelto sede operativa diversa dal dato utente. Il
+                # giro è persistito (sede target = utente) ma servirà
+                # vuoto rientro (MR-D6).
+                n_divergenza_target_operativa += 1
+                sedi_operative_divergenti.add(sede_operativa)
         else:
             n_altra_sede += 1
-            sedi_altre_set.add(sede)
+            sedi_altre_set.add(sede_target)
     if n_altra_sede > 0:
         sedi_altre_str = ", ".join(sorted(sedi_altre_set))
         warnings.append(
@@ -1426,6 +1442,15 @@ def _traduce_e_filtra_giri_linea_centrica(
             f"da {localita_codice_run}: [{sedi_altre_str}]. Esegui "
             "genera-giri per ciascuna di queste sedi per persisterli "
             "(modello cumulativo)."
+        )
+    if n_divergenza_target_operativa > 0:
+        sedi_op_str = ", ".join(sorted(sedi_operative_divergenti))
+        warnings.append(
+            f"MR-D5h-DUAL: {n_divergenza_target_operativa} giri assegnati "
+            f"a sede target {localita_codice_run} ma operativamente sostano "
+            f"a sedi geometricamente più vicine: [{sedi_op_str}]. Servirà "
+            "blocco vuoto di rientro fra capolinea e sede target (logica "
+            "in MR-D6 successivo)."
         )
 
     return (
@@ -1520,6 +1545,21 @@ async def _genera_giri_linea_centrica(
         corse=corse,
     )
 
+    # MR-D5h-DUAL (entry 276): mapping `regola_id → sede_target_codice`
+    # = `regola.localita_codice` (dato utente). Passato alla pipeline
+    # via `ParamPipelineLineaCentrica.sede_target_per_regola`. Il
+    # bridge MR-D4 produce `Giro.localita_codice = sede_target` (dato
+    # utente, usato per persistenza modello cumulativo) e
+    # `Giro.sede_operativa_codice = sede_operativa` (sede MR-D2
+    # ottimizzazione geometrica, info-only se differisce). Questo
+    # chiude il 3° mismatch architetturale entry 275 (giri prodotti
+    # ma 0 persistiti per FIO perché MR-D2 li assegnava a CRE/LEC).
+    sede_target_per_regola: dict[int, str] = {}
+    for r in regole:
+        sede_t = getattr(r, "localita_codice", None)
+        if sede_t is not None:
+            sede_target_per_regola[r.id] = str(sede_t)
+
     # Carica capacity flotta (defensive: se carica_dotazione fallisce,
     # capacity check skip per quel materiale). Filtra None per type safety.
     try:
@@ -1550,6 +1590,7 @@ async def _genera_giri_linea_centrica(
         periodo_a=programma.valido_a,
         festivita_set=frozenset(festivita) if festivita else None,
         regola_per_segmento=regola_per_segmento,
+        sede_target_per_regola=sede_target_per_regola,
     )
     # cast: CorsaCommerciale soddisfa strutturalmente _CorsaTurnoLike
     # (tutti i campi richiesti sono mappati nell'ORM). Mypy strict

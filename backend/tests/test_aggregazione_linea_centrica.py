@@ -74,7 +74,7 @@ def _giornata(
         )
     return GiornataServizio(
         data=d,
-        corse=tuple(corse),
+        corse=tuple(corse),  # type: ignore[arg-type]
         stazione_inizio=corse[0].codice_origine,
         stazione_fine=corse[-1].codice_destinazione,
         km_giornata=sum(c.km_tratta or 0.0 for c in corse),
@@ -325,6 +325,110 @@ def test_traduce_turno_segmento_completo_mancante_no_fallback_mr_d5f() -> None:
 
 
 # =====================================================================
+# Sprint 8.2 MR-D5h-DUAL (entry 276) — scissione sede target/operativa
+# =====================================================================
+
+
+def test_traduce_turno_sede_target_diversa_da_operativa_mr_d5h() -> None:
+    """Sede target (regola, dato utente) ≠ sede operativa (MR-D2 ottima)
+    → Giro.localita_codice = sede_target, Giro.sede_operativa_codice
+    = sede_operativa. Caso prog 17: regola ETR526 sede=FIO, MR-D2
+    sceglie LEC più vicina al capolinea TIRANO.
+    """
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("TIRANO", "S_LEC", 8, 0, 12, 0, treno="R5-1")],
+    )
+    turno = _turno("R5_C0", "R5_completo", "LEC", [g])  # operativa = LEC
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"LEC": "S_LEC", "FIO": "S_FIO"},
+        regola_per_segmento={"R5_completo": 47},
+        sede_target_per_regola={47: "FIO"},  # target = FIO (regola)
+    )
+    assert giro is not None
+    assert giro.localita_codice == "FIO"  # = sede target (utente)
+    assert giro.sede_operativa_codice == "LEC"  # = sede operativa MR-D2
+
+
+def test_traduce_turno_sede_target_uguale_operativa_mr_d5h() -> None:
+    """Sede target = sede operativa → Giro.sede_operativa_codice = None
+    (= no divergenza segnalabile, comportamento ottimale)."""
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("S_FIO", "S_B", 8, 0, 9, 0, treno="T1")],
+    )
+    turno = _turno("R31_C0", "R31_completo", "FIO", [g])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"FIO": "S_FIO"},
+        regola_per_segmento={"R31_completo": 42},
+        sede_target_per_regola={42: "FIO"},  # target == operativa
+    )
+    assert giro is not None
+    assert giro.localita_codice == "FIO"
+    assert giro.sede_operativa_codice is None  # no divergenza
+
+
+def test_traduce_turno_senza_sede_target_mapping_legacy_behavior() -> None:
+    """Senza `sede_target_per_regola` (chiamante legacy) → comportamento
+    pre-MR-D5h-DUAL: localita_codice = sede operativa, no campo
+    sede_operativa_codice."""
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("S_FIO", "S_B", 8, 0, 9, 0, treno="T1")],
+    )
+    turno = _turno("R31_C0", "R31_completo", "FIO", [g])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"FIO": "S_FIO"},
+        regola_per_segmento={"R31_completo": 42},
+        # sede_target_per_regola=None
+    )
+    assert giro is not None
+    assert giro.localita_codice == "FIO"  # = sede operativa (legacy)
+    assert giro.sede_operativa_codice is None
+
+
+def test_traduce_turno_sede_target_per_regola_vuoto_legacy() -> None:
+    """`sede_target_per_regola={}` (mapping presente ma vuoto) →
+    comportamento legacy come parametro None."""
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("S_FIO", "S_B", 8, 0, 9, 0, treno="T1")],
+    )
+    turno = _turno("R31_C0", "R31_completo", "FIO", [g])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"FIO": "S_FIO"},
+        regola_per_segmento={"R31_completo": 42},
+        sede_target_per_regola={},  # vuoto
+    )
+    assert giro is not None
+    assert giro.localita_codice == "FIO"
+    assert giro.sede_operativa_codice is None
+
+
+def test_traduce_turno_regola_id_non_in_sede_target_per_regola() -> None:
+    """`sede_target_per_regola` non contiene regola_id → fallback
+    legacy (target = operativa, no divergenza segnalabile)."""
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("S_FIO", "S_B", 8, 0, 9, 0, treno="T1")],
+    )
+    turno = _turno("R31_C0", "R31_completo", "FIO", [g])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"FIO": "S_FIO"},
+        regola_per_segmento={"R31_completo": 42},
+        sede_target_per_regola={99: "ALTRA"},  # 42 NON in mapping
+    )
+    assert giro is not None
+    assert giro.localita_codice == "FIO"
+    assert giro.sede_operativa_codice is None
+
+
+# =====================================================================
 # Wrapper multi-turno
 # =====================================================================
 
@@ -460,7 +564,7 @@ def test_integrazione_chain_d2_d3_d4() -> None:
         segmento=seg,
         assegnazione=ass,
         calendario=cal,
-        corse_segmento=corse,
+        corse_segmento=corse,  # type: ignore[arg-type]
         indice_convoglio=0,
         n_convogli_segmento=1,
     )

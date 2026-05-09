@@ -57,6 +57,7 @@ def _giro(
     n_giornate: int = 1,
     dates_apply: tuple[date, ...] | None = None,
     regola_id: int | None = 42,
+    sede_operativa: str | None = None,
 ) -> Giro:
     catena = Catena(corse=(_CorsaFake(),))
     cat_pos = CatenaPosizionata(
@@ -82,6 +83,7 @@ def _giro(
         chiuso=chiuso,
         motivo_chiusura=motivo,  # type: ignore[arg-type]
         km_cumulati=km,
+        sede_operativa_codice=sede_operativa,
     )
 
 
@@ -341,3 +343,76 @@ def test_traduce_e_filtra_giri_vuoti_no_warnings() -> None:
     assert n_altra_sede == 0
     assert sedi_altre == set()
     assert warnings == []
+
+
+# =====================================================================
+# Sprint 8.2 MR-D5h-DUAL — warning divergenza target/operativa
+# =====================================================================
+
+
+def test_traduce_e_filtra_emette_warning_divergenza_target_operativa() -> None:
+    """MR-D5h-DUAL: giro persistito con sede_operativa_codice != None
+    → warning aggregato `MR-D5h-DUAL: N giri assegnati a sede target X
+    ma operativamente sostano a [Y]`."""
+    giro = _giro(
+        localita="FIO",  # sede target (regola)
+        sede_operativa="LEC",  # MR-D2 ottimizza a LEC
+        regola_id=47,
+    )
+    out = _traduce_e_filtra_giri_linea_centrica(
+        giri=(giro,),
+        materiale_per_regola={47: "ETR526"},
+        localita_codice_run="FIO",
+    )
+    giri_persistibili, _, _, _, warnings = out
+    assert len(giri_persistibili) == 1
+    # Giro persistito (sede target = run)
+    assert giri_persistibili[0].localita_codice == "FIO"
+    # Warning divergenza presente
+    assert any(
+        "MR-D5h-DUAL" in w
+        and "sede target FIO" in w
+        and "[LEC]" in w
+        for w in warnings
+    )
+
+
+def test_traduce_e_filtra_no_warning_se_target_uguale_operativa() -> None:
+    """MR-D5h-DUAL: giro persistito con sede_operativa_codice=None
+    (target == operativa) → NESSUN warning divergenza."""
+    giro = _giro(
+        localita="FIO",
+        sede_operativa=None,  # no divergenza
+        regola_id=42,
+    )
+    out = _traduce_e_filtra_giri_linea_centrica(
+        giri=(giro,),
+        materiale_per_regola={42: "ETR522"},
+        localita_codice_run="FIO",
+    )
+    _, _, _, _, warnings = out
+    assert not any("MR-D5h-DUAL" in w for w in warnings)
+
+
+def test_traduce_e_filtra_warning_aggregato_n_giri_divergenti() -> None:
+    """MR-D5h-DUAL: 3 giri target=FIO, 2 con sede_operativa=LEC, 1 con
+    sede_operativa=CRE → warning unico aggregato "3 giri ... [CRE, LEC]".
+    """
+    giri = (
+        _giro(localita="FIO", sede_operativa="LEC", regola_id=47),
+        _giro(localita="FIO", sede_operativa="LEC", regola_id=47),
+        _giro(localita="FIO", sede_operativa="CRE", regola_id=47),
+    )
+    out = _traduce_e_filtra_giri_linea_centrica(
+        giri=giri,
+        materiale_per_regola={47: "ETR526"},
+        localita_codice_run="FIO",
+    )
+    giri_persistibili, _, _, _, warnings = out
+    assert len(giri_persistibili) == 3
+    divergenza_warns = [w for w in warnings if "MR-D5h-DUAL" in w]
+    assert len(divergenza_warns) == 1  # warning aggregato unico
+    w = divergenza_warns[0]
+    assert "3 giri" in w
+    # Sedi ordinate alfabeticamente
+    assert "[CRE, LEC]" in w

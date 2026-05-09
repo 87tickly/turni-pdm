@@ -208,8 +208,23 @@ class Giro:
     `persister.py` (Sprint 7.7 MR 3: ``GiroVariante`` rimosso).
 
     Attributi:
-        localita_codice: codice località manutenzione del giro
-            (la stessa per tutte le giornate).
+        localita_codice: codice località manutenzione **TARGET** del
+            giro (= sede dichiarata dalla regola, dato utente). Usato
+            per persistenza (filtro modello cumulativo) e numero turno
+            (`G-{codice_breve}-...`). Nel ramo legacy esplorativo/rigido
+            coincide con la sede del run; nel ramo linea-centrica
+            (MR-D5h-DUAL Sprint 8.2 entry 276) può differire da
+            ``sede_operativa_codice`` (la sede geometricamente ottima
+            scelta da MR-D2). La differenza (target ≠ operativa) genera
+            un warning nella response API perché segnala che servirà un
+            blocco vuoto di rientro fra capolinea operativa e sede
+            target (MR-D6 implementerà la logica).
+        sede_operativa_codice: Sprint 8.2 MR-D5h-DUAL — sede
+            **operativa** scelta da MR-D2 ottimizzazione geometrica
+            (= sede su cui il convoglio sosta operativamente fra
+            giornate). ``None`` per il ramo legacy (= coincide con
+            ``localita_codice``). Solo nel ramo linea-centrica può
+            divergere da ``localita_codice``.
         giornate: tupla ordinata di giornate (G1, G2, ...). Almeno 1.
         chiuso: ``True`` se l'ultima giornata chiude a località
             (``catena_posizionata.chiusa_a_localita=True``). Allineato a
@@ -228,6 +243,7 @@ class Giro:
     chiuso: bool
     motivo_chiusura: MotivoChiusura
     km_cumulati: float = 0.0
+    sede_operativa_codice: str | None = None
 
 
 # =====================================================================

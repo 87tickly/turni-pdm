@@ -144,6 +144,7 @@ def traduci_turno_in_giro(
     *,
     stazione_collegata_per_sede: dict[str, str],
     regola_per_segmento: dict[str, int] | None = None,
+    sede_target_per_regola: dict[int, str] | None = None,
 ) -> Giro | None:
     """Traduce un `TurnoConvoglio` in un `Giro` compatibile persister.
 
@@ -151,8 +152,9 @@ def traduci_turno_in_giro(
     1. Raggruppa giornate del turno per chiave sequenza (= varianti).
     2. Per ogni gruppo: 1 `GiornataGiro` con `dates_apply` =
        tuple delle date del gruppo.
-    3. Costruisce `Giro` con localita_codice = sede del turno,
-       chiuso = tutte le giornate chiudono in stazione collegata.
+    3. Costruisce `Giro` con sede target dichiarata dalla regola
+       (Sprint 8.2 MR-D5h-DUAL entry 276) e ``sede_operativa_codice``
+       = sede scelta da MR-D2 ottimizzazione geometrica.
 
     Args:
         turno: il `TurnoConvoglio` da tradurre.
@@ -162,6 +164,15 @@ def traduci_turno_in_giro(
         regola_per_segmento: opzionale, mapping ``segmento_codice →
             regola_id``. Se assente, regola_id=None (il post-pass
             backtracking dell'altro modello non agirà su questo giro).
+        sede_target_per_regola: Sprint 8.2 MR-D5h-DUAL — opzionale,
+            mapping ``regola_id → sede_target_codice``. Se presente
+            E la regola ha sede_target, ``Giro.localita_codice``
+            diventa la sede TARGET (regola.localita_codice, dato
+            utente) e ``Giro.sede_operativa_codice`` diventa la sede
+            geometrica (turno.sede_codice). Se assente o regola
+            non in mapping, mantiene comportamento legacy
+            (``localita_codice = turno.sede_codice``,
+            ``sede_operativa_codice = None``).
 
     Returns:
         `Giro` compatibile, oppure `None` se il turno è vuoto
@@ -169,8 +180,8 @@ def traduci_turno_in_giro(
     """
     if not turno.giornate:
         return None
-    sede = turno.sede_codice
-    stazione_collegata = stazione_collegata_per_sede.get(sede)
+    sede_operativa = turno.sede_codice
+    stazione_collegata = stazione_collegata_per_sede.get(sede_operativa)
     if stazione_collegata is None:
         # Sede non mappata: defensive, ritorna None invece di crash
         return None
@@ -191,6 +202,24 @@ def traduci_turno_in_giro(
         prefisso_linea = turno.segmento_codice.split("_", 1)[0]
         regola_id = regole.get(f"{prefisso_linea}_completo")
 
+    # Sprint 8.2 MR-D5h-DUAL entry 276 — risoluzione sede target/operativa.
+    sede_target_map = sede_target_per_regola or {}
+    sede_target = (
+        sede_target_map.get(regola_id) if regola_id is not None else None
+    )
+    if sede_target is None:
+        # Comportamento legacy / fallback: target = operativa, niente
+        # divergenza segnalabile.
+        localita_codice_giro = sede_operativa
+        sede_operativa_codice_giro: str | None = None
+    else:
+        localita_codice_giro = sede_target
+        # Espone sede_operativa solo se DIFFERISCE da target (= MR-D2
+        # ha scelto sede diversa dal dato utente).
+        sede_operativa_codice_giro = (
+            sede_operativa if sede_operativa != sede_target else None
+        )
+
     gruppi = _raggruppa_per_chiave_sequenza(turno.giornate)
 
     giornate_giro: list[GiornataGiro] = []
@@ -198,7 +227,7 @@ def traduci_turno_in_giro(
         giornata_canonica = giornate_gruppo[0]
         cat_pos = _costruisci_catena_posizionata(
             giornata_canonica,
-            sede_codice=sede,
+            sede_codice=sede_operativa,
             stazione_collegata=stazione_collegata,
             regola_id=regola_id,
         )
@@ -217,11 +246,12 @@ def traduci_turno_in_giro(
     motivo: MotivoChiusura = "naturale" if chiuso else "non_chiuso"
 
     return Giro(
-        localita_codice=sede,
+        localita_codice=localita_codice_giro,
         giornate=tuple(giornate_giro),
         chiuso=chiuso,
         motivo_chiusura=motivo,
         km_cumulati=turno.km_totali,
+        sede_operativa_codice=sede_operativa_codice_giro,
     )
 
 
@@ -230,12 +260,15 @@ def traduci_turni_in_giri(
     *,
     stazione_collegata_per_sede: dict[str, str],
     regola_per_segmento: dict[str, int] | None = None,
+    sede_target_per_regola: dict[int, str] | None = None,
 ) -> list[Giro]:
     """Wrapper multi-turno: traduce tutti i `TurnoConvoglio` validi
     in `Giro`. Skippa turni vuoti o con sede non mappata.
 
     Output ordinato per ``(localita_codice, giornate[0].data)`` per
-    determinismo nei consumer downstream.
+    determinismo nei consumer downstream. ``localita_codice`` post
+    MR-D5h-DUAL può essere la sede TARGET (da regola) invece della
+    sede operativa: il sort cambia coerentemente.
     """
     giri: list[Giro] = []
     for turno in turni:
@@ -243,6 +276,7 @@ def traduci_turni_in_giri(
             turno,
             stazione_collegata_per_sede=stazione_collegata_per_sede,
             regola_per_segmento=regola_per_segmento,
+            sede_target_per_regola=sede_target_per_regola,
         )
         if giro is not None:
             giri.append(giro)

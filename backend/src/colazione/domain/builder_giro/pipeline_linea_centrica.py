@@ -150,6 +150,14 @@ class ParamPipelineLineaCentrica:
         ore_servizio_die: usato da MR-D2 per stima n_convogli (default 18h).
         regola_per_segmento: opzionale, mapping segmento → regola_id per
             propagare la `regola_id` al `CatenaPosizionata` finale.
+        sede_target_per_regola: Sprint 8.2 MR-D5h-DUAL (entry 276) —
+            opzionale, mapping ``regola_id → sede_target_codice`` (=
+            ``regola.localita_codice`` dato utente). Se passato, il
+            bridge MR-D4 produce ``Giro.localita_codice`` = sede target
+            (per modello cumulativo + persistenza) e
+            ``Giro.sede_operativa_codice`` = sede operativa MR-D2 (se
+            differisce da target). Senza questo mapping, il bridge
+            mantiene il comportamento legacy (target=operativa).
     """
 
     sedi_disponibili: dict[str, str]
@@ -163,6 +171,7 @@ class ParamPipelineLineaCentrica:
     vincoli_default: VincoliSosta | None = None
     ore_servizio_die: float = 18.0
     regola_per_segmento: dict[str, int] = field(default_factory=dict)
+    sede_target_per_regola: dict[int, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.periodo_da > self.periodo_a:
@@ -304,10 +313,13 @@ def esegui_pipeline_linea_centrica(
             warnings.extend(g.warnings_sosta)
 
     # Step 6 (MR-D4): bridge turni → Giri
+    # MR-D5h-DUAL: passa anche sede_target_per_regola per scissione
+    # sede target (regola, dato utente) vs sede operativa (MR-D2 ottima).
     giri = traduci_turni_in_giri(
         turni,
         stazione_collegata_per_sede=params.sedi_disponibili,
         regola_per_segmento=params.regola_per_segmento,
+        sede_target_per_regola=params.sede_target_per_regola,
     )
 
     return RisultatoPipelineLineaCentrica(
