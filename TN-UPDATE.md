@@ -10,6 +10,87 @@
 
 ---
 
+## 2026-05-09 (280) — Sprint 8.2 MR-PD7b-1: helper enumera_date_giornata (prerequisito S4 SEVERO entry 279)
+
+### Contesto
+
+Decisione utente: opzione **Z "fai bene tutto"** sul piano MR-PD7b
+(§11.4 riposo settimanale). SEVERO ha bocciato il piano con voto
+3/10 fallback NINO (AMILCARE 3 timeout) per 2 finding CRITICAL:
+- S1 validatore decorativo senza date concrete → falso positivo silenzioso
+- S2 §11.5 RIGIDA non implementata, prerequisito logico
+
+Split in 3 sub-MR (vs 1 originale): PD7b-1 helper date (questo),
+PD7b-2 §11.5 riposo intraturno, PD7b-3 §11.4 corretto con algoritmo
+"≥1 riposo ogni 7 giornate consecutive".
+
+### Modifiche
+
+**Nuovo modulo `backend/src/colazione/domain/giornate_concrete.py`** (~140 righe):
+
+- Funzione `enumera_date_giornata(numero_giornata, variante_calendario,
+  ciclo_giorni, data_inizio_programma, data_fine_programma, festivita)
+  -> list[date]`. Materializza la giornata-tipo del turno PdC in date
+  concrete del periodo programma.
+- Algoritmo:
+  1. Itera `[data_inizio, data_fine]`, calcola
+     `posizione_ciclo = (offset_days % ciclo_giorni) + 1`. Se uguale
+     a `numero_giornata` → candidata.
+  2. Filtra per variante via helper `_filtra_per_variante` che usa
+     `tipo_giorno_categoria` esistente da `domain/calendario.py`.
+- Sintassi MVP supportata: `""`/`"GG"`/`None` (tutte), `"LMXGV"`/`"LV"`
+  (lavorativi), `"S"`/`"sabato"`, `"D"`/`"domenica"`, `"F"`/`"festivo"`,
+  `"PF"`/`"prefestivo"`. Case-insensitive.
+- Fallback per testi non riconosciuti (es. etichette parlanti Trenord
+  `"LV 1:5 escl. 22/3"`): **sovra-include conservativo** (tutte le
+  candidate) + log info. Parser DSL completo è scope MR-PD7c.
+- Edge case gestiti: `numero_giornata` fuori range → lista vuota +
+  warning; `data_fine < data_inizio` → lista vuota.
+
+**`backend/tests/test_giornate_concrete.py`** (~210 righe): 17 test in 3
+classi:
+
+- `TestCandidateCiclo` (4 test): ciclo 7gg con lunedì lavorativi,
+  ciclo 5gg con giornata 3 (mer/lun/sab), giornata fuori range,
+  data_fine < data_inizio.
+- `TestFiltroVariante` (7 test): GG, LV con esclusione Pasquetta,
+  F solo festivi (Pasquetta lunedì), S sabati, D domeniche, PF
+  prefestivi (sabati di marzo 2026), variante non riconosciuta sovra-include.
+- `test_variante_case_insensitive` (parametrize 6 variazioni
+  "lv"/"Lv"/"LV"/"lavorativo"/"LAVORATIVO"/"Lavorativo"): tutte
+  matchano lavorativo.
+
+### Verifiche
+
+- ✅ pytest test_giornate_concrete: 17 passed
+- ✅ mypy --strict: clean (2 source files)
+- ✅ ruff: clean
+
+### Limitazioni dichiarate
+
+1. **Parser DSL etichette parlanti Trenord** (`"LV 1:5 escl. 22/3,
+   12/4"`, `"F escluso FpF ed escl. 22/3"`, `"Si eff. 1/5 e 2/6"`):
+   non implementato. Fallback sovra-include = sovra-strict per
+   §11.4. Scope MR-PD7c o successivo (richiede DSL parser dedicato).
+2. **Giornate ancora non collegate al modello**: il helper è puro,
+   non sa di `TurnoPdcGiornata`. Il chiamante (MR-PD7b-3) deve
+   fornire `data_inizio_programma` e `data_fine_programma` dal
+   `Programma` legato al turno.
+
+### Stato deploy
+
+- ⏭️ Nessun deploy: helper isolato, non collegato a runtime corrente.
+  Verrà attivato quando MR-PD7b-3 lo userà.
+
+### Stato
+
+- ✅ MR-PD7b-1 chiuso. Prerequisito S4 SEVERO entry 279 ora disponibile.
+- ⏳ MR-PD7b-2 (§11.5 riposo intraturno 11/14/16h): prerequisito S2
+  SEVERO PIANO PD7b. Costo 2-3h.
+- ⏳ MR-PD7b-3 (§11.4 corretto + date concrete): completamento piano α.
+
+---
+
 ## 2026-05-09 (279) — Sprint 8.2 MR-PD-FIX-SEVERO 3b (A1+A2 unificato): RegistroVettureAssegnate cross-PdC + PartenzeCache shared via BuilderProgrammaContext
 
 ### Contesto
