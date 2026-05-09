@@ -597,10 +597,44 @@ async def genera_turni_pdc_deposito_first(
     )
     riposo_intraturno_violazioni = calcola_e_valida_riposi_intraturno(drafts)
 
+    # 7.quater. Sprint 8.2 MR-PD7b-3 §11.4: riposo settimanale ≥ 62h con
+    # ≥ 2 giorni solari interi. Algoritmo "≥1 ogni 7 giornate consecutive"
+    # (raffinamento S4 SEVERO PIANO PD7b). Carica calendario programma
+    # per conteggio giorni solari concreto.
+    from colazione.domain.builder_pdc.riposo_settimanale import (
+        valida_riposo_settimanale,
+    )
+    from colazione.domain.calendario import festivita_italiane
+    from colazione.models.programmi import ProgrammaMateriale
+
+    programma = (
+        await session.execute(
+            select(ProgrammaMateriale).where(
+                ProgrammaMateriale.id == giro.programma_id
+            )
+        )
+    ).scalar_one_or_none()
+    if programma is not None:
+        anno = programma.valido_da.year
+        festivita_set = frozenset(d for d, _ in festivita_italiane(anno))
+        riposo_settimanale_violazioni = valida_riposo_settimanale(
+            drafts,
+            ciclo_giorni=giro.numero_giornate,
+            data_inizio_programma=programma.valido_da,
+            data_fine_programma=programma.valido_a,
+            festivita=festivita_set,
+        )
+    else:
+        # Fallback: programma non trovato → validatore proxy senza date.
+        riposo_settimanale_violazioni = valida_riposo_settimanale(
+            drafts, ciclo_giorni=giro.numero_giornate
+        )
+
     violazioni_extra = (
         list(fr_cap_violazioni)
         + unicita_violazioni
         + riposo_intraturno_violazioni
+        + riposo_settimanale_violazioni
     )
 
     # 8. Persisti TurnoPdc + giornate + blocchi via helper builder.py
@@ -620,6 +654,7 @@ async def genera_turni_pdc_deposito_first(
             "fr_cap_violazioni": fr_cap_violazioni,
             "unicita_violazioni": unicita_violazioni,
             "riposo_intraturno_violazioni": riposo_intraturno_violazioni,
+            "riposo_settimanale_violazioni": riposo_settimanale_violazioni,
             "builder_strategy": "deposito_first",
             "violazioni_giornate_scartate": violazioni_giornate_scartate,
         },

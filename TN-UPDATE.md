@@ -10,6 +10,125 @@
 
 ---
 
+## 2026-05-10 (282) — Sprint 8.2 MR-PD7b-3: §11.4 riposo settimanale corretto + date concrete (CHIUDE PIANO α completo)
+
+### Contesto
+
+Terzo e ultimo step opzione Z (fai bene tutto). Implementa NORMATIVA-PDC
+§11.4 ("riposo settimanale ≥ 62 ore consecutive, dentro le quali devono
+ricadere almeno 2 giorni solari interi") con:
+- Algoritmo "≥1 riposo settimanale ogni 7 giornate consecutive"
+  (raffinamento S4 SEVERO PIANO PD7b vs heuristic `ciclo // 7` sotto-permissiva)
+- Conteggio **giorni solari interi REALE** via helper
+  `enumera_date_giornata` (MR-PD7b-1) e `_giorni_solari_interi_in_finestra`,
+  invece del proxy `gap_min // (24*60)` del piano originale (S5 SEVERO).
+
+Chiude completamente il piano α Sprint 8.2 (A3 ✅ entry 277 +
+3b ✅ entry 279 + PD7b-1/2/3 ✅ entry 280-282).
+
+### Modifiche
+
+**Nuovo modulo `backend/src/colazione/domain/builder_pdc/riposo_settimanale.py`** (~190 righe):
+
+- 3 costanti: `RIPOSO_SETTIMANALE_MIN_MIN=3720` (62h), `GIORNI_SOLARI_INTERI_RICHIESTI=2`,
+  `GIORNATE_CONSECUTIVE_MAX_SENZA_RIPOSO=7`.
+- `_giorni_solari_interi_in_finestra(start, end) -> int`: conta giorni
+  solari 00:00-23:59 dentro la finestra. Usa "primo intero successivo
+  a start" + "ultimo intero precedente a end". Esempio NORMATIVA: sab
+  14:00 → mar 04:00 = 62h, dom + lun = 2 giorni interi.
+- `valida_riposo_settimanale(drafts, ciclo_giorni, data_inizio_programma,
+  data_fine_programma, festivita) -> list[str]`:
+  - Itera giornate sequenzialmente con contatore
+    `giornate_da_ultimo_riposo`.
+  - Se `riposo_min_post[i] >= 62h` → reset contatore + verifica giorni
+    solari interi ≥ 2.
+  - Altrimenti incrementa contatore. Se raggiunge 7 → violazione
+    "no_riposo_settimanale_in_7gg".
+  - Verifica numero totale riposi settimanali ≥ `ceil(ciclo_giorni / 7)`.
+  - Formati violazioni:
+    - `riposo_settimanale_no_in_7gg:contatore_raggiunto_N_a_GX`
+    - `riposo_settimanale_giorni_solari_insufficienti:GX_post:richiesti_2:effettivi_N`
+    - `riposo_settimanale_numero_insufficiente:trovati_N:attesi_min_M_per_ciclo_Xgg`
+- Helper `_conta_giorni_solari_per_riposo(...)` usa
+  `enumera_date_giornata` (se parametri programma forniti) per
+  costruire datetime concreti, altrimenti fallback proxy.
+
+**`deposito_first.genera_turni_pdc_deposito_first`**: nuovo step 7.quater
+carica `ProgrammaMateriale` da DB, costruisce `festivita_italiane(anno)`,
+chiama `valida_riposo_settimanale(drafts, ciclo_giorni=giro.numero_giornate,
+data_inizio_programma=programma.valido_da, data_fine_programma=programma.valido_a,
+festivita=...)`. Fallback proxy se programma non trovato. Aggiunge
+violazioni a `violazioni_extra` + `metadata_json.riposo_settimanale_violazioni`.
+
+### Test
+
+**Nuovo `backend/tests/test_riposo_settimanale.py`** (~190 righe), 15 test:
+
+- `TestGiorniSolariInteri` (5 test): esempio NORMATIVA sab→mar (2gg),
+  dom→mer (2gg), 50h (1gg), 24h (0gg), end<start (0gg).
+- `TestValidatoreSettimanale` (8 test): lista vuota, ciclo 5gg wrap
+  64h ok, ciclo 5gg wrap 50h violazione "numero_insufficiente",
+  ciclo 14gg con 2 riposi ok, ciclo 14gg con 1 solo riposo violazione
+  "no_in_7gg" + "numero_insufficiente", date concrete 64h con 2gg
+  interi ok, date concrete 65h sab+dom interi ok.
+- 2 sanity test costanti.
+
+### Verifiche
+
+- ✅ pytest test_riposo_settimanale: 15 passed
+- ✅ pytest suite PdC completa (8 file): **103 passed**, 3 xfailed
+  (intenzionali). Zero regressioni.
+- ✅ mypy --strict 13 source files: clean
+- ✅ ruff: clean
+
+### Limitazioni dichiarate (residui)
+
+1. **Validatore strutturale**, non persona-specifico. Per validazione
+   "PdC X dal 15 al 21 marzo" serve modello assegnazione persona
+   (out-of-scope, MR-PD7+ con ruolo Gestione Personale).
+2. **Algoritmo "no_in_7gg"**: il contatore reset dopo violazione per
+   evitare ripetizioni. Se un ciclo ha più zone "senza riposo per 7gg",
+   solo la prima viene segnalata; le successive richiedono altro reset.
+   Comportamento accettabile per MVP (= 1 violazione per ciclo è
+   sufficiente per il pianificatore).
+3. **`enumera_date_giornata` parser DSL Trenord limitato** (vedi entry
+   280): per varianti calendariali parlanti complesse il fallback
+   sovra-include = sovra-strict per §11.4. Scope MR-PD7c (parser DSL
+   completo).
+4. **Solo path `deposito_first` integrato**. Vecchio `multi_turno`
+   continua senza validazione §11.4. Out-of-scope.
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway: aggiunta validazione + nuovo modulo +
+  query `ProgrammaMateriale`. Backward-compatible (validazione
+  opzionale: se programma non trovato → fallback proxy).
+
+### Stato
+
+- ✅ MR-PD7b-3 chiuso. **PIANO α SPRINT 8.2 CHIUSO COMPLETAMENTE**.
+- ✅ Tutti i finding A1+A2+A3 della re-critica AMILCARE entry 276
+  chiusi.
+- ✅ Tutti i finding S1-S8 SEVERO PIANO PD7b chiusi (S1+S2 CRITICAL +
+  S3-S5 HIGH integrati nei sub-MR).
+
+### Sintesi piano α completo
+
+| MR | Entry | Voto SEVERO piano | Costo | Stato |
+|---|---|---|---|---|
+| Re-critica MR-PD3 | 276 | 3/10 (AMILCARE) | 30 min | ✅ |
+| MR-PD-FIX-SEVERO 3a (A3) | 277 | n/a | ~30 min | ✅ |
+| MR-PD-FIX-SEVERO 3b (A1+A2) | 279 | 5/10 fallback NINO | ~7h | ✅ |
+| MR-PD7b-1 helper date | 280 | n/a | ~1h | ✅ |
+| MR-PD7b-2 §11.5 | 281 | n/a | ~2h | ✅ |
+| MR-PD7b-3 §11.4 | 282 (questa) | piano bocciato 3/10 → split Z scelto | ~2.5h | ✅ |
+
+**Totale piano α**: ~13h reali (vs stima originale 8-12h SEVERO,
+~25% meno). 3 deploy backend Railway + 0 frontend. Suite test PdC
+da 53 a 103 (+50 test). Zero regressioni.
+
+---
+
 ## 2026-05-10 (281) — Sprint 8.2 MR-PD7b-2: §11.5 riposo intraturno 11/14/16h (chiude prerequisito S2 SEVERO PIANO PD7b)
 
 ### Contesto
