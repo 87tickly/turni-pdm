@@ -10,6 +10,177 @@
 
 ---
 
+## 2026-05-09 (278) — Sprint 8.2 MR-D5h-A + MR-D5h-DUAL: scissione sede target/operativa CHIUDE Plan-D end-to-end (11 giri persistiti per FIO prog 17)
+
+### Contesto
+
+Risposta alla critica SEVERO 5/10 entry 275 + decisione utente
+*"fai la d che è la migliore"* (= strada (d) AMILCARE per il 3°
+mismatch sede-regola). Due fasi:
+
+- **FASE A (MR-D5h-A)**: pre-requisiti SEVERO obbligatori (~4h):
+  test S2 + estrazione helper S3 + 3 R-PROC permanent.
+- **FASE B (MR-D5h-DUAL)**: scissione `sede_target_codice` (regola,
+  dato utente) vs `sede_operativa_codice` (MR-D2 ottima).
+
+### MR-D5h-A — pre-requisiti (commit `dce3f2f`)
+
+Chiude S2+S3+S6 finding HIGH/MED PROC critica entry 275:
+
+- **S2 HIGH** `_carica_sedi_attive_azienda` no test → nuovo file
+  `tests/test_builder_linea_centrica_loader.py` con 5 test mock
+  AsyncSession (caso felice, filtra stazione_collegata=null,
+  lista vuota, query count=1, dict keys=codice).
+- **S3 HIGH** `direttrice_to_linee` mapping no test → estratta
+  funzione pura `_costruisci_mappature_regole_linee` da
+  `builder.py:1430-1477` (cuore del fix MR-D5f-tris). 9 test:
+  codice_linea diretto, direttrice espansa, misto, valore string,
+  regola senza materiale, direttrice non in corse, filtri non-dict,
+  N regole unione, regole vuote.
+- **S6 MED PROC** 3 R-PROC mai aggiunte → `.claude/agents/severo.md`
+  § "Regole di processo permanenti" + `docs/AUSILI-CODICE.md` § 11.
+  R-PROC-1 (e2e empirico al primo cambio strangler, cap 6/10
+  mock-only), R-PROC-2 (assunzioni esplicite per HARD), R-PROC-3
+  (MED diventa HIGH BLOCKING al cambio successivo del codice
+  mock-only).
+
+### MR-D5h-DUAL — strada (d) AMILCARE (commit `14e8f0f`)
+
+Scissione strutturale sede target vs operativa:
+
+**`backend/src/colazione/domain/builder_giro/multi_giornata.py`**:
+- Nuovo campo `Giro.sede_operativa_codice: str | None = None`.
+- `Giro.localita_codice` ora documentato come **sede TARGET**
+  (regola, dato utente) per il ramo linea-centrica. Nel ramo
+  legacy continua a coincidere con la sede del run (= no-op).
+
+**`backend/src/colazione/domain/builder_giro/aggregazione_linea_centrica.py`**:
+- `traduci_turno_in_giro` accetta nuovo param opzionale
+  `sede_target_per_regola: dict[int, str]`. Se presente E
+  `regola_id` risolve a `sede_target`:
+  - `Giro.localita_codice = sede_target` (utente, persistenza
+    modello cumulativo).
+  - `Giro.sede_operativa_codice = sede_operativa` (MR-D2),
+    `None` se uguali.
+- Senza param → comportamento legacy invariato.
+
+**`backend/src/colazione/domain/builder_giro/pipeline_linea_centrica.py`**:
+- `ParamPipelineLineaCentrica` espone `sede_target_per_regola:
+  dict[int, str]`, propagato al bridge MR-D4.
+
+**`backend/src/colazione/domain/builder_giro/builder.py`**:
+- Costruisce mapping `regola_id → regola.localita_codice` e lo
+  passa a `ParamPipelineLineaCentrica`.
+- `_traduce_e_filtra_giri_linea_centrica` ora confronta
+  `Giro.localita_codice` (= sede target post-MR-D5h) col run.
+  Per i giri persistiti, conta quelli con `sede_operativa_codice
+  != None` ed emette warning aggregato:
+  ```
+  MR-D5h-DUAL: N giri assegnati a sede target X ma operativamente
+  sostano a sedi geometricamente più vicine: [Y]. Servirà blocco
+  vuoto di rientro fra capolinea e sede target (logica in MR-D6
+  successivo).
+  ```
+
+### Verifiche pre-deploy
+
+- 100 test pytest green (linea_centrica/builder filter), 2 skipped,
+  **0 regressioni**.
+- 14 test loader nuovi (5 S2 + 9 S3) + 5 test bridge MR-D5h-DUAL
+  + 3 test warning divergenza in adapter.
+- mypy --strict + ruff clean su 32 file.
+
+### Verifica empirica e2e prog 17
+
+Re-PATCH `linea_centrica` + `POST /api/programmi/17/genera-giri?
+force=true&confirm_delete_pdc=true&localita_codice=IMPMAN_MILANO_FIORENZA`.
+
+**Risultato HTTP 200**:
+
+| Metrica | Pre-MR-D5h-DUAL | MR-D5h-DUAL | Δ |
+|---|---|---|---|
+| n_giri_creati | **0** | **11** | +11 ✅ |
+| n_corse_processate | 1302 | 1302 | invariato |
+| n_giri_chiusi | 0 | 3 | +3 ✅ |
+| n_giri_non_chiusi | 0 | 8 | +8 (servono vuoti rientro MR-D6) |
+| n_giri_scartati | 11 (tutti) | **0** | -11 ✅ |
+| warnings_count | 103 | 103 | invariato |
+| warnings MR-D5h-DUAL | n/a | **1** | +1 ✅ trasparenza |
+
+**Warning MR-D5h-DUAL** emesso correttamente:
+
+> *"MR-D5h-DUAL: 11 giri assegnati a sede target IMPMAN_MILANO_FIORENZA
+> ma operativamente sostano a sedi geometricamente più vicine:
+> [IMPMAN_CREMONA, IMPMAN_LECCO]. Servirà blocco vuoto di rientro
+> fra capolinea e sede target (logica in MR-D6 successivo)."*
+
+**DB stato finale prog 17**: 22 giri totali (11 G-CRE-* legacy + 11
+G-FIO-* nuovi tutti `tipo_materiale=ETR204`, 3 chiusi naturale +
+8 non_chiusi).
+
+### Plan-D end-to-end CHIUSO
+
+Dopo 5 retry consecutivi (D5e/D5f/D5f-bis/D5f-tris/D5h-DUAL) e 6
+commit (`ff2873d` + `f6b7992` + `1105a0b` + `d4200bd` + `dce3f2f`
++ `14e8f0f`), la pipeline linea-centrica è **funzionalmente
+operativa per il pianificatore Trenord prog 17**:
+
+- ✅ Multi-sede architettura (1302/2450 corse processate vs 52
+  pre-MR-D5e)
+- ✅ Espansione direttrice→linee (regole reali Trenord)
+- ✅ Scissione sede target/operativa (modello cumulativo
+  preservato + dato di dominio rispettato)
+- ✅ Trasparenza scarti (`n_giri_scartati`)
+- ✅ Persistenza giri per pianificatore (11 giri G-FIO-* persistiti)
+
+### Limitazioni dichiarate (scope futuro)
+
+1. **MR-D6 vuoti tecnici di rientro**: 8/11 giri sono `non_chiusi`
+   perché terminano in stazione operativa (LEC/CRE) non vicina
+   alla sede target (FIO). Servirà aggiungere blocco vuoto
+   `LECCO → FIORENZA` (= "9{numero_treno_commerciale}" pattern
+   memoria `project_rientro_sede_9XXXX`) come ultimo step del
+   giro, allungando giornata corrente o aggiungendo G_n+1 di
+   posizionamento. Logica in MR-D6 (vuoti tecnici fra giornate
+   di MR-D2/D3 multi-tronco).
+2. **Tutti gli 11 giri sono ETR204** (regola 53, multi-direttrice).
+   Le altre 5 regole FIO (ETR526/ETR522/Vivalto/MD/ETR522) NON
+   producono giri persistiti — probabilmente i loro segmenti sono
+   "catturati" dalla regola 53 (`categoria=R + 8 direttrici`) per
+   ordine di priorità o copertura. Da indagare in MR-D5h-bis o
+   MR-D7 (tuning regole / priorita score).
+3. **Smoke 2-3 linee reali pre-merge** (R-PROC-1 SEVERO entry 270):
+   non eseguito — dati pre-mock non disponibili. Il retry e2e su
+   prog 17 reale ha sostituito lo smoke.
+
+### Stato safety attuale
+
+- ✅ prog 17 rollback `esplorativo` per safety prod (decisione
+  utente sui prossimi passi).
+- 22 giri prog 17 (11 CRE + 11 FIO) in DB. Pianificatore può
+  vederli in UI; per ripristinare configurazione precedente
+  rigenerare in `esplorativo`.
+
+### Stato deploy
+
+- ✅ commit `dce3f2f` MR-D5h-A + push + deploy
+- ✅ commit `14e8f0f` MR-D5h-DUAL + push + deploy
+- ✅ HTTP 200 confermato post-deploy MR-D5h-DUAL su retry definitivo
+
+### Stato
+
+- ✅ MR-D5h-A pre-requisiti (test S2+S3+S6 PROC) chiusi.
+- ✅ MR-D5h-DUAL: scissione sede target/operativa attiva,
+  Plan-D end-to-end OPERATIVO.
+- ⏳ SEVERO retro su MR-D5h-DUAL obbligatorio (CLAUDE.md §9).
+- ⏸️ Decisione utente prossimi passi:
+  - **(a)** MR-D6 vuoti tecnici rientro (chiude i 8/11 non_chiusi)
+  - **(b)** MR-D5h-bis tuning priorità regole (sblocca le 5
+    regole FIO non rappresentate)
+  - **(c)** Sospendere Plan-D / configurazione utente regole
+
+---
+
 ## 2026-05-09 (277) — Sprint 8.2 MR-PD-FIX-SEVERO 3a (A3-extended): difensivo + retry signal-based su API live nel vettura_resolver
 
 ### Contesto
