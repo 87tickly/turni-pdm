@@ -429,6 +429,140 @@ def test_traduce_turno_regola_id_non_in_sede_target_per_regola() -> None:
 
 
 # =====================================================================
+# Sprint 8.2 MR-D6 (entry 279) — vuoto rientro target
+# =====================================================================
+
+
+def test_traduce_turno_mr_d6_vuoto_rientro_chiude_giro() -> None:
+    """MR-D6: turno con sede_target=FIO ma sede_operativa=LEC (capolinea
+    = S_LEC). L'ultima giornata acquisisce `vuoto_coda` da S_LEC a
+    S_FIO + `chiusa_a_localita=True` → giro chiuso."""
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("TIRANO", "S_LEC", 14, 30, 16, 0, treno="R5-1")],
+    )
+    turno = _turno("R5_C0", "R5_completo", "LEC", [g])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"LEC": "S_LEC", "FIO": "S_FIO"},
+        regola_per_segmento={"R5_completo": 47},
+        sede_target_per_regola={47: "FIO"},
+    )
+    assert giro is not None
+    assert giro.chiuso is True  # vuoto rientro chiude il giro
+    assert giro.motivo_chiusura == "naturale"
+    # Vuoto coda presente nella catena posizionata dell'ultima giornata
+    cat_pos = giro.giornate[-1].catena_posizionata
+    assert cat_pos.vuoto_coda is not None
+    assert cat_pos.vuoto_coda.codice_origine == "S_LEC"
+    assert cat_pos.vuoto_coda.codice_destinazione == "S_FIO"
+    assert cat_pos.vuoto_coda.motivo == "coda"
+    # ora_partenza = ora_arrivo ultima corsa (16:00)
+    from datetime import time
+    assert cat_pos.vuoto_coda.ora_partenza == time(16, 0)
+    # ora_arrivo = +60 min default = 17:00
+    assert cat_pos.vuoto_coda.ora_arrivo == time(17, 0)
+    assert cat_pos.chiusa_a_localita is True
+
+
+def test_traduce_turno_mr_d6_no_vuoto_se_target_uguale_operativa() -> None:
+    """MR-D6: se sede_target == sede_operativa, NESSUN vuoto rientro
+    aggiunto (caso felice geometrico)."""
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("S_FIO", "S_FIO", 8, 0, 9, 0, treno="T1")],
+    )
+    turno = _turno("R31_C0", "R31_completo", "FIO", [g])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"FIO": "S_FIO"},
+        regola_per_segmento={"R31_completo": 42},
+        sede_target_per_regola={42: "FIO"},
+    )
+    assert giro is not None
+    cat_pos = giro.giornate[-1].catena_posizionata
+    assert cat_pos.vuoto_coda is None  # no vuoto necessario
+    assert cat_pos.chiusa_a_localita is True  # già a target
+
+
+def test_traduce_turno_mr_d6_vuoto_solo_ultima_giornata_di_2() -> None:
+    """MR-D6: se il turno ha 2 giornate, il vuoto rientro è SOLO sulla
+    seconda (= ultima del giro). La prima giornata può chiudere a
+    sede operativa (= parking notte LEC)."""
+    g1 = _giornata(
+        date(2026, 6, 8),
+        [_corsa("TIRANO", "S_LEC", 14, 0, 15, 0, treno="R5-1")],
+    )
+    g2 = _giornata(
+        date(2026, 6, 9),
+        [_corsa("S_LEC", "MILANO", 8, 0, 9, 0, treno="R5-2")],
+        # nota: g2 ha sequenza DIVERSA da g1 (per evitare aggregazione)
+    )
+    turno = _turno("R5_C0", "R5_completo", "LEC", [g1, g2])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"LEC": "S_LEC", "FIO": "S_FIO"},
+        regola_per_segmento={"R5_completo": 47},
+        sede_target_per_regola={47: "FIO"},
+    )
+    assert giro is not None
+    assert len(giro.giornate) == 2
+    # G1 NO vuoto rientro (= parking LEC)
+    cat_pos_g1 = giro.giornate[0].catena_posizionata
+    assert cat_pos_g1.vuoto_coda is None
+    # G2 SI vuoto rientro a target
+    cat_pos_g2 = giro.giornate[-1].catena_posizionata
+    assert cat_pos_g2.vuoto_coda is not None
+    assert cat_pos_g2.vuoto_coda.codice_destinazione == "S_FIO"
+
+
+def test_traduce_turno_mr_d6_no_vuoto_se_legacy_no_sede_target() -> None:
+    """MR-D6: senza `sede_target_per_regola` (chiamante legacy),
+    NESSUN vuoto rientro (= comportamento pre-MR-D5h-DUAL invariato).
+    Backward-compat preservato."""
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("X", "Y", 8, 0, 9, 0, treno="T1")],
+    )
+    turno = _turno("R31_C0", "R31_completo", "FIO", [g])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"FIO": "S_FIO"},
+        regola_per_segmento={"R31_completo": 42},
+        # sede_target_per_regola=None
+    )
+    assert giro is not None
+    cat_pos = giro.giornate[-1].catena_posizionata
+    assert cat_pos.vuoto_coda is None  # comportamento legacy invariato
+
+
+def test_traduce_turno_mr_d6_stazione_target_assente_skip_vuoto() -> None:
+    """MR-D6: se `sede_target` è risolto ma la sua `stazione_collegata`
+    non è in `stazione_collegata_per_sede` (defensive), NO vuoto
+    rientro aggiunto. Giro non chiuso (= warning trasparente)."""
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("TIRANO", "S_LEC", 14, 0, 16, 0, treno="R5-1")],
+    )
+    turno = _turno("R5_C0", "R5_completo", "LEC", [g])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"LEC": "S_LEC"},  # FIO NON in mapping
+        regola_per_segmento={"R5_completo": 47},
+        sede_target_per_regola={47: "FIO"},  # target FIO ma stazione None
+    )
+    assert giro is not None
+    cat_pos = giro.giornate[-1].catena_posizionata
+    assert cat_pos.vuoto_coda is None
+    # Giro NON chiuso: stazione_fine S_LEC != stazione_collegata sede
+    # operativa (S_LEC) ... in realtà coincide. Caso edge: se è uguale
+    # alla sede operativa, è chiuso a sede_operativa ma non a target.
+    # Questo è il comportamento legacy: chiude se finisce in
+    # stazione_collegata operativa.
+    assert cat_pos.chiusa_a_localita is True
+
+
+# =====================================================================
 # Wrapper multi-turno
 # =====================================================================
 

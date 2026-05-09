@@ -44,6 +44,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Sequence
+from datetime import time
 from typing import Any
 
 from colazione.domain.builder_giro.catena import Catena
@@ -56,7 +57,10 @@ from colazione.domain.builder_giro.multi_giornata import (
     Giro,
     MotivoChiusura,
 )
-from colazione.domain.builder_giro.posizionamento import CatenaPosizionata
+from colazione.domain.builder_giro.posizionamento import (
+    BloccoMaterialeVuoto,
+    CatenaPosizionata,
+)
 
 # =====================================================================
 # Helpers
@@ -85,12 +89,72 @@ def _chiave_sequenza_giornata(giornata: GiornataServizio) -> tuple[Any, ...]:
     )
 
 
+def _costruisci_vuoto_rientro_target(
+    giornata: GiornataServizio,
+    stazione_target: str,
+    *,
+    durata_min_default: int = 60,
+) -> BloccoMaterialeVuoto | None:
+    """Sprint 8.2 MR-D6: costruisce un blocco vuoto di rientro
+    dall'ultima stazione operativa della giornata alla stazione
+    target (= sede regola, dato utente).
+
+    Necessario per chiudere i giri quando ``sede_target !=
+    sede_operativa`` (= MR-D2 ottimizzazione geometrica ha scelto
+    sede diversa dalla regola dichiarata). Pattern memoria
+    ``project_rientro_sede_9XXXX``: numerazione vuoti =
+    ``9{numero_treno_commerciale_di_confine}``.
+
+    Heuristic:
+    - ``ora_partenza`` = ora_arrivo dell'ultima corsa.
+    - ``ora_arrivo`` = ora_partenza + ``durata_min_default`` (= 60).
+      Stima conservativa per percorsi <100km. MR-D7 può raffinare
+      con dati km/velocità reali.
+    - ``motivo='coda'`` per tracciabilità nei metadata.
+    - ``cross_notte_giorno_precedente=False`` (= rientro nello
+      stesso giorno operativo, non valido per "uscita serale K-1").
+
+    Args:
+        giornata: ultima giornata del turno.
+        stazione_target: codice stazione collegata alla sede target.
+        durata_min_default: durata fissa stima vuoto rientro (default
+            60 min).
+
+    Returns:
+        ``BloccoMaterialeVuoto`` se serve rientro
+        (``stazione_fine != stazione_target``), ``None`` altrimenti.
+    """
+    if not giornata.corse:
+        return None
+    if giornata.stazione_fine == stazione_target:
+        # Già a target, no rientro necessario
+        return None
+    ultima = giornata.corse[-1]
+    arrivo_min = ultima.ora_arrivo.hour * 60 + ultima.ora_arrivo.minute
+    fine_rientro_min = arrivo_min + durata_min_default
+    # Cross-mezzanotte: cap a 23:59 per non finire oltre il giorno
+    # solare. Il "giro" potrebbe quindi non chiudere se il rientro
+    # finisce dopo mezzanotte. Lasciamo `chiusa_a_localita` decisa
+    # dal chiamante.
+    if fine_rientro_min >= 24 * 60:
+        fine_rientro_min = 24 * 60 - 1
+    return BloccoMaterialeVuoto(
+        codice_origine=giornata.stazione_fine,
+        codice_destinazione=stazione_target,
+        ora_partenza=ultima.ora_arrivo,
+        ora_arrivo=time(fine_rientro_min // 60, fine_rientro_min % 60),
+        motivo="coda",
+        cross_notte_giorno_precedente=False,
+    )
+
+
 def _costruisci_catena_posizionata(
     giornata: GiornataServizio,
     *,
     sede_codice: str,
     stazione_collegata: str,
     regola_id: int | None,
+    aggiungi_vuoto_rientro_a: str | None = None,
 ) -> CatenaPosizionata:
     """Sintetizza una `CatenaPosizionata` da una `GiornataServizio`.
 
@@ -99,15 +163,36 @@ def _costruisci_catena_posizionata(
       scope MR-D6)
     - ``chiusa_a_localita`` = True se ``stazione_fine ==
       stazione_collegata``
+
+    **Sprint 8.2 MR-D6 (entry 279)**: se ``aggiungi_vuoto_rientro_a``
+    è valorizzato (= stazione target diversa da sede operativa),
+    costruisce un ``BloccoMaterialeVuoto`` di coda da
+    ``giornata.stazione_fine`` a ``aggiungi_vuoto_rientro_a`` e
+    setta ``chiusa_a_localita=True`` (giro chiude a target via
+    vuoto coda).
     """
     catena = Catena(corse=giornata.corse)
-    chiusa = giornata.stazione_fine == stazione_collegata
+    vuoto_coda: BloccoMaterialeVuoto | None = None
+    if aggiungi_vuoto_rientro_a is not None:
+        vuoto_coda = _costruisci_vuoto_rientro_target(
+            giornata, aggiungi_vuoto_rientro_a
+        )
+        # Se serve rientro E il vuoto è stato costruito, il giro
+        # chiude a target via vuoto coda.
+        if vuoto_coda is not None:
+            chiusa = True
+        else:
+            # `_costruisci_vuoto_rientro_target` ha ritornato None →
+            # già a target, chiusa per stazione_fine == target.
+            chiusa = giornata.stazione_fine == aggiungi_vuoto_rientro_a
+    else:
+        chiusa = giornata.stazione_fine == stazione_collegata
     return CatenaPosizionata(
         localita_codice=sede_codice,
         stazione_collegata=stazione_collegata,
         vuoto_testa=None,
         catena=catena,
-        vuoto_coda=None,
+        vuoto_coda=vuoto_coda,
         chiusa_a_localita=chiusa,
         regola_id=regola_id,
     )
@@ -220,16 +305,34 @@ def traduci_turno_in_giro(
             sede_operativa if sede_operativa != sede_target else None
         )
 
+    # Sprint 8.2 MR-D6 (entry 279) — vuoto rientro target.
+    # Calcola la stazione TARGET (= stazione collegata della sede regola).
+    # Se sede_target != sede_operativa, l'ultima giornata del giro
+    # avrà un `vuoto_coda` da capolinea operativo a stazione target
+    # per chiudere il giro alla sede dichiarata dall'utente.
+    stazione_target_codice: str | None = None
+    if sede_target is not None and sede_target != sede_operativa:
+        stazione_target_codice = stazione_collegata_per_sede.get(sede_target)
+
     gruppi = _raggruppa_per_chiave_sequenza(turno.giornate)
+    n_giornate = len(gruppi)
 
     giornate_giro: list[GiornataGiro] = []
-    for _chiave, giornate_gruppo in gruppi:
+    for idx, (_chiave, giornate_gruppo) in enumerate(gruppi):
         giornata_canonica = giornate_gruppo[0]
+        # MR-D6: aggiungi vuoto rientro SOLO sull'ULTIMA giornata
+        # (= il convoglio rientra a sede target a fine giro, non
+        # inter-giornata).
+        is_ultima = idx == n_giornate - 1
+        aggiungi_vuoto = (
+            stazione_target_codice if is_ultima else None
+        )
         cat_pos = _costruisci_catena_posizionata(
             giornata_canonica,
             sede_codice=sede_operativa,
             stazione_collegata=stazione_collegata,
             regola_id=regola_id,
+            aggiungi_vuoto_rientro_a=aggiungi_vuoto,
         )
         dates_apply = tuple(g.data for g in giornate_gruppo)
         giornate_giro.append(
