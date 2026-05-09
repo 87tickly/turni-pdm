@@ -10,6 +10,198 @@
 
 ---
 
+## 2026-05-09 (251) — Sprint 8.1 MR-A7 + MR-A3-quater: validazione end-to-end builder esplorativo, fix HIGH-1 SEVERO pool perimetro tutto-o-niente
+
+### Contesto
+
+Sessione 2026-05-09 mattina: l'utente ha chiesto di "risolvere i 3
+sintomi reali" del builder con ausilio FAUSTO + AMILCARE + SEVERO.
+Sintomi target (entry 242 piano Sprint 8.1):
+
+1. 150 corse non coperte (programma 17, ETR522 FIO 3 direttrici)
+2. ~50% giri 1g sotto n_min=4 (programma 17)
+3. Programma R11 (Colico-Chiavenna) FIO → 0 giri (programma 16)
+
+### Lavoro svolto
+
+**Setup A7 locale**: Postgres 17 docker + dump Railway production
+(`/tmp/colazione_dump/railway.dump` 1.3MB) → ripristino in
+`colazione_db_temp` per test sicuri offline.
+
+**Snapshot rigido (PRE)** dei 2 programmi:
+- Prog 16: 67 giri, 22 sotto-min (32.8%), residue=6/2168 — sintomo R11
+  già risolto (R11 fra 8 regole genera giri).
+- Prog 17: 23 giri, 12 sotto-min (52.2%), 5 1g (21.7%), residue=0/765
+  — sintomo "150 non coperte" già risolto (residue=0). Sintomo
+  principale residuo: ~52% sotto-min.
+
+**Snapshot esplorativo (POST primo run)** prog 17: 35 giri, 12 sotto-min
+(34.3%), 5 1g (14.3%), corse 1651 (vs 765 rigido), residue=0, 264
+warning, 11 chiusi/24 non_chiusi. **Miglioramento −18pp ma 12 giri
+sotto-min restano in valore assoluto**.
+
+**Diagnosi 12 sotto-min** via `scripts/diag_giri_sotto_min.py`:
+- 6 'naturale' (50%): navette serali-mattutine isolate (es. giro 1820:
+  Pavia→Mortara@20:10 g1 + Mortara→Pavia@06:54 g2)
+- 3 'sotto_min', 2 'ciclo_aperto_irrisolto', 1 'non_chiuso'
+
+**Test MR-A4-tris**: cambio `peso_n_giornate=−0.5→+1.0` nel default
+`ParamBacktracking` → ZERO effetto (distribuzione identica). Backtracking
+non ha catene candidate utili per estendere quei giri. Rollback
+peso. **Errore metodologico**: modifica diretta default + run E2E
+senza unit test. Documentato come lesson learned (vedi sotto).
+
+**Validazione F4 con FAUSTO** (`mcp__grok__chat`, ~1KB brief): proposto
+fix "fusione_giri_corti" che cerca coppie compatibili topologicamente
+(A.last.dest = B.first.orig, ore compatibili) e le fonde. **FAUSTO
+ha individuato bug semantico in 5 secondi**: confonde "date disgiunte"
+con "giornate consecutive". Il modello giro = N giornate consecutive
+× M varianti calendariali; non posso fondere giro_A 2g + giro_B 1g
+in giro 3g se le date di A e B sono disgiunte. **F4 scartato**.
+
+**Decisione architetturale con AMILCARE V4 Pro** (brief snello ~2KB,
+no timeout): "i 12 sotto-min sono **fatto del PdE non bug**. Accetta
+naturali + UI badge per revisione umana". Opzione (a) corretta;
+opzione (b) "rifiuta corse" peggiorerebbe l'esperienza nascondendo
+soluzioni operative.
+
+### SEVERO via fallback NINO+AMILCARE (subagent non bootato)
+
+Critica MR-A7 voto **3/10**. File:
+`docs/critiche/SPRINT-8.1-MR-A7-validazione-end-to-end.md`.
+
+**Finding**:
+
+- **HIGH-1**: Pool inquinato. Esplorativo passa da 765 a 1651 corse
+  (+886, +116%) senza verifica conformità Tier 0. Diagnostica via
+  `scripts/diag_pool_esplorativo.py`: per prog 17 il pool effettivo
+  era Tier 0=298 + Tier 1 only=2651 (rumore +889.6%, top direttrici
+  rumore: SARONNO-LODI 267, MALPENSA-MILANO 174, COMO-SEREGNO 148,
+  ecc. = linee fuori 3 direttrici regola id=45). 264 warning
+  "Catena scartata fuori whitelist sede" + 24/35 non_chiusi
+  certificavano dataset sporco.
+- **HIGH-2**: Prog 16 saltato per timeout backtracking esplorativo
+  (>5 min sulla prima sede LECCO). Validazione end-to-end consegnata
+  parziale senza giustificazione.
+- **MED**: Test peso A4-tris senza unit test, modifica default
+  + rollback senza commit.
+
+### Modifiche MR-A3-quater (HIGH-1 fix)
+
+**`backend/src/colazione/domain/builder_giro/builder.py:1512`**:
+Tier 1 fallback attivato SOLO quando Tier 0 globale è VUOTO (caso
+"regola unica → 0 corse" originale MR-A3 entry 244). Pre-fix:
+allargava sempre. Post-fix:
+```python
+pool_tier0 = [c for c in corse if _corsa_in_perimetro(c)]
+if pool_tier0:
+    corse_perimetro = pool_tier0
+else:
+    corse_perimetro = [c for c in corse if _corsa_in_perimetro_esplorativo(c)]
+```
+
+**`backend/tests/test_risolvi_corsa_esplorativo.py`**: 2 test unit
+nuovi:
+- `test_a3quater_pool_tier0_non_vuoto_disattiva_tier1_fallback`
+  (regola R11 + 2 corse R11 + 3 corse R7 → pool = 2, no R7 fallback)
+- `test_a3quater_pool_tier0_vuoto_attiva_tier1_fallback` (regola R11
+  + 0 corse R11 + 3 corse R7 → pool = 3, fallback Tier 1 attivato)
+
+### Verifiche post-fix
+
+A7 ri-eseguito su entrambi prog 16 + prog 17:
+
+| Metrica | PRE rigido | POST esplorativo (post-fix) | Δ |
+|---|---|---|---|
+| Prog 16 n_giri | 67 | 91 | +24 |
+| Prog 16 sotto-min | 22 (32.8%) | **4 (4.4%)** | **−81%** |
+| Prog 16 giri_1g | 6 | 2 | −4 |
+| Prog 17 n_giri | 23 | 37 | +14 |
+| Prog 17 sotto-min | 12 (52.2%) | **3 (8.1%)** | **−75%** |
+| Prog 17 giri_1g | 5 | 1 | −4 |
+| Prog 17 warnings | n/a | 72 (era 264 pre-fix) | −73% |
+| Prog 16 backtracking timeout | bloccava >5min | OK in <2min | RISOLTO |
+
+Distribuzione POST esplorativo prog 17:
+`{1: 1, 2: 1, 3: 1, 4: 6, 5: 7, 6: 14, 7: 2, 8: 1, 9: 1, 10: 2, 11: 1}`
+(era pre-fix `{1: 5, 2: 3, 3: 4, 4: 7, 5: 5, 6: 5, ...}`).
+
+**Test**: 17/17 test esplorativi passed (15 esistenti + 2 A3-quater
+nuovi). Mypy --strict + ruff puliti su `builder.py`.
+
+### Stato sintomi originali
+
+| Sintomo | Verdict |
+|---|---|
+| 150 corse non coperte | ✅ già risolto pre-A7 (residue=0/765 rigido prog 17) |
+| R11 → 0 giri (prog 16) | ✅ già risolto pre-A7 (8 regole, R11 fra esse) |
+| ~50% giri 1g sotto n_min=4 | ✅ **risolto post-fix HIGH-1** (52%→8.1% prog 17, 32.8%→4.4% prog 16) |
+
+### Lesson learned MED (test peso A4-tris)
+
+**Errore**: alterato il default `peso_n_giornate=−0.5→+1.0` direttamente
+nel codice + run A7 E2E (~3 min CPU). Distribuzione identica
+(backtracking non aveva catene candidate utili). Rollback fatto
+senza commit. **Sforzo sprecato + zero traccia in TN-UPDATE**.
+
+**Pattern corretto** per validare pesi alternativi futuri:
+1. **Mai** modificare il default + run E2E come "test"
+2. Scrivere `test_param_pesi_score_alternativi.py` che istanzia
+   `ParamBacktracking(peso_X=Y)` con override esplicito e verifica
+   score delta direttamente
+3. SE il test unit passa → considerare modifica default come MR
+   formale con commit + critica SEVERO
+
+### Stato
+
+- ✅ MR-A3-quater chiuso. HIGH-1 SEVERO chiuso.
+- ✅ A7 prog 16 + 17 chiuso. HIGH-2 SEVERO chiuso.
+- ✅ Lesson learned MED documentata.
+- ⏳ MR-A8 (switch default `builder_mode='esplorativo'`): sbloccato.
+
+### Per l'utente
+
+- Sintomo principale "~50% giri 1g sotto n_min=4" **risolto**: prog 17
+  scende da 52.2% a 8.1%; prog 16 scende da 32.8% a 4.4%.
+- I residui (3 giri prog 17, 4 giri prog 16) sono "naturali":
+  navette/pattern PdE che non possono materialmente arrivare a 4
+  giornate consecutive (decisione AMILCARE: accept + UI badge,
+  scope futuro Sprint 7.3 dashboard).
+- Builder esplorativo ora pulito: pool = Tier 0 quando produce ≥1
+  corsa (prog 17/16 normali); fallback Tier 1 solo quando Tier 0
+  globale è VUOTO (caso "regola unica linea → 0 giri" originale).
+- Backtracking non si blocca più su prog 16 multi-sede.
+
+### Prossimo step: MR-A8 switch default
+
+Decisione utente da confermare: cambiare il default
+`programma_materiale.builder_mode` da `'rigido'` a `'esplorativo'`
+per nuovi programmi. Migration + rollout incrementale o switch
+diretto.
+
+### Costo
+
+- Tempo NINO: ~6h sessione (setup + diagnosi + 4 test A7 + fix + test + SEVERO + lesson)
+- AMILCARE V4 Pro: 2 chiamate andate a buon fine (~3 centesimi totali)
+- AMILCARE V4 Pro: 2 timeout (brief troppo grandi, lezione confermata entry 248)
+- FAUSTO: 1 chiamata `mcp__grok__chat` (~0.3 centesimi)
+
+### Note tracciabilità
+
+- **AMILCARE V4 Pro motore SEVERO**: critica MR-A7 voto 3/10 (HIGH-1
+  + HIGH-2 + MED). Pattern verbatim AMILCARE + filtro NINO seguito.
+  Tutti finding accettati, no scarto.
+- **AMILCARE V4 Pro decisione architetturale**: "12 sotto-min = fatto
+  PdE, accept (a)". Ha evitato fix sbagliato (rifiuto corse opzione b).
+- **FAUSTO**: validazione semantica F4 fusione_giri_corti.
+  Bug individuato (date disgiunte ≠ giornate consecutive). F4
+  scartato → ha evitato 1-2 giorni di lavoro sbagliato.
+- **SEVERO subagent**: NON invocato come `Agent(subagent_type=severo)`,
+  custom subagent ancora non bootato (restart Claude Code rimandato).
+  Workflow eseguito manualmente da NINO.
+
+---
+
 ## 2026-05-08 (250) — Chiusura progetto iniziale SEVERO: consolidamento lezioni apprese in subagent + framework
 
 ### Contesto

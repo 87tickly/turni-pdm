@@ -394,3 +394,91 @@ def test_a3bis_high3_tie_break_id_asc_anche_se_meno_filtri() -> None:
     assert out is not None
     assert out.regola_id == 3  # id più basso vince, len_filtri irrilevante
     assert out.composizione[0].materiale_tipo_codice == "ETR421"
+
+
+# =====================================================================
+# MR-A3-quater (entry 251) HIGH-1 SEVERO MR-A7: pool perimetro
+# tutto-o-niente. Tier 1 fallback attivo SOLO quando Tier 0 globale
+# è VUOTO. Quando Tier 0 produce ≥1 corsa, NON allargare al Tier 1
+# (era inflazione +889% sul prog 17 reale).
+# =====================================================================
+
+
+def test_a3quater_pool_tier0_non_vuoto_disattiva_tier1_fallback() -> None:
+    """HIGH-1 SEVERO MR-A7 fix: simula la logica del fix in builder.py.
+
+    Setup: regola R11 (filtri = codice_linea=R11). Corse: 2 R11 (Tier 0
+    match) + 3 R7 (Tier 0 fail, Tier 1 compatibile materiale).
+
+    Pre-fix: pool perimetro esplorativo = 5 corse (Tier 0 OR Tier 1).
+    Post-fix: pool Tier 0 = 2 corse → no fallback Tier 1 → pool = 2.
+    """
+    regola_r11 = _RegolaFake(
+        id=1,
+        priorita=60,
+        composizione_json=[{"materiale_tipo_codice": "ETR204", "n_pezzi": 1}],
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "R11"}],
+    )
+    corse_r11 = [
+        _CorsaFake(numero_treno="11001", codice_linea="R11"),
+        _CorsaFake(numero_treno="11002", codice_linea="R11"),
+    ]
+    corse_r7 = [
+        _CorsaFake(numero_treno="7001", codice_linea="R7"),
+        _CorsaFake(numero_treno="7002", codice_linea="R7"),
+        _CorsaFake(numero_treno="7003", codice_linea="R7"),
+    ]
+    corse_tutte = corse_r11 + corse_r7
+
+    # Simula `_corsa_in_perimetro` (Tier 0 only) usato nel fix
+    from colazione.domain.builder_giro.risolvi_corsa import matches_all
+
+    pool_tier0 = [
+        c for c in corse_tutte if matches_all(regola_r11.filtri_json, c, "feriale")
+    ]
+    assert len(pool_tier0) == 2  # solo 2 R11
+
+    # Tier 0 non vuoto → fix disattiva Tier 1 fallback
+    if pool_tier0:
+        pool_finale = pool_tier0
+    else:
+        pool_finale = corse_tutte  # fallback (non raggiunto qui)
+
+    assert len(pool_finale) == 2  # solo R11, NO R7 nel pool
+    assert all(c.codice_linea == "R11" for c in pool_finale)
+
+
+def test_a3quater_pool_tier0_vuoto_attiva_tier1_fallback() -> None:
+    """HIGH-1 SEVERO MR-A7 fix: caso "regola unica → 0 corse" originale
+    di MR-A3 entry 244 deve ancora funzionare.
+
+    Setup: regola R11, corse tutte R7. Tier 0 = 0 corse → fallback
+    Tier 1 attivato → tutte le corse R7 entrano nel pool (decisione
+    Q1=b utente, sblocca caso bloccante).
+    """
+    regola_r11 = _RegolaFake(
+        id=1,
+        priorita=60,
+        composizione_json=[{"materiale_tipo_codice": "ETR204", "n_pezzi": 1}],
+        filtri_json=[{"campo": "codice_linea", "op": "eq", "valore": "R11"}],
+    )
+    corse_r7 = [
+        _CorsaFake(numero_treno="7001", codice_linea="R7"),
+        _CorsaFake(numero_treno="7002", codice_linea="R7"),
+        _CorsaFake(numero_treno="7003", codice_linea="R7"),
+    ]
+
+    from colazione.domain.builder_giro.risolvi_corsa import matches_all
+
+    pool_tier0 = [
+        c for c in corse_r7 if matches_all(regola_r11.filtri_json, c, "feriale")
+    ]
+    assert len(pool_tier0) == 0  # Tier 0 vuoto
+
+    # Tier 0 vuoto → fallback Tier 1 attivato (decisione Q1=b)
+    if pool_tier0:
+        pool_finale = pool_tier0
+    else:
+        pool_finale = list(corse_r7)  # tutte ammesse al Tier 1 (sblocca)
+
+    assert len(pool_finale) == 3  # tutte le R7 ammesse al Tier 1

@@ -1510,7 +1510,20 @@ async def genera_giri(
         ) is not None
 
     if programma.builder_mode == "esplorativo":
-        corse_perimetro = [c for c in corse if _corsa_in_perimetro_esplorativo(c)]
+        # Sprint 8.1 MR-A3-quater (entry 251) HIGH-1 SEVERO MR-A7 fix:
+        # Tier 1 fallback attivo SOLO quando Tier 0 globale è VUOTO
+        # (caso "regola unica → 0 corse" originale MR-A3 entry 244).
+        # Quando Tier 0 produce ≥1 corsa, NON allargare al Tier 1: il
+        # fallback prende tutte le corse compatibili-materiale di TUTTE
+        # le linee Trenord, gonfiando il pool ~10x con rumore (es. prog
+        # 17 PdE 22gg: Tier 0=298, Tier 1 only=2651, inflazione +889%).
+        # Decisione tutto-o-niente: se Tier 0 ha qualcosa, esplorativo
+        # = Tier 0 (= rigido); se Tier 0 è 0, esplorativo allarga a Tier 1.
+        pool_tier0 = [c for c in corse if _corsa_in_perimetro(c)]
+        if pool_tier0:
+            corse_perimetro = pool_tier0
+        else:
+            corse_perimetro = [c for c in corse if _corsa_in_perimetro_esplorativo(c)]
     else:
         corse_perimetro = [c for c in corse if _corsa_in_perimetro(c)]
 
