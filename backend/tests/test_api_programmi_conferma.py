@@ -51,6 +51,14 @@ def client() -> TestClient:
 
 async def _wipe_programmi() -> None:
     async with session_scope() as session:
+        # Sprint 8.2 MR-PD-FIX-SEVERO 2 (S5): cleanup turni PdC orfani
+        # generati dal test smoke deposito_first (codice prefix
+        # T-TEST_DEPOT_PD5-...). I turni non hanno FK al programma quindi
+        # sopravvivono al cascade.
+        await session.execute(
+            text("DELETE FROM turno_pdc WHERE codice LIKE :tp"),
+            {"tp": "T-TEST_DEPOT_PD5-%"},
+        )
         await session.execute(
             text(
                 "DELETE FROM programma_regola_assegnazione WHERE programma_id IN ("
@@ -672,6 +680,215 @@ async def test_genera_turno_pdc_deposito_first_senza_deposito_pdc_id_422(
     )
     assert res.status_code == 422, res.text
     assert "deposito_pdc_id" in res.json()["detail"]
+
+
+# =====================================================================
+# Sprint 8.2 MR-PD-FIX-SEVERO 2 (S5): integration smoke deposito_first
+# =====================================================================
+
+
+async def _ensure_depot_test_pd5(az_id: int) -> int:
+    """Get-or-create depot di test (codice unique TEST_DEPOT_PD5)."""
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text("SELECT id FROM depot WHERE codice = 'TEST_DEPOT_PD5'")
+            )
+        ).first()
+        if row is not None:
+            return int(row[0])
+        await session.execute(
+            text(
+                "INSERT INTO depot (azienda_id, codice, display_name, "
+                "stazione_principale_codice, is_attivo, tipi_personale_ammessi) "
+                "SELECT :az, 'TEST_DEPOT_PD5', 'Test Depot MR-PD2', "
+                "(SELECT codice FROM stazione WHERE azienda_id = :az LIMIT 1), "
+                "TRUE, 'PdC'"
+            ),
+            {"az": az_id},
+        )
+        row = (
+            await session.execute(
+                text("SELECT id FROM depot WHERE codice = 'TEST_DEPOT_PD5'")
+            )
+        ).first()
+        assert row is not None
+        return int(row[0])
+
+
+async def _crea_giro_completo_per_deposito_first(
+    programma_id: int, codice: str
+) -> tuple[int, int, str]:
+    """Sprint 8.2 MR-PD-FIX-SEVERO 2: crea giro + 1 giornata + variante
+    canonica + 2 blocchi minimi per smoke integration deposito_first.
+
+    Returns (giro_id, depot_id, depot_codice).
+    """
+    async with session_scope() as session:
+        az_row = (
+            await session.execute(
+                text("SELECT id FROM azienda WHERE codice = 'trenord'")
+            )
+        ).first()
+        assert az_row is not None
+        az_id = int(az_row[0])
+
+        # Stazioni (use 2 esistenti dal seed Trenord)
+        staz_rows = list(
+            (
+                await session.execute(
+                    text(
+                        "SELECT codice FROM stazione WHERE azienda_id = :az "
+                        "ORDER BY codice LIMIT 2"
+                    ),
+                    {"az": az_id},
+                )
+            ).all()
+        )
+        assert len(staz_rows) >= 2
+        staz_a = str(staz_rows[0][0])
+        staz_b = str(staz_rows[1][0])
+
+        # Crea giro materiale
+        giro_row = (
+            await session.execute(
+                text(
+                    "INSERT INTO giro_materiale "
+                    "(azienda_id, programma_id, numero_turno, tipo_materiale, "
+                    "materiale_tipo_codice, numero_giornate, stato, "
+                    "localita_manutenzione_partenza_id, "
+                    "localita_manutenzione_arrivo_id, generation_metadata_json) "
+                    "SELECT :az, :pid, :codice, 'TEST', NULL, 1, 'bozza', "
+                    "(SELECT id FROM localita_manutenzione WHERE azienda_id = :az LIMIT 1), "
+                    "(SELECT id FROM localita_manutenzione WHERE azienda_id = :az LIMIT 1), "
+                    "'{}'::jsonb "
+                    "RETURNING id"
+                ),
+                {"az": az_id, "pid": programma_id, "codice": codice},
+            )
+        ).first()
+        assert giro_row is not None
+        giro_id = int(giro_row[0])
+
+        # Crea giornata
+        giornata_row = (
+            await session.execute(
+                text(
+                    "INSERT INTO giro_giornata "
+                    "(giro_materiale_id, numero_giornata) "
+                    "VALUES (:gid, 1) RETURNING id"
+                ),
+                {"gid": giro_id},
+            )
+        ).first()
+        assert giornata_row is not None
+        gg_id = int(giornata_row[0])
+
+        # Crea variante canonica
+        variante_row = (
+            await session.execute(
+                text(
+                    "INSERT INTO giro_variante "
+                    "(giro_giornata_id, variant_index, validita_testo) "
+                    "VALUES (:ggid, 0, 'GG') RETURNING id"
+                ),
+                {"ggid": gg_id},
+            )
+        ).first()
+        assert variante_row is not None
+        var_id = int(variante_row[0])
+
+        # 2 blocchi: 08:00-09:00 staz_a→staz_b, 09:30-12:00 staz_b→staz_a
+        for seq, ini_h, ini_m, fin_h, fin_m, da, a in [
+            (1, 8, 0, 9, 0, staz_a, staz_b),
+            (2, 9, 30, 12, 0, staz_b, staz_a),
+        ]:
+            await session.execute(
+                text(
+                    # tipo 'sosta_disponibile': non richiede FK a
+                    # corsa_commerciale ma soddisfa il check constraint.
+                    # Builder PdC tratta tutti i blocchi con orari e
+                    # stazioni come condotta (vedi _build_giornata_pdc).
+                    "INSERT INTO giro_blocco "
+                    "(giro_variante_id, seq, tipo_blocco, ora_inizio, "
+                    "ora_fine, stazione_da_codice, stazione_a_codice, "
+                    "is_validato_utente, metadata_json) "
+                    "VALUES (:vid, :seq, 'sosta_disponibile', :ini, :fin, "
+                    ":da, :a, FALSE, '{}'::jsonb)"
+                ),
+                {
+                    "vid": var_id,
+                    "seq": seq,
+                    "ini": f"{ini_h:02d}:{ini_m:02d}",
+                    "fin": f"{fin_h:02d}:{fin_m:02d}",
+                    "da": da,
+                    "a": a,
+                },
+            )
+
+    depot_id = await _ensure_depot_test_pd5(az_id)
+    return giro_id, depot_id, "TEST_DEPOT_PD5"
+
+
+async def test_genera_turno_pdc_deposito_first_smoke_ok(
+    client: TestClient,
+) -> None:
+    """Sprint 8.2 MR-PD-FIX-SEVERO 2 (S5): smoke integration end-to-end
+    del path ``builder_strategy='deposito_first'``.
+
+    Setup: programma MATERIALE_CONFERMATO + giro + 1 giornata + 1
+    variante canonica + 2 blocchi commerciali. Mock di
+    ``trova_treno_vettura`` per evitare chiamate live.arturo.travel
+    reali; ritorna ``None`` → fallback VOCTAXI nel resolver §7.2.
+
+    Verifica: 200, 1 turno persistito, ``deposito_pdc_id`` valorizzato,
+    metadata ``builder_strategy='deposito_first'``.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    pid = await _crea_programma_in_stato(
+        "df_smoke_ok", "MATERIALE_CONFERMATO"
+    )
+    giro_id, depot_id, depot_codice = (
+        await _crea_giro_completo_per_deposito_first(pid, "G-DF-SMOKE-001")
+    )
+
+    # Mock trova_treno_vettura → None ovunque (fallback VOCTAXI)
+    with patch(
+        "colazione.domain.builder_pdc.vettura_resolver.trova_treno_vettura",
+        new=AsyncMock(return_value=None),
+    ):
+        res = client.post(
+            f"/api/giri/{giro_id}/genera-turno-pdc"
+            f"?builder_strategy=deposito_first&deposito_pdc_id={depot_id}"
+            "&force=true",
+            headers=_h(_admin_token(client)),
+        )
+
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert isinstance(body, list)
+    assert len(body) == 1
+    turno = body[0]
+    assert turno["deposito_pdc_id"] == depot_id
+    assert turno["deposito_pdc_codice"] == depot_codice
+    assert turno["n_giornate"] == 1
+
+    # Verifica DB persistito + metadata builder_strategy
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT generation_metadata_json, deposito_pdc_id "
+                    "FROM turno_pdc WHERE id = :tid"
+                ),
+                {"tid": turno["turno_pdc_id"]},
+            )
+        ).first()
+        assert row is not None
+        meta, dep_id = row[0], row[1]
+        assert dep_id == depot_id
+        assert meta.get("builder_strategy") == "deposito_first"
 
 
 # =====================================================================

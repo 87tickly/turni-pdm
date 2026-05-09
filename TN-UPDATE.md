@@ -10,6 +10,80 @@
 
 ---
 
+## 2026-05-09 (271) — Sprint 8.2 MR-PD-FIX-SEVERO 2 (S5): integration smoke deposito_first scopre BUG critico check constraint MM/VOCTAXI
+
+### Contesto
+
+MR-PD-FIX-SEVERO 2 step S5: aggiungere integration test smoke
+end-to-end del path `builder_strategy='deposito_first'` per chiudere
+il gap di copertura segnalato da SEVERO (entry 268). Il test ha
+trovato un **BUG CRITICO** in produzione: il check constraint DB
+`turno_pdc_blocco_tipo_check` non includeva i tipi `MM` e
+`VOCTAXI`. Ogni invocazione `deposito_first` con fallback rientro
+causava `IntegrityError(CheckViolation)` in prod.
+
+Bug latente da MR-PD2 (entry 262) che ha aggiornato il type union TS
+frontend ma **dimenticato** di aggiornare il vincolo DB. MR-PD3b/PD5
+funzionavano in unit test (mock blocchi) ma fallivano al primo
+INSERT reale.
+
+### Modifiche
+
+**`backend/alembic/versions/0045_mr_pd5_turno_pdc_blocco_tipi_estesi.py`**
+(nuovo, 67 righe): migration alembic critica che aggiunge `MM` +
+`VOCTAXI` al check constraint `turno_pdc_blocco_tipo_check` (era
+12 tipi, ora 14). Revision `a6b7c8d9e0f1`, downstream del Plan-D
+`f4a5b6c7d8e9` (0044).
+
+**`backend/tests/test_api_programmi_conferma.py`** (esteso, +200
+righe): nuovo `test_genera_turno_pdc_deposito_first_smoke_ok`
+integration end-to-end + 2 helper (`_ensure_depot_test_pd5`
+get-or-create depot con `stazione_principale_codice` valorizzato;
+`_crea_giro_completo_per_deposito_first` setup giro+giornata+
+variante+blocchi). Mock `trova_treno_vettura→None` forza fallback
+VOCTAXI. Verifica: 200, 1 turno persistito, deposito_pdc_id
+valorizzato, metadata builder_strategy='deposito_first'. Cleanup
+turni orfani prefix `T-TEST_DEPOT_PD5-%` aggiunto a `_wipe_programmi`.
+
+### Verifiche
+
+- ✅ alembic upgrade head locale: migration 0045 applicata, constraint
+  esteso a 14 tipi
+- ✅ pytest test smoke: passed (isolato + in suite)
+- ✅ pytest suite PdC completa (10 file): 125 passed, 3 xfailed,
+  6 fail pre-esistenti **fuori scope** (2 cross-role 403 + 4 cross-test
+  contamination da turno orfano `TEST_AA_auto_persiste_pct_T`).
+- ✅ mypy --strict: clean
+- ✅ ruff check: clean
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway: la migration 0045 è **CRITICA** per il
+  funzionamento del path `builder_strategy=deposito_first` in prod.
+  Senza, qualsiasi turno con fallback rientro VOCTAXI/MM crash con
+  IntegrityError.
+
+### Lezione meta
+
+S5 di SEVERO era HIGH "zero integration test, tutti unit con mock".
+Il primo integration test ha trovato un bug latente con impatto
+produzione che 17 unit test non avevano colto. Il mock di
+`trova_treno_vettura` evita la chiamata API ma NON evita l'INSERT
+DB → solo integration con DB reale poteva trovare il constraint
+mismatch. Convalida la critica SEVERO: i test unit-only **non
+sostituiscono** integration test pre-endpoint per scoprire bug di
+schema.
+
+### Stato
+
+- ✅ MR-PD-FIX-SEVERO 2 step S5 chiuso.
+- ⏳ MR-PD-FIX-SEVERO 2 step S2: refactor `giornata_base.py` shared
+  (~2-3h, futuro MR).
+- ⏳ MR-PD6 parte 2: label stazioni acronimi.
+- ⏳ MR-PD7: §11.4 + §15 + §6 PK opt-in.
+
+---
+
 ## 2026-05-09 (270) — Sprint 8.2 MR-D5e: fix FK violation MISTO su materiale_thread (e2e prog 17 fallito 500)
 
 ### Contesto
