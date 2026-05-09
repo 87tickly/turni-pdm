@@ -10,6 +10,96 @@
 
 ---
 
+## 2026-05-09 (264) — Sprint 8.2 MR-PD3a: vettura_resolver §7.2 (vettura → MM → VOCTAXI) modulo standalone testato
+
+### Contesto
+
+MR-PD3 della pipeline Strada B è grande (12-16h: vettura_resolver +
+builder deposito-first core). Lo divido in **MR-PD3a** (resolver, ~3h)
+e **MR-PD3b** (builder core, ~10-13h) per ridurre il rischio di
+perdita lavoro e committare frequentemente, come da regola METODO §3
+(un passo alla volta completato bene).
+
+MR-PD3a chiude la priorità rientro PdC al deposito (NORMATIVA-PDC
+§7.2): step 1 vettura, step 2 MM se Milano e vettura sfora 8h30,
+step 3 VOCTAXI fallback. È il primo modulo che chiude operativamente
+la **Violazione D** dichiarata dall'utente ("non inserisci le vetture
+di rientro in deposito") — anche se l'integrazione col builder vero
+è in MR-PD3b.
+
+Numerazione 264 perché 263 occupata da Plan-D MR-D5 (entry 263).
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_pdc/vettura_resolver.py`**
+(nuovo, 226 righe): modulo standalone con:
+
+- 6 costanti (`PRESTAZIONE_MAX_STANDARD_MIN=510`,
+  `PRESTAZIONE_MAX_NOTTURNO_MIN=420`, `FINE_SERVIZIO_POST_VETTURA_MIN=15`,
+  `VETTURA_GAP_PRE_MIN=5`, `VETTURA_ATTESA_MAX_MIN=120`,
+  `MM_DURATA_FORFETTARIA_MIN=30`, `VOCTAXI_DURATA_DEFAULT_MIN=30`)
+- `DEPOT_MILANO_MM`: frozenset {GARIBALDI_ALE, GARIBALDI_CADETTI,
+  GARIBALDI_TE, GRECO_TE, GRECO_S9, FIORENZA} dei 6 codici depot
+  Trenord serviti da MM (NORMATIVA §2.2)
+- 3 dataclass discriminated union: `ScelzaVettura(treno, prestazione_finale_min)`,
+  `ScelzaMM(durata_min, motivo)`, `ScelzaVOCTAXI(durata_min, motivo)`,
+  unione `ScelzaRientro = ScelzaVettura | ScelzaMM | ScelzaVOCTAXI`
+- `risolvi_rientro(...)` async function:
+  - Short-circuit chiusura == deposito → no-op `ScelzaVOCTAXI(0)`
+  - Step 1: `trova_treno_vettura()` su API live.arturo.travel; verifica
+    cap prestazione 510 standard / 420 notturno (NORMATIVA §3 + §3.2
+    "fine servizio = arrivo vettura + 15 min")
+  - Step 2: `MM` se `deposito_codice in DEPOT_MILANO_MM` (sia per
+    vettura sforante sia per nessuna vettura)
+  - Step 3: `VOCTAXI` fallback finale
+
+Non gestisce §7.3 condotta come rientro produttivo (da valutare a
+monte dal builder MR-PD3b: se esiste un treno di condotta verso il
+deposito, NON si invoca il resolver). Non gestisce vettura partenza
+ai bordi §3.2 (modulo separato se serve).
+
+**`backend/tests/test_vettura_resolver.py`** (nuovo, 230 righe):
+8 test su 7 scenari + 1 sanity costanti. `trova_treno_vettura`
+mockato con `unittest.mock.AsyncMock` per evitare chiamate API reali
+(coperte già in `test_live_arturo_client.py`).
+
+Scenari:
+1. vettura ok, non sfora cap → `ScelzaVettura`
+2. vettura sfora cap, deposito Milano → `ScelzaMM`
+3. vettura sfora cap, deposito periferico → `ScelzaVOCTAXI`
+4. nessuna vettura, deposito Milano → `ScelzaMM`
+5. nessuna vettura, deposito periferico → `ScelzaVOCTAXI`
+6. chiusura == deposito → no-op `ScelzaVOCTAXI(0)` con API non chiamata
+7. turno notturno cap 420 (vettura starebbe sotto 510 ma sopra 420) → `ScelzaMM`
+8. sanity check `DEPOT_MILANO_MM` 6 voci attese
+
+### Verifiche
+
+- ✅ pytest test_vettura_resolver: 8 passed
+- ✅ mypy --strict: clean
+- ✅ ruff check: clean (1 fix automatico import sort)
+- ⏭️ no deploy Railway: il modulo non è ancora collegato al builder
+  attivo (sarà MR-PD3b)
+
+### Stato deploy MR-PD2 confermato
+
+Verifica post-deploy via `DATABASE_PUBLIC_URL` (proxy Railway):
+- `alembic_version=e3f4a5b6c7d8` (= migration 0043 applicata)
+- `is_nullable=NO` (vincolo NOT NULL attivo)
+- `turni_totali=28` (= invariato, 0 orfani cancellati come da
+  verifica pre-deploy del 2026-05-09 entry 262 follow-up)
+
+MR-PD2 è quindi **chiuso a tutti gli effetti** (codice + deploy +
+verifica empirica DB prod).
+
+### Stato
+
+- ✅ MR-PD3a chiuso: vettura_resolver §7.2 completato + testato.
+- ⏳ MR-PD3b (next): builder deposito-first core. Userà `risolvi_rientro`
+  per generare blocchi VETTURA/MM/VOCTAXI in coda alla giornata.
+
+---
+
 ## 2026-05-09 (262) — Sprint 8.2 MR-PD2: schema esteso (deposito_pdc_id NOT NULL + tipi blocchi MM/VOCTAXI/DORMITA)
 
 ### Contesto
