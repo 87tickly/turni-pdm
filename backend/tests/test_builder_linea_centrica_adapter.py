@@ -32,7 +32,6 @@ from colazione.domain.builder_giro.multi_giornata import (
 )
 from colazione.domain.builder_giro.posizionamento import CatenaPosizionata
 
-
 # =====================================================================
 # Fixture helpers
 # =====================================================================
@@ -115,16 +114,64 @@ def test_adapter_giornate_diventano_aggregate_con_una_variante() -> None:
         assert len(gnata.varianti) == 1
 
 
-def test_adapter_blocchi_assegnati_sempre_vuoti() -> None:
-    """La pipeline linea-centrica non genera composizioni miste."""
+def test_adapter_blocchi_assegnati_popolati_mr_d5c() -> None:
+    """MR-D5c (fix HIGH-1 SEVERO): blocchi_assegnati ora popolati con
+    1 BloccoAssegnato per ogni corsa. ComposizioneItem = singolo
+    materiale (linea-centrica single-mat). regola_id propagato.
+    """
     giro = _giro(n_giornate=2)
     agg = _giro_linea_centrica_a_aggregato(
         giro, materiale_tipo_codice="ETR522"
     )
     for gnata in agg.giornate:
         for var in gnata.varianti:
-            assert var.blocchi_assegnati == ()
+            # Ogni corsa della catena → 1 BloccoAssegnato
+            assert len(var.blocchi_assegnati) == len(
+                var.catena_posizionata.catena.corse
+            )
+            for blocco in var.blocchi_assegnati:
+                assert blocco.assegnazione.regola_id == 42
+                assert (
+                    blocco.assegnazione.composizione[0].materiale_tipo_codice
+                    == "ETR522"
+                )
+                assert blocco.assegnazione.composizione[0].n_pezzi == 1
+            # Eventi composizione restano vuoti (no aggancio/sgancio cross-mat)
             assert var.eventi_composizione == ()
+
+
+def test_adapter_blocchi_assegnati_regola_id_none_fallback_a_zero() -> None:
+    """Defensive: se regola_id è None (caso degenerato), fallback a 0
+    invece di crash. Non dovrebbe mai capitare in produzione perché
+    la pipeline linea-centrica popola regola_per_segmento.
+    """
+    catena = Catena(corse=(_CorsaFake(),))
+    cat_pos = CatenaPosizionata(
+        localita_codice="FIO",
+        stazione_collegata="S_FIO",
+        vuoto_testa=None,
+        catena=catena,
+        vuoto_coda=None,
+        chiusa_a_localita=True,
+        regola_id=None,  # ← caso degenerato
+    )
+    giornata = GiornataGiro(
+        data=date(2026, 6, 8),
+        catena_posizionata=cat_pos,
+        dates_apply=(),
+    )
+    giro = Giro(
+        localita_codice="FIO",
+        giornate=(giornata,),
+        chiuso=True,
+        motivo_chiusura="naturale",
+        km_cumulati=50.0,
+    )
+    agg = _giro_linea_centrica_a_aggregato(
+        giro, materiale_tipo_codice="ETR522"
+    )
+    blocco = agg.giornate[0].varianti[0].blocchi_assegnati[0]
+    assert blocco.assegnazione.regola_id == 0  # placeholder sentinel
 
 
 def test_adapter_dates_apply_propagati() -> None:

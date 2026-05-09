@@ -1142,21 +1142,41 @@ def _giro_linea_centrica_a_aggregato(
     - Per ogni ``GiornataGiro``: 1 ``GiornataAggregata`` con 1 sola
       ``VarianteGiornata`` (se MR-D4 ha aggregato N date con stessa
       sequenza, sono già nello stesso ``GiornataGiro.dates_apply``)
-    - ``blocchi_assegnati = ()``: la pipeline linea-centrica NON
-      genera composizioni miste (cross-materiale). Chi usa il modello
-      'linea_centrica' accetta un'esecuzione single-materiale
-      per regola.
+    - **MR-D5c (fix HIGH-1 SEVERO)**: ``blocchi_assegnati`` popolato
+      con un ``BloccoAssegnato`` per ogni corsa del giro. Risolve il
+      bug latente del MR-D5b: capacity check, conflict detection,
+      composizioni miste future leggono ``blocchi_assegnati`` non
+      più vuoto. ``regola_id`` da ``CatenaPosizionata.regola_id``
+      (popolato in MR-D4 via ``regola_per_segmento``).
+      ``composizione`` = singolo ``ComposizioneItem`` (linea-centrica
+      = 1 materiale per segmento).
 
     Args:
         giro: output MR-D4 (`Giro` legacy).
         materiale_tipo_codice: tipo materiale del giro (= materiale
             associato al segmento di provenienza).
     """
+    composizione = (ComposizioneItem(materiale_tipo_codice, 1),)
     giornate_agg: list[GiornataAggregata] = []
     for k, gnata in enumerate(giro.giornate, start=1):
+        # MR-D5c: costruisce BloccoAssegnato per ogni corsa della
+        # giornata (era blocchi_assegnati=() empty in MR-D5b → bug
+        # latente). Defensive: regola_id None solo in caso degenerato
+        # (pipeline linea-centrica popola sempre via regola_per_segmento);
+        # placeholder 0 per non crashare.
+        regola_id = gnata.catena_posizionata.regola_id
+        regola_id_effettiva = regola_id if regola_id is not None else 0
+        assegnazione_giornata = AssegnazioneRisolta(
+            regola_id=regola_id_effettiva,
+            composizione=composizione,
+        )
+        blocchi_assegnati = tuple(
+            BloccoAssegnato(corsa=corsa, assegnazione=assegnazione_giornata)
+            for corsa in gnata.catena_posizionata.catena.corse
+        )
         variante = VarianteGiornata(
             catena_posizionata=gnata.catena_posizionata,
-            blocchi_assegnati=(),
+            blocchi_assegnati=blocchi_assegnati,
             eventi_composizione=(),
             dates_apply=gnata.dates_apply_or_data,
         )
