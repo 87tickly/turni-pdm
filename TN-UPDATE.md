@@ -10,6 +10,74 @@
 
 ---
 
+## 2026-05-10 (285) — SEVERO post-Sprint piano α: voto 5/10* fallback NINO, 10 finding (1 HIGH-CRITICAL S1 regresso facade BLOCCANTE)
+
+### Contesto
+
+Critica retrospettiva obbligatoria a fine Sprint (regola §9 CLAUDE.md
+"obbligatorio a fine Sprint, dopo MR significativo"). Scope: 5 MR + 1
+hotfix migration committati e deployati in prod nelle entry 277/279/280/281/282/283.
+
+### Esecuzione
+
+Subagent SEVERO invocato via `Agent(subagent_type=severo)`. Brief
+snello con 7 aree di interesse pre-identificate da NINO. AMILCARE
+V4 Pro **NON disponibile** (3 timeout `-32001` consecutivi su brief
+3KB→2KB→1KB, pattern entry 248/270/278 server saturo cronico). Critica
+in **fallback NINO puro**, voto provvisorio asteriscato. Da rifare
+con AMILCARE operativo.
+
+### Risultato
+
+**Voto: 5/10*** (provvisorio, AMILCARE non disponibile). 10 finding:
+
+| ID | Severità | Cosa | Costo fix |
+|---|---|---|---|
+| **S1** | **HIGH-CRITICAL** | **Regresso facade strangler**: `riposo_intraturno.py:30` e `riposo_settimanale.py:42` importano `_GiornataPdcDraft` direttamente da `builder.py` BYPASSANDO `giornata_base.py` (entry 273 = giorno prima creato apposta per chiudere SEVERO MR-PD3 S2). Strangler pattern bucato dopo 1 giorno. | <30 min (4 righe) |
+| **S2** | HIGH | Costante `RIPOSO_INTRATURNO_FINE_TARDA_MIN=14*60` esportata in `__all__` ma MAI usata. Decisione "16h cautelativa" unilaterale NINO collassa fascia [00:01-05:00] in 16h ignorando NORMATIVA-PDC §11.5 letterale (14h per [00:01-01:00], 16h per resto). False signaling. Decisione utente: (a) letterale 14h/16h, (b) rimuovere costante. | <30 min |
+| **S3** | MEDIUM | Incidente migration 0046 revision ID duplicato (già documentato entry 283). §5 METODO violato. | (già fatto) |
+| **S4** | MEDIUM | `RegistroVettureAssegnate.from_db` ignora `programma_id`, carica TUTTE vetture DB. Pigrizia mascherata §7 (1 JOIN <1h scrivibile ora). | <1h |
+| **S5** | LOW-MED | `_ = ACCESSORI_MIN_STANDARD  # silence ruff` in `deposito_first.py:728` anti-pattern junior. | 5 min |
+| **S6** | LOW-MED | 4 import locali dentro `genera_turni_pdc_deposito_first` (calendario, ProgrammaMateriale, riposo_intraturno, riposo_settimanale) invece di top-level. | 10 min |
+| **S7** | MEDIUM | Zero test integration end-to-end del piano α. Tutti i +50 test sono unit con mock. | 2-3h |
+| **S8** | MEDIUM | `riposo_settimanale.py:200` reset contatore post-violazione perde info su settimane multiple violate. | <1h |
+| **S9** | MEDIUM | `enumera_date_giornata` parser DSL fallback sovra-include sulla maggioranza catalogo PdE Trenord 2026 (varianti parlanti complesse "LV 1:5", "F escluso FpF" ecc. non riconosciute). | 4-6h (DSL parser) |
+| **S10** | LOW | Doppia signature `cache_eff/registro_eff` backward compat in `costruisci_giornata_deposito_first` con path morto (no chiamante usa cache senza context). | 15 min |
+
+### Top-3 fix proposti
+
+1. **S1 BLOCCANTE chiusura ufficiale**: facade restoration <30min.
+2. **S3 anti-ricorsione**: aggiungere pre-commit hook revision ID
+   dedicato 1-2h (lezione meta migration ID).
+3. **S2 decisione utente**: 14h letterale vs 16h cautelativo + cleanup
+   costante morta.
+
+### Output
+
+- ✅ Critica completa: `docs/critiche/SPRINT-8.2-PIANO-ALPHA-RETROSPETTIVA.md`
+- ✅ `docs/critiche/README.md` aggiornato.
+- ⏭️ NESSUNA modifica codice. NESSUN commit nuovo (questo è solo doc).
+
+### Stato Sprint 8.2 finale
+
+- ✅ Piano α chiuso in produzione (entry 283)
+- ✅ Regola §9 CLAUDE.md "SEVERO obbligatorio a fine Sprint" rispettata (questa entry)
+- ⏳ S1 HIGH-CRITICAL aperto (bloccante per chiusura "ufficiale")
+- ⏳ S2 HIGH richiede decisione utente normativa
+- ⏳ S4-S10 debito tecnico documentato, rinviabile Sprint 8.3
+
+### Decisione utente richiesta
+
+Per **chiusura ufficiale Sprint 8.2** (regola §9):
+1. Fix S1 IMMEDIATO (<30min, 4 righe) per chiudere il regresso facade
+   strangler appena creato. Senza questo Sprint 8.2 chiude con un
+   debito attivo.
+2. Decidere S2 (14h letterale vs 16h cautelativo) per coerenza normativa.
+3. Decidere se chiudere Sprint 8.2 a questo punto + portare S4-S10 a
+   Sprint 8.3, oppure proseguire con cleanup parziale.
+
+---
+
 ## 2026-05-10 (284) — Sprint 8.2 MR-D5h-bis + MR-D6: pipeline Plan-D produce materiali misti + giri chiusi naturale (chiusura ciclo MR-D5e→MR-D6)
 
 ### Contesto
