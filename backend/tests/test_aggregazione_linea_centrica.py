@@ -270,6 +270,60 @@ def test_traduce_turno_senza_regola_id_default_none() -> None:
     assert giro.giornate[0].catena_posizionata.regola_id is None
 
 
+def test_traduce_turno_segmento_tronco_fallback_completo_mr_d5f() -> None:
+    """Sprint 8.2 MR-D5f S2 follow-up: segmento `_tronco_X` non
+    direttamente in `regola_per_segmento` ricade su `{linea}_completo`
+    come regola madre (chiude bug "0 giri persistiti perché tutti
+    regola_id=None" nel retry e2e prog 17)."""
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("S_FIO", "S_B", 8, 0, 9, 0, treno="T1")],
+    )
+    turno = _turno("R31_C0", "R31_tronco_S00034", "FIO", [g])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"FIO": "S_FIO"},
+        regola_per_segmento={"R31_completo": 42},
+    )
+    assert giro is not None
+    assert giro.giornate[0].catena_posizionata.regola_id == 42
+
+
+def test_traduce_turno_segmento_isolato_fallback_completo_mr_d5f() -> None:
+    """Sprint 8.2 MR-D5f S2 follow-up: segmento `_isolato_X_Y`
+    fallback a `{linea}_completo` (stesso pattern dei tronchi)."""
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("S_FIO", "S_B", 8, 0, 9, 0, treno="T1")],
+    )
+    turno = _turno("RE8_C0", "RE8_isolato_S01420_S01820", "FIO", [g])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"FIO": "S_FIO"},
+        regola_per_segmento={"RE8_completo": 99},
+    )
+    assert giro is not None
+    assert giro.giornate[0].catena_posizionata.regola_id == 99
+
+
+def test_traduce_turno_segmento_completo_mancante_no_fallback_mr_d5f() -> None:
+    """Se ANCHE `{linea}_completo` non è mappato → regola_id resta
+    None (caso davvero degenerato; downstream `_traduce_e_filtra`
+    scarta con warning trasparente)."""
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("S_FIO", "S_B", 8, 0, 9, 0, treno="T1")],
+    )
+    turno = _turno("RX_C0", "RX_tronco_S99999", "FIO", [g])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"FIO": "S_FIO"},
+        regola_per_segmento={"R5_completo": 100},  # mappa una linea diversa
+    )
+    assert giro is not None
+    assert giro.giornate[0].catena_posizionata.regola_id is None
+
+
 # =====================================================================
 # Wrapper multi-turno
 # =====================================================================

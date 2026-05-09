@@ -177,6 +177,19 @@ def traduci_turno_in_giro(
 
     regole = regola_per_segmento or {}
     regola_id = regole.get(turno.segmento_codice)
+    if regola_id is None:
+        # Sprint 8.2 MR-D5f S2 follow-up: il chiamante (builder.py)
+        # popola ``regola_per_segmento`` solo con chiavi
+        # ``{linea}_completo`` (1 sola variante per linea). MR-D1
+        # produce anche ``{linea}_tronco_X`` e ``{linea}_isolato_X_Y``
+        # per linee multi-tronco. Senza fallback, tutti i giri di
+        # tronchi finiscono con regola_id=None → scartati downstream
+        # da `_traduce_e_filtra_giri_linea_centrica`. Risolto via
+        # estrazione prefisso linea (split sul primo '_'): per ogni
+        # segmento `_tronco_X`/`_isolato_X_Y` ricaviamo `{linea}` e
+        # ricado su ``{linea}_completo`` come "regola madre".
+        prefisso_linea = turno.segmento_codice.split("_", 1)[0]
+        regola_id = regole.get(f"{prefisso_linea}_completo")
 
     gruppi = _raggruppa_per_chiave_sequenza(turno.giornate)
 
