@@ -13,6 +13,7 @@ import {
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { NightBand } from "@/components/gantt/NightBand";
 import {
   Dialog,
   DialogContent,
@@ -482,6 +483,44 @@ interface GanttPdcProps {
   selectedBloccoId: number | null;
 }
 
+/**
+ * Sprint 8.2 MR-PD6: calcola dati per la banda notturna fra due
+ * giornate consecutive del turno. Ritorna ``null`` se gli orari sono
+ * incompleti.
+ *
+ * Anomalia se sosta < 6h (riposo minimo NORMATIVA-PDC §10.5 e §11.4)
+ * o > 22h (sospetto bug nel modello). Pattern speculare alla
+ * `SostaNotturnaRow` del Gantt giro materiale.
+ */
+function computeSostaNotturna(
+  prev: TurnoPdcGiornata,
+  next: TurnoPdcGiornata,
+): {
+  giornataPrev: number;
+  giornataNext: number;
+  stazioneNome: string | null;
+  oraFinePrev: string | null;
+  oraInizioNext: string | null;
+  durataMin: number;
+  anomalia: boolean;
+} | null {
+  const oraFine = parseTimeToMin(prev.fine_prestazione);
+  const oraInizio = parseTimeToMin(next.inizio_prestazione);
+  if (oraFine === null || oraInizio === null) return null;
+  let durata = (oraInizio - oraFine + 24 * 60) % (24 * 60);
+  if (durata === 0) durata = 24 * 60;
+  const anomalia = durata < 6 * 60 || durata > 22 * 60;
+  return {
+    giornataPrev: prev.numero_giornata,
+    giornataNext: next.numero_giornata,
+    stazioneNome: prev.stazione_fine_nome ?? prev.stazione_fine,
+    oraFinePrev: prev.fine_prestazione,
+    oraInizioNext: next.inizio_prestazione,
+    durataMin: durata,
+    anomalia,
+  };
+}
+
 function GanttPdc({
   turno,
   oraOffset,
@@ -548,15 +587,41 @@ function GanttPdc({
         <div className="relative" style={{ width: `${innerWidth}px` }}>
           <AxisHeader oraOffset={oraOffset} />
 
-          {turno.giornate.map((g) => (
-            <GiornataRow
-              key={g.id}
-              giornata={g}
-              oraOffset={oraOffset}
-              onSelectBlocco={(b) => onSelectBlocco(b, g.numero_giornata)}
-              selectedBloccoId={selectedBloccoId}
-            />
-          ))}
+          {turno.giornate.map((g, idx) => {
+            // Sprint 8.2 MR-PD6: banda notturna fra giornate consecutive
+            // (pattern PDF Trenord giro). Mostrata sopra ogni giornata
+            // tranne la prima, calcolando la durata sosta come (inizio
+            // di questa giornata + 24h) - fine giornata precedente.
+            const prev = idx > 0 ? turno.giornate[idx - 1] : null;
+            const sosta =
+              prev !== null
+                ? computeSostaNotturna(prev, g)
+                : null;
+            return (
+              <div key={g.id}>
+                {sosta !== null && (
+                  <NightBand
+                    leftColPx={GIORNATA_LABEL_COL_PX}
+                    timelineWidthPx={TIMELINE_WIDTH_PX}
+                    rightColPx={STATS_COL_PX}
+                    giornataPrev={sosta.giornataPrev}
+                    giornataNext={sosta.giornataNext}
+                    stazioneNome={sosta.stazioneNome}
+                    oraFinePrev={sosta.oraFinePrev}
+                    oraInizioNext={sosta.oraInizioNext}
+                    durataMin={sosta.durataMin}
+                    anomalia={sosta.anomalia}
+                  />
+                )}
+                <GiornataRow
+                  giornata={g}
+                  oraOffset={oraOffset}
+                  onSelectBlocco={(b) => onSelectBlocco(b, g.numero_giornata)}
+                  selectedBloccoId={selectedBloccoId}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -942,24 +1007,27 @@ function CommercialBlock({
       )}
 
       {/* Riga 2: barra colorata centrata con treno+freccia.
+          Sprint 8.2 MR-PD6: bar h-3 (12px) coerente col CommercialeBlocco
+          del Gantt giro materiale (era h-7=28px in MR-7.10.7). Con bar
+          più sottile, le stazioni sopra (10px) e gli orari sotto (9px)
+          risultano più visibili spaziati nei TIMELINE_ROW_HEIGHT_PX=80px
+          del row, riproducendo il pattern PDF Trenord.
           Sprint 7.10 MR α.7: VETTURA ha icona UserRound (PdC come
-          passeggero) per distinguerla a colpo d'occhio dalla
-          CONDOTTA, anche nelle larghezze piccole dove le stazioni
-          potrebbero non essere visibili. */}
+          passeggero) per distinguerla a colpo d'occhio dalla CONDOTTA. */}
       <div
         className={cn(
-          "relative mt-1.5 flex h-7 items-center justify-center gap-1 rounded-sm shadow-sm transition",
+          "relative mt-1.5 flex h-3 items-center justify-center gap-1 rounded-sm shadow-sm transition",
           centerBg,
           isSelected && "ring-2 ring-amber-400 ring-offset-1",
         )}
       >
         {!isCondotta && (
           <UserRound
-            className="h-3 w-3 shrink-0 text-sky-900"
+            className="h-2.5 w-2.5 shrink-0 text-sky-900"
             aria-hidden
           />
         )}
-        <span className="truncate px-1 font-mono text-[11px] font-semibold tabular-nums">
+        <span className="truncate px-1 font-mono text-[11px] font-semibold leading-none tabular-nums">
           {arrow} {treno}
         </span>
       </div>

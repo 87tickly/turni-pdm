@@ -10,6 +10,106 @@
 
 ---
 
+## 2026-05-09 (268) — Sprint 8.2 MR-PD6 (parte 1): banda notturna fra giornate + bar CONDOTTA/VETTURA h-3 stile giro
+
+### Contesto
+
+MR-PD6 della pipeline Strada B: "Gantt PdC riscritto stile giro,
+palette per tipo evento" (richiesta utente 2026-05-09). Stima FAUSTO
+24-32h totali. Lo divido in fasi incrementali per ridurre rischio di
+regressione visuale e committare frequentemente:
+
+- **PD6 parte 1** (questa entry): banda notturna fra giornate
+  consecutive + bar CONDOTTA/VETTURA h-3 sottile come Gantt giro
+  materiale. Palette PdC pastel mantenuta (CONDOTTA blu primary,
+  VETTURA sky-200, ecc.) come da decisione utente "colori diversi che
+  evidenzino i servizi diversi".
+- **PD6 parte 2** (futuro): label stazioni acronimi + estrazione altri
+  componenti shared (`GanttAxisHeader`, `GanttBlock`).
+- **PD6 parte 3** (futuro): snapshot Vitest + verifica preview
+  preview con turno reale.
+
+Numerazione 268 perché 267 occupata dal Plan-D MR-D5d hotfix.
+
+### Modifiche
+
+**`frontend/src/components/gantt/NightBand.tsx`** (nuovo, 124 righe):
+componente shared per la banda notturna fra giornate consecutive del
+Gantt. Mantiene la stessa griglia 3-colonne (`leftColPx |
+timelineWidthPx | rightColPx`) per allineamento verticale perfetto
+con le `GiornataRow`. Default `heightPx=24`. Mostra:
+
+- Sticky-left: icona luna + "G_N → G_N+1" (mono 10px)
+- Timeline: label "sosta a {stazione} · da G_N finita HH:MM ·
+  ripresa G_N+1 HH:MM" (italic 11px)
+- Sticky-right: durata sosta formatHM "{h}h{mm}" (mono 10px)
+
+Stile `bg-sky-50/70 text-sky-800` (azzurro chiaro = notte) per casi
+ok; `bg-amber-50 text-amber-800` per anomalia (sosta < 6h o > 22h).
+
+Pattern speculare a `SostaNotturnaRow` del Gantt giro materiale —
+componente shared anche se ad oggi solo il PdC lo consuma. Quando
+in futuro il Gantt giro verrà rifattorizzato, potrà importarlo da
+`@/components/gantt/NightBand`.
+
+**`frontend/src/routes/pianificatore-giro/TurnoPdcDettaglioRoute.tsx`**:
+
+1. Import `NightBand` da `@/components/gantt/NightBand`.
+2. Nuova helper `computeSostaNotturna(prev, next)` che calcola la
+   durata in minuti fra fine prestazione G_n e inizio prestazione
+   G_n+1 (con wrap mezzanotte). Anomalia se < 6h
+   (NORMATIVA-PDC §10.5/§11.4 riposo minimo) o > 22h.
+3. `GanttPdc` rendering: per ogni giornata dopo la prima, inserisce
+   `<NightBand>` SOPRA la `GiornataRow`, con dati di
+   `computeSostaNotturna(prev, g)`. Se gli orari sono incompleti
+   (ritorna null), nessun NightBand → backward-compat con turni
+   pre-MR-PD3b senza orari completi.
+4. `CommercialBlock` (CONDOTTA/VETTURA): bar height ridotta da
+   **h-7 (28px) → h-3 (12px)** coerente col `CommercialeBlocco` del
+   Gantt giro materiale (linea 2686 GiroDettaglioRoute). Con bar più
+   sottile, le 3 righe (stazioni 10px / bar 12px / orari 9px) restano
+   visivamente bilanciate dentro `TIMELINE_ROW_HEIGHT_PX=80`.
+   `UserRound` (VETTURA) ridotto da h-3 → h-2.5 per coerenza.
+
+Palette PdC pastel **invariata**: CONDOTTA `bg-primary` (blu ARTURO),
+VETTURA `bg-sky-200`, REFEZ `bg-emerald-200`, ACC `bg-amber-200`,
+CV `bg-orange-300`, PK/SCOMP `bg-slate-200`, PRESA/FINE `bg-slate-400`,
+DORMITA `bg-violet-300`. Decisione utente 2026-05-09: *"con colori
+diversi che evidenzino i servizi diversi"*.
+
+### Verifiche
+
+- ✅ pnpm typecheck: clean
+- ⏭️ snapshot Vitest: rimandato a MR-PD6 parte 3 (turno reale
+  serve come fixture)
+- ⏭️ verifica preview locale: skippata perché DB locale vuoto =
+  niente turni da renderizzare. Verifica visuale su prod URL post-deploy.
+
+### Stato deploy
+
+- ⏳ push origin master + deploy frontend Railway in corso
+
+### Limitazioni dichiarate
+
+1. **PD6 parte 2 e 3 in MR successivi**: label stazioni acronimi +
+   shared component extraction + snapshot tests.
+2. **NightBand consumato solo da PdC**: il Gantt giro materiale ha
+   ancora `SostaNotturnaRow` interno (linea ~3040
+   `GiroDettaglioRoute.tsx`). Refactor giro → consumo shared è MR
+   futuro (NON in scope MR-PD6 per non collidere con Plan-D
+   builder giro).
+3. **Threshold anomalia hardcoded** (6h-22h): valore conservativo,
+   parametrizzabile in futuro tramite prop `sogliaAnomaliaMin/Max`.
+
+### Stato
+
+- ✅ MR-PD6 parte 1 chiusa lato codice + push.
+- ⏳ Deploy frontend Railway: pronto, no rischio (additive UI).
+- ⏳ MR-PD6 parte 2 (next): label stazioni acronimi + estrazione
+  componenti shared aggiuntivi.
+
+---
+
 ## 2026-05-09 (267) — Sprint 8.2 MR-PD5: endpoint genera-turno-pdc opzione builder_strategy='deposito_first'
 
 ### Contesto
