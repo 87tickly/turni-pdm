@@ -302,13 +302,15 @@ def test_giornata_senza_corse_genera_marker() -> None:
 
 
 # =====================================================================
-# Defensive: arrivo già in whitelist
+# Arrivo già in whitelist (MR-B1 entry 254: marca naturale, non passthrough)
 # =====================================================================
 
 
-def test_arrivo_gia_in_whitelist_pass_through_per_visibilita_bug() -> None:
-    """Se l'arrivo è già whitelist ma motivo='non_chiuso' (anomalia
-    upstream), non sovrascriviamo per non mascherare il bug.
+def test_b1_arrivo_in_whitelist_via_corsa_marca_naturale() -> None:
+    """Sprint 8.1 MR-B1 (entry 254): se l'ultima corsa commerciale
+    arriva direttamente in whitelist sede ma il marker upstream è
+    'non_chiuso', il post-pass corregge a 'naturale' (il giro è di
+    fatto chiuso a casa).
     """
     g = _make_giro(
         corse=(
@@ -320,7 +322,43 @@ def test_arrivo_gia_in_whitelist_pass_through_per_visibilita_bug() -> None:
         area_per_stazione={"S_CERTOSA": 1},
     )
     out = chiudi_giri_aperti([g], params)
-    assert out[0] is g  # invariato
+    assert out[0].motivo_chiusura == "naturale"
+    assert out[0].chiuso is True
+
+
+def test_b1_arrivo_in_whitelist_via_vuoto_coda_marca_naturale() -> None:
+    """Sprint 8.1 MR-B1 (entry 254): caso reale prog 17 produzione
+    (giri 1449, 1452): il builder upstream ha già aggiunto un
+    `vuoto_coda` di rientro a CERTOSA, ma il marker resta
+    'non_chiuso'. Il post-pass corregge a 'naturale' osservando che
+    `_ultima_stazione_giro` (che usa `vuoto_coda.codice_destinazione`
+    se presente) ricade in whitelist sede.
+    """
+    vuoto_coda = BloccoMaterialeVuoto(
+        codice_origine="S_ROGOREDO",
+        codice_destinazione="S_CERTOSA",
+        ora_partenza=time(23, 34),
+        ora_arrivo=time(0, 4),
+        motivo="coda",
+        cross_notte_giorno_precedente=False,
+    )
+    g = _make_giro(
+        corse=(
+            _CorsaFake("S_MORTARA", "S_ROGOREDO", time(22, 33), time(23, 34)),
+        ),
+        vuoto_coda=vuoto_coda,
+    )
+    params = ParamChiusuraPost(
+        whitelist_sede=frozenset({"S_CERTOSA"}),
+        area_per_stazione={"S_CERTOSA": 1},
+    )
+    out = chiudi_giri_aperti([g], params)
+    assert out[0].motivo_chiusura == "naturale"
+    assert out[0].chiuso is True
+    # Vuoto coda upstream preservato (non duplicato)
+    assert (
+        out[0].giornate[-1].catena_posizionata.vuoto_coda is vuoto_coda
+    )
 
 
 # =====================================================================

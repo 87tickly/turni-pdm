@@ -6,8 +6,15 @@ ogni giro con ``motivo_chiusura == 'non_chiuso'`` (legacy: ciclo
 aperto persistito senza tentativo di chiusura), tenta una chiusura
 attiva con un **vuoto di rientro intra-area metropolitana**:
 
-- Se l'ultima stazione del giro condivide un'area metropolitana con
-  almeno una stazione della whitelist sede → genera
+- Se l'ultima stazione del giro è già in ``whitelist_sede`` (caso
+  tipico: ``costruisci_giri_multigiornata`` ha aggiunto un
+  ``vuoto_coda`` di rientro upstream, oppure l'ultima corsa
+  commerciale arriva direttamente "a casa") → marca
+  ``motivo_chiusura='naturale'`` (MR-B1 entry 254: corregge il bug
+  upstream che lasciava 'non_chiuso' nonostante il giro fosse
+  effettivamente chiuso in sede).
+- Altrimenti, se l'ultima stazione condivide un'area metropolitana
+  con almeno una stazione della whitelist sede → genera
   ``BloccoMaterialeVuoto`` di coda, marca ``chiuso=True`` e
   ``motivo_chiusura='chiuso_con_vuoto'``.
 - Altrimenti (es. arrivo a Tirano con sede FIO) → marca
@@ -226,10 +233,22 @@ def chiudi_giri_aperti(
             continue
 
         if staz_arrivo in params.whitelist_sede:
-            # Defensive: se è già in whitelist, motivo_chiusura
-            # avrebbe dovuto essere 'naturale' a monte. Non
-            # sovrascriviamo per non mascherare bug.
-            risultato.append(giro)
+            # Sprint 8.1 MR-B1 (entry 254): il giro arriva in
+            # whitelist sede — tipicamente perché
+            # `costruisci_giri_multigiornata` ha già aggiunto un
+            # `vuoto_coda` di rientro upstream, oppure l'ultima corsa
+            # commerciale arriva direttamente "a casa". Il marker
+            # upstream `'non_chiuso'` è un'anomalia da indagare a
+            # parte (probabile fuori-stato del builder rispetto al
+            # vuoto coda generato), MA il giro È DI FATTO CHIUSO in
+            # stazione di sede. Marchiamolo `'naturale'` invece di
+            # passthrough: l'utente vede la verità operativa, non
+            # un falso "NON CHIUSO" generato dal bug a monte.
+            risultato.append(
+                dataclasses.replace(
+                    giro, chiuso=True, motivo_chiusura="naturale"
+                )
+            )
             continue
 
         target = _trova_target_intra_area(
