@@ -10,6 +10,180 @@
 
 ---
 
+## 2026-05-09 (256) — Sprint 8.1 MR-B3: chiude HIGH-1 SEVERO MR-B2 (cross-rule contamination nel backtracking)
+
+### Contesto
+
+L'utente ha mandato uno screenshot di un giro che mostra una giornata
+con treni RE13 (`2304 VOGHERA→ASTI`, `2385 ASTI→Mi.Centrale`,
+direttrice `ALESSANDRIA-VOGHERA-PAVIA-MILANO`) chiedendo: *"perché
+non riesci a incastrarli? è sbagliata la logica. dobbiamo investigare
+bene il codice. cosa non funziona esattamente? interroghiamo tutto
+bene, chiedi a fausto e senti amilcare. concludi con le precisazioni
+di SEVERO. il problema dell'ultimo trade-off. hai chiuso ma
+utilizzando linee non presenti sul filtro. e quindi in sintesi non
+abbiamo risolto il problema. anzi lo abbiamo ampliato. non mi sei
+di aiuto."*
+
+L'utente aveva ragione su entrambi i fronti: il fix MR-B2 (entry 255)
+ha aumentato i numeri ma ha introdotto un debito architetturale che
+SEVERO esiste apposta per smascherare.
+
+### Diagnosi guidata da AMILCARE V4 Pro come SEVERO + verifica empirica
+
+**FAUSTO** (`mcp__grok__chat` ~1.5KB): code review semantica del
+flusso pool/regola/score. Confermato che `_trova_continuazioni_top_k`
+filtra solo per materiale e località, non per regola. Path file
+allucinati come al solito ma logica corretta.
+
+**AMILCARE V4 Pro** (`mcp__amilcare__reason` brief 3KB, NO timeout
+questa volta): voto MR-B2 **2/10**, finding HIGH-1 cross-rule
+contamination. Verbatim:
+
+> "Il commit ba2e616 agisce su `backtracking_esplorativo.py:448`
+> (filtro `len < n_max`) e `_trova_continuazioni_top_k` (controlla
+> solo materiale + località, mai regola). Il pool è
+> `catene_per_data_per_materiale[mat_regola]`. Quando più regole
+> condividono lo stesso materiale (es. ETR522 in regola 48
+> ALES-MORTARA + regola 51 BERG-CARNATE), il pool è comune. Pertanto
+> un giro nato da regola 48 può pescare una catena di regola 51
+> sfruttando Milano come punto di contatto. Per la pianificazione
+> ferroviaria reale, un convoglio rispetta il contratto di linea
+> (regola specifica). Un giro composto da tratti di regole diverse,
+> pur appartenendo allo stesso materiale, viola il filtro operativo
+> dell'utente ('linee non presenti sul filtro')."
+
+**Verifica empirica DB post-critica**:
+- 78 giri prog 17 totali (post-MR-B2)
+- 54 giri toccano direttrici di "più regole" (false positive: stessa
+  direttrice in più regole con materiali diversi, es.
+  TIRANO-SONDRIO-LECCO-MILANO in regola 47 ETR526 + 53 ETR204)
+- **0 giri same-material cross-rule**: il bug architetturale
+  predetto NON si manifesta sui dati prog 17 attuali, perché finestre
+  orarie/posizioni geografiche delle regole same-material (ETR522 in
+  48+51, ETR204 in 47+53) non producono catene incrociabili.
+
+Quindi il fix è **per principio architetturale + copertura programmi
+futuri/diversi**, non per impatto numerico immediato.
+
+### Lo screenshot dell'utente
+
+I treni 2304/2385/2301 (direttrice ALESSANDRIA-VOGHERA-PAVIA-MILANO)
+**non sono in alcun giro persistito di prog 17**. Verifica fatta su
+DB Railway dopo rigenerazione MR-B2. Lo screenshot deve essere di
+una rigenerazione precedente (cache UI) o di un altro programma. Ho
+chiesto all'utente di confermare ma intanto ho proceduto con il fix
+architetturale che SEVERO ha richiesto.
+
+### Modifiche MR-B3
+
+**`backend/src/colazione/domain/builder_giro/posizionamento.py`**:
+- Aggiunto campo `regola_id: int | None = None` al dataclass
+  `CatenaPosizionata`. Default None per backward compat (test
+  esistenti non popolano il campo).
+
+**`backend/src/colazione/domain/builder_giro/builder.py:1748-1758`**:
+- Durante costruzione `catene_per_regola`, annotata la regola
+  dominante: `cp_annot = dataclasses.replace(cp, regola_id=regola_dom.id)`.
+
+**`backend/src/colazione/domain/builder_giro/backtracking_esplorativo.py`**:
+- `_trova_continuazioni_top_k` ora accetta `regola_id: int | None = None`.
+  Quando non None, filtra catene candidate alla stessa regola.
+- `_estendi_ricorsivo` propaga `regola_id` ricorsivamente.
+- `tenta_estensione_giri_corti` deriva `regola_id_giro` dalla prima
+  catena della prima giornata e lo passa giù.
+
+**`backend/tests/test_backtracking_esplorativo.py`** (3 nuovi test
+MR-B3):
+- `test_b3_no_cross_rule_contamination_when_extending`: giro regola 48
+  + catena regola 51 stesso materiale geo-compatibile → estensione
+  esclusa.
+- `test_b3_estensione_stessa_regola_funziona`: giro regola 48 +
+  catena regola 48 → estensione OK.
+- `test_b3_legacy_compat_regola_id_none_no_filter`: regola_id=None
+  su catene → filtro no-op (backward compat).
+
+### Verifiche
+
+- ✅ pytest test_backtracking + test_chiusura_post + test_risolvi_corsa +
+  test_builder_giri: **90 passed**
+- ✅ mypy --strict: 3 file clean
+- ✅ ruff: clean
+- ⏳ Deploy Railway in corso, rigenerazione prog 17 pendente
+
+### Critica SEVERO formale
+
+`docs/critiche/SPRINT-8.1-MR-B2-backtracking-cross-rule-contamination.md`:
+voto MR-B2 **2/10**, 2 HIGH + 2 MED:
+- HIGH-1: cross-rule contamination → **CHIUSO da MR-B3**
+- HIGH-2: trade-off mascherato da metriche favorevoli (-13 non chiusi
+  per +10 corse navetta) → **APERTO** scope iterazione successiva
+- MED-1: test cross-rule mancante → **CHIUSO da MR-B3** (3 test
+  nuovi)
+- MED-2: peso_chiude_sede=500 magic number → **APERTO** scope futuro
+  (proporzionare a km_max_ciclo)
+
+Indice critiche `docs/critiche/README.md` aggiornato.
+
+### Per l'utente
+
+1. **Lo screen che hai mandato** mostra treni RE13 ALES-VOGHERA-PAVIA-MILANO
+   che NON sono in nessun giro persistito attuale del prog 17.
+   Possibilità: cache UI di rigenerazione precedente, o altro
+   programma. Se lo riproduci dopo aver ricaricato la pagina,
+   mandamelo: indaghiamo il caso specifico.
+
+2. **MR-B3 è un fix di principio**: chiude il bug architetturale che
+   SEVERO ha smascherato. Sul prog 17 attuale l'effetto numerico è
+   trascurabile (0 cross-rule contaminations). MA blocca la
+   contaminazione futura su programmi multi-regola same-material
+   con catene incrociabili.
+
+3. **HIGH-2 trade-off resta APERTO**: i 10 corse navette extra
+   non-coperte (S01860↔S01074) richiedono un'iterazione architetturale
+   diversa (giri 1g dedicati per pattern navetta intra-day). Decidi
+   tu se prioritario o no.
+
+### Lezione meta consolidata
+
+**Pattern "celebro le metriche e rinvio l'analisi qualitativa"**:
+NINO ha fatto questo errore in entry 253 (residue=0 senza ricaricare
+UI), entry 254 (3 giri chiusi ma "scope futuro" per i 25 restanti),
+entry 255 (-13 non chiusi celebrati senza guardare le +10 corse
+non-coperte). SEVERO ha smascherato il pattern questa volta.
+
+**Pattern corretto**: dopo OGNI fix che produce numeri "vincenti",
+chiedersi:
+1. *Quale altro numero potrei star peggiorando?* (corse non-coperte,
+   coverage filtri, qualità operativa giri)
+2. *Il fix ha introdotto debito architetturale invisibile sui dati
+   attuali?* (cross-rule, magic number, test mancanti)
+3. *Quale parte della soluzione ho deferito a "scope futuro" senza
+   motivazione oggettiva?* (regola 7 CLAUDE.md "niente pigrizia")
+
+### Costo
+
+- Tempo NINO: ~2.5h sessione (investigazione codice + 8 query DB
+  diagnostiche + brief AMILCARE + critica SEVERO + fix + test + deploy)
+- AMILCARE V4 Pro: 1 chiamata SEVERO andata a buon fine (3KB brief,
+  output ~500 parole, no timeout)
+- AMILCARE V4 Flash: 0 chiamate questa entry
+- FAUSTO: 1 chiamata code review (~0.3c)
+
+### Prossimo step
+
+Decisione utente fra:
+- (a) **Verifica con utente** lo screen reale (caso specifico → indagine
+  dedicata se confermato).
+- (b) **Chiudere HIGH-2 SEVERO** con MR-B4: post-pass `rientra_a_casa`
+  multi-step per giri lunghi che terminano fuori area, OPPURE
+  generazione giri 1g dedicati per pattern navetta intra-day
+  S01860↔S01074 (recupera 16 corse residue).
+- (c) **Restart Claude Code** per attivare subagent SEVERO bootato
+  (4 critiche consecutive ancora in fallback NINO+AMILCARE manuale).
+
+---
+
 ## 2026-05-09 (255) — Sprint 8.1 MR-B2: backtracking esplorativo per giri lunghi + peso_chiude_sede 50→500 (23→10 non chiusi)
 
 ### Contesto
