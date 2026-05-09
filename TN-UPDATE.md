@@ -10,6 +10,84 @@
 
 ---
 
+## 2026-05-09 (251) — Code review completa repo: 6 critici, 15 importanti, 8 minori
+
+### Contesto
+
+Sessione 2026-05-09: l'utente ha richiesto una code review completa
+del repo COLAZIONE a partire da zero, con metodo senior: lettura
+di CLAUDE.md, TN-UPDATE.md (prime 5 entry), METODO-DI-LAVORO.md,
+NORMATIVA-PDC.md, MODELLO-DATI.md prima di aprire qualsiasi file
+di codice.
+
+La review di riferimento era `docs/CODE-REVIEW-2026-05-01.md`
+(6 critici, 11 importanti, 7 minori): questa sessione ne aggiorna
+lo stato e aggiunge finding sul codice scritto negli Sprint 8.0–8.1
+(`multi_turno.py`, `assegnazione_persone.py`, `backtracking_esplorativo.py`,
+3 nuove dashboard, modelli personale/turni_pdc).
+
+### Modifiche
+
+**`docs/CODE-REVIEW-2026-05-09.md`** — nuovo file, 29 finding totali:
+
+- **6 CRITICI** (5 ancora aperti da 01-05, 1 nuovo):
+  - C1: full table scan TurnoPdc in builder_pdc (builder.py:710-727)
+  - C2: is_notturno vs cap_prestazione divergente in 3 file
+    (builder.py:331-337, split_cv.py:151-153, multi_turno.py:141,905)
+  - C3: ACCp preriscaldo 80' dic-feb non implementato (builder.py:195-196)
+  - C4: tutti i gap classificati PK (builder.py:239-249)
+  - C5 **NUOVO**: auto_assegna non carica storia assegnazioni pregresse
+    per riposo intraturno §11.5 / cap FR §10.6 (assegnazione_persone.py:444-503,
+    programmi.py:1196-1228)
+  - C6: STAZIONI_CV_DEROGA TIRANO non verificata (split_cv.py:59)
+
+- **15 IMPORTANTI** (6 nuovi, 9 ancora aperti da 01-05):
+  - I1 NUOVO: FK index mancanti TurnoPdcGiornata + TurnoPdcBlocco
+  - I2 NUOVO: AssegnazioneGiornata senza UniqueConstraint(persona_id, data)
+  - I3 NUOVO: codice_dipendente senza unique per azienda
+  - I4: assert in produzione (= vecchio I2)
+  - I5: updated_at senza onupdate (= vecchio I5)
+  - I6: JWT 72h access token (= vecchio I3)
+  - I7: impianto = giro.tipo_materiale[:80] (= vecchio I4)
+  - I8 NUOVO: 22+ window.alert/confirm invece di Dialog (frontend)
+  - I9: "feriale" hardcoded nel builder giro (= vecchio I6)
+  - I10: FR draft mutation (= vecchio I7)
+  - I11: test gap per logiche critiche (= vecchio I8, parziale)
+  - I12: race condition rientro (= vecchio I11)
+  - I13: km_media_annua mock (= vecchio I10)
+  - I14: constanti normativa nel package sbagliato (= vecchio M1)
+  - I15 NUOVO: TurnoDettaglioRoute pianificatore-pdc = re-export giro
+
+- **8 MINORI** (3 nuovi, 5 ancora aperti da 01-05):
+  - M1 NUOVO: _eccede_limiti propaga il bug C2
+  - M2 NUOVO: import httpx a livello modulo in multi_turno.py
+  - M3 NUOVO: tipo_evento è str non Literal/Enum
+  - M4: require_role string match (= vecchio M6)
+  - M5: smoke script lasciano dati in DB (= vecchio M5)
+  - M6: codice revisioni dead (= vecchio M2)
+  - M7: noqa F841 (= vecchio M7)
+  - M8: refresh token stateless (= vecchio M8)
+
+**Chiusi da review 01-05**: C3_old (FK-in-JSON programma_id), I1_old
+(utcnow), I9_old (query duplicata). Parzialmente chiuso: M1_old
+(assegnazione_persone.py aggiunto al package normativa, ma costanti
+ancora in builder_pdc/builder.py).
+
+### Stato
+
+Review documetata in `docs/CODE-REVIEW-2026-05-09.md`. PR aperta
+su branch `claude/zen-babbage-8w3CB` con solo questo file —
+nessun fix automatico al codice di produzione, in attesa di
+decisione utente su priorità.
+
+### Prossimo step
+
+Decidere quali finding attaccare per primi (candidati naturali:
+I1/I2 come fix DB a basso rischio, o C5 come bug normativo ad
+alto impatto, o procedere con Sprint 7.3 dashboard PdC).
+
+---
+
 ## 2026-05-08 (250) — Chiusura progetto iniziale SEVERO: consolidamento lezioni apprese in subagent + framework
 
 ### Contesto
