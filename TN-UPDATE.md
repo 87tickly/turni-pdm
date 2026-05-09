@@ -10,6 +10,72 @@
 
 ---
 
+## 2026-05-09 (274) — Sprint 8.2 MR-PD7a: §15 unicità intra-turno (validazione post-build deposito_first)
+
+### Contesto
+
+MR-PD7a, primo step di MR-PD7 (normativa regole non banali). Implementa
+NORMATIVA-PDC §15.1: ogni segmento di treno (corsa commerciale o
+materiale vuoto) si assegna a UN solo PdC. Validazione **intra-turno**:
+nessun `corsa_commerciale_id` o `corsa_materiale_vuoto_id` può
+apparire in 2 blocchi distinti dello stesso turno PdC (= doppione).
+
+Validazione cross-turno (= stesso segmento in turni diversi dello
+stesso programma) rinviata a MR successivo (richiede query DB
+post-persistenza globale).
+
+§11.4 riposo settimanale ≥62h+2gg solari + §6 PK opt-in operatore
+restano in MR-PD7b/c (rinviati: §11.4 richiede modello inter-turno
+più ampio, §6 PK opt-in tocca il builder MVP `_inserisci_refezione`
+che usa SOLO PK ovunque — bug semantico già pre-PD7).
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_pdc/deposito_first.py`**
+(+60 righe): nuova funzione `_verifica_unicita_intra_turno(drafts) →
+list[str]`. Itera blocchi di tutte le giornate del turno, mantiene 2
+mappe (`visti_cc` per `corsa_commerciale_id`, `visti_cv` per
+`corsa_materiale_vuoto_id`). Su collisione, append violazione
+formato `"unicita_segmento_X:id_Y:G{n}.B{seq1}+G{m}.B{seq2}"`.
+Chiamata da `genera_turni_pdc_deposito_first` post-`aggiungi_dormite_fr`.
+Le violazioni vengono passate come `violazioni_ciclo_extra` a
+`persisti_un_turno_pdc` + finiscono in
+`generation_metadata_json.unicita_violazioni`.
+
+**`backend/tests/test_deposito_first.py`** (+95 righe): 4 test puri
+sul helper:
+- `test_unicita_intra_turno_pulito_nessuna_violazione` (4 blocchi
+  distinti)
+- `test_unicita_intra_turno_doppione_corsa_commerciale` (stesso cci
+  in 2 blocchi)
+- `test_unicita_intra_turno_doppione_materiale_vuoto` (stesso cmv in
+  2 giornate diverse)
+- `test_unicita_intra_turno_blocchi_senza_id_ignorati` (PRESA/ACCp/
+  REFEZ/ACCa/FINE/PK senza corsa_id non causano violazione)
+
+Helper `_draft_con_blocchi(numero_giornata, [(seq, tipo, cci, cmv)])`
+costruisce `GiornataPdcDraft` minimi.
+
+### Verifiche
+
+- ✅ pytest test_deposito_first: 13 passed (era 9, +4 nuovi §15)
+- ✅ pytest smoke integration + vettura_resolver: 22 passed
+- ✅ mypy --strict: clean
+- ✅ ruff check: clean
+
+### Stato
+
+- ✅ MR-PD7a chiuso (§15 intra-turno).
+- ⏳ MR-PD7b §11.4 riposo settimanale ≥62h+2gg solari: scope inter-turno,
+  rinviato. Richiede aggregare turni per PdC su finestra 7-28gg.
+- ⏳ MR-PD7c §6 PK opt-in operatore: builder MVP usa solo PK ovunque
+  (pre-PD7 bug semantico). Refactor `_inserisci_refezione` + branch
+  ACC vs PK in base a gap. Rinviato.
+- ⏳ Sprint 8.2 finale: tutti gli HIGH+CRITICAL chiusi, restano
+  features normativa parziali (Sprint 8.3?).
+
+---
+
 ## 2026-05-09 (273) — Sprint 8.2 MR-PD-FIX-SEVERO 2 (S2): facade pubblico giornata_base.py per builder_pdc
 
 ### Contesto

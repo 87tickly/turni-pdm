@@ -29,7 +29,12 @@ import httpx
 import pytest
 
 from colazione.domain.builder_pdc.deposito_first import (
+    _verifica_unicita_intra_turno,
     costruisci_giornata_deposito_first,
+)
+from colazione.domain.builder_pdc.giornata_base import (
+    BloccoPdcDraft,
+    GiornataPdcDraft,
 )
 from colazione.domain.builder_pdc.vettura_resolver import (
     SceltaMM,
@@ -448,3 +453,108 @@ def test_costruisci_giornata_deposito_first_e_pubblica() -> None:
 
 # Silence unused Any import for type-only usage.
 _ = Any
+
+
+# =====================================================================
+# Sprint 8.2 MR-PD7a §15: unicità intra-turno
+# =====================================================================
+
+
+def _draft_con_blocchi(
+    numero_giornata: int,
+    blocchi_specs: list[tuple[int, str, int | None, int | None]],
+) -> GiornataPdcDraft:
+    """Helper: crea GiornataPdcDraft con blocchi minimi
+    (seq, tipo_evento, corsa_commerciale_id, corsa_materiale_vuoto_id).
+    Solo per test di `_verifica_unicita_intra_turno`."""
+    blocchi = []
+    for seq, tipo, cci, cmv in blocchi_specs:
+        blocchi.append(
+            BloccoPdcDraft(
+                seq=seq,
+                tipo_evento=tipo,
+                ora_inizio=time(7, 0),
+                ora_fine=time(8, 0),
+                durata_min=60,
+                stazione_da_codice="A",
+                stazione_a_codice="B",
+                corsa_commerciale_id=cci,
+                corsa_materiale_vuoto_id=cmv,
+            )
+        )
+    return GiornataPdcDraft(
+        numero_giornata=numero_giornata,
+        variante_calendario="GG",
+        blocchi=blocchi,
+        stazione_inizio="A",
+        stazione_fine="B",
+        inizio_prestazione=time(6, 0),
+        fine_prestazione=time(14, 0),
+        prestazione_min=480,
+        condotta_min=60,
+        refezione_min=0,
+        is_notturno=False,
+        is_cap_notturno=False,
+        violazioni=[],
+    )
+
+
+def test_unicita_intra_turno_pulito_nessuna_violazione() -> None:
+    """4 blocchi con corsa_commerciale_id distinti → nessuna violazione."""
+    drafts = [
+        _draft_con_blocchi(
+            1,
+            [(1, "CONDOTTA", 100, None), (2, "CONDOTTA", 101, None)],
+        ),
+        _draft_con_blocchi(
+            2,
+            [(1, "CONDOTTA", 200, None), (2, "VETTURA", 201, None)],
+        ),
+    ]
+    assert _verifica_unicita_intra_turno(drafts) == []
+
+
+def test_unicita_intra_turno_doppione_corsa_commerciale() -> None:
+    """Stesso corsa_commerciale_id in 2 blocchi distinti → violazione."""
+    drafts = [
+        _draft_con_blocchi(
+            1,
+            [(1, "CONDOTTA", 100, None), (2, "CONDOTTA", 100, None)],
+        ),
+    ]
+    out = _verifica_unicita_intra_turno(drafts)
+    assert len(out) == 1
+    assert "unicita_segmento_corsa_commerciale" in out[0]
+    assert "id_100" in out[0]
+    assert "G1.B1+G1.B2" in out[0]
+
+
+def test_unicita_intra_turno_doppione_materiale_vuoto() -> None:
+    """Stesso corsa_materiale_vuoto_id in 2 giornate diverse → violazione."""
+    drafts = [
+        _draft_con_blocchi(1, [(1, "CONDOTTA", None, 50)]),
+        _draft_con_blocchi(2, [(1, "CONDOTTA", None, 50)]),
+    ]
+    out = _verifica_unicita_intra_turno(drafts)
+    assert len(out) == 1
+    assert "unicita_segmento_materiale_vuoto" in out[0]
+    assert "id_50" in out[0]
+    assert "G1.B1+G2.B1" in out[0]
+
+
+def test_unicita_intra_turno_blocchi_senza_id_ignorati() -> None:
+    """Blocchi PRESA/FINE/REFEZ/PK senza corsa_id → ignorati."""
+    drafts = [
+        _draft_con_blocchi(
+            1,
+            [
+                (1, "PRESA", None, None),
+                (2, "ACCp", None, None),
+                (3, "CONDOTTA", 300, None),
+                (4, "REFEZ", None, None),
+                (5, "ACCa", None, None),
+                (6, "FINE", None, None),
+            ],
+        ),
+    ]
+    assert _verifica_unicita_intra_turno(drafts) == []

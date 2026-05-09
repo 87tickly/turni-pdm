@@ -530,6 +530,12 @@ async def genera_turni_pdc_deposito_first(
         ciclo_giorni=giro.numero_giornate,
     )
 
+    # 7.bis. Sprint 8.2 MR-PD7a §15: verifica unicità intra-turno
+    # (nessun doppione di segmento commerciale o vuoto fra le N
+    # giornate del turno).
+    unicita_violazioni = _verifica_unicita_intra_turno(drafts)
+    violazioni_extra = list(fr_cap_violazioni) + unicita_violazioni
+
     # 8. Persisti TurnoPdc + giornate + blocchi via helper builder.py
     codice = genera_codice_turno(giro, depot)
     risultato = await persisti_un_turno_pdc(
@@ -545,15 +551,68 @@ async def genera_turni_pdc_deposito_first(
             "fr_giornate": fr_giornate,
             "is_ramo_split": False,
             "fr_cap_violazioni": fr_cap_violazioni,
+            "unicita_violazioni": unicita_violazioni,
             "builder_strategy": "deposito_first",
             "violazioni_giornate_scartate": violazioni_giornate_scartate,
         },
         depot_target=depot,
-        violazioni_ciclo_extra=fr_cap_violazioni,
+        violazioni_ciclo_extra=violazioni_extra,
     )
 
     await session.commit()
     return [risultato]
+
+
+# =====================================================================
+# Sprint 8.2 MR-PD7a §15: validazione unicità intra-turno
+# =====================================================================
+
+
+def _verifica_unicita_intra_turno(
+    drafts: list[GiornataPdcDraft],
+) -> list[str]:
+    """NORMATIVA-PDC §15.1: ogni segmento di treno (corsa commerciale o
+    materiale vuoto) si assegna a un solo PdC. **Validazione
+    intra-turno**: nessun ``corsa_commerciale_id`` o
+    ``corsa_materiale_vuoto_id`` può apparire in 2 blocchi distinti
+    dello stesso turno PdC (= doppione).
+
+    NB: la validazione cross-turno (lo stesso segmento in turni
+    diversi dello stesso programma) è scope MR successivo (richiede
+    query DB su tutti i turni del programma post-persistenza).
+
+    Returns:
+        Lista vuota se nessun doppione, altrimenti elenco di stringhe
+        con il pattern ``"unicita_segmento_X:id_Y:G{n}.B{seq1}+G{m}.B{seq2}"``
+        dove X è ``corsa_commerciale`` o ``corsa_materiale_vuoto``,
+        Y è l'id, e G{n}.B{seq} è la posizione del primo + secondo blocco.
+    """
+    visti_cc: dict[int, str] = {}
+    visti_cv: dict[int, str] = {}
+    violazioni: list[str] = []
+
+    for draft in drafts:
+        for blocco in draft.blocchi:
+            label = f"G{draft.numero_giornata}.B{blocco.seq}"
+            if blocco.corsa_commerciale_id is not None:
+                cci = blocco.corsa_commerciale_id
+                if cci in visti_cc:
+                    violazioni.append(
+                        f"unicita_segmento_corsa_commerciale:id_{cci}:"
+                        f"{visti_cc[cci]}+{label}"
+                    )
+                else:
+                    visti_cc[cci] = label
+            if blocco.corsa_materiale_vuoto_id is not None:
+                cmv = blocco.corsa_materiale_vuoto_id
+                if cmv in visti_cv:
+                    violazioni.append(
+                        f"unicita_segmento_materiale_vuoto:id_{cmv}:"
+                        f"{visti_cv[cmv]}+{label}"
+                    )
+                else:
+                    visti_cv[cmv] = label
+    return violazioni
 
 
 __all__ = [
