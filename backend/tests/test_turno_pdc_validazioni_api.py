@@ -56,6 +56,36 @@ async def cleanup_engine() -> None:
     await dispose_engine()
 
 
+async def _ensure_depot_test(session, az_id: int) -> int:  # type: ignore[no-untyped-def]
+    """MR-PD2: get-or-create depot di test (codice 'TEST_DEPOT_PD2').
+
+    `depot.codice` è UNIQUE globale; un solo record per tutto il test
+    suite. Riusato fra test consecutivi grazie al fixture autouse di
+    cleanup che NON cancella i depot.
+    """
+    row = (
+        await session.execute(
+            text("SELECT id FROM depot WHERE codice = 'TEST_DEPOT_PD2'")
+        )
+    ).first()
+    if row is not None:
+        return int(row[0])
+    await session.execute(
+        text(
+            "INSERT INTO depot (azienda_id, codice, display_name) "
+            "VALUES (:az, 'TEST_DEPOT_PD2', 'Test Depot MR-PD2')"
+        ),
+        {"az": az_id},
+    )
+    row = (
+        await session.execute(
+            text("SELECT id FROM depot WHERE codice = 'TEST_DEPOT_PD2'")
+        )
+    ).first()
+    assert row is not None
+    return int(row[0])
+
+
 async def _crea_turno(
     codice: str,
     giornate_specs: list[
@@ -71,6 +101,10 @@ async def _crea_turno(
         assert az_row is not None
         az_id = int(az_row[0])
 
+        # MR-PD2 (Sprint 8.2): deposito_pdc_id NOT NULL.
+        # Get-or-create depot di test per la azienda.
+        depot_id = await _ensure_depot_test(session, az_id)
+
         turno = TurnoPdc(
             azienda_id=az_id,
             codice=codice,
@@ -80,6 +114,7 @@ async def _crea_turno(
             valido_da=date(2026, 1, 1),
             stato="bozza",
             generation_metadata_json=metadata or {},
+            deposito_pdc_id=depot_id,
         )
         session.add(turno)
         await session.flush()

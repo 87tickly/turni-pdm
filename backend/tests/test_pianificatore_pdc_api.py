@@ -151,6 +151,29 @@ async def _crea_turno_pdc(
 ) -> int:
     """Crea un TurnoPdc + 1 giornata con i metric forniti."""
     async with session_scope() as session:
+        # MR-PD2 (Sprint 8.2): deposito_pdc_id NOT NULL.
+        # Get-or-create depot di test riusato da tutto il test suite.
+        depot_row = (
+            await session.execute(
+                text("SELECT id FROM depot WHERE codice = 'TEST_DEPOT_PD2'")
+            )
+        ).first()
+        if depot_row is None:
+            await session.execute(
+                text(
+                    "INSERT INTO depot (azienda_id, codice, display_name) "
+                    "VALUES (:az, 'TEST_DEPOT_PD2', 'Test Depot MR-PD2')"
+                ),
+                {"az": az_id},
+            )
+            depot_row = (
+                await session.execute(
+                    text("SELECT id FROM depot WHERE codice = 'TEST_DEPOT_PD2'")
+                )
+            ).first()
+        assert depot_row is not None
+        depot_id_test = int(depot_row[0])
+
         turno = TurnoPdc(
             azienda_id=az_id,
             codice=codice,
@@ -159,6 +182,7 @@ async def _crea_turno_pdc(
             ciclo_giorni=7,
             valido_da=date(2026, 1, 1),
             stato="bozza",
+            deposito_pdc_id=depot_id_test,
         )
         session.add(turno)
         await session.flush()

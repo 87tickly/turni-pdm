@@ -10,6 +10,119 @@
 
 ---
 
+## 2026-05-09 (262) — Sprint 8.2 MR-PD2: schema esteso (deposito_pdc_id NOT NULL + tipi blocchi MM/VOCTAXI/DORMITA)
+
+### Contesto
+
+MR-PD2 della pipeline Strada B (TDD from-scratch deposito-first, vedi
+entry 258). Chiude la **Violazione B** dichiarata dall'utente nell'audit
+`docs/AUDIT-PDC-NORMATIVA-2026-05-09.md` ("non associi i turni ai
+depositi"). Schema-only: niente logica builder (resta MR-PD3).
+
+Numerazione entry 262 perché 258-261 occupate dal Plan-D builder giro
+(parallelo): entry 257 MR-D0 → 258 MR-D0.5 → 259 MR-D1 → 260 MR-D2 →
+261 MR-D3. Il prefisso `MR-PD` (PdC) era già stato adottato in MR-PD1
+proprio per disambiguare.
+
+### Modifiche
+
+**`backend/alembic/versions/0043_mr_pd2_deposito_pdc_not_null.py`**
+(nuovo, 90 righe): migration alembic in 4 step:
+
+1. `DELETE FROM turno_pdc WHERE deposito_pdc_id IS NULL` — backfill
+   destructive di turni orfani Sprint 7.2 pre-MR η, rigenerabili dal
+   nuovo builder MR-PD3. **Greenfield**: dati `bozza` MVP, nessun
+   contenuto utente perso. **Su Railway prod**: numero turni orfani
+   sconosciuto al momento del commit (host postgres.railway.internal
+   non risolvibile da locale). Conferma deploy richiesta all'utente.
+2. `DROP CONSTRAINT turno_pdc_deposito_pdc_id_fkey` (FK ondelete=SET
+   NULL).
+3. `ALTER COLUMN deposito_pdc_id SET NOT NULL`.
+4. `CREATE FK turno_pdc_deposito_pdc_id_fkey` con
+   `ondelete=RESTRICT`. Più semantico di SET NULL su colonna NOT
+   NULL: cancellazione esplicitamente impedita se ci sono turni che
+   referenziano il depot.
+
+**`backend/src/colazione/models/turni_pdc.py`** (modificato): campo
+`deposito_pdc_id: Mapped[int | None]` → `Mapped[int]` (rimosso
+optional). FK ondelete `SET NULL` → `RESTRICT`. Commento esteso con
+riferimento NORMATIVA-PDC §2.3 + Violazione B + migration 0043.
+
+**`frontend/src/lib/api/turniPdc.ts`** (modificato): nuovo type union
+`TipoEventoPdc` esportato (string-literal union):
+`"CONDOTTA" | "VETTURA" | "REFEZ" | "ACCp" | "ACCa" | "CVp" | "CVa" |
+"PK" | "SCOMP" | "PRESA" | "FINE" | "DORMITA" | "MM" | "VOCTAXI"`.
+Campo `TurnoPdcBlocco.tipo_evento: string` → `TipoEventoPdc`. Type
+narrowing senza forzare enum a tutti i consumatori. `MM` e `VOCTAXI`
+sono i nuovi tipi che servirà al vettura-resolver §7.2 (MR-PD3);
+`DORMITA` esisteva già a runtime (`builder.py:1152`) ma non era
+parte del type union.
+
+**Test fixture aggiornati** (3 file):
+
+- `backend/tests/test_turno_pdc_validazioni_api.py`: nuova helper
+  `_ensure_depot_test(session, az_id) → int` (get-or-create depot
+  con codice unique `TEST_DEPOT_PD2`). Factory `_crea_turno` ora
+  passa `deposito_pdc_id=depot_id`.
+- `backend/tests/test_giri_turni_pdc_list_api.py`: stesso pattern
+  inline in `_setup_due_programmi`.
+- `backend/tests/test_pianificatore_pdc_api.py`: stesso pattern
+  inline in `_crea_turno_pdc`.
+
+### Verifiche
+
+- ✅ pytest test PdC core (7 file): **53 passed, 3 xfailed (red-phase
+  MR-PD1), 2 fail pre-esistenti su 403 cross-role**
+  (`test_list_giri_pianificatore_giro_ok`, `test_list_turni_pianificatore_giro_ok`)
+  — **fuori scope MR-PD2**, sono su autorizzazione `/api/turni-pdc`
+  per role PIANIFICATORE_GIRO. Confermato pre-esistenti via stash
+  (i test fallivano con NOT NULL pre-fix factory; col fix factory
+  applicato si rivelano in 403). Da indagare separatamente.
+- ✅ mypy --strict: clean
+- ✅ ruff check: clean
+- ✅ frontend pnpm typecheck: clean (DORMITA aggiunto al union per
+  compat con `TurnoPdcDettaglioRoute.tsx:1109,1137,1570`)
+- ✅ alembic upgrade head su DB locale: applicato con successo
+  (0 turni orfani locali)
+
+### Stato deploy
+
+- ✅ Push origin master
+- ⏸️ **Railway deploy backend NON ancora eseguito**. Migration ha
+  step 1 destructive (DELETE turni orfani). Numero turni orfani in
+  prod sconosciuto (host postgres.railway.internal non raggiungibile
+  da locale). **Richiesta conferma utente** prima di
+  `railway up --service backend`.
+
+### Builder legacy: side-effect noto
+
+Builder monolitico `genera_turno_pdc` accetta ancora
+`deposito_pdc_id=None`. Multi-turno `_persisti_segmenti` può tentare
+INSERT con None se nessun deposito matcha. **Effetto post-migration**:
+INSERT fallirà con `IntegrityError` (NotNullViolation) invece del
+silente bug pre-MR-PD2 (turno persistito senza deposito). Errore
+fail-fast accettabile per MR-PD2 schema-only. **Risolto in MR-PD3**
+quando il builder deposito-first GARANTIRÀ il deposito per
+costruzione.
+
+### Stato
+
+- ✅ MR-PD2 chiuso lato codice + push.
+- ⏸️ Deploy Railway in attesa conferma utente (DELETE destructive).
+- ⏳ MR-PD3 (next): builder deposito-first core. Risolverà
+  Violazioni A, C, D + side-effect del builder legacy.
+
+### Prossimo step
+
+Decisione utente:
+- (a) Confermare deploy Railway (rischio = N turni orfani prod
+  cancellati). Comando: `railway up --service backend`.
+- (b) Rinviare deploy. Codice pronto, deploy in batch con MR-PD3.
+- (c) Aggiungere prima un endpoint di diagnostica per contare turni
+  orfani in prod (via Railway console).
+
+---
+
 ## 2026-05-09 (258) — Sprint 8.2 MR-PD1: audit normativa PdC + fixture E2E red-phase TDD (Strada B from-scratch deposito-first, parallelo a Plan-D builder giro)
 
 ### Contesto

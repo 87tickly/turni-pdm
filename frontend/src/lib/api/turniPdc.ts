@@ -52,10 +52,40 @@ export interface TurnoPdcListItem extends SplitCvFields {
   n_fr_cap_violazioni: number;
 }
 
+/**
+ * Sprint 8.2 MR-PD2: tipi evento che il blocco PdC può assumere.
+ *
+ * Insieme dei letterali = stringhe accettate dal backend (vedi
+ * `backend/src/colazione/domain/builder_pdc/builder.py:141`).
+ * I due nuovi tipi `MM` e `VOCTAXI` servono al vettura-resolver §7.2
+ * (priorità rientro: vettura → MM se Milano e sfora 8h30 → VOCTAXI),
+ * implementato in MR-PD3.
+ *
+ * Tipo string-union (non enum) per permettere narrowing senza forzare
+ * un import enum a tutti i consumatori. Il backend conserva
+ * `String(20)` libero quindi un valore inatteso non rompe il parsing
+ * — i consumatori UI fanno fallback al rendering generico.
+ */
+export type TipoEventoPdc =
+  | "CONDOTTA"
+  | "VETTURA"
+  | "REFEZ"
+  | "ACCp"
+  | "ACCa"
+  | "CVp"
+  | "CVa"
+  | "PK"
+  | "SCOMP"
+  | "PRESA"
+  | "FINE"
+  | "DORMITA"
+  | "MM"
+  | "VOCTAXI";
+
 export interface TurnoPdcBlocco {
   id: number;
   seq: number;
-  tipo_evento: string;
+  tipo_evento: TipoEventoPdc;
   corsa_commerciale_id: number | null;
   corsa_materiale_vuoto_id: number | null;
   giro_blocco_id: number | null;

@@ -43,13 +43,15 @@ class TurnoPdc(Base):
     valido_da: Mapped[date] = mapped_column(Date)
     valido_a: Mapped[date | None] = mapped_column(Date)
     source_file: Mapped[str | None] = mapped_column(Text)
-    # Sprint 7.9 MR η: deposito PdC che copre il turno. Nullable per
-    # backward compat con i turni pre-MR η; il builder aggiornato lo
-    # valorizza sempre quando l'utente sceglie un deposito target.
-    # ondelete=SET NULL per non perdere i turni se un deposito viene
-    # cancellato (caso raro: i depositi sono anagrafica stabile).
-    deposito_pdc_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("depot.id", ondelete="SET NULL")
+    # Sprint 7.9 MR η: deposito PdC che copre il turno.
+    # Sprint 8.2 MR-PD2 (Violazione B): ora NOT NULL. NORMATIVA-PDC §2.3
+    # ("ogni PdC appartiene a uno dei 25 depositi"): un turno PdC senza
+    # deposito non ha senso operativo. Migration 0043 cancella i turni
+    # orfani Sprint 7.2 pre-MR η e applica il vincolo.
+    # ondelete=RESTRICT impedisce la cancellazione di un depot con
+    # turni associati (più semantico di SET NULL su colonna NOT NULL).
+    deposito_pdc_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("depot.id", ondelete="RESTRICT")
     )
     generation_metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     stato: Mapped[str] = mapped_column(String(20), default="bozza")
