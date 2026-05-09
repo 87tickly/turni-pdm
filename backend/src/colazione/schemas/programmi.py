@@ -284,7 +284,7 @@ class ProgrammaMaterialeRead(BaseModel):
     # corsa→regola. ``"rigido"`` = filtra-e-scarta legacy.
     # ``"esplorativo"`` (default da MR-A8 entry 251) = esplora-e-rilassa
     # con vincoli soft + fallback governato. Ortogonale a ``builder_version``.
-    builder_mode: Literal["rigido", "esplorativo"] = "esplorativo"
+    builder_mode: Literal["rigido", "esplorativo", "linea_centrica"] = "esplorativo"
     created_by_user_id: int | None = None
     # Sprint dashboard 1° ruolo (entry 88): popolato via JOIN con `app_user`
     # quando la query usa `joinedload(ProgrammaMateriale.created_by)`.
@@ -390,7 +390,7 @@ class ProgrammaMaterialeCreate(BaseModel):
     # con fix HIGH-1 SEVERO: sotto-min 52%→8% prog 17, 33%→4% prog 16).
     # Il pianificatore può forzare ``"rigido"`` per programmi specifici
     # se necessario (es. ripristinare comportamento legacy).
-    builder_mode: Literal["rigido", "esplorativo"] = "esplorativo"
+    builder_mode: Literal["rigido", "esplorativo", "linea_centrica"] = "esplorativo"
     regole: list[ProgrammaRegolaAssegnazioneCreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -437,7 +437,7 @@ class ProgrammaMaterialeUpdate(BaseModel):
     # come builder_version: rigenerare i giri dopo il PATCH per vedere
     # l'effetto. Foundation in MR-A1: il valore è settabile ma nessun
     # consumatore lo legge fino a MR-A3.
-    builder_mode: Literal["rigido", "esplorativo"] | None = None
+    builder_mode: Literal["rigido", "esplorativo", "linea_centrica"] | None = None
 
 
 # =====================================================================

@@ -47,7 +47,7 @@ import dataclasses
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -100,6 +100,10 @@ from colazione.domain.builder_giro.persister import (
     GiroDaPersistere,
     LocalitaNonTrovataError,
     persisti_giri,
+)
+from colazione.domain.builder_giro.pipeline_linea_centrica import (
+    ParamPipelineLineaCentrica,
+    esegui_pipeline_linea_centrica,
 )
 from colazione.domain.builder_giro.posizionamento import (
     CatenaPosizionata,
@@ -1120,6 +1124,270 @@ async def _genera_giri_v2(
     )
 
 
+def _giro_linea_centrica_a_aggregato(
+    giro: Giro,
+    *,
+    materiale_tipo_codice: str,
+) -> GiroAggregato:
+    """Adapter per la pipeline linea-centrica: ``Giro`` (output MR-D4)
+    → ``GiroAggregato`` (input persister legacy).
+
+    La pipeline linea-centrica produce ``Giro`` con varianti già
+    aggregate (MR-D4 raggruppa giornate per chiave sequenza). Per
+    persistere riusiamo l'infrastruttura legacy ``GiroAggregato`` →
+    ``persisti_giri``.
+
+    Mapping:
+    - 1 ``Giro`` → 1 ``GiroAggregato`` (no fusione cross-giro)
+    - Per ogni ``GiornataGiro``: 1 ``GiornataAggregata`` con 1 sola
+      ``VarianteGiornata`` (se MR-D4 ha aggregato N date con stessa
+      sequenza, sono già nello stesso ``GiornataGiro.dates_apply``)
+    - ``blocchi_assegnati = ()``: la pipeline linea-centrica NON
+      genera composizioni miste (cross-materiale). Chi usa il modello
+      'linea_centrica' accetta un'esecuzione single-materiale
+      per regola.
+
+    Args:
+        giro: output MR-D4 (`Giro` legacy).
+        materiale_tipo_codice: tipo materiale del giro (= materiale
+            associato al segmento di provenienza).
+    """
+    giornate_agg: list[GiornataAggregata] = []
+    for k, gnata in enumerate(giro.giornate, start=1):
+        variante = VarianteGiornata(
+            catena_posizionata=gnata.catena_posizionata,
+            blocchi_assegnati=(),
+            eventi_composizione=(),
+            dates_apply=gnata.dates_apply_or_data,
+        )
+        giornate_agg.append(
+            GiornataAggregata(numero_giornata=k, varianti=(variante,))
+        )
+
+    return GiroAggregato(
+        localita_codice=giro.localita_codice,
+        materiale_tipo_codice=materiale_tipo_codice,
+        giornate=tuple(giornate_agg),
+        chiuso=giro.chiuso,
+        motivo_chiusura=giro.motivo_chiusura,
+        km_cumulati=giro.km_cumulati,
+    )
+
+
+async def _genera_giri_linea_centrica(
+    *,
+    programma: ProgrammaMateriale,
+    localita: LocalitaManutenzione,
+    whitelist: frozenset[str],
+    azienda_id: int,
+    session: AsyncSession,
+    regole: list[ProgrammaRegolaAssegnazione],
+    corse: list[CorsaCommerciale],
+    regola_per_corsa_id: dict[int, ProgrammaRegolaAssegnazione],
+    area_per_stazione: dict[str, int],
+    warnings_esistenti: list[str],
+    n_corse_orfane: int,
+    eseguito_da_user_id: int | None,
+    force: bool,
+) -> BuilderResult:
+    """Sprint 8.2 Plan-D MR-D5b: pipeline linea-centrica end-to-end.
+
+    Chiamata da ``genera_giri`` quando ``programma.builder_mode='linea_centrica'``.
+    Salta gli step v1 (multi_giornata, sourcing, capacity, fusione, A2):
+    la pipeline ``esegui_pipeline_linea_centrica`` (MR-D5) produce
+    ``list[Giro]`` già aggregato per chiave sequenza. L'adapter
+    ``_giro_linea_centrica_a_aggregato`` traduce in ``GiroAggregato``
+    per il persister v1 invariato.
+
+    **Limitazioni note (scope MR-D5b baseline)**:
+
+    - Composizioni miste (cross-materiale) non supportate: il modello
+      linea-centrico assume 1 materiale per segmento.
+    - Vuoti tecnici cross-segmento non gestiti (= scope MR-D6).
+    - Validazione sui programmi reali Trenord = scope MR-D7 e2e.
+
+    Strangler: il branching è una opt-in via ``builder_mode``. Programmi
+    con ``'rigido'``/``'esplorativo'`` continuano sulla pipeline legacy
+    invariata.
+    """
+    warnings = list(warnings_esistenti)
+
+    # Costruisce sedi_disponibili dal solo localita del run (single-sede).
+    if localita.stazione_collegata_codice is None:
+        warnings.append(
+            f"Sede {localita.codice!r} senza stazione_collegata: "
+            "pipeline linea-centrica non può procedere."
+        )
+        return BuilderResult(
+            giri_ids=[],
+            n_giri_creati=0,
+            n_corse_processate=0,
+            n_corse_residue=n_corse_orfane,
+            n_giri_chiusi=0,
+            n_giri_non_chiusi=0,
+            n_eventi_composizione=0,
+            n_incompatibilita_materiale=0,
+            warnings=warnings,
+        )
+    sedi_disponibili: dict[str, str] = {
+        localita.codice: localita.stazione_collegata_codice
+    }
+
+    # Materiale per segmento: derivato dalle regole della sede.
+    # MR-D1 produce segmenti con codice ``{codice_linea}_completo`` o
+    # ``{codice_linea}_tronco_{X}``. Per ogni regola, le linee del filtro
+    # corrispondono a segmenti potenziali. Mapping conservativo: tutte
+    # le varianti di una linea sotto la regola usano lo stesso materiale.
+    materiale_per_segmento: dict[str, str] = {}
+    regola_per_segmento: dict[str, int] = {}
+    for r in regole:
+        mat = _materiale_da_regola(r)
+        if not mat:
+            continue
+        # Estrai linee dal filtro
+        linee_regola: list[str] = []
+        for f in r.filtri_json or []:
+            if isinstance(f, dict) and f.get("campo") == "codice_linea":
+                val = f.get("valore")
+                if isinstance(val, list):
+                    linee_regola.extend(str(v) for v in val)
+                elif isinstance(val, str):
+                    linee_regola.append(val)
+        # Per ogni linea, mappa i potenziali segmenti
+        for linea in linee_regola:
+            materiale_per_segmento[f"{linea}_completo"] = mat
+            regola_per_segmento[f"{linea}_completo"] = r.id
+
+    # Carica capacity flotta (defensive: se carica_dotazione fallisce,
+    # capacity check skip per quel materiale). Filtra None per type safety.
+    try:
+        dotazione_obj = await carica_dotazione_per_azienda(session, azienda_id)
+        dotazione_per_materiale: dict[str, int] = {
+            mat: int(n)
+            for mat, n in dotazione_obj.items()
+            if n is not None
+        } if hasattr(dotazione_obj, "items") else {}
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(
+            f"Carica dotazione fallita ({exc}); capacity check skippato."
+        )
+        dotazione_per_materiale = {}
+
+    # Carica festivita per il periodo
+    festivita = await carica_festivita_periodo(
+        session, azienda_id, programma.valido_da, programma.valido_a
+    )
+
+    # Esegue la pipeline pure-domain D0..D4
+    params_pipeline = ParamPipelineLineaCentrica(
+        sedi_disponibili=sedi_disponibili,
+        area_per_stazione=area_per_stazione,
+        dotazione_per_materiale=dotazione_per_materiale,
+        materiale_per_segmento=materiale_per_segmento,
+        periodo_da=programma.valido_da,
+        periodo_a=programma.valido_a,
+        festivita_set=frozenset(festivita) if festivita else None,
+        regola_per_segmento=regola_per_segmento,
+    )
+    # cast: CorsaCommerciale soddisfa strutturalmente _CorsaTurnoLike
+    # (tutti i campi richiesti sono mappati nell'ORM). Mypy strict
+    # richiede cast esplicito per Protocol cross-modulo.
+    result = esegui_pipeline_linea_centrica(
+        cast("Sequence[Any]", corse), params_pipeline
+    )
+    warnings.extend(result.warnings)
+
+    # Adapter Giro → GiroAggregato
+    materiale_per_giro: dict[int, str] = {}
+    for turno in result.turni:
+        materiale_per_giro[id(turno)] = (
+            materiale_per_segmento.get(turno.segmento_codice, "MISTO")
+        )
+
+    giri_aggregati: list[GiroAggregato] = []
+    for giro in result.giri:
+        # Recupera il materiale dal primo CatenaPosizionata.regola_id
+        regola_id_giro = (
+            giro.giornate[0].catena_posizionata.regola_id
+            if giro.giornate
+            else None
+        )
+        materiale = "MISTO"
+        if regola_id_giro is not None:
+            for seg_codice, r_id in regola_per_segmento.items():
+                if r_id == regola_id_giro:
+                    materiale = materiale_per_segmento.get(seg_codice, "MISTO")
+                    break
+        giri_aggregati.append(
+            _giro_linea_centrica_a_aggregato(
+                giro, materiale_tipo_codice=materiale
+            )
+        )
+
+    # Persiste
+    giri_da_persistere: list[GiroDaPersistere] = []
+    for idx, giro_agg in enumerate(giri_aggregati, start=1):
+        numero_turno = (
+            f"G-{localita.codice_breve}-{idx:03d}-"
+            f"{giro_agg.materiale_tipo_codice}-{len(giro_agg.giornate)}g"
+        )
+        giri_da_persistere.append(
+            GiroDaPersistere(
+                numero_turno=numero_turno,
+                giro=giro_agg,
+                genera_rientro_sede=True,
+                whitelist_sede=whitelist,
+            )
+        )
+
+    giro_ids = await persisti_giri(
+        giri_da_persistere,
+        session,
+        programma.id,
+        azienda_id,
+        periodo_valido_da=programma.valido_da,
+        periodo_valido_a=programma.valido_a,
+    )
+    await session.commit()
+
+    # Stats
+    n_corse_processate = sum(t.n_corse_totali for t in result.turni)
+    n_giri_chiusi = sum(1 for g in result.giri if g.chiuso)
+    n_giri_non_chiusi = sum(1 for g in result.giri if not g.chiuso)
+
+    # Persisti BuilderRun
+    run = BuilderRun(
+        programma_id=programma.id,
+        azienda_id=azienda_id,
+        localita_codice=localita.codice,
+        eseguito_da_user_id=eseguito_da_user_id,
+        n_giri_creati=len(giro_ids),
+        n_giri_chiusi=n_giri_chiusi,
+        n_giri_non_chiusi=n_giri_non_chiusi,
+        n_corse_processate=n_corse_processate,
+        n_corse_residue=n_corse_orfane,
+        n_eventi_composizione=0,
+        n_incompatibilita_materiale=0,
+        warnings_json=list(warnings),
+        force=force,
+    )
+    session.add(run)
+    await session.commit()
+
+    return BuilderResult(
+        giri_ids=giro_ids,
+        n_giri_creati=len(giro_ids),
+        n_corse_processate=n_corse_processate,
+        n_corse_residue=n_corse_orfane,
+        n_giri_chiusi=n_giri_chiusi,
+        n_giri_non_chiusi=n_giri_non_chiusi,
+        n_giri_km_cap=0,
+        n_eventi_composizione=0,
+        n_incompatibilita_materiale=0,
+        warnings=warnings,
+    )
+
+
 def _trova_regola_dominante(
     cat_pos: CatenaPosizionata,
     regole: list[ProgrammaRegolaAssegnazione],
@@ -1612,6 +1880,29 @@ async def genera_giri(
         if area_per_stazione
         else ParamCatena()
     )
+
+    # Sprint 8.2 Plan-D MR-D5b (entry 264): branching pipeline
+    # linea-centrica. Il modello linea-centrico (MR-D0..D5) opera
+    # direttamente su corse PdE raggruppate per linea, non su catene
+    # posizionate. Salta tutto il flusso v1 (multi-giornata, sourcing,
+    # capacity, fusione, A2). Strangler intatto: programmi
+    # 'rigido'/'esplorativo' continuano sul flusso esistente invariato.
+    if programma.builder_mode == "linea_centrica":
+        return await _genera_giri_linea_centrica(
+            programma=programma,
+            localita=localita,
+            whitelist=whitelist,
+            azienda_id=azienda_id,
+            session=session,
+            regole=regole_della_sede,
+            corse=corse_perimetro,
+            regola_per_corsa_id=regola_per_corsa_id,
+            area_per_stazione=area_per_stazione,
+            warnings_esistenti=warnings,
+            n_corse_orfane=n_corse_orfane,
+            eseguito_da_user_id=eseguito_da_user_id,
+            force=force,
+        )
 
     # Sprint 5.6 Feature 3: attiva il vincolo finestra uscita deposito
     # 01:00-03:00 per programmi reali (non per test puri legacy).
