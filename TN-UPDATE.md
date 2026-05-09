@@ -10,6 +10,128 @@
 
 ---
 
+## 2026-05-09 (276) — Sprint 8.2 RE-CRITICA SEVERO MR-PD3 con AMILCARE V4 Pro (chiude riserva fallback FAUSTO, voto 3/10, scopre A1/A2/A3)
+
+### Contesto
+
+La critica SEVERO MR-PD3 di entry 268 era stata fatta in **fallback
+FAUSTO** (Grok Code Fast come motore SEVERO) perché AMILCARE V4 Pro
+era andato in 4 timeout `-32001` consecutivi. Voto fallback: 4.5/10
+provvisorio con riserva metodologica esplicita "da rifare con AMILCARE
+operativo". Memoria `feedback_severo_sempre_su_piani.md` impone re-critica
+con motore primario quando disponibile. Oggi AMILCARE è ripartito.
+
+Decisione utente sequenza Sprint 8.2: **A → B**. A = re-critica SEVERO
+(questa entry). B = MR-PD7b §11.4 riposo settimanale.
+
+### Esecuzione re-critica
+
+Subagent SEVERO invocato via `Agent(subagent_type=severo)`. Brief
+fornito: commit range `053b1f2`+`90ed424`, entry 264-265, stato
+finding S1-S11 (chiusi/rimandati), 4 domande secche AMILCARE.
+
+**AMILCARE V4 Pro pattern brief snello (entry 248) confermato**:
+2 timeout su brief 5KB e 3KB → terzo tentativo brief 1.5KB con 3
+domande secche → risposta in pochi secondi. Brief snello vince sempre.
+
+### Risultato
+
+**Voto AMILCARE: 3/10** (peggiore di FAUSTO 4.5/10 di 1.5 punti).
+
+**3 finding NUOVI strutturali HIGH-CRITICAL** mancati dal fallback
+FAUSTO (categoria A per distinguere da S1-S11):
+
+| Finding | Severità | Descrizione | Costo fix |
+|---|---|---|---|
+| **A1** | CRITICAL | §15 unicità segmenti **cross-PdC** assente. Due PdC indipendenti possono prenotare lo stesso treno-vettura per il rientro = output illegale per definizione (NORMATIVA-PDC §15.1-§15.2 dichiara "ogni segmento si assegna a UN solo PdC, sempre"). FAUSTO mancato per bias di prossimità sui moduli toccati. | **4-6h** |
+| **A2** | HIGH | Idempotenza builder NON garantita: `PartenzeCache` opzionale + API `live.arturo.travel` non-deterministica → re-build dello stesso programma produce turni diversi senza modifica input. | 2h opzione cache shared / 1-2gg snapshot DB |
+| **A3** | HIGH | Zero gestione eccezioni `httpx`: `grep -E "try\|except\|raise"` su entrambi i moduli MR-PD3 = **0 risultati**. Qualsiasi flake rete → traceback Python → endpoint MR-PD5 500 al pianificatore frontend. | 1.5h |
+
+**Falso positivo FAUSTO smascherato**: S5 sub-punto "arrivo_min=None
+edge case" è **impossibile** (`live_arturo.py:359` ha guard esplicita
+`if arrivo_min is None: return None`).
+
+**S1-S11 confermati** in linea generale. AMILCARE concorda con
+FAUSTO su S1 CRITICAL (matematica del flag `is_notturno` superinclusivo
+vs §11.8 cap presa 01:00-04:59), S4 test ambivalente, S2/S6/S7/S8/S9/S10/S11
+nei termini originari, S3 (§7.3 condotta produttiva) come HIGH-LATENT
+con scope-cutting **legittimo** Sprint 8.3 MR-C7.
+
+**Bias auto-compiacenza NINO smascherato** (entry 248): la critica
+fallback NINO post-fix avrebbe dato ~6-7/10 ("HIGH+CRITICAL chiusi
+nelle entry 269/271/273"); AMILCARE su PRE-FIX dà 3/10. Il motore
+esterno indipendente è insostituibile.
+
+### Verifica empirica NINO post-critica
+
+- ✅ Verificato `grep -E "RegistroSegment|pool_segmenti|SegmentiPool"`
+  in `backend/src/colazione/domain/builder_giro/`: **NON esiste**
+  pool segmenti riusabile dal Plan-D builder giro. Solo metodo
+  `n_segmenti_non_assegnati` come counter. **A1 fix resta a costo
+  pieno 4-6h** (no shortcut "estensione pool esistente").
+- ✅ Verificato DB prod: 26 turno_pdc totali, **0 deposito_first**
+  (tutti `multi_turno_dp_alpha8` legacy). Path opt-in MR-PD5 mai
+  invocato in prod → A1+A2+A3 NON hanno ancora prodotto turni
+  illegali, ma **al primo run reale lo faranno**.
+
+### Output
+
+- ✅ Critica completa: `docs/critiche/SPRINT-8.2-MR-PD3-RE-CRITICA-AMILCARE.md`
+  (337 righe, format canonico SEVERO).
+- ✅ `docs/critiche/README.md` aggiornato in cima con riga riassuntiva.
+- ✅ Critica fallback FAUSTO `SPRINT-8.2-MR-PD3-deposito-first.md`
+  **mantenuta intatta** per confronto storico.
+- ⏭️ NESSUNA modifica codice. NESSUN commit nuovo (solo doc nuovo).
+
+### Stato pre-MR-PD5 in produzione (rivalutazione)
+
+L'endpoint `POST /api/giri/{id}/genera-turno-pdc?builder_strategy=deposito_first`
+è già deployato (commit 2b27bcc) ed esposto in prod. Però:
+- È **opt-in** (default = `multi_turno_dp_alpha8`).
+- 0 turni `deposito_first` esistono in prod oggi.
+
+Quindi la finestra per chiudere A1+A2+A3 prima dell'esposizione
+reale è ancora aperta — basta non documentare l'opt-in nelle UI/manuali
+finché P0 non sono chiusi.
+
+**Priorità AMILCARE-driven (P0 obbligatori pre-uso reale, ~10-12h)**:
+1. S1 cap notturno → ✅ già chiuso entry 269
+2. A3 try/except httpx + retry + 2 test → da fare
+3. A1 RegistroSegmentiAssegnati cross-PdC → da fare (4-6h)
+4. A2 PartenzeCache obbligatoria + manager-builder shared → da fare
+
+### Decisione successiva (NINO + utente)
+
+La sequenza A→B concordata era: A re-critica (questa) → B MR-PD7b
+§11.4 riposo settimanale. **Ma A1/A2/A3 sono emersi come P0
+pre-uso reale**. Opzioni:
+
+- **Opzione α**: prima A1+A2+A3 (MR-PD-FIX-SEVERO 3, ~7-9h netti dopo
+  S1 già chiuso), poi MR-PD7b §11.4 riposo settimanale.
+  **Razionale**: rispettiamo §7 NIENTE PIGRIZIA sui CRITICAL emersi.
+  Allinea con priorità AMILCARE.
+- **Opzione β**: prima MR-PD7b §11.4 (chiudiamo Sprint 8.2 normativa
+  feature), poi MR-PD-FIX-SEVERO 3 in coda allo Sprint o in 8.3.
+  **Razionale**: path opt-in zero turni reali = no impatto
+  utente immediato; rispetta sequenza A→B concordata.
+- **Opzione γ**: solo A3 (1.5h, basso costo HIGH "anti-500") prima
+  di MR-PD7b, e A1+A2 spostati in Sprint 8.3 con motivazione "no
+  uso reale prod". **Razionale**: pragma — chiudi il rischio 500
+  immediato, ma ammetti che A1+A2 sono debito tecnico Sprint 8.3.
+
+In attesa decisione utente. Default mio (NINO): Opzione α — A1
+non è rimandabile per principio (output illegale per definizione
+normativa); meglio chiuderlo ora con la mente fresca su MR-PD3
+che lasciarlo per Sprint 8.3.
+
+### Stato
+
+- ✅ Re-critica SEVERO MR-PD3 chiusa lato critica.
+- ✅ Riserva metodologica fallback FAUSTO chiusa.
+- ⏳ Decisione utente α/β/γ richiesta prima di B (MR-PD7b §11.4).
+
+---
+
 ## 2026-05-09 (275) — Sprint 8.2 MR-D5f + MR-D5f-bis + MR-D5f-tris: pool sedi multi-sede + fallback tronchi + espansione direttrice→linee (Plan-D end-to-end funzionale, mismatch sede-regola da risolvere)
 
 ### Contesto
