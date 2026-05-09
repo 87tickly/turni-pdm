@@ -342,6 +342,28 @@ retrospettivo). Se ambiguo, chiedere.
 
 ---
 
+## 11. Regole di processo SEVERO (R-PROC)
+
+Aggiunte alla critica `SPRINT-8.2-MR-D5e+bug-architetturale-single-sede.md`
+entry 270 (voto 4/10) + applicate retroattivamente a tutto il
+codice futuro:
+
+- **R-PROC-1**: SEVERO obbligatorio sul **primo cambio strangler**
+  che tocca un file di produzione (`builder.py`,
+  `assegna_convogli_linea.py`, ecc.) richiede **verifica e2e empirica
+  su prog reale** prima del voto. Cap voto 6/10 se mock-only.
+- **R-PROC-2**: ogni raccomandazione SEVERO HARD deve esplicitare
+  le **assunzioni sull'input/contesto** (formato: "HARD assumendo X.
+  Se non X, va rilassato a Y"). Senza, è una racc fragile.
+- **R-PROC-3**: una racc MED non bloccante diventa **HIGH BLOCKING
+  al primo cambio in produzione del codice mock-only**. Cap voto
+  5/10 al MR successivo se debito MED non chiuso.
+
+Definizione completa in `.claude/agents/severo.md` § "Regole di
+processo permanenti".
+
+---
+
 ## Riferimenti
 
 - `CLAUDE.md` — regole operative del progetto (sezione 9 ora rimanda

@@ -1244,6 +1244,102 @@ def _giro_linea_centrica_a_aggregato(
     )
 
 
+def _costruisci_mappature_regole_linee(
+    *,
+    regole: Sequence[Any],
+    corse: Sequence[Any],
+) -> tuple[dict[str, str], dict[str, int], dict[int, str]]:
+    """Sprint 8.2 MR-D5h-A: costruisce 3 mappature derivate dalle
+    regole + corse del programma, usate dalla pipeline linea-centrica.
+
+    Estratta in helper pura indipendente dal DB (chiude finding HIGH
+    S3 critica SEVERO 5/10 entry 275: il fix MR-D5f-tris era inline al
+    chiamante senza test sul cuore del fix).
+
+    Mappature ritornate:
+    - ``materiale_per_segmento[seg_codice] → materiale_tipo_codice``:
+      mapping dei segmenti `_completo` → materiale autoritativo della
+      regola che li copre.
+    - ``regola_per_segmento[seg_codice] → regola.id``: mapping dei
+      segmenti `_completo` → id della regola.
+    - ``materiale_per_regola[r.id] → materiale_tipo_codice``: lookup
+      autoritativo regola_id → materiale (usato da
+      ``_traduce_e_filtra_giri_linea_centrica`` indipendente dai
+      segmenti, copre anche i tronchi).
+
+    Logica:
+
+    1. Pre-calcola mappa ``direttrice → set(codice_linea)`` dalle corse
+       del programma (MR-D5f-tris): le regole reali Trenord filtrano per
+       ``campo='direttrice'`` (es. "TIRANO-SONDRIO-LECCO-MILANO"), non
+       per ``codice_linea``. Senza l'espansione,
+       ``regola_per_segmento`` resta vuoto e tutti i giri sono scartati
+       downstream.
+    2. Per ogni regola valida (con materiale risolto):
+       - Estrae ``linee_regola`` dal filtro ``codice_linea`` (direttamente)
+         e ``direttrice`` (espanso via mappa di step 1).
+       - Mappa ``{linea}_completo → mat`` e ``{linea}_completo →
+         regola.id``.
+
+    Args:
+        regole: lista regole del programma (filter già applicato dal
+            chiamante per sede del run, vedi `regole_della_sede`).
+        corse: corse del programma nel periodo (per pre-calcolo
+            direttrice→linee).
+
+    Returns:
+        Tupla (materiale_per_segmento, regola_per_segmento,
+        materiale_per_regola).
+
+    Note:
+        ``materiale_per_segmento`` e ``regola_per_segmento`` mappano
+        SOLO le varianti `_completo`. Il fallback per `_tronco_X` /
+        `_isolato_X_Y` è applicato downstream da
+        `aggregazione_linea_centrica.traduci_turno_in_giro` (split
+        prefisso → `_completo`).
+    """
+    direttrice_to_linee: dict[str, set[str]] = {}
+    for c in corse:
+        d = getattr(c, "direttrice", None)
+        cl = getattr(c, "codice_linea", None)
+        if d and cl:
+            direttrice_to_linee.setdefault(str(d), set()).add(str(cl))
+
+    materiale_per_segmento: dict[str, str] = {}
+    regola_per_segmento: dict[str, int] = {}
+    materiale_per_regola: dict[int, str] = {}
+
+    for r in regole:
+        mat = _materiale_da_regola(r)
+        if not mat:
+            continue
+        materiale_per_regola[r.id] = mat
+        linee_regola: set[str] = set()
+        for f in r.filtri_json or []:
+            if not isinstance(f, dict):
+                continue
+            campo = f.get("campo")
+            val = f.get("valore")
+            if campo == "codice_linea":
+                if isinstance(val, list):
+                    linee_regola.update(str(v) for v in val)
+                elif isinstance(val, str):
+                    linee_regola.add(val)
+            elif campo == "direttrice":
+                direttrici = (
+                    [str(v) for v in val]
+                    if isinstance(val, list)
+                    else ([val] if isinstance(val, str) else [])
+                )
+                for d_codice in direttrici:
+                    linee_regola.update(direttrice_to_linee.get(d_codice, set()))
+        for linea in linee_regola:
+            materiale_per_segmento[f"{linea}_completo"] = mat
+            regola_per_segmento[f"{linea}_completo"] = r.id
+
+    return materiale_per_segmento, regola_per_segmento, materiale_per_regola
+
+
 def _traduce_e_filtra_giri_linea_centrica(
     *,
     giri: Sequence[Giro],
@@ -1412,69 +1508,17 @@ async def _genera_giri_linea_centrica(
             "pipeline procede in modalità degradata single-sede."
         )
 
-    # Materiale per segmento: derivato dalle regole della sede.
-    # MR-D1 produce segmenti con codice ``{codice_linea}_completo`` o
-    # ``{codice_linea}_tronco_{X}``. Per ogni regola, le linee del filtro
-    # corrispondono a segmenti potenziali. Mapping conservativo: tutte
-    # le varianti di una linea sotto la regola usano lo stesso materiale.
-    materiale_per_segmento: dict[str, str] = {}
-    regola_per_segmento: dict[str, int] = {}
-    # MR-D5e: lookup diretto regola_id → materiale (autoritativo).
-    # ``materiale_per_segmento`` mappa solo i ``_completo``; la pipeline
-    # MR-D1 può creare segmenti ``_tronco_X`` non presenti nel mapping
-    # → fallback ``"MISTO"`` storico (builder.py:1335 pre-fix) violava
-    # FK ``materiale_thread_tipo_materiale_codice_fkey`` (sentinella
-    # ``MISTO`` non esiste in ``materiale_tipo``).  Con questo dict
-    # ricaviamo il materiale dalla regola direttamente.
-    materiale_per_regola: dict[int, str] = {}
-
-    # MR-D5f-tris: pre-calcola mappa direttrice → linee (estratta dalle
-    # corse del programma). Necessario perché le regole prog 17 (e in
-    # generale le regole reali Trenord) filtrano per `direttrice`
-    # (es. "TIRANO-SONDRIO-LECCO-MILANO"), non per `codice_linea`. Senza
-    # questa espansione, `regola_per_segmento` resta vuoto → tutti i
-    # giri orfani con regola_id=None → tutti scartati downstream
-    # (e2e prog 17 v3/v4: 1302 corse processate ma 0 giri persistiti).
-    direttrice_to_linee: dict[str, set[str]] = {}
-    for c in corse:
-        d = getattr(c, "direttrice", None)
-        cl = getattr(c, "codice_linea", None)
-        if d and cl:
-            direttrice_to_linee.setdefault(str(d), set()).add(str(cl))
-
-    for r in regole:
-        mat = _materiale_da_regola(r)
-        if not mat:
-            continue
-        materiale_per_regola[r.id] = mat
-        # Estrai linee dal filtro: campo `codice_linea` (diretto)
-        # E campo `direttrice` (espanso via direttrice_to_linee).
-        # MR-D5f-tris: se il filtro è solo direttrice (caso prog 17),
-        # senza espansione `regola_per_segmento` è vuoto.
-        linee_regola: set[str] = set()
-        for f in r.filtri_json or []:
-            if not isinstance(f, dict):
-                continue
-            campo = f.get("campo")
-            val = f.get("valore")
-            if campo == "codice_linea":
-                if isinstance(val, list):
-                    linee_regola.update(str(v) for v in val)
-                elif isinstance(val, str):
-                    linee_regola.add(val)
-            elif campo == "direttrice":
-                # Espande direttrice → linee via mappa pre-calcolata
-                direttrici = (
-                    [str(v) for v in val]
-                    if isinstance(val, list)
-                    else ([val] if isinstance(val, str) else [])
-                )
-                for d_codice in direttrici:
-                    linee_regola.update(direttrice_to_linee.get(d_codice, set()))
-        # Per ogni linea, mappa i potenziali segmenti
-        for linea in linee_regola:
-            materiale_per_segmento[f"{linea}_completo"] = mat
-            regola_per_segmento[f"{linea}_completo"] = r.id
+    # MR-D5h-A (chiude S3 HIGH critica SEVERO 5/10): logica di
+    # costruzione mappature segmenti estratta in helper pura testabile
+    # `_costruisci_mappature_regole_linee`.
+    (
+        materiale_per_segmento,
+        regola_per_segmento,
+        materiale_per_regola,
+    ) = _costruisci_mappature_regole_linee(
+        regole=regole,
+        corse=corse,
+    )
 
     # Carica capacity flotta (defensive: se carica_dotazione fallisce,
     # capacity check skip per quel materiale). Filtra None per type safety.

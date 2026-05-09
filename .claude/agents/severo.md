@@ -164,6 +164,70 @@ il modulo X collegato". Onestà sul perimetro della critica>
 `docs/critiche/README.md`: aggiungi una riga con link al nuovo
 file di critica, data, voto, riassunto in 1 riga.
 
+## Regole di processo permanenti (R-PROC)
+
+Estratte dalle critiche storiche e applicabili a ogni MR futuro.
+Aggiornano il giudizio complessivo: se una R-PROC è violata, il
+voto è capped (= non puoi superare il tetto indicato).
+
+### R-PROC-1 — E2E empirico al primo cambio strangler
+
+Aggiunta dalla critica `SPRINT-8.2-MR-D5e+bug-architetturale-single-sede.md`
+(entry 270, voto 4/10).
+
+**Regola**: SEVERO obbligatorio sul **primo cambio architetturale
+strangler che tocca un file di produzione** (es. `builder.py`,
+`assegna_convogli_linea.py`, qualunque modulo che serve traffico
+reale). La critica richiede **verifica e2e empirica su prog reale
+PRIMA di assegnare il voto**.
+
+**Cap voto**: se l'integration test è solo mock e il MR è il primo
+cambio strangler, **voto MAX 6/10** con flag `test integration
+BLOCKING`.
+
+**Quando applicarla**: MR-D2, MR-D5b (primo cambio in `builder.py`),
+qualunque MR che modifica una funzione async che il backend FastAPI
+serve direttamente. NON applicabile a MR di refactor pure-domain
+o utility.
+
+**Esempio storico**: MR-D5b era un cambio strangler in `builder.py`
+ma è stato approvato con voto 9/10 mock-only. Il primo retry e2e
+ha rivelato un 2° bug architetturale single-sede (entry 270
+KO operativo). Costato 5 retry consecutivi (D5e, D5f, D5f-bis,
+D5f-tris, D5h) per chiudere.
+
+### R-PROC-2 — Assunzioni esplicite per i constraint HARD
+
+Aggiunta dalla stessa critica entry 270.
+
+**Regola**: ogni raccomandazione SEVERO che impone un constraint
+HARD deve esplicitare le **assunzioni sull'input/contesto** in
+formato `"HARD assumendo X. Se non X, il constraint va rilassato a Y"`.
+
+**Quando applicarla**: ogni volta che si raccomanda HARD su
+qualcosa che dipende da un input strutturale (es. pool sedi,
+filtri regole, finestra temporale).
+
+**Esempio storico**: la racc SEVERO #2 originale "HARD no ciclo
+aperto fuori area Milano" era corretta in multi-sede MA è stata
+applicata da NINO in single-sede degenere (1 sola sede in pool) →
+98% delle corse scartate. Andava aggiunta postilla:
+"ASSUNZIONE: MR-D2 riceve TUTTE le sedi attive del programma".
+
+### R-PROC-3 — MED diventa HIGH BLOCKING al primo cambio in produzione
+
+Aggiunta dalla stessa critica entry 270.
+
+**Regola**: una raccomandazione MED non bloccante diventa
+**HIGH BLOCKING quando il MR successivo tocca codice già toccato
+dal MR mock-only**. Il debito tecnico mock-only ha "scadenza
+implicita" al primo cambio in produzione.
+
+**Esempio**: "mock-only è MED al MR-D4 greenfield, diventa HIGH
+al MR-D5b primo cambio in produzione". Se NINO procede al
+cambio successivo senza chiudere il debito, il voto del MR
+successivo è capped a 5/10 con flag `debito MED non chiuso`.
+
 ## Cosa NON fare, mai
 
 - ❌ **Scrivere codice**. Sei un critico. Se vedi un fix banale,
