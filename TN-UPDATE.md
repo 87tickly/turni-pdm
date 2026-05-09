@@ -10,6 +10,111 @@
 
 ---
 
+## 2026-05-09 (252) — Sprint 8.1 MR-A8: switch default builder_mode='esplorativo' (chiusura Sprint 8.1)
+
+### Contesto
+
+MR-A8 è l'ultimo MR del piano Sprint 8.1 (entry 242, 8 MR strangler):
+A1 foundation → A2 closure post-pass → A3+bis+quater vincolo soft tier
+→ A4+bis backtracking → A7 validation → **A8 switch default + cleanup
+legacy**.
+
+Pre-requisiti chiusi (entry 251): A7 validato + HIGH-1 SEVERO chiuso da
+MR-A3-quater. Su programmi reali Trenord 16 + 17:
+- Sotto-min 52.2%→8.1% (prog 17), 32.8%→4.4% (prog 16)
+- Pool perimetro pulito (Tier 1 fallback solo quando Tier 0 vuoto)
+- Backtracking multi-sede non si blocca più
+
+### Modifiche
+
+**`backend/alembic/versions/0042_programma_builder_mode_default_esplorativo.py`**:
+nuova migration. `ALTER COLUMN ... SET DEFAULT 'esplorativo'`. Solo
+`server_default` cambia → programmi esistenti DB invariati (la regola
+si applica solo a INSERT futuri senza valore esplicito). Downgrade
+ripristina `'rigido'`.
+
+**`backend/src/colazione/models/programmi.py:176`**: cambio `default`
++ `server_default` da `"rigido"` a `"esplorativo"`. Commento aggiornato
+con rimando entry 251 e numeri validazione A7.
+
+**`backend/src/colazione/schemas/programmi.py:287, 392`**:
+- `ProgrammaMaterialeRead.builder_mode` default `"esplorativo"` (per
+  programmi creati senza valore esplicito post-A8)
+- `ProgrammaMaterialeCreate.builder_mode` default `"esplorativo"` (la
+  POST `/api/programmi` senza specificare `builder_mode` ottiene
+  esplorativo)
+- `ProgrammaMaterialeUpdate.builder_mode` invariato (`| None = None`,
+  PATCH parziale).
+
+### Verifiche
+
+- ✅ `alembic upgrade head` locale: migration applicata, head
+  `c2d3e4f5a6b7`. `column_default = 'esplorativo'::character varying`.
+- ✅ Mypy --strict: no issues su `models/programmi.py` +
+  `schemas/programmi.py`.
+- ✅ Ruff: All checks passed su 3 file modificati.
+- ✅ Test esplorativi (17/17) ancora green.
+
+### Stato
+
+- ✅ MR-A8 chiuso. Default builder_mode = `'esplorativo'`.
+- ✅ Sprint 8.1 chiuso (8 MR + 2 bis + 1 quater = 11 MR consegnati).
+- ⏳ Commit + push + deploy Railway backend (migration auto-applicata
+  al boot via `alembic upgrade head`).
+
+### Per l'utente
+
+- **Da ora in poi nuovi programmi** creati via UI/API ricevono
+  `builder_mode='esplorativo'` di default. Se vuoi un programma con
+  comportamento legacy, specifica esplicitamente
+  `builder_mode='rigido'` nel POST.
+- **Programmi esistenti su Railway** (1-17) non cambiano mode in DB:
+  restano col valore corrente. Per attivare esplorativo su uno
+  esistente: `PATCH /api/programmi/{ID}` con
+  `{"builder_mode": "esplorativo"}` + rigenera giri `force=true`.
+- **Effetto atteso** sui prossimi programmi: distribuzione lunghezza
+  giri spostata verso 4-6g, sotto-min < 10%, pool perimetro pulito
+  (solo corse delle regole Tier 0).
+
+### Sprint 8.1 — bilancio finale (8 MR pianificati + bis + quater)
+
+| MR | Scope | Stato finale |
+|---|---|---|
+| A1 | foundation flag + dataclass VincoloSoft | ✅ |
+| A2 | closure post-pass `chiudi_giri_aperti` | ✅ |
+| A3 | vincolo soft tier-based `risolvi_corsa` | ✅ |
+| A3-bis | fix CRITICAL+HIGH SEVERO MR-A3 (4/10) | ✅ |
+| A3-quater | fix HIGH-1 SEVERO MR-A7 (3/10) — pool tutto-o-niente | ✅ entry 251 |
+| A4 | backtracking esplorativo profondo | ✅ |
+| A4-bis | fix HIGH SEVERO MR-A4 (2/10) — cap branches + vincoli MR-4 | ✅ |
+| A5 | fill gap non coperte | ⊘ NOT NEEDED (residue=0 su prog reali) |
+| A6 | capacity-aware esplorazione | ⊘ NOT NEEDED (cap km già attivo) |
+| A7 | validazione end-to-end | ✅ entry 251 (SEVERO 3/10 chiuso) |
+| **A8** | **switch default + cleanup legacy** | ✅ **entry 252** |
+
+3 critiche SEVERO totali (MR-A3 4/10, MR-A4 2/10, MR-A7 3/10) tutte
+chiuse. Pattern AMILCARE V4 Pro motore + filtro NINO consolidato.
+
+### Prossimi step (post Sprint 8.1)
+
+Decisione utente fra:
+- (a) **Sprint 7.3**: dashboard Pianificatore Turno PdC (2° ruolo).
+  Nel contesto: badge UI "giro naturale sotto-min — revisione manuale"
+  per i 3-4 giri residui post-esplorativo (entry 251 decisione
+  AMILCARE).
+- (b) **MR-UI cleanup**: badge sotto-min in pianificatore giro
+  esistente prima di Sprint 7.3.
+- (c) **Restart Claude Code** per attivare subagent SEVERO bootato
+  (4 critiche SEVERO consecutive eseguite via fallback NINO+AMILCARE
+  manuale).
+
+### Costo
+
+- Tempo NINO: ~30min (migration + commit)
+- AMILCARE/FAUSTO: 0 chiamate (MR-A8 è cleanup banale, no decisioni)
+
+---
+
 ## 2026-05-09 (251) — Sprint 8.1 MR-A7 + MR-A3-quater: validazione end-to-end builder esplorativo, fix HIGH-1 SEVERO pool perimetro tutto-o-niente
 
 ### Contesto

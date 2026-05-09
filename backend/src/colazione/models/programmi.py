@@ -168,13 +168,16 @@ class ProgrammaMateriale(Base):
     )
 
     # Sprint 8.1 MR-A1 (migration 0041, 2026-05-08): logica di assegnazione
-    # corsa→regola. ``"rigido"`` (default, retrocompat) = filtra-e-scarta
-    # legacy. ``"esplorativo"`` = esplora-e-rilassa con vincoli soft
-    # pesati e fallback governato (decisione utente Q1=b). Ortogonale a
-    # ``builder_version``. Foundation flag in MR-A1: nessun consumatore
-    # lo legge ancora; i branching arrivano da MR-A3.
+    # corsa→regola. ``"rigido"`` = filtra-e-scarta legacy. ``"esplorativo"``
+    # = esplora-e-rilassa con vincoli soft pesati e fallback governato
+    # (decisione utente Q1=b). Ortogonale a ``builder_version``.
+    # Sprint 8.1 MR-A8 (migration 0042, 2026-05-09): switch default a
+    # ``"esplorativo"`` dopo validazione A7 (entry 251): sotto-min
+    # 52.2%→8.1% prog 17, 32.8%→4.4% prog 16, +33% giri lunghi. Programmi
+    # esistenti DB invariati (server_default applica solo a INSERT senza
+    # valore esplicito).
     builder_mode: Mapped[str] = mapped_column(
-        String(20), default="rigido", server_default="rigido", nullable=False
+        String(20), default="esplorativo", server_default="esplorativo", nullable=False
     )
 
     # Tracking
