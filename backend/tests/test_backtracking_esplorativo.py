@@ -165,20 +165,119 @@ def test_pass_through_motivi_non_eligibili(motivo: str) -> None:
     assert stat.n_giri_processati == 0
 
 
-def test_pass_through_giro_gia_lungo() -> None:
-    """Giro con len(giornate) >= n_giornate_min: pass-through."""
+def test_pass_through_giro_lungo_senza_pool_disponibile() -> None:
+    """MR-B2 (entry 255): giro non_chiuso len >= n_min ma POOL VUOTO →
+    pass-through (nessuna estensione possibile). Era ``test_pass_through_giro_gia_lungo``
+    pre-MR-B2 quando il filtro era ``len >= n_min``; ora il filtro è
+    ``len >= n_max``, ma con pool vuoto comunque pass-through.
+    """
     catene = [
         _make_catena_pos("S_A", "S_B", time(8, 0), time(9, 0)),
         _make_catena_pos("S_B", "S_C", time(10, 0), time(11, 0)),
         _make_catena_pos("S_C", "S_D", time(12, 0), time(13, 0)),
-        _make_catena_pos("S_D", "S_FIO", time(14, 0), time(15, 0)),
+        _make_catena_pos("S_D", "S_E", time(14, 0), time(15, 0)),
     ]
-    g = _make_giro(catene, motivo="non_chiuso")  # 4 giornate, n_min=4 → no extend
+    g = _make_giro(catene, motivo="non_chiuso")  # 4 giornate, n_min=4
     out, stat = tenta_estensione_giri_corti(
-        [g], {"ETR421": {}}, {0: "ETR421"}, _params_mg(n_min=4)
+        [g], {"ETR421": {}}, {0: "ETR421"}, _params_mg(n_min=4, n_max=12)
+    )
+    # MR-B2: pool vuoto (catene_per_data={}) short-circuit prima del
+    # processing → n_giri_processati=0. Output identico a input.
+    assert out[0] is g
+    assert stat.n_giri_processati == 0
+    assert stat.n_giri_estesi == 0
+
+
+def test_pass_through_giro_al_max_giornate() -> None:
+    """MR-B2 (entry 255): giro che ha raggiunto n_giornate_max →
+    pass-through (non c'è spazio per estendere).
+    """
+    catene = [
+        _make_catena_pos("S_A", "S_B", time(8, 0), time(9, 0)),
+        _make_catena_pos("S_B", "S_C", time(10, 0), time(11, 0)),
+    ]
+    # 2 giornate con n_max=2 → non estendibile
+    g = _make_giro(catene, motivo="non_chiuso")
+    out, stat = tenta_estensione_giri_corti(
+        [g], {"ETR421": {}}, {0: "ETR421"}, _params_mg(n_min=2, n_max=2)
     )
     assert out[0] is g
     assert stat.n_giri_processati == 0
+
+
+def test_b2_giro_lungo_non_chiuso_esteso_per_chiudere_in_sede() -> None:
+    """MR-B2 (entry 255): giro 4g (>= n_min=4) motivo='non_chiuso'
+    arriva a S_D fuori sede. Catena disponibile per giornata 5
+    porta a S_FIO (whitelist). Backtracking lo deve estendere a 5g
+    e marcare 'naturale'. Caso che PRE-MR-B2 era pass-through
+    (il filtro `len >= n_min` lo escludeva).
+    """
+    cp1 = _make_catena_pos("S_FIO", "S_B", time(8, 0), time(9, 0), km=100.0)
+    cp2 = _make_catena_pos("S_B", "S_C", time(10, 0), time(11, 0), km=100.0)
+    cp3 = _make_catena_pos("S_C", "S_D", time(12, 0), time(13, 0), km=100.0)
+    cp4 = _make_catena_pos("S_D", "S_E", time(14, 0), time(15, 0), km=100.0)
+    cp5_rientro = _make_catena_pos(
+        "S_E", "S_FIO", time(8, 0), time(9, 0), km=120.0
+    )
+
+    g = _make_giro(
+        [cp1, cp2, cp3, cp4],
+        motivo="non_chiuso",
+        km_cumulati=400.0,
+    )
+    catene_pool = {date(2026, 6, 5): [cp5_rientro]}
+    out, stat = tenta_estensione_giri_corti(
+        [g],
+        {"ETR421": catene_pool},
+        {0: "ETR421"},
+        _params_mg(n_min=4, n_max=12, km_cap=600.0),
+    )
+    assert stat.n_giri_processati == 1
+    assert stat.n_giri_estesi == 1
+    g_esteso = out[0]
+    assert len(g_esteso.giornate) == 5
+    assert g_esteso.km_cumulati == pytest.approx(520.0)
+    # km_cap=600 NON raggiunto (520 < 600), ma chiude in S_FIO whitelist
+    # → motivo dipende dalla logica `_ricalcola_motivo`. Senza km_cap
+    # raggiunto resta 'non_chiuso' anche se è in whitelist; lo score
+    # alza il branch ma il motivo finale è gestito da chiusura_post
+    # (entry 254 MR-B1: in whitelist → naturale). Qui verifichiamo solo
+    # che l'estensione è avvenuta.
+    last_corsa = g_esteso.giornate[-1].catena_posizionata.catena.corse[-1]
+    assert last_corsa.codice_destinazione == "S_FIO"
+
+
+def test_b2_giro_lungo_non_chiuso_chiude_via_km_cap_in_sede() -> None:
+    """MR-B2 (entry 255): giro 4g km=400 (sotto km_cap=500) non_chiuso
+    + catena 5° giornata che porta in S_FIO con km=150 (totale 550 >=
+    cap=500 → naturale per `_ricalcola_motivo`). Backtracking estende
+    e marca 'naturale'.
+    """
+    cp1 = _make_catena_pos("S_FIO", "S_B", time(8, 0), time(9, 0), km=100.0)
+    cp2 = _make_catena_pos("S_B", "S_C", time(10, 0), time(11, 0), km=100.0)
+    cp3 = _make_catena_pos("S_C", "S_D", time(12, 0), time(13, 0), km=100.0)
+    cp4 = _make_catena_pos("S_D", "S_E", time(14, 0), time(15, 0), km=100.0)
+    cp5_rientro = _make_catena_pos(
+        "S_E", "S_FIO", time(8, 0), time(9, 0), km=150.0
+    )
+
+    g = _make_giro(
+        [cp1, cp2, cp3, cp4],
+        motivo="non_chiuso",
+        km_cumulati=400.0,
+    )
+    catene_pool = {date(2026, 6, 5): [cp5_rientro]}
+    out, stat = tenta_estensione_giri_corti(
+        [g],
+        {"ETR421": catene_pool},
+        {0: "ETR421"},
+        _params_mg(n_min=4, n_max=12, km_cap=500.0),
+    )
+    assert stat.n_giri_estesi == 1
+    g_esteso = out[0]
+    assert len(g_esteso.giornate) == 5
+    assert g_esteso.motivo_chiusura == "naturale"
+    assert g_esteso.chiuso is True
 
 
 def test_pass_through_giro_senza_giornate() -> None:
@@ -450,11 +549,11 @@ def test_a4bis_vincolo_max_sosta_diurna_passthrough_se_none() -> None:
 
 
 def test_a4bis_pesi_score_parametrizzati_default() -> None:
-    """Pesi default = valori MR-A4 originali (km×0.5, n_corse×1, ...)."""
+    """Pesi default. MR-B2 (entry 255): peso_chiude_sede 50 → 500."""
     p = ParamBacktracking()
     assert p.peso_km == 0.5
     assert p.peso_corse == 1.0
-    assert p.peso_chiude_sede == 50.0
+    assert p.peso_chiude_sede == 500.0  # MR-B2 (entry 255)
     assert p.peso_raggiunge_min == 30.0
     assert p.peso_n_giornate == -0.5
 
@@ -478,7 +577,9 @@ def test_a4bis_pesi_score_override_funziona() -> None:
     # Con peso_chiude_sede=0 e peso_n_giornate molto negativo,
     # lo score originale (1g, no chiusura) può vincere su 2g (chiusa
     # ma con penalità giornate).
-    # km_default=100×0.5+1×1=51, vs km_2g=180×0.5+2×1+50−1=141.
+    # MR-B2 (entry 255): peso_chiude_sede default ora 500, ma qui
+    # l'override mette 0. Calcoli con override:
+    # km_default=100×0.5+1×1=51, vs km_2g=180×0.5+2×1+0−1=91 (no bonus).
     # Con peso_chiude_sede=0 e peso_n_giornate=-100:
     # score_1g=51-100=-49, score_2g=180×0.5+2-200=-108 → 1g vince.
     out_pesi_estremi, _ = tenta_estensione_giri_corti(

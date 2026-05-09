@@ -103,12 +103,16 @@ class ParamBacktracking:
     # CPU Python su nodo medio. Quando raggiunto, abort + warning.
     n_branches_max: int = 100_000
     # MR-A4-bis (entry 247) MED-NINO-1 fix: pesi score parametrizzati.
-    # Erano hardcoded in `_score_stato`. Default = valori MR-A4 originali
-    # (km×0.5 + n_corse×1 + 50 chiude + 30 raggiunge_min - 0.5 n_giornate)
-    # da calibrare empiricamente in MR-A7.
+    # MR-B2 (entry 255): peso_chiude_sede 50 → 500 dopo verifica empirica
+    # prog 17 produzione. Razionale: per giri 6g km cumulati ~1800 → score
+    # km = 900 (peso_km=0.5). Il vecchio peso_chiude_sede=50 era
+    # sproporzionato (18:1 vs km), il backtracking sceglieva spesso il
+    # branch con più km invece del branch che chiude in sede. Con 500,
+    # ratio chiusura:km ≈ 0.55 — confrontabile, lo score privilegia
+    # chiusura quando entrambi sono "buoni".
     peso_km: float = 0.5
     peso_corse: float = 1.0
-    peso_chiude_sede: float = 50.0
+    peso_chiude_sede: float = 500.0
     peso_raggiunge_min: float = 30.0
     peso_n_giornate: float = -0.5
 
@@ -207,8 +211,9 @@ def _score_stato(
     MR-A4-bis entry 247):
     - ``km_cumulati × peso_km`` (default 0.5): km coperti.
     - ``n_corse × peso_corse`` (default 1.0): corse PdE coperte.
-    - ``peso_chiude_sede`` (default 50) se ultima stazione in
-      ``whitelist_sede`` (chiusura geografica, vincolo principale).
+    - ``peso_chiude_sede`` (default 500, MR-B2 entry 255) se ultima
+      stazione in ``whitelist_sede`` (chiusura geografica, vincolo
+      principale).
     - ``peso_raggiunge_min`` (default 30) se ``len(giornate) >=
       n_giornate_min`` (raggiunge soft floor).
     - ``peso_n_giornate × n_giornate`` (default -0.5): piccola
@@ -405,9 +410,16 @@ def tenta_estensione_giri_corti(
     params_mg: ParamMultiGiornata,
     params_back: ParamBacktracking | None = None,
 ) -> tuple[list[Giro], StatBacktracking]:
-    """Per ogni giro corto (``motivo_chiusura ∈ {'sotto_min', 'non_chiuso'}``
-    e ``len(giornate) < n_giornate_min``), tenta estensione via beam search
-    con backtracking profondo.
+    """Per ogni giro estendibile (``motivo_chiusura ∈ {'sotto_min',
+    'non_chiuso'}`` e ``len(giornate) < n_giornate_max``), tenta
+    estensione via beam search con backtracking profondo.
+
+    MR-B2 (entry 255): l'eligibilità si è allargata da
+    ``len < n_giornate_min`` a ``len < n_giornate_max``. Il backtracking
+    ora processa anche giri che hanno raggiunto la soglia minima ma sono
+    ancora aperti (tipico: giri 6-11g che terminano fuori area-Milano).
+    Lo score `_score_stato` con `peso_chiude_sede=500` privilegia branch
+    che riportano in whitelist sede.
 
     Args:
         giri: lista giri prodotti da ``costruisci_giri_multigiornata``.
@@ -445,7 +457,17 @@ def tenta_estensione_giri_corti(
         if giro.motivo_chiusura not in {"sotto_min", "non_chiuso"}:
             risultato.append(giro)
             continue
-        if len(giro.giornate) >= params_mg.n_giornate_min:
+        # MR-B2 (entry 255): in MR-A4 originale qui c'era
+        # `len(giornate) >= n_giornate_min`: il backtracking si applicava
+        # SOLO ai giri sotto-min. Verifica empirica prog 17 (post entry
+        # 254): 19/23 giri non_chiuso terminavano fuori area-Milano
+        # (PAVIA, MORTARA, ALESSANDRIA, ASTI, ecc.) con
+        # `len(giornate) >= n_giornate_min` (=4). Non venivano mai
+        # processati. Estendiamo l'eligibilità a giri "non chiusi" fino
+        # a `n_giornate_max`: il backtracking cerca catene di estensione
+        # che possano chiudere il giro in sede (score peso_chiude_sede
+        # alzato a 500 per privilegiare chiusura geografica).
+        if len(giro.giornate) >= params_mg.n_giornate_max:
             risultato.append(giro)
             continue
         if not giro.giornate:
