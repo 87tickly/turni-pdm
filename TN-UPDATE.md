@@ -10,6 +10,58 @@
 
 ---
 
+## 2026-05-09 (272) — Sprint 8.2 MR-PD6 parte 2: label stazioni acronimi pattern Gantt giro
+
+### Contesto
+
+MR-PD6 parte 2: completare l'integrazione del pattern "Gantt giro
+materiale" nel Gantt PdC. Aggiunge label stazioni acronimi
+(`MILANO PORTA GARIBALDI` → `MiPG`, `LECCO` → `Lc`) per i blocchi
+CONDOTTA/VETTURA intermedi, mantenendo il nome pieno per il primo
+e l'ultimo blocco produttivo della giornata. Pattern preso da
+`GiroDettaglioRoute.tsx:2620-2630`.
+
+Risolve un'attesa visiva: blocchi CONDOTTA stretti (h-3 da MR-PD6
+parte 1) con stazione "MILANO CENTRALE" + "TIRANO" si sovrappongono
+visivamente; con `MiCe` + `TIR` la lettura è pulita.
+
+### Modifiche
+
+**`frontend/src/routes/pianificatore-giro/TurnoPdcDettaglioRoute.tsx`**:
+
+1. Import `stazioneAcronimo` da `@/lib/stazioni-acronimi`.
+2. `CommercialBlock`: nuovi 2 prop `isFirstOfGiornata`,
+   `isLastOfGiornata`. Logica:
+   - `stazioneDa = isFirstOfGiornata ? stazioneShort(...) : stazioneAcronimo(...)`
+   - `stazioneA = isLastOfGiornata ? stazioneShort(...) : stazioneAcronimo(...)`
+   - Soglie ribassate: `showStazioni 47→30`, `showOrari 33→25` (acronimi
+     2-4 char ci stanno in larghezze più piccole).
+3. `BloccoSegment`: propaga i flag a `CommercialBlock`.
+4. `GiornataRow.timeline.map`: identifica `firstIdx` e `lastIdx` =
+   indici del primo/ultimo blocco produttivo (CONDOTTA/VETTURA) della
+   giornata. Passa flag a `BloccoSegment`.
+
+`stazioneShort` (1232) resta come fallback per nome pieno troncato
+(es. "MILANO CENTRALE" → "CENTRALE" se il blocco è il primo/ultimo
+produttivo).
+
+### Verifiche
+
+- ✅ pnpm typecheck: clean
+- ⏭️ Preview locale skippata: DB locale vuoto = nessun turno PdC
+  da renderizzare. La modifica è osservabile solo con dati reali in
+  prod. Verifica visuale post-deploy.
+- ⏭️ Snapshot Vitest: rimandato a MR-PD6 parte 3.
+
+### Stato
+
+- ✅ MR-PD6 parte 2 chiusa lato codice + push.
+- ⏳ Deploy frontend Railway: pronto, no rischio (additive UI).
+- ⏳ MR-PD6 parte 3 (futuro): snapshot Vitest + estrazione altri
+  componenti shared se serve.
+
+---
+
 ## 2026-05-09 (271) — Sprint 8.2 MR-PD-FIX-SEVERO 2 (S5): integration smoke deposito_first scopre BUG critico check constraint MM/VOCTAXI
 
 ### Contesto

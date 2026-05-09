@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { NightBand } from "@/components/gantt/NightBand";
+import { stazioneAcronimo } from "@/lib/stazioni-acronimi";
 import {
   Dialog,
   DialogContent,
@@ -789,15 +790,32 @@ function GiornataRow({
           style={{ top: TIMELINE_ROW_HEIGHT_PX / 2 }}
         />
 
-        {giornata.blocchi.map((b) => (
-          <BloccoSegment
-            key={b.id}
-            blocco={b}
-            oraOffset={oraOffset}
-            onSelect={() => onSelectBlocco(b)}
-            isSelected={selectedBloccoId === b.id}
-          />
-        ))}
+        {(() => {
+          // Sprint 8.2 MR-PD6 parte 2: identifica primo/ultimo blocco
+          // produttivo (CONDOTTA/VETTURA) della giornata per mostrare il
+          // nome stazione pieno ai bordi (gli altri usano l'acronimo).
+          // Pattern come Gantt giro materiale (linea 2620-2630).
+          const idxsProduttivi = giornata.blocchi
+            .map((b, i) => ({
+              i,
+              produttivo: b.tipo_evento === "CONDOTTA" || b.tipo_evento === "VETTURA",
+            }))
+            .filter((x) => x.produttivo)
+            .map((x) => x.i);
+          const firstIdx = idxsProduttivi[0] ?? -1;
+          const lastIdx = idxsProduttivi[idxsProduttivi.length - 1] ?? -1;
+          return giornata.blocchi.map((b, idx) => (
+            <BloccoSegment
+              key={b.id}
+              blocco={b}
+              oraOffset={oraOffset}
+              onSelect={() => onSelectBlocco(b)}
+              isSelected={selectedBloccoId === b.id}
+              isFirstOfGiornata={idx === firstIdx}
+              isLastOfGiornata={idx === lastIdx}
+            />
+          ));
+        })()}
       </div>
 
       {/* Sticky-right: prestazione + condotta in due celle */}
@@ -879,9 +897,13 @@ function BloccoSegment({
   oraOffset,
   onSelect,
   isSelected,
+  isFirstOfGiornata = false,
+  isLastOfGiornata = false,
 }: {
   blocco: TurnoPdcBlocco;
   oraOffset: 0 | 4;
+  isFirstOfGiornata?: boolean;
+  isLastOfGiornata?: boolean;
   onSelect: () => void;
   isSelected: boolean;
 }) {
@@ -915,6 +937,8 @@ function BloccoSegment({
         tooltip={tooltip}
         onSelect={onSelect}
         isSelected={isSelected}
+        isFirstOfGiornata={isFirstOfGiornata}
+        isLastOfGiornata={isLastOfGiornata}
       />
     );
   }
@@ -945,6 +969,8 @@ function CommercialBlock({
   tooltip,
   onSelect,
   isSelected,
+  isFirstOfGiornata = false,
+  isLastOfGiornata = false,
 }: {
   blocco: TurnoPdcBlocco;
   startPx: number;
@@ -952,11 +978,26 @@ function CommercialBlock({
   tooltip: string;
   onSelect: () => void;
   isSelected: boolean;
+  isFirstOfGiornata?: boolean;
+  isLastOfGiornata?: boolean;
 }) {
-  const showStazioni = widthPx >= 47;
-  const showOrari = widthPx >= 33;
-  const stazioneDa = stazioneShort(blocco.stazione_da_nome ?? blocco.stazione_da_codice);
-  const stazioneA = stazioneShort(blocco.stazione_a_nome ?? blocco.stazione_a_codice);
+  // Sprint 8.2 MR-PD6 parte 2: label stazioni acronimi compatte (es.
+  // "MILANO PORTA GARIBALDI" → "MiPG"). Pattern preso dal Gantt giro
+  // (`GiroDettaglioRoute.tsx:2620-2630`): prima e ultima stazione
+  // della GIORNATA mostrano il nome pieno (truncate), intermedie
+  // l'acronimo. Migliora la leggibilità nelle larghezze ridotte
+  // (h-3 bar, soglia 47px → spesso intermedie sovrapposte col nome
+  // pieno).
+  const showStazioni = widthPx >= 30;
+  const showOrari = widthPx >= 25;
+  const labelDa = blocco.stazione_da_nome ?? blocco.stazione_da_codice;
+  const labelA = blocco.stazione_a_nome ?? blocco.stazione_a_codice;
+  const stazioneDa = isFirstOfGiornata
+    ? stazioneShort(labelDa)
+    : stazioneAcronimo(labelDa);
+  const stazioneA = isLastOfGiornata
+    ? stazioneShort(labelA)
+    : stazioneAcronimo(labelA);
 
   const isCondotta = blocco.tipo_evento === "CONDOTTA";
   // Palette: CONDOTTA = blu primary (cuore del lavoro PdC), VETTURA =
