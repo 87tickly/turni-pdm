@@ -10,6 +10,170 @@
 
 ---
 
+## 2026-05-09 (275) — Sprint 8.2 MR-D5f + MR-D5f-bis + MR-D5f-tris: pool sedi multi-sede + fallback tronchi + espansione direttrice→linee (Plan-D end-to-end funzionale, mismatch sede-regola da risolvere)
+
+### Contesto
+
+Risposta alla critica SEVERO 4/10 entry 270 (post fix MR-D5e):
+*"trova la soluzione"*. Tre fix in cascata stretta sequenza,
+chiusura del 2° bug architetturale single-sede + 2 bug a monte
+scoperti durante il retry e2e iterativo.
+
+### Modifiche per fix
+
+**MR-D5f** (`f6b7992`, +323/-59 in 3 file):
+- Helper `_carica_sedi_attive_azienda` carica TUTTE le
+  `LocalitaManutenzione` attive con `stazione_collegata_codice` non
+  null. Sostituisce single-sede `{localita.codice: stz}` in
+  `_genera_giri_linea_centrica`.
+- Persistenza preserva modello cumulativo: filtra `Giro.localita_codice
+  == localita.codice` del run, gli altri sono persisti in chiamate
+  successive.
+- `BuilderResult.n_giri_scartati: int = 0` + `BuilderResultResponse`
+  campo aggiunto (chiude S1 HIGH critica entry 270, loss-of-data
+  invisibile).
+- Estratta funzione pura `_traduce_e_filtra_giri_linea_centrica` con
+  6 test su scenari (caso felice, regola_id=None, regola_id non in
+  dict, giro altra sede, misti, vuoti). Chiude S2 HIGH critica.
+- Rimosso loop zombie `materiale_per_giro` info-only mai letto.
+  Chiude S6 LOW critica.
+
+**MR-D5f-bis** (`1105a0b`, +67/-0 in 2 file): fallback nel bridge
+MR-D4 `aggregazione_linea_centrica.py:179` per segmenti `_tronco_X`
+e `_isolato_X_Y` non direttamente in `regola_per_segmento`. Estrae
+prefisso linea via `split("_", 1)[0]` e ricade su `{linea}_completo`.
+3 test specifici. Atomico col MR-D5f.
+
+**MR-D5f-tris** (`d4200bd`, +36/-6 in 1 file): root cause finale
+identificata dopo 4 retry consecutivi tutti con stesso esito
+(1302 corse, 11 giri tutti `regola_id=None`). Le 7 regole prog 17
+filtrano per `campo=direttrice` (es. "TIRANO-SONDRIO-LECCO-MILANO"),
+**NON per `campo=codice_linea`**. builder.py:1437 (pre-MR-D5f-tris)
+estraeva solo filtri `codice_linea` → `regola_per_segmento` vuoto
+→ tutti i giri orfani.
+
+Fix: pre-calcola mappa `direttrice → set(codice_linea)` dalle
+corse del programma in tempo lineare; nel loop regole espande
+filtri `direttrice` via lookup. `codice_linea` resta supportato
+per backward-compat. Set invece di list per dedup.
+
+### Verifiche locali
+
+- 197 test pytest green (builder/genera_giri/persister/linea_centrica/
+  definizione_linea/assegna_convogli/analizza_linee/costruisci_turno),
+  2 skipped, **0 regressioni**.
+- 3 test API pre-esistenti fail (auth 403, KeyError) verificati
+  anche su master pre-fix → non regressione.
+- mypy --strict + ruff clean su tutti i file modificati.
+- 6 test nuovi `_traduce_e_filtra_giri_linea_centrica` + 3 fallback
+  tronchi/isolati + sanity sui pattern direttrice.
+
+### Verifica empirica e2e prog 17 — risultato dei 5 retry
+
+| Retry | Modalità | n_corse_proc | n_giri_creati | n_giri_scart | warnings |
+|---|---|---|---|---|---|
+| pre-MR-D5e | esplorativo | 2450 | 51 | n/a | n/a |
+| MR-D5e (113) | linea_centrica | 52 | 0 | n/a | 43 |
+| MR-D5f | linea_centrica | **1302** | 0 | 11 | 114 |
+| MR-D5f-bis | linea_centrica | 1302 | 0 | 11 | 114 |
+| MR-D5f-tris | linea_centrica | 1302 | 0 | 11 (sede altra) | 103 |
+
+**Cosa ha sbloccato il fix**:
+
+- ✅ Multi-sede `_carica_sedi_attive_azienda` ha sbloccato 1302/2450
+  corse processate (vs 52 pre-MR-D5f, +25×).
+- ✅ Espansione `direttrice → linee` ha sbloccato il mapping regole
+  (n_scartati_no_materiale: 11 → **0**).
+- ✅ Trasparenza `n_giri_scartati=11` con warning specifici sedi
+  altre (S1 chiuso): `[IMPMAN_CREMONA, IMPMAN_LECCO]`.
+
+### 3° mismatch architetturale identificato (NON un bug, scelta di design)
+
+**Il software Plan-D funziona correttamente**, ma evidenzia un
+mismatch fra modello dati prog 17 e raccomandazione SEVERO #2:
+
+- Le 6 regole prog 17 per direttrici TIRANO/ALES/BG-CARNATE-MILANO
+  hanno `localita_codice='IMPMAN_MILANO_FIORENZA'`.
+- MR-D2 multi-sede (raccomandazione #2 SEVERO HARD) sceglie la sede
+  GEOMETRICAMENTE OTTIMA per ogni segmento. Per "TIRANO-SONDRIO-
+  LECCO-MILANO" sceglie LECCO (capolinea TIRANO più vicino a LEC
+  che a FIO). Per "BERGAMO-CARNATE-MILANO" similmente.
+- Quindi i 11 giri prodotti vengono assegnati a `[CRE, LEC]` nonostante
+  la regola dichiari sede=FIO.
+- Il filtro persistenza modello cumulativo `g.localita_codice ==
+  run.localita_codice` esclude tutti gli 11.
+- Smoke `genera-giri` per CRE/LEC ritorna 0 corse processate perché
+  `regole_della_sede` filtra `r.localita_codice == localita_codice
+  OR NULL` (legacy entry 212): CRE ha 1 sola regola (ATR803, fuori
+  periodo prog 17), LEC ha 0 regole.
+
+**Conseguenza**: il pianificatore prog 17 con qualunque chiamata
+`genera-giri` in `linea_centrica` NON vede giri persistiti. Per
+sbloccare bisogna scegliere fra:
+
+- **(a) Override sede-regola in MR-D2**: la pipeline rispetta
+  `regola.localita_codice` (= sede dichiarata dal pianificatore)
+  invece di ottimizzare geometricamente. Compatibile col modello
+  cumulativo, **ma rinuncia all'ottimizzazione geometrica** (=
+  raccomandazione SEVERO #2 originale viene rilassata).
+- **(b) Cambia modello cumulativo**: persistenza non più filtrata
+  per `localita.codice` ma per OGNI sede assegnata da MR-D2. 1
+  chiamata = N giri di N sedi. Breaking change vs decisione utente
+  2026-05-01.
+- **(c) Configurazione utente**: pianificatore riassegna le regole
+  con `localita_codice` allineato alla geografia (TIRANO-LEC,
+  BG-CARNATE → CAM o nuova sede BG, ecc.). Nessun fix codice ma
+  richiede UI aggiornata e change-management.
+
+### Stato safety
+
+- ✅ prog 17 rollback a `esplorativo` (gli 11 giri G-CRE-* sono
+  cancellati dalla rigenerazione `force=true`, ma il pianificatore
+  può riprodurli via UI con esplorativo).
+
+### Stato deploy
+
+- ✅ commit `f6b7992` MR-D5f + push + deploy
+- ✅ commit `1105a0b` MR-D5f-bis + push + deploy
+- ✅ commit `d4200bd` MR-D5f-tris + push + deploy + redeploy forzato
+- ✅ HTTP 200 confermato su tutte le rigenerazioni
+- ✅ Backward-compat: builder_mode `'esplorativo'/'rigido'` invariato
+
+### Stato
+
+- ✅ MR-D5f core: pool multi-sede + n_giri_scartati + S1+S2+S6 fix.
+- ✅ MR-D5f-bis: bridge fallback `_tronco_X → _completo`.
+- ✅ MR-D5f-tris: espansione `direttrice → linee` (root cause).
+- ⏸️ **Plan-D bloccato sul 3° mismatch sede-regola**. Decisione
+  utente richiesta su (a)/(b)/(c).
+- ⏳ SEVERO retro su MR-D5f+f-bis+f-tris obbligatorio (CLAUDE.md §9
+  post-MR significativo, multi-file refactor).
+
+### Limitazioni dichiarate
+
+1. Pre-calcolo `direttrice → linee` legge tutte le `corse` del
+   programma. Per Trenord 6536 corse PdE 2025-2026 è ~10ms
+   trascurabile.
+2. Pool sedi è azienda-wide non programma-specifico (MR-D5f). Per
+   programmi con SUBSET di sedi, le altre sedi nel pool sono
+   "rumore" che MR-D2 ignora (non costoso). Refactor pool
+   programma-specifico = scope MR-D7.
+3. **3° mismatch** sede-regola/sede-ottima NON risolto: scope
+   futuro MR-D5h/D6 (a seconda della scelta utente).
+
+### Prossimo step
+
+Decisione utente su (a)/(b)/(c) per chiudere il 3° mismatch:
+- (a) MR-D5h: override sede-regola in MR-D2 (rilassa SEVERO #2).
+- (b) MR-D5i: nuovo modello cumulativo "scrive tutte le sedi".
+- (c) Configurazione utente: riallineare regole prog 17 + UI.
+
+In tutti i casi, prima di chiudere Plan-D va aggiunto integration
+smoke test e2e (raccomandazione MED 9.0/10 + R-PROC-1 SEVERO entry
+270, ancora aperta).
+
+---
+
 ## 2026-05-09 (274) — Sprint 8.2 MR-PD7a: §15 unicità intra-turno (validazione post-build deposito_first)
 
 ### Contesto
