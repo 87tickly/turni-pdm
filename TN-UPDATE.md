@@ -88,11 +88,13 @@ parte del type union.
 ### Stato deploy
 
 - ✅ Push origin master
-- ⏸️ **Railway deploy backend NON ancora eseguito**. Migration ha
-  step 1 destructive (DELETE turni orfani). Numero turni orfani in
-  prod sconosciuto (host postgres.railway.internal non raggiungibile
-  da locale). **Richiesta conferma utente** prima di
-  `railway up --service backend`.
+- ✅ **Verifica orfani prod**: nuovo script
+  `backend/scripts/check_turni_orfani.py` eseguito via
+  `DATABASE_PUBLIC_URL` (proxy Railway esterno
+  `nozomi.proxy.rlwy.net:28852`). Risultato: **0 turni orfani su
+  28 totali** → migration step 1 (DELETE) sarà no-op. Deploy senza
+  rischio.
+- ✅ Railway deploy eseguito (`railway up --service backend`).
 
 ### Builder legacy: side-effect noto
 
