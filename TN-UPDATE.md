@@ -110,19 +110,197 @@ blocchi (es. `ETR526`, `ATR803`), mai `MISTO`.
 
 ### Stato deploy
 
-- ⏳ commit + push origin master
-- ⏳ railway up --service backend
-- ⏳ post-deploy: re-PATCH prog 17 a `linea_centrica`, retry e2e
+- ✅ commit `ff2873d` + push origin master
+- ✅ railway up --service backend (build + image push completati,
+  startup confermato post-call API HTTP 200)
+- ✅ re-PATCH prog 17 → `linea_centrica`
+- ✅ retry e2e eseguito
+
+### Risultato e2e (KO architetturale — 2° bug strutturale rilevato)
+
+**HTTP 200** (no più 500 FK MISTO → fix MR-D5e funziona). MA:
+
+```
+n_giri_creati=0, n_corse_processate=52, n_corse_residue=0
+n_giri_chiusi=0, n_giri_non_chiusi=1
+warnings: 43 (di cui 26 segmenti non assegnabili,
+            15 cross-day sosta non ammessa, 1 giro scartato MR-D5e,
+            1 nota cumulativa)
+```
+
+**Confronto vs builder_run cronologia prog 17 stessa sede**:
+
+| Run id | Modalità | Quando | Creati | Chiusi | Non chiusi | Corse |
+|---|---|---|---|---|---|---|
+| 108 | esplorativo, force=False | 08:20 | 16 | 3 | 13 | 298 |
+| 111 | esplorativo, force=True | 08:49 | 51 | 41 | 10 | 2450 |
+| 112 | esplorativo, force=True | 10:30 | 51 | 41 | 10 | 2450 |
+| **113** | **linea_centrica, force=True** | **11:34** | **0** | **0** | **1** | **52** |
+
+Calo da **2450 → 52 corse processate** e da **51 → 0 giri creati**.
+Differenza non spiegabile da un bug solo MISTO.
+
+### Diagnosi del 2° bug (architetturale, scoperto dal retry)
+
+**`builder.py:1252-1254`** (pre-MR-D5e, invariato):
+
+```python
+sedi_disponibili: dict[str, str] = {
+    localita.codice: localita.stazione_collegata_codice
+}
+```
+
+La pipeline linea-centrica passa a `assegna_convogli_linea` (MR-D2)
+**SOLO la sede selezionata dal pianificatore** (= IMPMAN_MILANO_FIORENZA).
+Ma MR-D2 controlla compatibilità capolinee vs `sedi_disponibili` ed
+applica come HARD constraint la raccomandazione SEVERO #2 *"no ciclo
+aperto fuori area Milano"*: se nessuna sede di `sedi_disponibili`
+condivide area con i capolinee del segmento → **scarta**.
+
+**Conseguenze**:
+
+1. Tutti i 26 segmenti con capolinee non-Milano (R11/R12/R13/R14
+   con S01400/S01420/S01430 = Como/Lecco; R31/R34/R39/R40/R41
+   con S00034/S01807/S01820/S01915/S01919/S01920/S01945 =
+   Bergamo/Brescia, ecc.; R2 con S01529/S01708 = Tirano/Sondrio;
+   RE8 con S01420/S01520/S01700/S01820 = Lecco/Cremona/Tirano/Brescia)
+   sono scartati.
+2. Solo i pochi segmenti con TUTTI i capolinee in area Milano
+   (whitelist FIO) sopravvivono → 52 corse residue di un'unica
+   linea sopravvissute.
+3. Tutti i 15 warning cross-day "sosta a S01645/S01915 non ammessa"
+   sono conseguenza dello stesso problema (S01645 = LECCO,
+   S01915 = ROMANO?, fuori area Milano).
+4. Il giro non chiuso scartato (1) è prodotto dal mio fix MR-D5e
+   per `regola_id=None` — caso non gestito dal turno_linea.
+
+**Single-sede vs multi-sede mismatch**:
+- **Modello cumulativo legacy** (Sprint 7.6 MR 3.1, decisione utente
+  2026-05-01): user chiama `genera-giri` con UNA sede alla volta.
+  Builder lavora SOLO su quella sede. Ulteriori chiamate per altre
+  sedi accumulano.
+- **MR-D2 architettura**: per assegnare correttamente i convogli
+  alle linee, ha bisogno di TUTTE le sedi attive del programma
+  contemporaneamente (così che convogli di linee bergamasche
+  possano puntare a sede Bergamo, ecc.).
+
+Il design MR-D5b ha trasferito la single-sede del legacy nel
+nuovo flusso senza adattarla → mismatch fondamentale.
+
+### Decisione: Plan-D NON chiuso
+
+**MR-D5e fix è validato funzionalmente** (no più FK violation), ma
+**non sblocca l'e2e Plan-D** perché c'è un 2° bug architetturale
+single-sede vs multi-sede preesistente al MR-D5e.
+
+**Servono ulteriori MR**:
+
+- **MR-D5f**: caricare TUTTE le sedi attive del programma in
+  `sedi_disponibili`, scoping la sola persistenza per
+  `localita.codice`. Mantieni invariante modello cumulativo
+  (giri di altre sedi non toccati).
+- **MR-D5g** (eventuale): gestire `regola_id=None` nei giri
+  prodotti da `costruisci_turno_linea` (forse sono catene
+  residuali di posizionamento). Da indagare: è un caso degenerato
+  legittimo o un bug nel flusso MR-D3?
+
+### Stato safety attuale
+
+- ✅ prog 17 `builder_mode='esplorativo'` (rollback eseguito)
+- ⚠️ I 51 giri FIO precedenti sono stati cancellati dalla
+  rigenerazione `force=True`. Restano **11 giri G-CRE-XXX** (sede
+  Cremona, ATR803, tutti chiusi naturale) **non toccati** dal
+  modello cumulativo. Per ripristinare i giri FIO l'utente deve
+  rigenerare manualmente con sede FIORENZA in modalità
+  `esplorativo` (default).
+- 🚨 Niente è rotto in produzione, ma il pianificatore vede ora
+  solo 11 giri totali (CRE) per il prog 17 invece di 62.
 
 ### Stato
 
-- ⏳ MR-D5e: codice scritto, test pure-domain green, mypy/ruff
-  clean. Push + deploy in corso.
-- ⏳ Prossimo: re-PATCH prog 17, retry e2e, verifica i 4 problemi
-  originali (76 corse, 10 non chiusi, navette intra-day, mix
-  linee, sosta diurna).
-- ⏳ SEVERO obbligatorio sul fix (CLAUDE.md §9: post-MR
-  significativo, anche hotfix che cambia logica di adapter).
+- ✅ MR-D5e: validato funzionalmente (HTTP 200, no più FK MISTO).
+- ❌ E2E Plan-D: KO per 2° bug architetturale single-sede.
+- ⏳ SEVERO obbligatorio sul fix MR-D5e + 2° bug architetturale
+  (CLAUDE.md §9: post-MR significativo).
+- ⏸️ MR-D5f/g: scope da decidere con utente. Possibili strade:
+  - **(a)** procedere con MR-D5f (multi-sede) + MR-D5g
+    (regola_id=None) per chiudere Plan-D.
+  - **(b)** rivisitare Plan-D dalla testa con SEVERO sul piano
+    revisitato (= terza iterazione, dopo voti 6/10 e 7/10).
+  - **(c)** sospendere Plan-D, riconsolidare esplorativo.
+
+### Critica SEVERO post-MR-D5e + 2° bug architetturale
+
+File: `docs/critiche/SPRINT-8.2-MR-D5e+bug-architetturale-single-sede.md`.
+Voto: **4/10 provvisorio fallback** (motore: V4 Flash, V4 Pro 3
+timeout `-32001`).
+
+**Cosa funziona** (4 punti):
+- Diagnosi bug FK con stack + file:riga
+- Lookup `materiale_per_regola[regola_id]` O(1) autoritativo
+- mypy/ruff/53 test green
+- NINO onesto su KO e2e in entry 270
+
+**6 finding**:
+
+- **S1 HIGH** — Scarto silenzioso giro: `warnings.append` non
+  espone `n_giri_scartati` in response API → loss-of-data invisibile
+  al pianificatore. Fix <2h. *Pigrizia §7 attivata.*
+- **S2 HIGH** — Manca test sul ramo `regola_id=None → scarto`. I
+  53 test green coprono solo happy path. Fix <30 min. *Pigrizia
+  §7 grave (esatto pattern vietato da CLAUDE.md).*
+- **S3 HIGH** — 2° bug architetturale single-sede: la racc
+  SEVERO #2 originale ("HARD no ciclo aperto fuori area Milano")
+  era corretta in multi-sede ma fatale in single-sede. Voto 7/10
+  sul piano Plan-D approvato senza esplicitare l'assunzione
+  "MR-D2 riceve pool completo sedi attive". **Errore di giudizio
+  retroattivo della racc #2 SEVERO.**
+- **S4 MED** — `_materiale_da_regola` ritorna solo primo elemento
+  di `composizione_json` (monomateriale, amplificato dal fix).
+- **S5 MED PROCESSO** — Falla sistemica SEVERO: 4 voti ≥7/10
+  consecutivi tutti mock-only, e2e fallimento al primo run reale.
+  La racc MED 9.0/10 "pipeline mock-tested" era corretta ma non
+  è stata classificata HIGH BLOCKING al primo cambio strangler
+  (D5b). builder.py:1252-1254 era visibile nel diff D5b ma SEVERO
+  ha mancato il single-sede.
+- **S6 LOW** — `materiale_per_giro` info-only zombie code.
+  Cleanup <15 min.
+
+**3 R-PROC** (da aggiungere a `.claude/agents/severo.md`):
+- R-PROC-1: SEVERO obbligatorio con verifica e2e empirica al
+  primo cambio strangler in `builder.py` (voto MAX 6/10 se
+  mock-only).
+- R-PROC-2: ogni racc HARD esplicita le assunzioni sull'input
+  ("HARD assumendo X").
+- R-PROC-3: una racc MED diventa HIGH BLOCKING al primo cambio
+  in produzione del codice mock-only.
+
+**Raccomandazione chiave**: MR-D5f Sprint 8.3 (multi-sede),
+revisione racc SEVERO #2 originale come "HARD assumendo MR-D2
+riceve pool completo; SOFT con proxy rientro-via-vuoto in
+single-sede" + parametro `params.modalita_single_sede: bool` in
+`assegna_convogli_linea.py`. Sequenza stretta MR-D5f+g+h
+(~3-4gg). Smoke 2-3 linee reali PRIMA di MR-D6.
+
+### Prossimo step
+
+1. ✅ SEVERO obbligatorio completato (voto 4/10 provvisorio,
+   da rifare con AMILCARE V4 Pro operativo).
+2. ⏸️ Rigenerazione manuale prog 17 in `esplorativo` per
+   ripristinare i giri FIO: in attesa decisione utente
+   (facciamo subito o aspetta?).
+3. ⏸️ Decisione utente su come procedere:
+   - **(a)** MR-D5f (multi-sede) + MR-D5g (regola_id=None)
+     come hotfix-in-sequenza dello Sprint 8.2 attuale, allineati
+     alle indicazioni di SEVERO (revisione racc #2 + parametro
+     `modalita_single_sede`).
+   - **(b)** Aprire Sprint 8.3 dedicato: terza iterazione del
+     piano Plan-D con SEVERO sulla revisione del piano (motore
+     AMILCARE V4 Pro), per chiudere anche S1+S2+S5+R-PROC.
+   - **(c)** Sospendere Plan-D, riconsolidare esplorativo,
+     pianificare la migrazione in un nuovo sprint con scope
+     allargato (multi-sede + integration test + revisione racc
+     #2 + R-PROC SEVERO).
 
 ---
 
