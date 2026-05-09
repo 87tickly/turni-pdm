@@ -10,6 +10,94 @@
 
 ---
 
+## 2026-05-10 (283) — Verifica chiusura piano α: migration 0046 hotfix revision ID + deploy prod SUCCESS
+
+### Contesto
+
+Verifica post-PD7b-3 (entry 282 dichiarava "PIANO α CHIUSO"). Dichiarazione
+era prematura: l'utente ha chiesto "è ufficiale? abbiamo finito?" e la
+verifica concreta ha rivelato che il deploy backend Railway era
+**CRASHED** (build `22f2fb07` 2026-05-10 00:07:46) e il DB prod era
+ancora a `alembic_version = a6b7c8d9e0f1` (= MR-PD5 entry 271, pre-PIANO α).
+
+**Causa root** (regola §4 METODO ammettere l'errore): mio errore in
+entry 279 (MR-PD-FIX-SEVERO 3b). Ho assegnato a migration 0046 la
+revision ID ``b7c8d9e0f1a2`` che era **già usata in 0029**
+(``backend/alembic/versions/0029_turno_pdc_deposito_fk.py:44``). Alembic
+boot rilevava "Revision b7c8d9e0f1a2 is present more than once" + "Cycle
+is detected in revisions" → migration upgrade fallito → CMD
+``alembic upgrade head && uvicorn ...`` exit 1 → deploy crashed →
+Railway rollback automatico al precedente success (= MR-PD5 versione).
+
+### Modifiche
+
+**Hotfix già committato dal thread Plan-D parallelo**: commit `40b64f5`
+``fix(sprint-8.2) 0046 alembic: revision ID univoco c8d9e0f1a2b3 (era
+duplicato 0029 → ciclo migration → deploy 502)``. Cambia revision di
+0046 da ``b7c8d9e0f1a2`` → ``c8d9e0f1a2b3`` univoco.
+
+**Deploy successivo**: build `fbf981ba-6de9-4bc3-ae8d-ec4cc3a10bd3`
+2026-05-10 00:13:08 → **SUCCESS**. Railway ha applicato la migration
+e il backend è ora live con il piano α completo.
+
+### Verifica concreta DB prod (post-fix)
+
+Query via DATABASE_PUBLIC_URL Railway proxy:
+
+```
+alembic_version: c8d9e0f1a2b3                      ✅ migration 0046 applicata
+numero_treno_vettura column: 'numero_treno_vettura'  ✅ colonna creata
+ix_turno_pdc_blocco_numero_treno_vettura: created    ✅ index creato
+turno_pdc totali: 26, orfani deposito: 0             ✅ no regressioni
+```
+
+### Lezione meta (regola §1 + §5 METODO)
+
+1. **Diagnosi prima di azione**: prima di assegnare una revision ID
+   alembic dovrei verificare unicità con
+   ``grep -rn 'revision: str' alembic/versions/`` + sort+uniq. Era un
+   check di 30 secondi che avrebbe evitato 1h di debug.
+2. **Verifica prima del commit**: pytest verde non basta — la migration
+   alembic va testata anche col grafo (``alembic heads`` + ``alembic check``).
+   Nei prossimi MR con migration aggiungo questo check pre-commit.
+3. **Ammettere l'errore**: il bug era mio (entry 279 piano α). Il thread
+   Plan-D parallelo l'ha trovato e fixato mentre ero focalizzato su
+   PD7b-3. Errore tipico di "scope-cutting silente" su check banali.
+
+### Stato definitivo PIANO α SPRINT 8.2
+
+✅ **PIANO α UFFICIALMENTE CHIUSO IN PRODUZIONE**.
+
+- Backend deploy SUCCESS `fbf981ba` 2026-05-10 00:13:08
+- Migration 0046 applicata (alembic_version = c8d9e0f1a2b3)
+- Suite test PdC: 103 passed, 3 xfailed (intenzionali). Zero regressioni.
+- DB prod: 26 turni, 0 orfani, schema esteso con `numero_treno_vettura`
+- Tutti i finding A1+A2+A3 della re-critica AMILCARE entry 276 chiusi
+- Tutti i prerequisiti S1-S8 SEVERO PIANO PD7b chiusi
+
+### Cosa rimane per "Sprint 8.2 ufficialmente chiuso" (≠ piano α)
+
+Il piano α è chiuso. Sprint 8.2 ha ancora elementi backlog opzionali:
+
+1. **SEVERO post-Sprint** (regola §9 CLAUDE.md "obbligatorio a fine
+   Sprint"): critica retrospettiva sui MR effettivi 3a/3b/PD7b-1/2/3
+   (NON sui piani — quelli già fatti). 30-60 min.
+2. **Smoke prod end-to-end** opzionale: generare 1 turno reale via
+   `POST /api/giri/{id}/genera-turno-pdc?builder_strategy=deposito_first`
+   per validare il path opt-in completo (oggi 0/26 turni in prod usano
+   deposito_first). 15-30 min.
+3. **MR-PD6 parte 3 snapshot Vitest** (backlog originale): verifica
+   visuale Gantt PdC prod. 2-3h.
+4. **Aggiornamento CLAUDE.md** "Stato attuale del progetto" con
+   riferimento Sprint 8.2 (oggi cita solo Sprint 7). 5 min.
+
+Decisione utente richiesta: marchiamo Sprint 8.2 chiuso anche senza i
+4 punti sopra (backlog rinviato a Sprint 8.3 con motivazione "pianifico
+con la mente fresca")? Oppure procediamo con almeno il punto 1 (SEVERO
+post-Sprint, costo 30-60 min)?
+
+---
+
 ## 2026-05-10 (282) — Sprint 8.2 MR-PD7b-3: §11.4 riposo settimanale corretto + date concrete (CHIUDE PIANO α completo)
 
 ### Contesto
