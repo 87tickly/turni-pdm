@@ -10,6 +10,117 @@
 
 ---
 
+## 2026-05-09 (265) — Sprint 8.2 MR-PD3b + MR-PD4: builder deposito-first core + 9 test green su 4 violazioni
+
+### Contesto
+
+MR-PD3b chiude il **cuore architetturale** della Strada B: builder
+turno PdC ancorato al deposito per costruzione (ciclo casa-casa).
+Si appoggia al `vettura_resolver` di MR-PD3a (entry 264) per la
+priorità rientro §7.2.
+
+MR-PD4 fornisce i test green-phase delle 4 violazioni (speculari ai
+test xfail di MR-PD1 entry 258). Combinati in un unico commit perché
+sono inseparabili (builder + test sono unico contratto).
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_pdc/deposito_first.py`**
+(nuovo, 235 righe):
+
+`costruisci_giornata_deposito_first(depot, numero_giornata, variante,
+blocchi_giro, live_client, cache=None) → (_GiornataPdcDraft|None,
+violazioni: list[str])`. Pipeline:
+
+1. ``_build_giornata_pdc`` standard (riusa builder MVP per
+   PRESA/ACCp/CONDOTTA/PK/REFEZ/ACCa/FINE).
+2. **HARD condotta_max**: se ``condotta_min > 330`` → return
+   ``(None, ["giornataN: condotta_max_hard …"])``.
+3. Se ``stazione_fine == depot.stazione_principale_codice`` → no
+   rientro extra (giornata già chiusa al deposito).
+4. Altrimenti chiama ``risolvi_rientro`` § 7.2.
+5. Helper privato ``_inserisci_blocco_rientro`` aggiunge blocco
+   VETTURA / MM / VOCTAXI tra ACCa e FINE; sposta il blocco FINE
+   POST-rientro (ora_inizio = ora_fine_rientro,
+   ora_fine = ora_fine_rientro + 15 — NORMATIVA-PDC §3.2).
+6. Ricalcola ``prestazione_min`` finale.
+7. **HARD prestazione_max**: cap 510 standard / 420 notturno.
+   VETTURA garantita sotto cap dal resolver, ma MM/VOCTAXI
+   forfettari possono spingere oltre → SCARTATA.
+8. Return ``(draft, [])`` con ``stazione_fine =
+   depot.stazione_principale_codice`` GARANTITO.
+
+**Garanzie per costruzione** (chiudono Violazioni A, C, D):
+
+- A → cap condotta HARD (scarta vs annota)
+- C → ``stazione_fine = deposito`` invariante
+- D → blocco di rientro VETTURA/MM/VOCTAXI sempre presente quando
+  serve
+
+**Non gestito** (fuori scope MR-PD3b):
+
+- §7.3 condotta come rientro produttivo → ranking treni candidati
+  (Sprint 8.3 MR-C7)
+- §9 split CV intermedi → Sprint 8.3 MR-C7
+- §10.3 FR g1+g2 unica unità → Sprint 8.3 MR-C8
+- §3.2 vettura DI PARTENZA ai bordi
+- §11.2-§11.4 ciclo settimanale → MR-PD7
+
+**`backend/tests/test_deposito_first.py`** (nuovo, 360 righe): 9
+test green-phase con `risolvi_rientro` mockato (`AsyncMock`):
+
+1. ``test_violazione_a_cap_condotta_eccede_giornata_scartata`` (A)
+2. ``test_violazione_c_giornata_chiude_sempre_in_deposito_via_vettura`` (C)
+3. ``test_violazione_d_ultimo_blocco_e_rientro_non_fine`` (D)
+4. ``test_rientro_mm_inserito_in_coda``
+5. ``test_rientro_voctaxi_inserito_in_coda``
+6. ``test_chiusura_uguale_deposito_no_rientro_extra`` (resolver
+   non chiamato per short-circuit)
+7. ``test_depot_senza_stazione_principale_codice_scartata``
+8. ``test_prestazione_post_rientro_eccede_cap_scartata`` (VOCTAXI 2h
+   pathological)
+9. ``test_costruisci_giornata_deposito_first_e_pubblica`` (sanity)
+
+Stub minimali ``_StubBlocco`` + ``_StubDepot`` (no DB). Test pure
+async. ``trova_treno_vettura`` mai chiamato (mock al livello
+resolver).
+
+### Verifiche
+
+- ✅ pytest test_deposito_first: 9 passed
+- ✅ pytest suite PdC completa (9 file): **70 passed, 3 xfailed
+  (MR-PD1 red-phase, intenzionali), 2 fail pre-esistenti 403
+  cross-role** (`test_list_giri_pianificatore_giro_ok` e
+  `test_list_turni_pianificatore_giro_ok`, fuori scope dichiarato
+  in entry 262)
+- ✅ mypy --strict: clean
+- ✅ ruff check: clean (1 fix auto import sort)
+- ⏭️ no deploy Railway: il nuovo builder NON è ancora collegato
+  all'endpoint `genera-turno-pdc`. Il flusso prod usa ancora i
+  builder legacy. Migrazione endpoint in MR-PD5.
+
+### Stato
+
+- ✅ MR-PD3b chiuso. Builder deposito-first core funzionante e
+  testato.
+- ✅ MR-PD4 chiuso (combinato con PD3b).
+- ⏳ MR-PD5 (next): collegare il nuovo builder all'endpoint
+  `POST /api/giri/{id}/genera-turno-pdc`. Strategia: nuovo flag
+  `builder_strategy=deposito_first` opt-in, oppure switch totale.
+
+### Prossimo step
+
+Decisione utente:
+- (a) Switch totale immediato: tutto il traffico `genera-turno-pdc`
+  passa al nuovo builder. Vecchio builder legacy ELIMINATO. Rischio:
+  regressione silente in prod.
+- (b) Flag opt-in `builder_strategy=deposito_first` (default
+  `multi_turno` legacy). Migrazione progressiva, fallback safe.
+  Default NINO: **opzione b** (flag opt-in) per minimizzare blast
+  radius di una migrazione builder.
+
+---
+
 ## 2026-05-09 (264) — Sprint 8.2 MR-PD3a: vettura_resolver §7.2 (vettura → MM → VOCTAXI) modulo standalone testato
 
 ### Contesto
