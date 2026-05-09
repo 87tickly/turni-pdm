@@ -204,23 +204,25 @@ def _distribuisci_round_robin(
     corse_giorno: Sequence[_CorsaTurnoLike],
     n_convogli: int,
 ) -> list[list[_CorsaTurnoLike]]:
-    """Distribuisce corse del giorno fra ``n_convogli`` con round-robin
-    temporale.
+    """Distribuisce corse del giorno fra ``n_convogli`` con strategia
+    greedy continuativa.
 
-    Algoritmo:
-    1. Ordina corse per (ora_partenza, codice_origine, numero_treno)
-       per determinismo.
-    2. Assegna corsa i a convoglio (i % n_convogli).
+    **MR-D5d (entry 267, hotfix bug e2e prog 17)**: era round-robin
+    semplice (corsa[i] → conv[i % N]). Bug e2e produzione: per pattern
+    navetta A↔B alternato, il convoglio 0 prendeva sempre A→B (mai
+    ritorni) e il persister legacy generava vuoti intra-area con
+    ``ora_inizio > ora_fine`` (CHECK constraint giro_blocco_link_coerente).
 
-    Per pattern NAVETTA (A→B, B→A, A→B, B→A...): convoglio 0 prende
-    indici 0, 2, 4 (= sempre A→B); convoglio 1 prende 1, 3, 5 (=
-    sempre B→A). NB: questo pattern produce sequenze NON valide
-    operativamente (un singolo convoglio resta in A senza tornare).
-    Per gestire correttamente il round-trip, MR-D4 raffinerà
-    aggregando le coppie (A→B, B→A) prima della distribuzione.
+    Nuovo algoritmo greedy continuativo:
+    1. Ordina corse per (ora_partenza, codice_origine, numero_treno).
+    2. Per ogni corsa, assegna al primo convoglio compatibile:
+       - convoglio mai usato (vuoto) → assegna
+       - oppure ultima stazione_arrivo del convoglio == corsa.codice_origine
+         AND corsa.ora_partenza >= convoglio.ultima_ora_arrivo → assegna
+    3. Corse non assegnabili a nessun convoglio → scartate
+       (= corse residue scoperte dal greedy, fix MR-D6).
 
-    Per ora MR-D3 baseline: distribuzione round-robin semplice +
-    warning se la sequenza risultante non rispetta continuità.
+    Determinismo: ordinamento + first-fit garantiscono output stabile.
     """
     if n_convogli < 1:
         return []
@@ -233,8 +235,25 @@ def _distribuisci_round_robin(
         ),
     )
     out: list[list[_CorsaTurnoLike]] = [[] for _ in range(n_convogli)]
-    for i, c in enumerate(corse_ordinate):
-        out[i % n_convogli].append(c)
+    # Stato per convoglio: ultima stazione di arrivo + ora arrivo
+    ultima_stazione: list[str | None] = [None] * n_convogli
+    ultima_ora_arrivo: list[int] = [0] * n_convogli  # in minuti dall'inizio giornata
+    for c in corse_ordinate:
+        ora_partenza_min = _time_to_min(c.ora_partenza)
+        for i in range(n_convogli):
+            compat_geo = (
+                ultima_stazione[i] is None
+                or ultima_stazione[i] == c.codice_origine
+            )
+            compat_temp = (
+                ultima_stazione[i] is None
+                or ora_partenza_min >= ultima_ora_arrivo[i]
+            )
+            if compat_geo and compat_temp:
+                out[i].append(c)
+                ultima_stazione[i] = c.codice_destinazione
+                ultima_ora_arrivo[i] = _time_to_min(c.ora_arrivo)
+                break
     return out
 
 

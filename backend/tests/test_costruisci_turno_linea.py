@@ -224,11 +224,15 @@ def test_turno_corse_filtrate_per_valido_in_date_json() -> None:
 # =====================================================================
 
 
-def test_round_robin_due_convogli_navetta() -> None:
-    """4 corse navetta A↔B alternate, 2 convogli round-robin:
-    convoglio 0 prende corse 0,2 (= A→B sempre); convoglio 1 prende
-    corse 1,3 (= B→A sempre).
-    NB: questo produce sequenze con discontinuità → warning atteso.
+def test_greedy_continuativo_navetta_un_convoglio_copre_tutto() -> None:
+    """MR-D5d (entry 267, hotfix bug e2e): greedy continuativo per
+    pattern navetta A↔B continua. Convoglio 0 prende TUTTE le corse
+    compatibili (T1 A→B, T2 B→A, T3 A→B, T4 B→A) in sequenza valida.
+    Convoglio 1 resta vuoto (n_convogli=2 sovradimensionato per
+    questa frequenza).
+
+    Pre-MR-D5d era round-robin alternato: produceva sequenze con
+    discontinuità geografica (CHECK constraint persister fallisce).
     """
     seg = _segmento(capolinee={"S_A", "S_B"})
     cal = _calendario("R31_completo", date_feriali={date(2026, 6, 8)})
@@ -248,13 +252,55 @@ def test_round_robin_due_convogli_navetta() -> None:
         indice_convoglio=0,
         n_convogli_segmento=2,
     )
-    # Convoglio 0 prende corse a indice 0, 2 = T1 (A→B) + T3 (A→B)
-    assert [c.numero_treno for c in turno_0.giornate[0].corse] == ["T1", "T3"]
-    # Discontinuità: T1 finisce a B, T3 parte da A → warning
-    assert any(
-        "Discontinuità" in w
-        for w in turno_0.giornate[0].warnings_sosta
+    # Convoglio 0 prende TUTTE le corse continuative
+    assert [c.numero_treno for c in turno_0.giornate[0].corse] == [
+        "T1",
+        "T2",
+        "T3",
+        "T4",
+    ]
+    # Sequenza operativamente valida: nessuna discontinuità geografica
+    discontinuita = [
+        w for w in turno_0.giornate[0].warnings_sosta
+        if "Discontinuit" in w
+    ]
+    assert discontinuita == []
+
+
+def test_greedy_continuativo_corsa_incompatibile_scartata() -> None:
+    """Corsa che NON si concatena al convoglio attivo viene scartata
+    (= residua per coverage). Convoglio 1 prende le corse incompatibili.
+    """
+    seg = _segmento(capolinee={"S_A", "S_B"})
+    cal = _calendario("R31_completo", date_feriali={date(2026, 6, 8)})
+    ass = _assegnazione("R31_completo", n_conv=2)
+    corse = [
+        _corsa("S_A", "S_B", 8, 0, 9, 0, treno="T1"),
+        _corsa("S_X", "S_Y", 8, 30, 9, 30, treno="X1"),  # disgiunto da T1
+        _corsa("S_B", "S_A", 10, 0, 11, 0, treno="T2"),
+    ]
+    turno_0 = costruisci_turno_per_convoglio(
+        convoglio_id="R31_completo_C0",
+        segmento=seg,
+        assegnazione=ass,
+        calendario=cal,
+        corse_segmento=corse,
+        indice_convoglio=0,
+        n_convogli_segmento=2,
     )
+    turno_1 = costruisci_turno_per_convoglio(
+        convoglio_id="R31_completo_C1",
+        segmento=seg,
+        assegnazione=ass,
+        calendario=cal,
+        corse_segmento=corse,
+        indice_convoglio=1,
+        n_convogli_segmento=2,
+    )
+    # C0 prende T1 + T2 (continui A→B→A)
+    assert [c.numero_treno for c in turno_0.giornate[0].corse] == ["T1", "T2"]
+    # C1 prende X1 (disgiunto da T1, va al primo convoglio compatibile)
+    assert [c.numero_treno for c in turno_1.giornate[0].corse] == ["X1"]
 
 
 def test_round_robin_un_convoglio_prende_tutto() -> None:
