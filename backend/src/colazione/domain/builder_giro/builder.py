@@ -1260,10 +1260,19 @@ async def _genera_giri_linea_centrica(
     # le varianti di una linea sotto la regola usano lo stesso materiale.
     materiale_per_segmento: dict[str, str] = {}
     regola_per_segmento: dict[str, int] = {}
+    # MR-D5e: lookup diretto regola_id → materiale (autoritativo).
+    # ``materiale_per_segmento`` mappa solo i ``_completo``; la pipeline
+    # MR-D1 può creare segmenti ``_tronco_X`` non presenti nel mapping
+    # → fallback ``"MISTO"`` storico (builder.py:1335 pre-fix) violava
+    # FK ``materiale_thread_tipo_materiale_codice_fkey`` (sentinella
+    # ``MISTO`` non esiste in ``materiale_tipo``).  Con questo dict
+    # ricaviamo il materiale dalla regola direttamente.
+    materiale_per_regola: dict[int, str] = {}
     for r in regole:
         mat = _materiale_da_regola(r)
         if not mat:
             continue
+        materiale_per_regola[r.id] = mat
         # Estrai linee dal filtro
         linee_regola: list[str] = []
         for f in r.filtri_json or []:
@@ -1318,30 +1327,55 @@ async def _genera_giri_linea_centrica(
     warnings.extend(result.warnings)
 
     # Adapter Giro → GiroAggregato
+    # MR-D5e: per ``result.turni`` il segmento può essere ``_tronco_X``;
+    # se ``materiale_per_segmento`` non lo copre, ricado su
+    # ``materiale_per_regola`` via ``regola_per_segmento``. Se ancora
+    # nulla → debug log "MISTO" (questo dict è solo informativo e non
+    # finisce nel DB).
     materiale_per_giro: dict[int, str] = {}
     for turno in result.turni:
-        materiale_per_giro[id(turno)] = (
-            materiale_per_segmento.get(turno.segmento_codice, "MISTO")
-        )
+        mat_turno = materiale_per_segmento.get(turno.segmento_codice)
+        if mat_turno is None:
+            r_id_turno = regola_per_segmento.get(turno.segmento_codice)
+            if r_id_turno is not None:
+                mat_turno = materiale_per_regola.get(r_id_turno)
+        materiale_per_giro[id(turno)] = mat_turno or "MISTO"
 
     giri_aggregati: list[GiroAggregato] = []
+    giri_skippati = 0
     for giro in result.giri:
-        # Recupera il materiale dal primo CatenaPosizionata.regola_id
+        # MR-D5e: lookup diretto regola_id → materiale (autoritativo).
+        # ``materiale_per_segmento`` ha solo varianti ``_completo``;
+        # i segmenti ``_tronco_X`` di MR-D1 non sono mappati.
         regola_id_giro = (
             giro.giornate[0].catena_posizionata.regola_id
             if giro.giornate
             else None
         )
-        materiale = "MISTO"
+        materiale: str | None = None
         if regola_id_giro is not None:
-            for seg_codice, r_id in regola_per_segmento.items():
-                if r_id == regola_id_giro:
-                    materiale = materiale_per_segmento.get(seg_codice, "MISTO")
-                    break
+            materiale = materiale_per_regola.get(regola_id_giro)
+        if materiale is None:
+            # Caso degenerato: regola priva di materiale (composizione
+            # vuota) o ``regola_id`` non popolato dalla pipeline. Salto
+            # il giro con warning invece di propagare ``"MISTO"`` →
+            # FK violation su ``materiale_thread`` (Sprint 8.2 MR-D5e).
+            warnings.append(
+                f"Giro linea-centrica scartato: regola_id={regola_id_giro!r} "
+                "non risolve a un materiale (composizione_json vuota o "
+                "regola assente)."
+            )
+            giri_skippati += 1
+            continue
         giri_aggregati.append(
             _giro_linea_centrica_a_aggregato(
                 giro, materiale_tipo_codice=materiale
             )
+        )
+    if giri_skippati:
+        warnings.append(
+            f"Pipeline linea-centrica: {giri_skippati} giri scartati per "
+            "materiale non risolto (vedi warning specifici sopra)."
         )
 
     # Persiste

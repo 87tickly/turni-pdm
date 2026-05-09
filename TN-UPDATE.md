@@ -10,6 +10,122 @@
 
 ---
 
+## 2026-05-09 (270) — Sprint 8.2 MR-D5e: fix FK violation MISTO su materiale_thread (e2e prog 17 fallito 500)
+
+### Contesto
+
+Retry e2e Plan-D linea-centrica su prog 17 (post deploy MR-D5d entry 267).
+PATCH `builder_mode='linea_centrica'` applicata, JWT generato (admin
+id=3 azienda=2), `POST /api/programmi/17/genera-giri?force=true&
+confirm_delete_pdc=true&localita_codice=IMPMAN_MILANO_FIORENZA` →
+**500 Internal Server Error**.
+
+Stack trace dai log Railway:
+
+```
+psycopg.errors.ForeignKeyViolation: insert or update on table
+"materiale_thread" violates foreign key constraint
+"materiale_thread_tipo_materiale_codice_fkey"
+DETAIL:  Key (tipo_materiale_codice)=(MISTO) is not present
+in table "materiale_tipo".
+```
+
+### Diagnosi
+
+`builder.py:1335` (pre-fix): fallback `materiale = "MISTO"` quando
+la `regola_id` del giro NON è in `regola_per_segmento`. Causa
+radice:
+
+1. `materiale_per_segmento` viene popolato SOLO con chiavi
+   `{codice_linea}_completo` (riga 1278).
+2. La pipeline MR-D1 (`analizza_linee.py`) può creare segmenti
+   `{codice_linea}_tronco_X` per linee multi-tronco, **non
+   coperti** dal mapping.
+3. Nei giri di tipo `_tronco_X` il loop 1336-1340 fallisce → fallback
+   `MISTO`.
+4. Il valore `MISTO` viene scritto nei `BloccoAssegnato.composizione`
+   → poi nel `metadata_json.composizione` di `GiroBlocco`.
+5. `thread_proiezione.py:215` legge il metadata e fa
+   `MaterialeThread.tipo_materiale_codice='MISTO'`. Ma `MISTO`
+   **non esiste** in `materiale_tipo` (è una sentinella). FK
+   violation.
+
+Differenza vs flusso legacy: il persister legacy
+(`persister.py:706-708`) converte `MISTO → None` su
+`giro_materiale.materiale_tipo_codice` (= colonna nullable). Ma
+`MaterialeThread.tipo_materiale_codice` è **NOT NULL** + FK
+RESTRICT (`models/anagrafica.py:391-393`), quindi quel pattern non
+è applicabile. La pipeline legacy non incontra mai il problema
+perché `composizione_da_blocco` legge composizioni concrete dei
+blocchi (es. `ETR526`, `ATR803`), mai `MISTO`.
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_giro/builder.py`**:
+
+1. **Riga 1261-1273**: nuovo dict `materiale_per_regola: dict[int,
+   str]` popolato dal loop esistente sulle regole. Lookup diretto
+   `regola_id → materiale` via `_materiale_da_regola(r)`.
+   Autoritativo (vs `materiale_per_segmento` parziale).
+2. **Riga 1320-1357 adapter Giro → GiroAggregato**:
+   - Per `result.turni`: fallback in cascata
+     `materiale_per_segmento → materiale_per_regola → "MISTO"`.
+     Il dict è solo informativo (non persiste in DB).
+   - Per `result.giri` (= persisti): lookup diretto
+     `materiale_per_regola[regola_id_giro]`. **Se nullo, scarto
+     il giro con warning** invece di propagare `MISTO`. Il giro
+     scartato finisce nei warning della response, non nel DB.
+
+### Verifiche
+
+- ✅ pytest test_builder_linea_centrica_adapter +
+  test_aggregazione_linea_centrica + test_pipeline_linea_centrica +
+  test_persister: **53 passed** (su moduli toccati)
+- ✅ pytest builder_giro/genera_giri/persister/linea_centrica/
+  thread_proiezione (74 tests rilevanti): **72 passed** + **3 fail
+  pre-esistenti** (`test_pianificatore_puo_generare`,
+  `test_get_giro_dettaglio`, `test_get_giro_404_se_inesistente`),
+  verificati anche su master pre-fix → **non regressione MR-D5e**,
+  legati a auth 403 / KeyError di test API. Issue separato.
+- ✅ mypy --strict builder.py: clean
+- ✅ ruff builder.py: clean
+
+### Limitazioni dichiarate
+
+1. **Test integration end-to-end NON aggiunto** per
+   `_genera_giri_linea_centrica` (lo scarto giro è coperto solo
+   dalla logica del builder, non da test). Coerente con
+   raccomandazione MED della critica SEVERO 9.0/10 su MR-D4+D5+D5b
+   (`pipeline solo mock-tested, mitigazione prima MR-D7 = run su
+   2-3 linee reali`). MR-D5e non amplia il debito: **chiude un bug
+   blocking che impediva qualunque smoke test**.
+2. **Bug a monte (segmenti `_tronco_X` non in
+   `materiale_per_segmento`) non risolto**: il fix è defensive
+   (lookup via regola), non corregge la causa originaria del miss
+   nel mapping segmenti. Refactor del mapping (= aggiungere
+   varianti `_tronco_X` dinamicamente in base all'output di MR-D1)
+   è scope MR-D7. Per ora il fix è sufficiente perché
+   `materiale_per_regola` è indipendente dalla classificazione
+   tronchi.
+
+### Stato deploy
+
+- ⏳ commit + push origin master
+- ⏳ railway up --service backend
+- ⏳ post-deploy: re-PATCH prog 17 a `linea_centrica`, retry e2e
+
+### Stato
+
+- ⏳ MR-D5e: codice scritto, test pure-domain green, mypy/ruff
+  clean. Push + deploy in corso.
+- ⏳ Prossimo: re-PATCH prog 17, retry e2e, verifica i 4 problemi
+  originali (76 corse, 10 non chiusi, navette intra-day, mix
+  linee, sosta diurna).
+- ⏳ SEVERO obbligatorio sul fix (CLAUDE.md §9: post-MR
+  significativo, anche hotfix che cambia logica di adapter).
+
+---
+
 ## 2026-05-09 (269) — Sprint 8.2 MR-PD-FIX-SEVERO 1: chiude S1 CRITICAL (cap notturno superinclusivo) + S4 HIGH + S7 LOW
 
 ### Contesto
