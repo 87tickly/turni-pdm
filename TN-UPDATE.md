@@ -10,6 +10,126 @@
 
 ---
 
+## 2026-05-09 (257) — Sprint 8.2 MR-D1: audit normativa PdC + fixture E2E red-phase TDD (Strada B from-scratch deposito-first)
+
+### Contesto
+
+L'utente ha aperto la revisione del capitolo Pianificatore PdC con
+quattro vincoli espliciti:
+
+1. Pianificatore PdC collegato al pianificatore Giro (poi precisato:
+   *"il turno pdc viene generato solo dal pianificatore turni pdc"*
+   → no trigger automatico).
+2. Gantt PdC va **rifatto** in stile Gantt giro con palette
+   differenziata per tipo servizio.
+3. La **normativa non viene rispettata**: cap condotta, vetture
+   rientro deposito, associazione turno-deposito, chiusura sempre
+   in stazione deposito.
+4. Mancano le **vetture** perché non cercate su `live.arturo.travel`
+   (chiave API pubblica).
+
+Dopo critica preventiva SEVERO al plan v1 (4/10 fallback NINO,
+voto in `docs/critiche/SPRINT-8.2-PLAN-PIANIFICATORE-PDC-revisione.md`)
++ second opinion FAUSTO + AMILCARE V4 Flash (V4 Pro saturo oggi:
+9 timeout MCP `-32001`, causa = bug Anthropic claude-code #424:
+timeout MCP tool call hardcoded a 60s, V4 Pro reasoning prende
+60-64s → fuori cap; bypass V4 Flash 16s o `reasoning_effort=low`
+32s), **convergenza ausili su Strada B TDD from-scratch
+deposito-first** (60-80h vs incrementale 48-66h, riduce debito
+strutturale).
+
+Utente ha confermato Strada B con direttiva *"inizia e non
+scrivere fino a quando non finisci"*. Sequenza Sprint 8.2 ridefinita
+in 7 MR D1-D7 + Sprint 8.3 dichiarato per §9 CV intermedi e §10
+FR struttura multi-giornata (motivazione oggettiva: refactor
+modello dati turno).
+
+### Modifiche
+
+**`docs/AUDIT-PDC-NORMATIVA-2026-05-09.md`** (nuovo, 124 righe):
+audit cross-table builder PdC (`builder.py` 1242 LOC,
+`multi_turno.py` 1274 LOC, `live_arturo.py`,
+`models/turni_pdc.py`) vs NORMATIVA-PDC.md §3-§11. Documenta:
+
+- Le **4 violazioni utente** con `file:riga` e severità HIGH:
+  - **A** cap condotta non rispettato (annotazione vs HARD constraint
+    a `builder.py:343-344`; multi-turno fallback monolitico a
+    `multi_turno.py:629-630`)
+  - **B** `deposito_pdc_id NULL` (modello nullable `models/turni_pdc.py:51-53`,
+    builder param opzionale `builder.py:550`)
+  - **C** stazione_fine ≠ deposito (`builder.py:352-353` setta ultimo
+    blocco condotta; multi-turno heuristic depot ma `stazione_fine`
+    resta del lavoro produttivo)
+  - **D** vetture rientro mancanti (monolitico nessuna VETTURA mai;
+    multi-turno solo step 1 `live.arturo.travel`, no fallback MM/VOCTAXI
+    §7.2)
+- Stato delle **altre regole §3-§11**: §3.2/§3.3/§6/§7.2/§7.3/§9/§10
+  /§11.2/§11.3/§11.4/§15 → tutte ❌, alcune ⚠️ parziali (§3.4 PK
+  intermedi, §9 split_cv aperto Sprint 7.4).
+- **Mappa MR-D1..D7** + Sprint 8.3 preview con motivazione oggettiva
+  per i residui (§9, §10).
+
+**`backend/tests/test_violazioni_normative_pdc.py`** (nuovo, 213
+righe): 3 test red-phase TDD su `_build_giornata_pdc` pure-function
+(no DB), marcati `pytest.mark.xfail(strict=True)`:
+
+- `test_violazione_a_cap_condotta_giornata_non_supera_330min`
+  (4 blocchi × 100min = 400min condotta totale)
+- `test_violazione_c_giornata_chiude_in_stazione_deposito`
+  (giro Mi.PG → Tirano, deposito atteso MILANO_PG)
+- `test_violazione_d_giornata_lontana_da_deposito_ha_vettura_rientro`
+  (atteso ultimo blocco ∈ {VETTURA, MM, VOCTAXI})
+
+Stub `_StubBlocco` minimale che imita `GiroBlocco` con i campi che
+`_build_giornata_pdc` legge. Quando MR-D3 chiuderà le violazioni i
+test passeranno → `strict=True` marcherà come failed gli xfail
+diventati XPASS → rimuovere il decorator.
+
+Violazione B (deposito_pdc_id NOT NULL) **rimandata a MR-D2**
+(migration alembic) + MR-D4 (test integrato con DB session). Motivo
+oggettivo: serve constraint DB + test asincrono.
+
+### Verifiche
+
+- ✅ pytest test_violazioni_normative_pdc: 3 xfail (red phase OK)
+- ✅ mypy --strict: clean su `builder.py` + nuovo file test
+- ✅ ruff check: clean
+- ⏭️ no deploy Railway: solo doc + test
+
+### Tracciamento ausili
+
+- **AMILCARE V4 Flash** (`mcp__amilcare__code`): 1 chiamata utile
+  brief 1.5KB per validare ordine MR e gap. Output: invertire C3↔C4,
+  manca MR bonifica pregressa, Strada B TDD vince sull'incrementale.
+  V4 Pro saturo (9 timeout consecutivi, bug claude-code #424).
+- **FAUSTO** (`mcp__grok__chat` `grok-code-fast-1`): 2 chiamate.
+  (1) stima Gantt 12-16h ottimistico → **24-32h** realistico per
+  riscrittura ~1.600 LOC con multi-riga + banda notturna + palette.
+  (2) ordine sequenziale, C3 sotto-stimato 8-10h → 12-16h, alternativa
+  TDD vince su accumulo debito.
+- **SEVERO** (subagent): critica preventiva del plan v1 in
+  `docs/critiche/SPRINT-8.2-PLAN-PIANIFICATORE-PDC-revisione.md`,
+  voto 4/10 fallback NINO. 8 finding (S1 default opt(c) ricalca
+  pattern fallito, S2 6 regole NORMATIVA fuori scope, S3 C2‖C3
+  collidono, S4 C5 sotto-stimato, S5 test plan mancante, S6 P1
+  delegata pur con default, S7 C4 specula prima di C1, S8 range
+  18-37h fragile). Tutti applicati al plan v3/v4 e alla pipeline
+  D1-D7 finale.
+
+### Stato
+
+- ✅ MR-D1 chiuso. Audit + fixture red-phase committati.
+- ⏳ MR-D2 (next): schema esteso (blocchi MM/VOCTAXI + `deposito_pdc_id
+  NOT NULL` migration alembic + tipi TS frontend).
+
+### Prossimo step
+
+Decisione utente: parto subito con MR-D2, oppure si vuole
+ri-controllare l'audit/test di MR-D1 prima di procedere? Default
+NINO: parto MR-D2.
+
+---
+
 ## 2026-05-09 (256) — Sprint 8.1 MR-B3: chiude HIGH-1 SEVERO MR-B2 (cross-rule contamination nel backtracking)
 
 ### Contesto
