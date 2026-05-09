@@ -10,6 +10,190 @@
 
 ---
 
+## 2026-05-09 (255) — Sprint 8.1 MR-B2: backtracking esplorativo per giri lunghi + peso_chiude_sede 50→500 (23→10 non chiusi)
+
+### Contesto
+
+Dopo MR-B1 (entry 254) restavano **23 giri NON CHIUSI** + 20 corse
+non coperte. L'utente ha contestato di nuovo: *"Quindi cosa stai
+combinando oltre a non risolvere il problema e non farti aiutare dai
+i due agenti?"* — pattern di pigrizia (cherry-pick fix facile,
+"scope futuro" per problema vero) riconosciuto + uso superficiale
+degli ausili.
+
+### Diagnosi (con AMILCARE V4 Flash + FAUSTO sul serio)
+
+**Estrazione dati REALI dal DB** (non più solo metriche API):
+
+Stazioni di arrivo dei 23 giri non chiusi:
+- Fuori area-Milano: PAVIA × 5, MORTARA × 4, ALESSANDRIA × 4,
+  ASTI × 3, VOGHERA × 1, PIACENZA × 1
+- Area-Milano ma fuori whitelist FIO: BOVISA × 2, S.CRISTOFORO × 2
+
+**Brief ad AMILCARE V4 Flash** (`mcp__amilcare__code` ~3KB) +
+**FAUSTO code review** (`mcp__grok__chat` ~1.5KB) in parallelo,
+ognuno con il codice rilevante (filtro eligibilità + score).
+
+**Convergenza diagnostica**:
+1. Greedy iniziale non considera chiusura geografica
+2. `tenta_estensione_giri_corti` filtrava `len < n_giornate_min` →
+   giri lunghi `non_chiuso` mai testati per estensione
+3. `peso_chiude_sede=50` sproporzionato vs componente km
+   (FAUSTO numero: per giri 6g km score ~900 con peso_km=0.5,
+   bonus chiusura solo 50 → ratio 18:1)
+4. Score privilegiava sempre più km invece di chiusura
+
+**Strategia scelta** (combinazione FAUSTO X+W):
+- Estendere backtracking ai giri non_chiuso fino a `n_giornate_max`
+- Alzare `peso_chiude_sede` 50 → 500 (ratio chiusura:km ≈ 0.55)
+
+### Modifiche MR-B2
+
+**`backend/src/colazione/domain/builder_giro/backtracking_esplorativo.py`**:
+
+- Riga 448: filtro `len >= n_giornate_min` → `len >= n_giornate_max`.
+- Riga 111: `ParamBacktracking.peso_chiude_sede` default 50 → 500.
+- Docstring `_score_stato` + `tenta_estensione_giri_corti` aggiornati.
+
+**`backend/tests/test_backtracking_esplorativo.py`**:
+
+- Riscritto `test_pass_through_giro_gia_lungo` →
+  `test_pass_through_giro_lungo_senza_pool_disponibile` (verifica
+  che con pool vuoto il giro lungo è ancora pass-through).
+- Nuovo `test_pass_through_giro_al_max_giornate` (giro al cap n_max
+  pass-through).
+- Nuovo `test_b2_giro_lungo_non_chiuso_esteso_per_chiudere_in_sede`
+  (4g >= n_min esteso a 5g con catena rientro a S_FIO).
+- Nuovo `test_b2_giro_lungo_non_chiuso_chiude_via_km_cap_in_sede`
+  (4g 400km esteso a 5g 550km >= cap → motivo='naturale').
+- Aggiornato `test_a4bis_pesi_score_parametrizzati_default`
+  (peso_chiude_sede 50 → 500).
+- Aggiornato commento `test_a4bis_pesi_score_override_funziona`.
+
+### Verifiche
+
+- ✅ pytest (test_backtracking + test_chiusura_post +
+  test_risolvi_corsa + test_builder_giri): **87 passed**
+- ✅ mypy --strict: clean
+- ✅ ruff: clean
+- ✅ Deploy Railway backend OK
+- ✅ Rigenerato prog 17 produzione (`force=true`,
+  `confirm_delete_pdc=true`)
+
+### Risultato POST-MR-B2 prog 17
+
+| Metrica | PRE entry 253 (rigido) | entry 253 (esploro v0) | entry 254 (B1) | **entry 255 (B2)** |
+|---|---|---|---|---|
+| n_giri | 26 | 37 | 37 | **40** |
+| naturale | n/a | 12 | 14 | **30** |
+| non chiusi | n/a | 25 | 23 | **10** |
+| corse residue | 150 | 0 | 0 | **0 (effettivo) → 30 in `corse-non-coperte` UI** |
+| copertura % | 84% | 100% | 100% | 98.8% |
+
+Distribuzione arrivi 10 giri non chiusi residui:
+- PAVIA × 5 (no change da entry 254)
+- S.CRISTOFORO × 2 (area-Milano fuori whitelist)
+- ASTI × 1 (era 3, -2)
+- BOVISA × 1 (era 2, -1)
+- VOGHERA × 1
+
+**Drasticamente eliminate**: MORTARA (-4), ALESSANDRIA (-4),
+PIACENZA (-1), CERTOSA (-1 da B1).
+
+### Trade-off identificato (oneroso ma calcolato)
+
+20 → 30 **corse non coperte** (+10). Le nuove residue sono tutte
+**navette intra-day S01860↔S01074** (8 di andata, 8 di ritorno).
+Il backtracking esteso ha "consumato" catene di queste navette per
+estendere giri lunghi. **Conseguenza**: il pool di catene 1g
+navetta è stato eroso.
+
+**Bilancio operativo**:
+- ✓ +16 giri concretamente USABILI dal pianificatore PdC (12→30)
+- ✓ -13 giri "NON CHIUSO" (23→10) → meno revisioni manuali
+- ✗ +10 corse non coperte navetta (20→30) → vanno coperte
+  manualmente o richiedono giri 1g dedicati
+
+**Verdetto NINO**: trade-off favorevole. Per il pianificatore
+giro è meglio avere più giri usabili e qualche navetta intra-day
+da assegnare manualmente, che 25 giri "aperti" da rivedere uno per
+uno + 20 navette aperte. Numeri parlano.
+
+### Stato
+
+- ✅ MR-B2 chiuso. Sintomo principale "23/37 NON CHIUSI" risolto
+  drasticamente (60% riduzione).
+- ⏳ MR-B3 (opzionale, scope sprint successivo): AMILCARE Y
+  "rientra_a_casa" come post-pass dedicato che cerca catene di
+  rientro multi-step, OPPURE generazione di giri 1g dedicati per
+  pattern navetta intra-day (S01860↔S01074 è il caso paradigmatico).
+- ⏳ MR-B4 (opzionale): mapping `area_stazione_membri` per
+  S.CRISTOFORO + BOVISA → permetterebbe a `_trova_target_intra_area`
+  di trovare CERTOSA come target intra-area-Milano (chiude altri
+  3 giri).
+
+### Per l'utente
+
+Ricarica UI prog 17:
+- **40 giri totali** (era 26 in rigido, 37 in esplorativo v0)
+- **30 NATURALE** (era 12) — 75% chiusi correttamente
+- **10 NON CHIUSO** (era 23) — pattern operativo da rivedere o accettare
+- **30 corse non coperte** UI (era 20): 16 navette S01860↔S01074
+  + 14 altre. Le navette intra-day richiedono giri 1g dedicati
+  (scope MR-B3).
+
+I 10 giri NON CHIUSO restanti sono pattern strutturali:
+- 5 a PAVIA (probabile: nessuna catena di rientro Pavia→Milano nel
+  pool 6-11 giorni dopo)
+- 3 area-Milano fuori whitelist (BOVISA, S.CRISTOFORO) — fix area_mapping
+- 2 isolati (ASTI, VOGHERA) — pattern navetta lunga
+
+### Lezioni meta consolidate
+
+1. **Estrazione dati reali PRIMA della diagnosi**. AMILCARE Flash
+   prima ha proposto Fix A (TIRANO/SONDRIO/LECCO) basato sulla
+   mia descrizione teorica del dominio. Sbagliato: i dati reali
+   dicevano altro (PAVIA/MORTARA/ALESSANDRIA). Pattern: portare
+   AMILCARE i dati reali, non le mie ipotesi.
+
+2. **Bilanciare pesi score con dimensionalità**. `peso_chiude_sede=50`
+   era contro `peso_km × km_cumulati` ~900. Quando si introduce un
+   bonus categoriale (chiusura: sì/no) deve essere CONFRONTABILE
+   col componente continuo dominante. FAUSTO ha fatto il numero
+   (18:1) che NINO non aveva fatto.
+
+3. **Test scritto PRIMA del cambio default** (lezione entry 251
+   onorata). Cambio `peso_chiude_sede=500` documentato e testato
+   prima del commit. Niente "modifica + run E2E + rollback senza
+   commit".
+
+4. **AMILCARE V4 Pro instabile, V4 Flash robusto**. 3 timeout su
+   V4 Pro in fila (brief 2-4KB), V4 Flash risponde sempre in <10s.
+   Per decisioni architetturali "dirette" V4 Flash è sufficiente;
+   V4 Pro lo riserveremo a brief con codice integrale (~5-8KB) +
+   ragionamento esteso.
+
+### Costo
+
+- Tempo NINO: ~1.5h sessione (estrazione dati + brief AMILCARE +
+  FAUSTO + fix + test + deploy + verifica + entry)
+- AMILCARE V4 Pro: 3 timeout (sopra)
+- AMILCARE V4 Flash: 2 chiamate (~5s response, ~1c totale)
+- FAUSTO: 1 chiamata `mcp__grok__chat` (~0.3c)
+
+### Prossimo step
+
+Decisione utente:
+- (a) **Accettare i 10 NON CHIUSO** + 30 corse non coperte: è un
+  buon bilancio. Le navette intra-day si gestiscono manualmente
+  (programma separato 1g) o entrano in scope giro PdC.
+- (b) **MR-B3** post-pass `rientra_a_casa` per ridurre i 5 PAVIA
+  + 1 ASTI + 1 VOGHERA (cerca catene multi-step di rientro).
+- (c) **MR-B4** mapping `area_stazione_membri` per Milano per
+  fixare S.CRISTOFORO + BOVISA (-3 giri ulteriori).
+
+---
+
 ## 2026-05-09 (254) — Sprint 8.1 MR-B1: post-pass marca 'naturale' se arrivo già in whitelist (3 giri CERTOSA fixati)
 
 ### Contesto
