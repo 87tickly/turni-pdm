@@ -179,6 +179,16 @@ class CatenaPosizionata:
             collegata in questa giornata (naturalmente o via vuoto coda).
             ``False`` se cross-notte o se il vuoto di coda finirebbe
             oltre la mezzanotte.
+        regola_id: id della ``ProgrammaRegolaAssegnazione`` dominante
+            che ha attribuito questa catena al pool. ``None`` durante
+            la costruzione iniziale (in ``posiziona_su_localita`` non si
+            conosce ancora la regola); popolato dal builder
+            (``catene_per_regola``) prima di passare la catena al
+            backtracking esplorativo. **MR-B3 (entry 256, fix SEVERO
+            voto 2/10 MR-B2)**: usato da ``_trova_continuazioni_top_k``
+            per filtrare le catene candidate alla stessa regola del
+            giro che si sta estendendo, evitando contaminazione
+            cross-rule fra regole con stesso materiale.
     """
 
     localita_codice: str
@@ -187,6 +197,7 @@ class CatenaPosizionata:
     catena: Catena
     vuoto_coda: BloccoMaterialeVuoto | None
     chiusa_a_localita: bool
+    regola_id: int | None = None
 
 
 # =====================================================================

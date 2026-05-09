@@ -177,15 +177,25 @@ def _trova_continuazioni_top_k(
     staz_arrivo: str,
     localita_codice: str,
     k: int,
+    regola_id: int | None = None,
 ) -> list[CatenaPosizionata]:
     """Versione esplorativa di ``_trova_continuazione`` di multi_giornata.py:
     ritorna fino a ``k`` candidati ordinati per ora_partenza crescente
     (deterministico).
 
-    Vincoli identici al legacy:
+    Vincoli:
     - non già visitata (id() non in ``visitate``)
     - stessa località manutenzione (= stesso convoglio fisico)
     - prima corsa parte da ``staz_arrivo``
+    - **MR-B3 (entry 256, fix SEVERO HIGH-1 MR-B2)**: stessa regola
+      dominante (``regola_id``). Quando il chiamante passa
+      ``regola_id`` non None, il filtro esclude catene di altre regole.
+      Questo previene la contaminazione cross-rule per programmi con
+      più regole same-material (es. ETR522 in regola 48 ALES-MORTARA-MILANO
+      + regola 51 BERG-CARNATE-MILANO): un giro nato da regola 48 NON
+      può pescare catene di regola 51 anche se geograficamente
+      compatibili. Se ``regola_id=None`` (legacy/fallback), il filtro
+      è no-op (compat).
     """
     candidati = [
         c
@@ -193,6 +203,7 @@ def _trova_continuazioni_top_k(
         if id(c) not in visitate
         and c.localita_codice == localita_codice
         and c.catena.corse[0].codice_origine == staz_arrivo
+        and (regola_id is None or c.regola_id == regola_id)
     ]
     candidati.sort(
         key=lambda c: _time_to_min(c.catena.corse[0].ora_partenza)
@@ -249,6 +260,7 @@ def _estendi_ricorsivo(
     params_back: ParamBacktracking,
     depth_remaining: int,
     n_branches: list[int],
+    regola_id: int | None = None,
 ) -> list[_StatoBacktracking]:
     """Backtracking ricorsivo. Esplora top-k continuazioni della
     giornata successiva fino a ``depth_remaining`` giornate addizionali.
@@ -293,6 +305,7 @@ def _estendi_ricorsivo(
         staz_arrivo,
         localita,
         params_back.beam_k,
+        regola_id=regola_id,
     )
     if not continuazioni:
         return [stato]
@@ -356,6 +369,7 @@ def _estendi_ricorsivo(
             params_back,
             depth_remaining - 1,
             n_branches,
+            regola_id=regola_id,
         )
         risultati.extend(ramo)
     return risultati
@@ -510,6 +524,13 @@ def tenta_estensione_giri_corti(
         n_processati += 1
         n_branches_local = [0]
 
+        # MR-B3 (entry 256): deriva la regola dominante del giro dalla
+        # PRIMA catena della PRIMA giornata. Questa è la regola che ha
+        # attribuito il giro al pool in builder.py:`catene_per_regola`.
+        # Le catene candidate dovranno appartenere alla stessa regola
+        # per evitare contaminazione cross-rule.
+        regola_id_giro = giro.giornate[0].catena_posizionata.regola_id
+
         stati_finali = _estendi_ricorsivo(
             stato_init,
             catene_per_data,
@@ -518,6 +539,7 @@ def tenta_estensione_giri_corti(
             params_back,
             depth_max,
             n_branches_local,
+            regola_id=regola_id_giro,
         )
         n_branches_total += n_branches_local[0]
 

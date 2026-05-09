@@ -56,6 +56,7 @@ def _make_catena_pos(
     ora_a: time,
     localita: str = "FIO",
     km: float = 100.0,
+    regola_id: int | None = None,
 ) -> CatenaPosizionata:
     corsa = _CorsaFake(codice_origine, codice_destinazione, ora_p, ora_a, km)
     return CatenaPosizionata(
@@ -65,6 +66,7 @@ def _make_catena_pos(
         catena=Catena(corse=(corsa,)),
         vuoto_coda=None,
         chiusa_a_localita=False,
+        regola_id=regola_id,
     )
 
 
@@ -591,3 +593,90 @@ def test_a4bis_pesi_score_override_funziona() -> None:
     )
     # Con questi pesi estremi, lo stato originale 1g è preferito
     assert len(out_pesi_estremi[0].giornate) == 1
+
+
+# =====================================================================
+# MR-B3 (entry 256, fix SEVERO HIGH-1 MR-B2): no cross-rule contamination
+# =====================================================================
+
+
+def test_b3_no_cross_rule_contamination_when_extending() -> None:
+    """Sprint 8.1 MR-B3 (entry 256): un giro nato dalla regola 48
+    NON deve essere esteso con catene della regola 51, anche se
+    geograficamente compatibili e stesso materiale.
+
+    Setup: giro corto regola_id=48 + 1 catena candidata regola_id=51
+    geo-compatibile. Senza il filtro regola, il backtracking
+    sceglieva la catena 51 (cross-rule contamination). Con il fix,
+    il filtro la esclude.
+    """
+    cp1 = _make_catena_pos(
+        "S_A", "S_B", time(8, 0), time(9, 0), km=100.0, regola_id=48
+    )
+    cp2_altra_regola = _make_catena_pos(
+        "S_B", "S_FIO", time(10, 0), time(11, 0), km=80.0, regola_id=51
+    )
+
+    g = _make_giro([cp1], motivo="sotto_min", km_cumulati=100.0)
+    catene_pool = {date(2026, 6, 2): [cp2_altra_regola]}
+    out, stat = tenta_estensione_giri_corti(
+        [g],
+        {"ETR421": catene_pool},
+        {0: "ETR421"},
+        _params_mg(n_min=4),
+    )
+    # Il filtro deve aver escluso cp2 (regola 51 != regola 48 del giro)
+    assert stat.n_giri_processati == 1
+    assert stat.n_giri_estesi == 0  # nessuna estensione possibile
+    assert out[0] is g  # giro invariato (passa-through)
+
+
+def test_b3_estensione_stessa_regola_funziona() -> None:
+    """Sprint 8.1 MR-B3 (entry 256): se la catena candidata appartiene
+    alla STESSA regola del giro, il backtracking la considera ed
+    estende normalmente. Verifica che il filtro regola non blocchi
+    il caso legittimo same-regola.
+    """
+    cp1 = _make_catena_pos(
+        "S_A", "S_B", time(8, 0), time(9, 0), km=100.0, regola_id=48
+    )
+    cp2_stessa_regola = _make_catena_pos(
+        "S_B", "S_FIO", time(10, 0), time(11, 0), km=80.0, regola_id=48
+    )
+
+    g = _make_giro([cp1], motivo="sotto_min", km_cumulati=100.0)
+    catene_pool = {date(2026, 6, 2): [cp2_stessa_regola]}
+    out, stat = tenta_estensione_giri_corti(
+        [g],
+        {"ETR421": catene_pool},
+        {0: "ETR421"},
+        _params_mg(n_min=4),
+    )
+    assert stat.n_giri_estesi == 1
+    assert len(out[0].giornate) == 2
+
+
+def test_b3_legacy_compat_regola_id_none_no_filter() -> None:
+    """Sprint 8.1 MR-B3 (entry 256): se regola_id è None su tutte le
+    catene (caso legacy/test che non popola regola_id), il filtro è
+    no-op e il backtracking funziona come prima del fix. Garantisce
+    backward compatibility.
+    """
+    cp1 = _make_catena_pos(
+        "S_A", "S_B", time(8, 0), time(9, 0), km=100.0, regola_id=None
+    )
+    cp2 = _make_catena_pos(
+        "S_B", "S_FIO", time(10, 0), time(11, 0), km=80.0, regola_id=None
+    )
+
+    g = _make_giro([cp1], motivo="sotto_min", km_cumulati=100.0)
+    catene_pool = {date(2026, 6, 2): [cp2]}
+    out, stat = tenta_estensione_giri_corti(
+        [g],
+        {"ETR421": catene_pool},
+        {0: "ETR421"},
+        _params_mg(n_min=4),
+    )
+    # Senza regola_id, il filtro non si applica → estensione normale
+    assert stat.n_giri_estesi == 1
+    assert len(out[0].giornate) == 2

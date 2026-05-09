@@ -1749,8 +1749,14 @@ async def genera_giri(
             if regola_dom is None:
                 catene_orphane += 1
                 continue
+            # MR-B3 (entry 256, fix SEVERO HIGH-1 MR-B2): annota la
+            # catena con la regola dominante. Il backtracking esplorativo
+            # userà questo campo per filtrare le catene candidate
+            # alla stessa regola del giro corrente, evitando
+            # contaminazione cross-rule fra regole same-material.
+            cp_annot = dataclasses.replace(cp, regola_id=regola_dom.id)
             per_data = catene_per_regola.setdefault(regola_dom.id, {})
-            per_data.setdefault(d_iter, []).append(cp)
+            per_data.setdefault(d_iter, []).append(cp_annot)
     if catene_orphane > 0:
         warnings.append(
             f"{catene_orphane} catene scartate: nessuna regola del programma copre la prima corsa."
