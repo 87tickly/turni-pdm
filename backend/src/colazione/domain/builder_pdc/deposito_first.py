@@ -43,24 +43,28 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.config import get_settings
-from colazione.domain.builder_pdc.builder import (
+
+# Sprint 8.2 MR-PD-FIX-SEVERO 2 (S2): import dal modulo facade pubblico
+# `giornata_base.py` invece dei simboli privati `_xxx` di `builder.py`.
+# Eliminata dipendenza da API privata cross-modulo (anti-pattern S2).
+from colazione.domain.builder_pdc.giornata_base import (
     ACCESSORI_MIN_STANDARD,
     CONDOTTA_MAX_MIN,
     FINE_SERVIZIO_MIN,
+    BloccoPdcDraft,
     BuilderTurnoPdcResult,
     DepositoPdcNonTrovatoError,
+    GiornataPdcDraft,
     GiriEsistentiError,
     GiroNonTrovatoError,
     GiroVuotoError,
-    _aggiungi_dormite_fr,
-    _BloccoPdcDraft,
-    _build_giornata_pdc,
-    _calcola_violazioni_cap_fr,
-    _from_min,
-    _genera_codice_turno,
-    _GiornataPdcDraft,
-    _persisti_un_turno_pdc,
-    _t,
+    aggiungi_dormite_fr,
+    build_giornata_pdc,
+    calcola_violazioni_cap_fr,
+    from_minuti,
+    genera_codice_turno,
+    persisti_un_turno_pdc,
+    to_minuti,
 )
 from colazione.domain.builder_pdc.vettura_resolver import (
     PRESTAZIONE_MAX_NOTTURNO_MIN,
@@ -91,12 +95,12 @@ logger = logging.getLogger(__name__)
 
 def _inserisci_blocco_rientro(
     *,
-    blocchi: list[_BloccoPdcDraft],
+    blocchi: list[BloccoPdcDraft],
     rientro: SceltaRientro,
     deposito_stazione: str,
     stazione_chiusura: str,
     ora_fine_acca_min: int,
-) -> tuple[list[_BloccoPdcDraft], int, int]:
+) -> tuple[list[BloccoPdcDraft], int, int]:
     """Inserisce il blocco di rientro PRIMA del FINE servizio.
 
     Strategia:
@@ -140,11 +144,11 @@ def _inserisci_blocco_rientro(
         treno = rientro.treno
         ora_inizio_rientro_min = treno.partenza_min
         ora_fine_rientro_min = treno.arrivo_min
-        blocco_rientro = _BloccoPdcDraft(
+        blocco_rientro = BloccoPdcDraft(
             seq=0,  # rinumerato dal chiamante
             tipo_evento="VETTURA",
-            ora_inizio=_from_min(ora_inizio_rientro_min),
-            ora_fine=_from_min(ora_fine_rientro_min),
+            ora_inizio=from_minuti(ora_inizio_rientro_min),
+            ora_fine=from_minuti(ora_fine_rientro_min),
             durata_min=treno.durata_min,
             stazione_da_codice=stazione_chiusura,
             stazione_a_codice=deposito_stazione,
@@ -162,11 +166,11 @@ def _inserisci_blocco_rientro(
             note = f"Rientro MM → {deposito_stazione} ({rientro.motivo})"
         else:
             note = f"Rientro VOCTAXI → {deposito_stazione} ({rientro.motivo})"
-        blocco_rientro = _BloccoPdcDraft(
+        blocco_rientro = BloccoPdcDraft(
             seq=0,
             tipo_evento=tipo_evento,
-            ora_inizio=_from_min(ora_inizio_rientro_min),
-            ora_fine=_from_min(ora_fine_rientro_min),
+            ora_inizio=from_minuti(ora_inizio_rientro_min),
+            ora_fine=from_minuti(ora_fine_rientro_min),
             durata_min=rientro.durata_min,
             stazione_da_codice=stazione_chiusura,
             stazione_a_codice=deposito_stazione,
@@ -178,11 +182,11 @@ def _inserisci_blocco_rientro(
     ora_fine_servizio_nuovo_min = (ora_fine_rientro_min + FINE_SERVIZIO_MIN) % (
         24 * 60
     )
-    nuovo_fine = _BloccoPdcDraft(
+    nuovo_fine = BloccoPdcDraft(
         seq=0,
         tipo_evento="FINE",
-        ora_inizio=_from_min(ora_fine_rientro_min),
-        ora_fine=_from_min(ora_fine_servizio_nuovo_min),
+        ora_inizio=from_minuti(ora_fine_rientro_min),
+        ora_fine=from_minuti(ora_fine_servizio_nuovo_min),
         durata_min=FINE_SERVIZIO_MIN,
         stazione_da_codice=deposito_stazione,
         stazione_a_codice=deposito_stazione,
@@ -211,12 +215,12 @@ async def costruisci_giornata_deposito_first(
     blocchi_giro: list[GiroBlocco],
     live_client: httpx.AsyncClient,
     cache: PartenzeCache | None = None,
-) -> tuple[_GiornataPdcDraft | None, list[str]]:
+) -> tuple[GiornataPdcDraft | None, list[str]]:
     """Costruisce 1 giornata di turno PdC ancorata al deposito.
 
     Pipeline:
 
-    1. ``_build_giornata_pdc`` standard (PRESA, ACCp, condotta, PK,
+    1. ``build_giornata_pdc`` standard (PRESA, ACCp, condotta, PK,
        REFEZ, ACCa, FINE).
     2. **HARD** se ``condotta_min > 330`` → scarta (return ``None``).
     3. Se ``stazione_fine == depot.stazione_principale_codice`` →
@@ -250,7 +254,7 @@ async def costruisci_giornata_deposito_first(
         ]
 
     # 1. Build standard.
-    draft = _build_giornata_pdc(
+    draft = build_giornata_pdc(
         numero_giornata=numero_giornata,
         variante_calendario=variante_calendario,
         blocchi_giro=blocchi_giro,
@@ -279,10 +283,10 @@ async def costruisci_giornata_deposito_first(
         ]
 
     # 4. Caso B: chiusura ≠ deposito → risolvi rientro §7.2.
-    ora_presa_min = _t(draft.inizio_prestazione)
+    ora_presa_min = to_minuti(draft.inizio_prestazione)
     # ora_fine_servizio_old = ora_fine_acca + FINE_SERVIZIO_MIN
     # → ora_fine_acca = fine_prestazione - FINE_SERVIZIO_MIN
-    ora_fine_acca_min = (_t(draft.fine_prestazione) - FINE_SERVIZIO_MIN) % (24 * 60)
+    ora_fine_acca_min = (to_minuti(draft.fine_prestazione) - FINE_SERVIZIO_MIN) % (24 * 60)
 
     rientro = await risolvi_rientro(
         deposito_codice=depot.codice,
@@ -329,7 +333,7 @@ async def costruisci_giornata_deposito_first(
             draft,
             blocchi=nuovi_blocchi,
             stazione_fine=deposito_stazione,
-            fine_prestazione=_from_min(nuova_fine_servizio_min),
+            fine_prestazione=from_minuti(nuova_fine_servizio_min),
             prestazione_min=nuova_prestazione_min,
         ),
         [],
@@ -488,7 +492,7 @@ async def genera_turni_pdc_deposito_first(
     live_client = httpx.AsyncClient(timeout=settings.live_arturo_timeout_sec)
     cache = PartenzeCache()
 
-    drafts: list[_GiornataPdcDraft] = []
+    drafts: list[GiornataPdcDraft] = []
     violazioni_giornate_scartate: list[str] = []
     try:
         for gg in giornate_giro:
@@ -520,15 +524,15 @@ async def genera_turni_pdc_deposito_first(
         )
 
     # 7. FR + violazioni cap (riusa helper builder.py)
-    fr_giornate = _aggiungi_dormite_fr(drafts, depot.stazione_principale_codice)
-    fr_cap_violazioni = _calcola_violazioni_cap_fr(
+    fr_giornate = aggiungi_dormite_fr(drafts, depot.stazione_principale_codice)
+    fr_cap_violazioni = calcola_violazioni_cap_fr(
         n_dormite_fr=len(fr_giornate),
         ciclo_giorni=giro.numero_giornate,
     )
 
     # 8. Persisti TurnoPdc + giornate + blocchi via helper builder.py
-    codice = _genera_codice_turno(giro, depot)
-    risultato = await _persisti_un_turno_pdc(
+    codice = genera_codice_turno(giro, depot)
+    risultato = await persisti_un_turno_pdc(
         session=session,
         azienda_id=azienda_id,
         giro=giro,

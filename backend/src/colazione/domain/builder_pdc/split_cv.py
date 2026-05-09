@@ -15,11 +15,11 @@ Decisioni di scope per Sprint 7.4 MR 1 (TN-UPDATE entry pendente):
   `{MORTARA, TIRANO}` (vedi `docs/NORMATIVA-PDC.md:701-717`).
   Refactor a regola configurabile per programma è in iterazioni
   successive.
-- Output: 1 giornata splittata → N `_GiornataPdcDraft` distinti, che
+- Output: 1 giornata splittata → N `GiornataPdcDraft` distinti, che
   diventeranno N `TurnoPdc` separati nel persister (MR 2).
 
 L'algoritmo NON modifica le strutture intermedie del builder ma
-ricostruisce ogni ramo richiamando `_build_giornata_pdc()` su
+ricostruisce ogni ramo richiamando `build_giornata_pdc()` su
 sotto-liste dei blocchi giro originali. Vantaggio: ogni ramo è
 autonomo, validato indipendentemente, con i propri
 PRESA/ACCp/.../ACCa/FINE.
@@ -37,12 +37,14 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from colazione.domain.builder_pdc.builder import (
+# Sprint 8.2 MR-PD-FIX-SEVERO 2 (S2): import dal modulo facade pubblico
+# `giornata_base.py` invece dei simboli privati `_xxx` di `builder.py`.
+from colazione.domain.builder_pdc.giornata_base import (
     CONDOTTA_MAX_MIN,
     PRESTAZIONE_MAX_NOTTURNO,
     PRESTAZIONE_MAX_STANDARD,
-    _build_giornata_pdc,
-    _GiornataPdcDraft,
+    GiornataPdcDraft,
+    build_giornata_pdc,
 )
 from colazione.models.anagrafica import Depot
 from colazione.models.giri import GiroBlocco
@@ -93,12 +95,12 @@ def split_e_build_giornata(
     blocchi_giro: list[GiroBlocco],
     stazioni_cv: set[str],
     livello: int = 0,
-) -> list[_GiornataPdcDraft]:
+) -> list[GiornataPdcDraft]:
     """Costruisce una giornata PdC, splittando se eccede i limiti.
 
     Strategia:
 
-    1. Costruisce un draft con `_build_giornata_pdc` (logica MVP).
+    1. Costruisce un draft con `build_giornata_pdc` (logica MVP).
     2. Se il draft è entro i limiti normativi → ritorna `[draft]`.
     3. Se eccede e si è sotto `MAX_LIVELLI_SPLIT`, cerca un punto di
        split greedy (primo punto valido nei blocchi giro), divide
@@ -110,7 +112,7 @@ def split_e_build_giornata(
     Ritorna lista vuota solo se il segmento di blocchi è vuoto
     (es. dopo uno split degenere).
     """
-    draft = _build_giornata_pdc(numero_giornata, variante_calendario, blocchi_giro)
+    draft = build_giornata_pdc(numero_giornata, variante_calendario, blocchi_giro)
     if draft is None:
         return []
     if not _eccede_limiti(draft):
@@ -135,12 +137,12 @@ def split_e_build_giornata(
     return rami_a + rami_b
 
 
-def _eccede_limiti(draft: _GiornataPdcDraft) -> bool:
+def _eccede_limiti(draft: GiornataPdcDraft) -> bool:
     """True se prestazione o condotta del draft sforano i limiti.
 
     Allinea il cap di prestazione al regime applicabile (notturno se
     `is_notturno`, altrimenti standard). Il calcolo replica la logica
-    di validazione interna di `_build_giornata_pdc`, così che la
+    di validazione interna di `build_giornata_pdc`, così che la
     soglia di trigger split coincida con il flag di violazione.
 
     Refezione mancante NON è motivo di split: una refezione si può
@@ -174,7 +176,7 @@ def _trova_punto_split(
     - Per ogni indice `i`, considera `blocchi_giro[i]
       .stazione_a_codice` come candidato di cambio volante.
     - Se la stazione è in `stazioni_cv`, costruisci il ramo A
-      (= `blocchi_giro[:i+1]`) chiamando `_build_giornata_pdc` e
+      (= `blocchi_giro[:i+1]`) chiamando `build_giornata_pdc` e
       verifica che non ecceda i limiti.
     - Primo `i` che produce un ramo A entro limiti → return i.
 
@@ -194,7 +196,7 @@ def _trova_punto_split(
         stazione_a = blocchi_giro[i].stazione_a_codice
         if stazione_a is None or stazione_a not in stazioni_cv:
             continue
-        ramo_a = _build_giornata_pdc(
+        ramo_a = build_giornata_pdc(
             numero_giornata, variante_calendario, blocchi_giro[: i + 1]
         )
         if ramo_a is None:

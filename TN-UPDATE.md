@@ -10,6 +10,101 @@
 
 ---
 
+## 2026-05-09 (273) — Sprint 8.2 MR-PD-FIX-SEVERO 2 (S2): facade pubblico giornata_base.py per builder_pdc
+
+### Contesto
+
+S2 di SEVERO MR-PD3 (entry 268, voto 4.5/10): "import privati `_xxx`
+da `builder.py` cross-modulo è anti-pattern, refactor o rimozione di
+`builder.py` rompono i moduli consumatori". Risolto con un modulo
+**facade pubblico** `giornata_base.py` che re-esporta i simboli del
+builder con nomi pubblici (senza underscore). I moduli consumatori
+(`deposito_first.py`, `multi_turno.py`, `split_cv.py`) importano da
+qui — l'API è ora stabile e gli `_xxx` di `builder.py` restano
+interni puri.
+
+Approccio **minimale** (rename-only): non sposto le definizioni in
+giornata_base.py, le re-esporto. Il refactor "sposta-codice" è più
+invasivo (~2-3h con rischio di regressione) ma può essere fatto in
+MR successivo se serve (la facade nasconde la posizione interna).
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_pdc/giornata_base.py`**
+(nuovo, 79 righe): facade pubblico. Re-export di:
+
+- Costanti (`PRESA_SERVIZIO_MIN`, `FINE_SERVIZIO_MIN`,
+  `ACCESSORI_MIN_STANDARD`, `PRESTAZIONE_MAX_STANDARD`,
+  `PRESTAZIONE_MAX_NOTTURNO`, `CONDOTTA_MAX_MIN`,
+  `REFEZIONE_MIN_DURATA`, `REFEZIONE_SOGLIA_MIN`,
+  `REFEZIONE_FINESTRE`, `FR_MAX_PER_SETTIMANA`, `FR_MAX_PER_28GG`)
+- Eccezioni (`GiroNonTrovatoError`, `GiroVuotoError`,
+  `DepositoPdcNonTrovatoError`, `GiriEsistentiError`)
+- Result class (`BuilderTurnoPdcResult`)
+- Dataclass rinominati: `_BloccoPdcDraft` → `BloccoPdcDraft`,
+  `_GiornataPdcDraft` → `GiornataPdcDraft`
+- Funzioni rinominate: `_t` → `to_minuti`, `_from_min` → `from_minuti`,
+  `_diff` → `diff_minuti`, `_build_giornata_pdc` → `build_giornata_pdc`,
+  `_aggiungi_dormite_fr` → `aggiungi_dormite_fr`,
+  `_calcola_violazioni_cap_fr` → `calcola_violazioni_cap_fr`,
+  `_genera_codice_turno` → `genera_codice_turno`,
+  `_persisti_un_turno_pdc` → `persisti_un_turno_pdc`
+
+`builder.py` invariato — i simboli `_xxx` interni restano per
+backward-compat dei test (`test_builder_pdc_eta.py` usa
+`_calcola_violazioni_cap_fr` direttamente).
+
+**`backend/src/colazione/domain/builder_pdc/deposito_first.py`**:
+import switchato da `builder` a `giornata_base`. Tutti gli usi
+`_xxx` → nomi pubblici. 19 occorrenze rinominate.
+
+**`backend/src/colazione/domain/builder_pdc/multi_turno.py`**:
+stesso switch. ~10 occorrenze rinominate. L'import deferred a
+livello funzione `from colazione.domain.builder_pdc.builder import
+GiriEsistentiError` ora `from giornata_base`.
+
+**`backend/src/colazione/domain/builder_pdc/split_cv.py`**:
+stesso switch. 3 occorrenze rinominate.
+
+### Verifiche
+
+- ✅ pytest suite PdC completa (10 file): 129 passed (+4 vs entry
+  271), 3 xfailed (intenzionali MR-PD1), 2 fail pre-esistenti 403
+  cross-role. **Tutti i test deposito_first + vettura_resolver +
+  smoke integration verdi**.
+- ✅ mypy --strict: clean (8 source files in builder_pdc/)
+- ✅ ruff check: clean
+
+### Stato
+
+- ✅ MR-PD-FIX-SEVERO 2 (S2) chiuso lato codice + push.
+- ✅ TUTTI i finding S1+S4+S5+S7+S2 di SEVERO MR-PD3 chiusi.
+- ⏳ Deploy backend Railway: backward-compatible (solo refactor,
+  nessuna nuova feature). No rischio.
+- ⏳ MR-PD7: §11.4 + §15 + §6 PK opt-in (8-12h).
+
+### Stato finding SEVERO MR-PD3
+
+| Finding | Severità | Stato |
+|---|---|---|
+| S1 (`is_cap_notturno`) | CRITICAL | ✅ chiuso entry 269 |
+| S2 (`giornata_base.py` shared) | HIGH | ✅ chiuso entry 273 (questa) |
+| S3 (§7.3 condotta produttiva) | HIGH-LATENT | ⏳ Sprint 8.3 MR-C7 |
+| S4 (test ambivalente) | HIGH | ✅ chiuso entry 269 |
+| S5 (zero integration test) | HIGH | ✅ chiuso entry 271 (con BUG critico DB scoperto) |
+| S6 (`DEPOT_MILANO_MM` hardcoded) | MED | ⏳ rimandato (rifactor `Depot.is_servito_da_mm`) |
+| S7 (refuso "Scelza") | LOW | ✅ chiuso entry 269 |
+| S8 (`PRESTAZIONE_MAX_*` duplicato) | MED | ⏳ rimandato (basso rischio) |
+| S9 (`_inserisci_blocco_rientro` primo FINE) | MED-LOW | ⏳ rimandato (latente, attivo solo con split CV) |
+| S10 (gap ACCa→VETTURA buco UI) | MED | ⏳ decisione utente |
+| S11 (`+15` post MM/VOCTAXI extrapola §3.2) | LOW | ⏳ decisione utente |
+
+Tutti i HIGH (S2, S3, S4, S5) e CRITICAL (S1) chiusi (S3 dichiarato
+Sprint 8.3 con motivazione oggettiva). Restano MED/LOW non
+bloccanti.
+
+---
+
 ## 2026-05-09 (272) — Sprint 8.2 MR-PD6 parte 2: label stazioni acronimi pattern Gantt giro
 
 ### Contesto

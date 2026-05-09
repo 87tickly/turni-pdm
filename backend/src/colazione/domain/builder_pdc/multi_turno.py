@@ -54,23 +54,26 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.config import get_settings
-from colazione.domain.builder_pdc.builder import (
+
+# Sprint 8.2 MR-PD-FIX-SEVERO 2 (S2): import dal modulo facade pubblico
+# `giornata_base.py` invece dei simboli privati `_xxx` di `builder.py`.
+from colazione.domain.builder_pdc.giornata_base import (
     ACCESSORI_MIN_STANDARD,
     CONDOTTA_MAX_MIN,
     FINE_SERVIZIO_MIN,
     PRESA_SERVIZIO_MIN,
     PRESTAZIONE_MAX_NOTTURNO,
     PRESTAZIONE_MAX_STANDARD,
+    BloccoPdcDraft,
     BuilderTurnoPdcResult,
     DepositoPdcNonTrovatoError,
+    GiornataPdcDraft,
     GiroNonTrovatoError,
     GiroVuotoError,
-    _BloccoPdcDraft,
-    _build_giornata_pdc,
-    _from_min,
-    _GiornataPdcDraft,
-    _persisti_un_turno_pdc,
-    _t,
+    build_giornata_pdc,
+    from_minuti,
+    persisti_un_turno_pdc,
+    to_minuti,
 )
 from colazione.domain.builder_pdc.split_cv import lista_stazioni_cv_ammesse
 from colazione.integrations.live_arturo import (
@@ -135,7 +138,7 @@ class _SegmentoTurno:
     dormita_rientro: bool = False
 
 
-def _eccede_cap_prestazione(draft: _GiornataPdcDraft) -> bool:
+def _eccede_cap_prestazione(draft: GiornataPdcDraft) -> bool:
     """True se prestazione del draft eccede il cap applicabile.
 
     Sprint 8.2 SEVERO S1 fix: usa ``draft.is_cap_notturno`` invece di
@@ -148,14 +151,14 @@ def _eccede_cap_prestazione(draft: _GiornataPdcDraft) -> bool:
     return draft.prestazione_min > cap
 
 
-def _segmento_valido(blocchi: list[GiroBlocco]) -> _GiornataPdcDraft | None:
+def _segmento_valido(blocchi: list[GiroBlocco]) -> GiornataPdcDraft | None:
     """Costruisce il draft del segmento; ritorna None se non valido.
 
     Validità = il draft esiste E non eccede cap prestazione/condotta.
     Refezione mancante NON invalida il segmento (è gestita a sub-livello
     dal builder MVP nello stesso modo del split CV intermedio Sprint 7.4).
     """
-    draft = _build_giornata_pdc(
+    draft = build_giornata_pdc(
         numero_giornata=1,  # placeholder: rinumerato a livello segmento
         variante_calendario="GG",
         blocchi_giro=blocchi,
@@ -598,7 +601,7 @@ async def genera_turni_pdc_multi(
     if legati and not force:
         # Lancia la stessa eccezione del builder monolitico per
         # coerenza API; il chiamante sa già gestirla con 409.
-        from colazione.domain.builder_pdc.builder import GiriEsistentiError
+        from colazione.domain.builder_pdc.giornata_base import GiriEsistentiError
         raise GiriEsistentiError(
             f"Esistono già {len(legati)} turno/i PdC per giro {giro_id}: "
             f"{legati[0].codice}"
@@ -660,7 +663,7 @@ async def genera_turni_pdc_multi(
                     ora_apertura_min = 0
                 else:
                     ora_apertura_min = (
-                        _t(primo_blocco.ora_inizio)
+                        to_minuti(primo_blocco.ora_inizio)
                         - ACCESSORI_MIN_STANDARD
                         - PRESA_SERVIZIO_MIN
                     ) % (24 * 60)
@@ -668,7 +671,7 @@ async def genera_turni_pdc_multi(
                     ora_chiusura_min = 0
                 else:
                     ora_chiusura_min = (
-                        _t(ultimo_blocco.ora_fine)
+                        to_minuti(ultimo_blocco.ora_fine)
                         + ACCESSORI_MIN_STANDARD
                         + FINE_SERVIZIO_MIN
                     ) % (24 * 60)
@@ -738,10 +741,10 @@ async def genera_turni_pdc_multi(
 
 async def _aggiungi_vettura_partenza(
     *,
-    draft: _GiornataPdcDraft,
+    draft: GiornataPdcDraft,
     depot: Depot,
     treno_pre_calcolato: TrenoVettura | None,
-) -> _GiornataPdcDraft:
+) -> GiornataPdcDraft:
     """Sprint 7.10 MR α.8: prepende un blocco VETTURA all'inizio del
     primo draft del ciclo per portare il PdC dal depot alla stazione
     di apertura.
@@ -766,11 +769,11 @@ async def _aggiungi_vettura_partenza(
         return draft
 
     # Costruisci il blocco VETTURA "in partenza" (prima della PRESA).
-    blocco_vettura = _BloccoPdcDraft(
+    blocco_vettura = BloccoPdcDraft(
         seq=0,  # rinumerato a fine pipeline
         tipo_evento="VETTURA",
-        ora_inizio=_from_min(treno_pre_calcolato.partenza_min),
-        ora_fine=_from_min(treno_pre_calcolato.arrivo_min),
+        ora_inizio=from_minuti(treno_pre_calcolato.partenza_min),
+        ora_fine=from_minuti(treno_pre_calcolato.arrivo_min),
         durata_min=treno_pre_calcolato.durata_min,
         stazione_da_codice=treno_pre_calcolato.stazione_partenza_codice,
         stazione_a_codice=treno_pre_calcolato.stazione_arrivo_codice,
@@ -799,7 +802,7 @@ async def _aggiungi_vettura_partenza(
     # vettura. Per ora teniamo `inizio_prestazione` invariato (= ora
     # presa originale) — il blocco VETTURA è visibile prima nel Gantt.
 
-    return _GiornataPdcDraft(
+    return GiornataPdcDraft(
         numero_giornata=draft.numero_giornata,
         variante_calendario=draft.variante_calendario,
         blocchi=nuovi_blocchi,
@@ -821,12 +824,12 @@ async def _aggiungi_vettura_partenza(
 
 async def _aggiungi_vettura_rientro(
     *,
-    draft: _GiornataPdcDraft,
+    draft: GiornataPdcDraft,
     depot: Depot,
     client: httpx.AsyncClient,
     treno_pre_calcolato: TrenoVettura | None = None,
     cache: PartenzeCache | None = None,
-) -> tuple[_GiornataPdcDraft, TrenoVettura | None]:
+) -> tuple[GiornataPdcDraft, TrenoVettura | None]:
     """Sprint 7.10 MR α.5: estende l'ultima giornata del turno con un
     blocco VETTURA per riportare il PdC al deposito.
 
@@ -865,7 +868,7 @@ async def _aggiungi_vettura_rientro(
     if treno_pre_calcolato is not None:
         treno: TrenoVettura | None = treno_pre_calcolato
     else:
-        ora_fine_min = _t(draft.fine_prestazione)
+        ora_fine_min = to_minuti(draft.fine_prestazione)
         treno = await trova_treno_vettura(
             stazione_partenza_codice=draft.stazione_fine,
             stazione_arrivo_codice=depot.stazione_principale_codice,
@@ -880,11 +883,11 @@ async def _aggiungi_vettura_rientro(
     # Costruisci il blocco VETTURA. La sequenza delle stazioni nel
     # blocco è (stazione_chiusura_PdC → deposito), il PdC viaggia
     # come passeggero.
-    blocco_vettura = _BloccoPdcDraft(
+    blocco_vettura = BloccoPdcDraft(
         seq=draft.blocchi[-1].seq + 1 if draft.blocchi else 1,
         tipo_evento="VETTURA",
-        ora_inizio=_from_min(treno.partenza_min),
-        ora_fine=_from_min(treno.arrivo_min),
+        ora_inizio=from_minuti(treno.partenza_min),
+        ora_fine=from_minuti(treno.arrivo_min),
         durata_min=treno.durata_min,
         stazione_da_codice=treno.stazione_partenza_codice,
         stazione_a_codice=treno.stazione_arrivo_codice,
@@ -899,7 +902,7 @@ async def _aggiungi_vettura_rientro(
     # Prestazione = (treno.arrivo_min - inizio_prestazione) gestendo
     # wrap-mezzanotte. Approssimazione: se arrivo > inizio, ok; se
     # arrivo < inizio (cross-mezzanotte) aggiungi 24h.
-    inizio_prest_min = _t(draft.inizio_prestazione)
+    inizio_prest_min = to_minuti(draft.inizio_prestazione)
     nuova_fine_min = treno.arrivo_min
     if nuova_fine_min < inizio_prest_min:
         nuova_prest = (24 * 60 - inizio_prest_min) + nuova_fine_min
@@ -918,7 +921,7 @@ async def _aggiungi_vettura_rientro(
             f"prestazione_max:{nuova_prest}>{cap_prest}min(con_vettura_rientro)"
         )
 
-    nuovo_draft = _GiornataPdcDraft(
+    nuovo_draft = GiornataPdcDraft(
         numero_giornata=draft.numero_giornata,
         variante_calendario=draft.variante_calendario,
         blocchi=nuovi_blocchi,
@@ -926,7 +929,7 @@ async def _aggiungi_vettura_rientro(
         # La stazione di chiusura ora è il deposito.
         stazione_fine=depot.stazione_principale_codice,
         inizio_prestazione=draft.inizio_prestazione,
-        fine_prestazione=_from_min(treno.arrivo_min),
+        fine_prestazione=from_minuti(treno.arrivo_min),
         prestazione_min=nuova_prest,
         condotta_min=draft.condotta_min,  # vettura non è condotta
         refezione_min=draft.refezione_min,
@@ -997,13 +1000,13 @@ async def _persisti_segmenti(
     """
     # 1. Costruisco i drafts in memoria, raggruppandoli per deposito.
     drafts_per_deposito: dict[
-        int | None, list[tuple[_SegmentoTurno, _GiornataPdcDraft]]
+        int | None, list[tuple[_SegmentoTurno, GiornataPdcDraft]]
     ] = {}
     for seg in segmenti:
         depot_key = (
             seg.deposito_assegnato.id if seg.deposito_assegnato is not None else None
         )
-        draft = _build_giornata_pdc(
+        draft = build_giornata_pdc(
             numero_giornata=1,  # placeholder, rinumerato sotto
             variante_calendario=seg.variante_calendario,
             blocchi_giro=seg.blocchi,
@@ -1078,7 +1081,7 @@ async def _persisti_segmenti(
                 else:
                     codice = f"T-FT-{giro.id}-{idx:02d}"[:50]
                     stazione_sede = draft.stazione_inizio
-                risultato = await _persisti_un_turno_pdc(
+                risultato = await persisti_un_turno_pdc(
                     session=session,
                     azienda_id=azienda_id,
                     giro=giro,
@@ -1124,7 +1127,7 @@ async def _persisti_segmenti(
         lista.sort(key=lambda x: (x[0].numero_giornata, x[0].idx_start))
 
         # Rinumera giornata=1..N nel ciclo del TurnoPdc.
-        drafts_finali: list[_GiornataPdcDraft] = []
+        drafts_finali: list[GiornataPdcDraft] = []
         meta_giornate: list[dict[str, int]] = []
         for i, (seg, draft) in enumerate(lista, start=1):
             draft.numero_giornata = i
@@ -1244,7 +1247,7 @@ async def _persisti_segmenti(
             else drafts_finali[0].stazione_inizio
         )
 
-        risultato = await _persisti_un_turno_pdc(
+        risultato = await persisti_un_turno_pdc(
             session=session,
             azienda_id=azienda_id,
             giro=giro,
