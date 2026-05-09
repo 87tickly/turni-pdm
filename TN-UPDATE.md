@@ -10,6 +10,138 @@
 
 ---
 
+## 2026-05-09 (277) — Sprint 8.2 MR-PD-FIX-SEVERO 3a (A3-extended): difensivo + retry signal-based su API live nel vettura_resolver
+
+### Contesto
+
+A3 della re-critica AMILCARE entry 276 ("zero gestione eccezioni httpx
+nel resolver, qualsiasi flake → endpoint MR-PD5 500"). Diagnosi NINO
+post-critica: A3 era basato su un **falso positivo parziale**.
+`live_arturo.py:21-24` dichiara contratto "ritorno None su errore,
+mai eccezioni", e `cerca_stazione:149`, `_fetch_partenze:203`,
+`trova_treno_vettura:267` hanno tutti try/except `httpx.HTTPError`
+→ `return None`. Il rischio "endpoint 500 al primo flake" non esiste
+in stato attuale.
+
+Decisione utente: **A3-extended** (1.5h originale) — formulazione
+piena con difensivo + retry policy resolver-level.
+
+Razionale: il fix è cheap insurance. Esplicita un contratto oggi
+solo documentato + protegge contro future regressioni di
+`live_arturo.py`. Verificato con FAUSTO (OK su ordine A3→A1→A2,
+unificare A1+A2 in MR singolo); AMILCARE 3 timeout consecutivi
+anche con brief 200 byte (server saturo, pattern entry 270).
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_pdc/vettura_resolver.py`** (+~70/-15 righe):
+
+1. **Import `asyncio`** per `await asyncio.sleep` nel backoff.
+2. **2 nuove costanti**:
+   - `RETRY_API_BACKOFF_SEC: float = 0.5` — backoff resolver-level
+     (oltre i 3 retry interni di `_fetch_partenze` su 429).
+   - `RETRY_API_MAX_TENTATIVI: int = 1` — 1 retry oltre la prima
+     chiamata = 2 tentativi totali. Esposte in `__all__`.
+3. **`risolvi_rientro` — Step 1 riscritto** con loop `for tentativo
+   in range(RETRY_API_MAX_TENTATIVI + 1)`:
+   - **Difensivo**: `try/except Exception` broad attorno a
+     `await trova_treno_vettura(...)` (`# noqa: BLE001` esplicito,
+     commento sul perché). Su eccezione: `treno=None`, `api_failed=True`,
+     log warning con tentativo/limite.
+   - **Signal "API failed" via `cache.errori`**: snapshot
+     `errori_baseline = cache.errori` pre-chiamata, dopo verifica
+     `cache.errori > errori_baseline` → `api_failed=True`,
+     `errori_baseline += delta`. Senza cache, signal solo via
+     Exception. Il commento spiega che `live_arturo._fetch_partenze`
+     incrementa `errori` dopo retry interno fallito (HTTPError
+     catturata + 429 esauriti).
+   - **Decisione retry**: break se `treno is not None` (vettura
+     trovata, no retry); break se `not api_failed` (no errore →
+     "nessun treno utile" è risposta valida); break se tentativi
+     esauriti. Altrimenti: pop entry None dalla cache (= bypass
+     entry stale negativa), `await asyncio.sleep(RETRY_API_BACKOFF_SEC)`,
+     log info.
+4. **Suffisso motivo arricchito**: nuova variabile
+   `suffisso_api = " [API live non raggiungibile dopo retry]" if
+   api_failed else ""`. Concatenata nei motivi di `SceltaMM` e
+   `SceltaVOCTAXI` quando `treno is None` per dare al pianificatore
+   un signal operativo: "il fallback non è 'nessuna vettura', è
+   'API non interrogabile'".
+
+**Backward compatibility**: contratto `risolvi_rientro` invariato
+(stessi parametri, stesso ritorno `SceltaRientro`). Comportamento
+identico per chi non passa `cache` E non incontra eccezioni
+(percorso felice = stessa traiettoria). Cambia solo il path errore.
+
+**`backend/tests/test_vettura_resolver.py`** (+~115 righe):
+
+3 nuovi test scenario A3 in coda al file:
+
+1. `test_a3_eccezione_imprevista_difensivo_no_crash`:
+   `AsyncMock(side_effect=RuntimeError(...))` simula bug futuro in
+   `live_arturo`. Verifica: resolver non propaga, mock chiamato
+   `1 + RETRY_API_MAX_TENTATIVI = 2` volte, output `SceltaMM`
+   (deposito Milano), motivo contiene `"API live non raggiungibile"`.
+2. `test_a3_cache_errori_signal_attiva_retry`: `fake_trova` async
+   incrementa `cache.errori` ad ogni chiamata e cacha None.
+   Verifica: 2 chiamate (signal attiva retry), `cache.errori == 2`,
+   bypass cache (entry pop+ripopolata None), output `SceltaVOCTAXI`
+   con flag motivo.
+3. `test_a3_cache_assente_no_signal_no_retry_inutile`: mock None
+   senza cache. Verifica conservativo: 1 sola chiamata (no retry
+   inutile su "nessun treno trovato" legittimo), motivo regolare
+   senza suffisso API.
+
+### Verifiche
+
+- ✅ pytest test_vettura_resolver: 11 passed (era 8, +3 nuovi A3)
+- ✅ pytest suite PdC (test_vettura_resolver + test_deposito_first
+  + test_violazioni_normative_pdc + test_builder_pdc_eta): 36 passed,
+  3 xfailed (intenzionali MR-PD1). Zero regressioni.
+- ✅ mypy --strict vettura_resolver.py: clean
+- ✅ ruff check vettura_resolver.py + test: clean
+
+### Lezione meta
+
+A3 era falso positivo per AMILCARE: ha fatto `grep try|except|raise`
+sui due moduli del MR (`vettura_resolver.py` + `deposito_first.py`)
+ma NON sul chiamato `live_arturo.py`. Smascherato da NINO con lettura
+del file (regola §1 METODO "diagnosi prima di azione" applicata anche
+ai finding degli ausili). Pattern complementare a entry 248 (bias
+auto-compiacenza NINO smascherato da AMILCARE): qui bias di
+prossimità AMILCARE smascherato da NINO. Conferma che nessun motore
+è infallibile e il filtro NINO sui finding è sempre necessario.
+
+Decisione architetturale: implementato comunque "A3-extended" perché
+(a) cheap insurance contro regressioni future di `live_arturo.py`;
+(b) esplicita invariante del contratto; (c) il signal `cache.errori`
+delta + bypass cache None è pattern riusabile per A1/A2.
+
+### Stato deploy
+
+- ✅ commit + push origin master
+- ⏳ Deploy backend Railway: cambia solo path errore del resolver
+  (no cambio schema, no migration). Backward-compatible.
+
+### Stato
+
+- ✅ MR-PD-FIX-SEVERO 3a (A3-extended) chiuso.
+- ⏳ MR-PD-FIX-SEVERO 3b (A1+A2 unificato): SEVERO sul piano prima
+  del codice (memoria `feedback_severo_sempre_su_piani`).
+- ⏳ MR-PD7b §11.4 riposo settimanale (B): SEVERO sul piano +
+  implementazione 4-6h.
+
+### Quanto manca per chiudere il piano α
+
+- A3 ✅ ora.
+- 3b (A1+A2): SEVERO sul piano (~30 min) + codice (~6-8h) + test
+  + commit + deploy. **Totale stimato: 7-9h**.
+- B (MR-PD7b §11.4): SEVERO sul piano (~30 min) + codice (~4-6h)
+  + test + commit + deploy. **Totale stimato: 5-7h**.
+- **Totale residuo Sprint 8.2 finale: ~12-16h**.
+
+---
+
 ## 2026-05-09 (276) — Sprint 8.2 RE-CRITICA SEVERO MR-PD3 con AMILCARE V4 Pro (chiude riserva fallback FAUSTO, voto 3/10, scopre A1/A2/A3)
 
 ### Contesto

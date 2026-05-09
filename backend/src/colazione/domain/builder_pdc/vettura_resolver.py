@@ -27,6 +27,7 @@ al builder per costruire il blocco corrispondente nel TurnoPdc.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Literal
@@ -94,6 +95,21 @@ MM_DURATA_FORFETTARIA_MIN: int = 30
 #: all'interno della finestra accettabile, lasciando al builder la
 #: validazione del cap prestazione finale.
 VOCTAXI_DURATA_DEFAULT_MIN: int = 30
+
+#: Sprint 8.2 MR-PD-FIX-SEVERO 3a (A3): retry policy resolver-level su
+#: errori API ``live.arturo.travel``. ``live_arturo._fetch_partenze``
+#: già gestisce 429 con backoff (200/500/1000ms) e cattura
+#: ``httpx.HTTPError`` ritornando ``None``. Questo retry è "di seconda
+#: linea" per scenari oltre 429 (5xx persistente, timeout reale,
+#: response malformata): bypassa la cache se ha cachato ``None`` ed
+#: effettua 1 retry con backoff. Signal "API failed" via
+#: ``cache.errori`` delta (live_arturo incrementa il contatore in caso
+#: di fallimento dopo retry interno).
+RETRY_API_BACKOFF_SEC: float = 0.5
+
+#: Numero massimo di retry oltre la prima chiamata. Totale tentativi
+#: = 1 + RETRY_API_MAX_TENTATIVI (= 2 con valore corrente).
+RETRY_API_MAX_TENTATIVI: int = 1
 
 
 # =====================================================================
@@ -204,14 +220,67 @@ async def risolvi_rientro(
     )
 
     # Step 1: cerca vettura via API live.arturo.travel.
-    treno = await trova_treno_vettura(
-        stazione_partenza_codice=stazione_chiusura_codice,
-        stazione_arrivo_codice=deposito_stazione_codice,
-        ora_min_partenza=ora_chiusura_servizio_min + VETTURA_GAP_PRE_MIN,
-        max_attesa_min=VETTURA_ATTESA_MAX_MIN,
-        client=live_client,
-        cache=cache,
-    )
+    # Sprint 8.2 MR-PD-FIX-SEVERO 3a (A3): difensivo + retry signal-based.
+    # Il chiamato live_arturo.trova_treno_vettura per contratto NON solleva
+    # eccezioni (vedi docstring live_arturo.py righe 21-24); cattura HTTPError
+    # internamente e ritorna None. Il try/except qui è una cintura di sicurezza
+    # per future regressioni di quel contratto. Il retry signal-based (via
+    # cache.errori delta) attiva 1 retry con backoff solo se l'API ha
+    # davvero fallito (no retry inutile su "nessun treno trovato").
+    treno: TrenoVettura | None = None
+    api_failed: bool = False
+    errori_baseline = cache.errori if cache is not None else 0
+
+    for tentativo in range(RETRY_API_MAX_TENTATIVI + 1):
+        try:
+            treno = await trova_treno_vettura(
+                stazione_partenza_codice=stazione_chiusura_codice,
+                stazione_arrivo_codice=deposito_stazione_codice,
+                ora_min_partenza=ora_chiusura_servizio_min + VETTURA_GAP_PRE_MIN,
+                max_attesa_min=VETTURA_ATTESA_MAX_MIN,
+                client=live_client,
+                cache=cache,
+            )
+        except Exception as e:  # noqa: BLE001
+            # Difensivo: live_arturo non dovrebbe sollevare ma blindiamo
+            # contro future regressioni. Eccezione rara → tracciamo con
+            # warning + procediamo come se l'API avesse fallito.
+            logger.warning(
+                "vettura_resolver: trova_treno_vettura ha sollevato "
+                "eccezione imprevista (tentativo %d/%d): %s. Difensivo: "
+                "treno=None, marca api_failed.",
+                tentativo + 1,
+                RETRY_API_MAX_TENTATIVI + 1,
+                e,
+            )
+            treno = None
+            api_failed = True
+
+        # Signal "API failed via cache.errori": live_arturo._fetch_partenze
+        # incrementa cache.errori dopo retry interno fallito (429 esauriti
+        # o HTTPError catturato). Delta vs baseline = errore attribuibile
+        # alla chiamata corrente.
+        if cache is not None and cache.errori > errori_baseline:
+            api_failed = True
+            errori_baseline = cache.errori
+
+        if treno is not None:
+            break  # vettura trovata → no retry
+        if not api_failed:
+            break  # no errore API → "nessun treno utile" è risposta valida
+        if tentativo >= RETRY_API_MAX_TENTATIVI:
+            break  # esauriti i retry
+
+        # Retry: bypass cache entry None se presente, attendi backoff.
+        if cache is not None:
+            cache.by_stazione.pop(stazione_chiusura_codice, None)
+        logger.info(
+            "vettura_resolver: API live failed, retry %d/%d in %.1fs",
+            tentativo + 1,
+            RETRY_API_MAX_TENTATIVI,
+            RETRY_API_BACKOFF_SEC,
+        )
+        await asyncio.sleep(RETRY_API_BACKOFF_SEC)
 
     if treno is not None:
         # Verifica che la vettura NON sfori il cap prestazione.
@@ -239,6 +308,13 @@ async def risolvi_rientro(
             cap_prestazione,
         )
 
+    # Suffisso motivo per quando l'API live ha fallito ripetutamente (signal
+    # operativo per il pianificatore: il fallback MM/VOCTAXI non è "nessuna
+    # vettura disponibile", è "API non interrogabile").
+    suffisso_api = (
+        " [API live non raggiungibile dopo retry]" if api_failed else ""
+    )
+
     # Step 2: MM se deposito è a Milano servito.
     if deposito_codice in DEPOT_MILANO_MM:
         if treno is not None:
@@ -247,7 +323,10 @@ async def risolvi_rientro(
                 f"({cap_prestazione}min); fallback MM (deposito Milano)"
             )
         else:
-            motivo = "nessuna vettura utile; fallback MM (deposito Milano)"
+            motivo = (
+                f"nessuna vettura utile{suffisso_api}; "
+                f"fallback MM (deposito Milano)"
+            )
         return SceltaMM(
             tipo="MM",
             durata_min=MM_DURATA_FORFETTARIA_MIN,
@@ -263,7 +342,8 @@ async def risolvi_rientro(
         )
     else:
         motivo = (
-            f"nessuna vettura utile; deposito {deposito_codice} non in "
+            f"nessuna vettura utile{suffisso_api}; "
+            f"deposito {deposito_codice} non in "
             f"area Milano-MM → VOCTAXI"
         )
     return SceltaVOCTAXI(
@@ -278,6 +358,8 @@ __all__ = [
     "MM_DURATA_FORFETTARIA_MIN",
     "PRESTAZIONE_MAX_NOTTURNO_MIN",
     "PRESTAZIONE_MAX_STANDARD_MIN",
+    "RETRY_API_BACKOFF_SEC",
+    "RETRY_API_MAX_TENTATIVI",
     "SceltaMM",
     "SceltaRientro",
     "SceltaVOCTAXI",

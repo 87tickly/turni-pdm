@@ -20,13 +20,14 @@ from colazione.domain.builder_pdc.vettura_resolver import (
     MM_DURATA_FORFETTARIA_MIN,
     PRESTAZIONE_MAX_NOTTURNO_MIN,
     PRESTAZIONE_MAX_STANDARD_MIN,
+    RETRY_API_MAX_TENTATIVI,
     VOCTAXI_DURATA_DEFAULT_MIN,
     SceltaMM,
     SceltaVettura,
     SceltaVOCTAXI,
     risolvi_rientro,
 )
-from colazione.integrations.live_arturo import TrenoVettura
+from colazione.integrations.live_arturo import PartenzeCache, TrenoVettura
 
 # =====================================================================
 # Helper costruzione TrenoVettura mock
@@ -296,3 +297,137 @@ def test_depot_milano_mm_contiene_5_voci() -> None:
     assert "FIORENZA" in DEPOT_MILANO_MM
     assert "BERGAMO" not in DEPOT_MILANO_MM
     assert "SONDRIO" not in DEPOT_MILANO_MM
+
+
+# =====================================================================
+# Sprint 8.2 MR-PD-FIX-SEVERO 3a (A3) — robustezza errori API live
+# =====================================================================
+
+
+@pytest.mark.asyncio
+async def test_a3_eccezione_imprevista_difensivo_no_crash(
+    fake_client: httpx.AsyncClient,
+) -> None:
+    """Difensivo A3: live_arturo per contratto non solleva (vedi docstring
+    live_arturo.py righe 21-24), ma se in futuro una regressione lo rompe
+    il resolver NON deve propagare l'eccezione al chiamante (= endpoint
+    MR-PD5 → 500 evitato).
+
+    Mock con side_effect=RuntimeError simula bug futuro in live_arturo.
+    Il try/except broad cattura, marca api_failed=True, dopo 1 retry
+    (anche fallito) si ritorna a fallback graceful (MM o VOCTAXI a
+    seconda del deposito).
+    """
+    mock = AsyncMock(side_effect=RuntimeError("simulated future bug in live_arturo"))
+
+    with patch(
+        "colazione.domain.builder_pdc.vettura_resolver.trova_treno_vettura",
+        new=mock,
+    ):
+        out = await risolvi_rientro(
+            deposito_codice="GARIBALDI_TE",
+            deposito_stazione_codice="MILANO_PG",
+            stazione_chiusura_codice="TIRANO",
+            ora_presa_min=12 * 60,
+            ora_chiusura_servizio_min=19 * 60 + 30,
+            is_cap_notturno=False,
+            live_client=fake_client,
+            cache=None,  # senza cache: signal solo via Exception
+        )
+
+    # Il resolver è arrivato in fondo senza propagare l'eccezione.
+    assert isinstance(out, SceltaMM)  # deposito Milano → MM fallback
+    # Mock chiamato 2 volte (1 + RETRY_API_MAX_TENTATIVI=1).
+    assert mock.call_count == 1 + RETRY_API_MAX_TENTATIVI
+    # Motivo arricchito col flag API non raggiungibile.
+    assert "API live non raggiungibile" in out.motivo
+
+
+@pytest.mark.asyncio
+async def test_a3_cache_errori_signal_attiva_retry(
+    fake_client: httpx.AsyncClient,
+) -> None:
+    """Signal A3: live_arturo._fetch_partenze incrementa cache.errori dopo
+    retry interno fallito. Il resolver legge il delta vs baseline e
+    decide il retry resolver-level (1 retry con backoff + bypass cache
+    entry None).
+
+    Simulazione: mock incrementa cache.errori e ritorna None ad ogni
+    chiamata (= API persistentemente down). Resolver tentativi attesi:
+    1 + RETRY_API_MAX_TENTATIVI = 2.
+    """
+    cache = PartenzeCache()
+    call_count = {"n": 0}
+
+    async def fake_trova(**kwargs: Any) -> TrenoVettura | None:
+        call_count["n"] += 1
+        c = kwargs.get("cache")
+        if c is not None:
+            c.errori += 1
+            # Simula caching del None (live_arturo lo fa su HTTPError)
+            stz = kwargs["stazione_partenza_codice"]
+            c.by_stazione[stz] = None
+        return None
+
+    with patch(
+        "colazione.domain.builder_pdc.vettura_resolver.trova_treno_vettura",
+        new=AsyncMock(side_effect=fake_trova),
+    ):
+        out = await risolvi_rientro(
+            deposito_codice="SONDRIO",  # NON Milano → step 3 VOCTAXI
+            deposito_stazione_codice="SONDRIO",
+            stazione_chiusura_codice="TIRANO",
+            ora_presa_min=12 * 60,
+            ora_chiusura_servizio_min=19 * 60 + 30,
+            is_cap_notturno=False,
+            live_client=fake_client,
+            cache=cache,
+        )
+
+    # Mock chiamato 1 + RETRY_API_MAX_TENTATIVI = 2 volte.
+    assert call_count["n"] == 1 + RETRY_API_MAX_TENTATIVI
+    # Cache.errori incrementato 2 volte (una per chiamata).
+    assert cache.errori == 1 + RETRY_API_MAX_TENTATIVI
+    # Bypass cache: dopo il retry, l'entry per la stazione è stata
+    # ri-popolata con None nel secondo tentativo (no entry stale).
+    assert cache.by_stazione.get("TIRANO") is None
+    # Output graceful con motivo arricchito.
+    assert isinstance(out, SceltaVOCTAXI)
+    assert "API live non raggiungibile" in out.motivo
+
+
+@pytest.mark.asyncio
+async def test_a3_cache_assente_no_signal_no_retry_inutile(
+    fake_client: httpx.AsyncClient,
+) -> None:
+    """Senza cache E senza eccezioni il resolver non ha signal per
+    distinguere "API failed" da "nessun treno utile in finestra".
+    Comportamento conservativo: NESSUN retry inutile (treno is None +
+    not api_failed → break immediato dopo prima chiamata).
+
+    Caso reale: chiamata API riesce ma niente treno passante in finestra
+    accettabile → fallback MM/VOCTAXI legittimo, no retry serve.
+    """
+    mock = AsyncMock(return_value=None)
+
+    with patch(
+        "colazione.domain.builder_pdc.vettura_resolver.trova_treno_vettura",
+        new=mock,
+    ):
+        out = await risolvi_rientro(
+            deposito_codice="FIORENZA",
+            deposito_stazione_codice="MILANO_CERTOSA",
+            stazione_chiusura_codice="MILANO_PG",
+            ora_presa_min=6 * 60,
+            ora_chiusura_servizio_min=14 * 60,
+            is_cap_notturno=False,
+            live_client=fake_client,
+            cache=None,
+        )
+
+    # 1 sola chiamata: no retry inutile.
+    assert mock.call_count == 1
+    # Output regolare (no flag api_failed nel motivo).
+    assert isinstance(out, SceltaMM)
+    assert "API live non raggiungibile" not in out.motivo
+    assert "nessuna vettura utile" in out.motivo
