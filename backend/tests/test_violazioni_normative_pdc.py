@@ -1,14 +1,14 @@
-"""Test red-phase TDD — Sprint 8.2 MR-D1.
+"""Test red-phase TDD — Sprint 8.2 MR-PD1.
 
 Verifica le 3 violazioni dichiarate dall'utente che sono testabili a
 livello pure-function nel builder PdC attuale (la 4ª, deposito_pdc_id
-NOT NULL, richiede DB session ed è coperta in MR-D2 via migration +
-MR-D4 via test integrato).
+NOT NULL, richiede DB session ed è coperta in MR-PD2 via migration +
+MR-PD4 via test integrato).
 
 Ogni test è marcato ``xfail(strict=True)``: fallisce sul builder
-attuale, passerà sul nuovo builder deposito-first (MR-D3, MR-D4).
+attuale, passerà sul nuovo builder deposito-first (MR-PD3, MR-PD4).
 
-Quando MR-D3 chiude le violazioni:
+Quando MR-PD3 chiude le violazioni:
 - i test diventano green
 - ``strict=True`` causa il fallimento del test xfail che ora passa
 - a quel punto: rimuovere ``xfail`` (i test diventano normali asserzioni)
@@ -79,9 +79,9 @@ def _b(
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "MR-D1 red phase: builder monolitico costruisce 1 giornata con "
+        "MR-PD1 red phase: builder monolitico costruisce 1 giornata con "
         "TUTTI i blocchi del giro, anche se condotta totale > 330 min. "
-        "Risolto in MR-D3 builder deposito-first che spezza per "
+        "Risolto in MR-PD3 builder deposito-first che spezza per "
         "costruzione (cap condotta HARD)."
     ),
 )
@@ -119,9 +119,9 @@ def test_violazione_a_cap_condotta_giornata_non_supera_330min() -> None:
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "MR-D1 red phase: builder monolitico setta stazione_fine = "
+        "MR-PD1 red phase: builder monolitico setta stazione_fine = "
         "ultimo blocco condotta del giro, NON il deposito. "
-        "Risolto in MR-D3 builder deposito-first che forza chiusura "
+        "Risolto in MR-PD3 builder deposito-first che forza chiusura "
         "in stazione_principale_codice del deposito (NORMATIVA §2.3)."
     ),
 )
@@ -161,9 +161,9 @@ def test_violazione_c_giornata_chiude_in_stazione_deposito() -> None:
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "MR-D1 red phase: builder monolitico NON aggiunge mai un blocco "
+        "MR-PD1 red phase: builder monolitico NON aggiunge mai un blocco "
         "VETTURA/MM/VOCTAXI in coda. Ultimo blocco rilevante è ACCa + FINE. "
-        "Risolto in MR-D3 builder deposito-first + vettura_resolver §7.2 "
+        "Risolto in MR-PD3 builder deposito-first + vettura_resolver §7.2 "
         "(priorità vettura → MM → VOCTAXI)."
     ),
 )
@@ -200,11 +200,11 @@ def test_violazione_d_giornata_lontana_da_deposito_ha_vettura_rientro() -> None:
 
 
 # =====================================================================
-# Violazione B — deposito_pdc_id NOT NULL (rimandata a MR-D2 + MR-D4)
+# Violazione B — deposito_pdc_id NOT NULL (rimandata a MR-PD2 + MR-PD4)
 # =====================================================================
 # La violazione B richiede:
-# - migration alembic per ``deposito_pdc_id NOT NULL`` (MR-D2)
+# - migration alembic per ``deposito_pdc_id NOT NULL`` (MR-PD2)
 # - test integrato con DB session che verifica builder rifiuti
-#   ``deposito_pdc_id=None`` (MR-D4)
+#   ``deposito_pdc_id=None`` (MR-PD4)
 #
 # Documentata in ``docs/AUDIT-PDC-NORMATIVA-2026-05-09.md`` Violazione B.

@@ -10,7 +10,7 @@
 
 ---
 
-## 2026-05-09 (257) — Sprint 8.2 MR-D1: audit normativa PdC + fixture E2E red-phase TDD (Strada B from-scratch deposito-first)
+## 2026-05-09 (258) — Sprint 8.2 MR-PD1: audit normativa PdC + fixture E2E red-phase TDD (Strada B from-scratch deposito-first, parallelo a Plan-D builder giro)
 
 ### Contesto
 
@@ -40,7 +40,7 @@ strutturale).
 
 Utente ha confermato Strada B con direttiva *"inizia e non
 scrivere fino a quando non finisci"*. Sequenza Sprint 8.2 ridefinita
-in 7 MR D1-D7 + Sprint 8.3 dichiarato per §9 CV intermedi e §10
+in 7 MR PD1-PD7 + Sprint 8.3 dichiarato per §9 CV intermedi e §10
 FR struttura multi-giornata (motivazione oggettiva: refactor
 modello dati turno).
 
@@ -66,7 +66,7 @@ audit cross-table builder PdC (`builder.py` 1242 LOC,
 - Stato delle **altre regole §3-§11**: §3.2/§3.3/§6/§7.2/§7.3/§9/§10
   /§11.2/§11.3/§11.4/§15 → tutte ❌, alcune ⚠️ parziali (§3.4 PK
   intermedi, §9 split_cv aperto Sprint 7.4).
-- **Mappa MR-D1..D7** + Sprint 8.3 preview con motivazione oggettiva
+- **Mappa MR-PD1..D7** + Sprint 8.3 preview con motivazione oggettiva
   per i residui (§9, §10).
 
 **`backend/tests/test_violazioni_normative_pdc.py`** (nuovo, 213
@@ -81,12 +81,12 @@ righe): 3 test red-phase TDD su `_build_giornata_pdc` pure-function
   (atteso ultimo blocco ∈ {VETTURA, MM, VOCTAXI})
 
 Stub `_StubBlocco` minimale che imita `GiroBlocco` con i campi che
-`_build_giornata_pdc` legge. Quando MR-D3 chiuderà le violazioni i
+`_build_giornata_pdc` legge. Quando MR-PD3 chiuderà le violazioni i
 test passeranno → `strict=True` marcherà come failed gli xfail
 diventati XPASS → rimuovere il decorator.
 
-Violazione B (deposito_pdc_id NOT NULL) **rimandata a MR-D2**
-(migration alembic) + MR-D4 (test integrato con DB session). Motivo
+Violazione B (deposito_pdc_id NOT NULL) **rimandata a MR-PD2**
+(migration alembic) + MR-PD4 (test integrato con DB session). Motivo
 oggettivo: serve constraint DB + test asincrono.
 
 ### Verifiche
@@ -114,19 +114,19 @@ oggettivo: serve constraint DB + test asincrono.
   collidono, S4 C5 sotto-stimato, S5 test plan mancante, S6 P1
   delegata pur con default, S7 C4 specula prima di C1, S8 range
   18-37h fragile). Tutti applicati al plan v3/v4 e alla pipeline
-  D1-D7 finale.
+  PD1-PD7 finale.
 
 ### Stato
 
-- ✅ MR-D1 chiuso. Audit + fixture red-phase committati.
-- ⏳ MR-D2 (next): schema esteso (blocchi MM/VOCTAXI + `deposito_pdc_id
+- ✅ MR-PD1 chiuso. Audit + fixture red-phase committati.
+- ⏳ MR-PD2 (next): schema esteso (blocchi MM/VOCTAXI + `deposito_pdc_id
   NOT NULL` migration alembic + tipi TS frontend).
 
 ### Prossimo step
 
-Decisione utente: parto subito con MR-D2, oppure si vuole
-ri-controllare l'audit/test di MR-D1 prima di procedere? Default
-NINO: parto MR-D2.
+Decisione utente: parto subito con MR-PD2, oppure si vuole
+ri-controllare l'audit/test di MR-PD1 prima di procedere? Default
+NINO: parto MR-PD2.
 
 ---
 

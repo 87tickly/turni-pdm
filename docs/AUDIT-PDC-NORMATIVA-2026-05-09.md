@@ -1,6 +1,6 @@
 # AUDIT NORMATIVA PIANIFICATORE TURNO PdC — 2026-05-09
 
-> **Output di MR-D1** dello Sprint 8.2 (Strada B TDD from-scratch
+> **Output di MR-PD1** dello Sprint 8.2 (Strada B TDD from-scratch
 > deposito-first). Audit del builder PdC esistente vs
 > `docs/NORMATIVA-PDC.md`, con focus sulle **4 violazioni dichiarate
 > dall'utente** + verifica delle altre regole §3-§11.
@@ -137,19 +137,19 @@ vettura, niente step 2 MM e step 3 VOCTAXI).
 
 ## Mappa MR Strada B → copertura violazioni
 
-- **MR-D1** *(questo)*: audit + fixture E2E red-phase TDD (3 test
+- **MR-PD1** *(questo)*: audit + fixture E2E red-phase TDD (3 test
   xfail su Violazioni A/C/D)
-- **MR-D2**: schema esteso (blocchi MM/VOCTAXI + `deposito_pdc_id NOT NULL`
+- **MR-PD2**: schema esteso (blocchi MM/VOCTAXI + `deposito_pdc_id NOT NULL`
   via migration alembic) — copre B
-- **MR-D3**: builder `deposito_first.py` con modello "ciclo casa-casa"
+- **MR-PD3**: builder `deposito_first.py` con modello "ciclo casa-casa"
   per costruzione (cap condotta HARD + chiusura deposito GARANTITA +
   vettura_resolver §7.2 + §3.2 + §3.3 + §6 + §7.3) — copre A, C, D +
   metà delle altre regole
-- **MR-D4**: i test red di MR-D1 diventano green sul nuovo builder
-- **MR-D5**: migrazione endpoint `genera-turno-pdc` al nuovo builder,
+- **MR-PD4**: i test red di MR-PD1 diventano green sul nuovo builder
+- **MR-PD5**: migrazione endpoint `genera-turno-pdc` al nuovo builder,
   vecchio deprecato
-- **MR-D6**: Gantt PdC riscritto stile giro + palette per tipo
-- **MR-D7**: §11.2/§11.3/§11.4/§15 + altri da audit
+- **MR-PD6**: Gantt PdC riscritto stile giro + palette per tipo
+- **MR-PD7**: §11.2/§11.3/§11.4/§15 + altri da audit
 
 ## Sprint 8.3 dichiarato (residui con motivazione oggettiva)
 
