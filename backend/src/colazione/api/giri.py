@@ -116,6 +116,17 @@ class BuilderResultResponse(BaseModel):
             "(modello cumulativo). Se >0 frontend mostra toast warning."
         ),
     )
+    modalita_sede: str | None = Field(
+        default=None,
+        description=(
+            "Sprint 8.2 MR-D5h-bis S4: stato modalità sede del run. "
+            "`null` per ramo legacy (rigido/esplorativo). Per ramo "
+            "linea-centrica: `'normale'` (pool azienda attivo) o "
+            "`'degradata_single_sede'` (sede del run NON nel pool azienda, "
+            "pipeline ridotta a single-sede). Frontend mostra warning "
+            "se `'degradata_single_sede'`."
+        ),
+    )
     warnings: list[str]
 
 
@@ -130,6 +141,7 @@ def _to_response(result: BuilderResult) -> BuilderResultResponse:
         n_eventi_composizione=result.n_eventi_composizione,
         n_incompatibilita_materiale=result.n_incompatibilita_materiale,
         n_giri_scartati=result.n_giri_scartati,
+        modalita_sede=result.modalita_sede,
         warnings=result.warnings,
     )
 

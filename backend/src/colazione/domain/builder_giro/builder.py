@@ -297,6 +297,13 @@ class BuilderResult:
             diversa da quella del run (modello cumulativo single-sede:
             altre sedi vanno persistite con chiamate successive). Default
             0 per il ramo legacy che non scarta.
+        modalita_sede: Sprint 8.2 MR-D5h-bis S4: stato della modalità
+            sede del run. ``None`` per ramo legacy. Per ramo
+            linea-centrica: ``"normale"`` (sede del run nel pool azienda
+            attive) o ``"degradata_single_sede"`` (sede del run NON
+            nel pool, pipeline ridotta). Chiude S7 LOW critica entry 275
+            + S4 MED critica entry 278: edge case prima silenzioso ora
+            esposto in response.
         warnings: messaggi human-readable per il pianificatore (UI).
     """
 
@@ -310,6 +317,7 @@ class BuilderResult:
     n_incompatibilita_materiale: int
     n_giri_km_cap: int = 0
     n_giri_scartati: int = 0
+    modalita_sede: str | None = None
     warnings: list[str] = field(default_factory=list)
 
 
@@ -1244,17 +1252,62 @@ def _giro_linea_centrica_a_aggregato(
     )
 
 
+def _conta_linee_regola(
+    regola: Any,
+    direttrice_to_linee: dict[str, set[str]],
+) -> int:
+    """Sprint 8.2 MR-D5h-bis: conta le linee complessive coperte da
+    una regola (= specificity score).
+
+    Più basso = più specifica. Una regola con 1 sola direttrice è più
+    specifica di una con 8. La regola più specifica ha priorità sul
+    mapping segmento → regola/materiale per evitare collisioni
+    (chiude S1 HIGH critica SEVERO 6/10 entry 278).
+
+    Returns:
+        Numero linee coperte. ``int(2**31 - 1)`` se la regola è
+        "wildcard" (= nessun filtro) per metterla in fondo.
+    """
+    linee: set[str] = set()
+    has_filter = False
+    for f in regola.filtri_json or []:
+        if not isinstance(f, dict):
+            continue
+        campo = f.get("campo")
+        val = f.get("valore")
+        if campo == "codice_linea":
+            has_filter = True
+            if isinstance(val, list):
+                linee.update(str(v) for v in val)
+            elif isinstance(val, str):
+                linee.add(val)
+        elif campo == "direttrice":
+            has_filter = True
+            direttrici = (
+                [str(v) for v in val]
+                if isinstance(val, list)
+                else ([val] if isinstance(val, str) else [])
+            )
+            for d_codice in direttrici:
+                linee.update(direttrice_to_linee.get(d_codice, set()))
+    if not has_filter:
+        # Regola senza filtri linea/direttrice (es. solo categoria) →
+        # wildcard, in fondo all'ordine.
+        return 2**31 - 1
+    return len(linee)
+
+
 def _costruisci_mappature_regole_linee(
     *,
     regole: Sequence[Any],
     corse: Sequence[Any],
 ) -> tuple[dict[str, str], dict[str, int], dict[int, str]]:
-    """Sprint 8.2 MR-D5h-A: costruisce 3 mappature derivate dalle
-    regole + corse del programma, usate dalla pipeline linea-centrica.
+    """Sprint 8.2 MR-D5h-A + MR-D5h-bis: costruisce 3 mappature derivate
+    dalle regole + corse del programma, usate dalla pipeline linea-centrica.
 
-    Estratta in helper pura indipendente dal DB (chiude finding HIGH
-    S3 critica SEVERO 5/10 entry 275: il fix MR-D5f-tris era inline al
-    chiamante senza test sul cuore del fix).
+    Estratta in helper pura indipendente dal DB (chiude S3 HIGH critica
+    SEVERO 5/10 entry 275). MR-D5h-bis: ordinamento per specificity
+    (chiude S1 HIGH BLOCKING critica entry 278).
 
     Mappature ritornate:
     - ``materiale_per_segmento[seg_codice] → materiale_tipo_codice``:
@@ -1272,14 +1325,24 @@ def _costruisci_mappature_regole_linee(
     1. Pre-calcola mappa ``direttrice → set(codice_linea)`` dalle corse
        del programma (MR-D5f-tris): le regole reali Trenord filtrano per
        ``campo='direttrice'`` (es. "TIRANO-SONDRIO-LECCO-MILANO"), non
-       per ``codice_linea``. Senza l'espansione,
-       ``regola_per_segmento`` resta vuoto e tutti i giri sono scartati
-       downstream.
-    2. Per ogni regola valida (con materiale risolto):
-       - Estrae ``linee_regola`` dal filtro ``codice_linea`` (direttamente)
-         e ``direttrice`` (espanso via mappa di step 1).
+       per ``codice_linea``.
+    2. **MR-D5h-bis**: ordina le regole per **specificity ASC** (=
+       più specifiche prima, ampie dopo) + tie-break per ``r.id`` ASC
+       (deterministic).
+    3. Per ogni regola valida (con materiale risolto), itera in ordine
+       di specificity:
+       - Estrae ``linee_regola`` dal filtro.
        - Mappa ``{linea}_completo → mat`` e ``{linea}_completo →
-         regola.id``.
+         regola.id`` **solo se non già scritto** (skip-if-exists). La
+         regola più specifica vince; le ampie completano i buchi.
+
+    Esempio prog 17 (entry 275):
+    - regola 47 (ETR526) direttrice=[TIRANO-...] → 1 linea
+    - regola 53 (ETR204) direttrice=[8 valori incluso TIRANO] → 8+ linee
+    - Pre-MR-D5h-bis: regola 53 sovrascriveva TIRANO_completo con
+      ETR204 (last-write per id).
+    - Post-MR-D5h-bis: regola 47 scrive TIRANO_completo con ETR526
+      (più specifica), regola 53 lo skippa e completa solo le altre 7.
 
     Args:
         regole: lista regole del programma (filter già applicato dal
@@ -1309,7 +1372,16 @@ def _costruisci_mappature_regole_linee(
     regola_per_segmento: dict[str, int] = {}
     materiale_per_regola: dict[int, str] = {}
 
-    for r in regole:
+    # MR-D5h-bis: ordina regole per specificity ASC (più specifiche
+    # prima) + r.id ASC tie-break (deterministic). Dentro `_conta_linee_regola`
+    # le regole wildcard (no filter linea/direttrice) finiscono in fondo
+    # con score 2^31-1.
+    regole_ordinate = sorted(
+        regole,
+        key=lambda r: (_conta_linee_regola(r, direttrice_to_linee), r.id),
+    )
+
+    for r in regole_ordinate:
         mat = _materiale_da_regola(r)
         if not mat:
             continue
@@ -1333,9 +1405,13 @@ def _costruisci_mappature_regole_linee(
                 )
                 for d_codice in direttrici:
                     linee_regola.update(direttrice_to_linee.get(d_codice, set()))
+        # MR-D5h-bis skip-if-exists: regola più specifica vince. Le
+        # regole successive completano i buchi.
         for linea in linee_regola:
-            materiale_per_segmento[f"{linea}_completo"] = mat
-            regola_per_segmento[f"{linea}_completo"] = r.id
+            seg_codice = f"{linea}_completo"
+            if seg_codice not in regola_per_segmento:
+                materiale_per_segmento[seg_codice] = mat
+                regola_per_segmento[seg_codice] = r.id
 
     return materiale_per_segmento, regola_per_segmento, materiale_per_regola
 
@@ -1514,6 +1590,7 @@ async def _genera_giri_linea_centrica(
             n_giri_non_chiusi=0,
             n_eventi_composizione=0,
             n_incompatibilita_materiale=0,
+            modalita_sede="degradata_single_sede",
             warnings=warnings,
         )
     # Sprint 8.2 MR-D5f: pool COMPLETO sedi attive azienda (non più
@@ -1523,11 +1600,15 @@ async def _genera_giri_linea_centrica(
     # Modello cumulativo è preservato a livello di persistenza:
     # vediamo sotto il filtro `g.localita_codice == localita.codice`.
     sedi_disponibili = await _carica_sedi_attive_azienda(session, azienda_id)
+    # Sprint 8.2 MR-D5h-bis S4 (chiude S7 LOW entry 275 + S4 MED entry 278):
+    # tracking della modalità sede del run per esposizione in response API.
+    modalita_sede_run = "normale"
     if localita.codice not in sedi_disponibili:
         # Edge case: la sede del run non è (più) censita nel pool
         # completo (es. is_attiva=False). Forziamo l'inclusione del
         # solo run; MR-D2 lavorerà ridotto come pre-MR-D5f.
         sedi_disponibili[localita.codice] = localita.stazione_collegata_codice
+        modalita_sede_run = "degradata_single_sede"
         warnings.append(
             f"Sede {localita.codice!r} non risulta attiva nel pool azienda; "
             "pipeline procede in modalità degradata single-sede."
@@ -1687,6 +1768,7 @@ async def _genera_giri_linea_centrica(
         n_eventi_composizione=0,
         n_incompatibilita_materiale=0,
         n_giri_scartati=n_giri_scartati,
+        modalita_sede=modalita_sede_run,
         warnings=warnings,
     )
 
