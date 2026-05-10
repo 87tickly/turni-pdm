@@ -47,7 +47,7 @@ import dataclasses
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -134,6 +134,13 @@ from colazione.models.programmi import (
 #: effettivo del giro quando né la regola né il programma hanno
 #: `km_max_ciclo` configurato. 850 = midpoint.
 DEFAULT_KM_MEDIO_GIORNALIERO: int = 850
+
+#: Sprint 8.3 (chiude S1 MED critica entry 284): score di "specificity
+#: wildcard" usato da ``_conta_linee_regola`` per ordinare in fondo le
+#: regole prive di filtro linea/direttrice (= regola "ampia"). Estratto
+#: come costante simbolica per evitare il magic number ``2**31 - 1``
+#: ripetuto inline.
+SPECIFICITY_WILDCARD: Final[int] = 2**31 - 1
 
 
 # =====================================================================
@@ -1265,8 +1272,9 @@ def _conta_linee_regola(
     (chiude S1 HIGH critica SEVERO 6/10 entry 278).
 
     Returns:
-        Numero linee coperte. ``int(2**31 - 1)`` se la regola è
-        "wildcard" (= nessun filtro) per metterla in fondo.
+        Numero linee coperte. ``SPECIFICITY_WILDCARD`` (= ``2**31 - 1``)
+        se la regola è "wildcard" (= nessun filtro) per metterla in
+        fondo all'ordine.
     """
     linee: set[str] = set()
     has_filter = False
@@ -1293,7 +1301,7 @@ def _conta_linee_regola(
     if not has_filter:
         # Regola senza filtri linea/direttrice (es. solo categoria) →
         # wildcard, in fondo all'ordine.
-        return 2**31 - 1
+        return SPECIFICITY_WILDCARD
     return len(linee)
 
 
@@ -1375,7 +1383,7 @@ def _costruisci_mappature_regole_linee(
     # MR-D5h-bis: ordina regole per specificity ASC (più specifiche
     # prima) + r.id ASC tie-break (deterministic). Dentro `_conta_linee_regola`
     # le regole wildcard (no filter linea/direttrice) finiscono in fondo
-    # con score 2^31-1.
+    # con score SPECIFICITY_WILDCARD (= 2^31-1).
     regole_ordinate = sorted(
         regole,
         key=lambda r: (_conta_linee_regola(r, direttrice_to_linee), r.id),
