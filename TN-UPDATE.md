@@ -10,6 +10,62 @@
 
 ---
 
+## 2026-05-10 (286) — Code Review completa codebase Sprint 8.2: 16 finding (3 CRITICI, 8 IMPORTANTI, 5 MINORI)
+
+### Contesto
+
+Code review su richiesta utente. Scope: codebase al commit `adbfd26`
+(entry 285). Lettura diretta sorgenti + confronto con `NORMATIVA-PDC.md`
+come fonte di verità. Review separata dai finding SEVERO entry 285
+(che rimangono aperti).
+
+### Modifiche
+
+Solo documentazione aggiunta — nessuna modifica al codice di produzione
+(vincolo esplicito utente).
+
+### Finding
+
+**3 CRITICI**:
+
+| ID | Titolo | Fix |
+|----|--------|-----|
+| **C1** | Facade strangler bucato: `riposo_intraturno.py:30` e `riposo_settimanale.py:42` importano `_GiornataPdcDraft` da `builder.py` bypassando `giornata_base.py` (=SEVERO S1 entry 285, confermato) | 30 min |
+| **C2** | §3.3 Preriscaldo ACCp 80' dic-feb non implementato: `builder.py:57` usa `ACCESSORI_MIN_STANDARD=40` fisso. Turni invernali non conformi senza alert | 2h |
+| **C3** | §4.4 PK gap minimo 40' (20'+20') non validato: `builder.py:259` crea PK per qualsiasi gap>0, anche 5'. Nessuna violazione emessa | 1h |
+
+**8 IMPORTANTI**:
+
+| ID | Titolo | Fix |
+|----|--------|-----|
+| I1 | `RIPOSO_INTRATURNO_FINE_TARDA_MIN` zombie + 14h letterale §11.5 ignorato (=SEVERO S2) | 30 min + decisione utente |
+| I2 | `RegistroVettureAssegnate.from_db()` ignora `programma_id` → wild-card cross-programma (=SEVERO S4) | 1h |
+| I3 | 4 import locali dentro funzione `deposito_first.py:595-608` (=SEVERO S6) | 10 min |
+| I4 | Reset contatore `riposo_settimanale.py:200` post-violazione maschera cicli multipli (=SEVERO S8) | 30 min |
+| I5 | `TurnoPdcGiornata` mancante campo `data: date` — root cause di I2 | 2h + migration |
+| I6 | `giornata_base.py` facade nella direzione sbagliata (proxy di `builder.py`, non fonte) | 3h |
+| I7 | `assert` per invarianti runtime invece di raise espliciti (`builder.py:210,253,256`) | 20 min |
+| I8 | `enumera_date_giornata` fallback sovra-include su varianti parlanti Trenord (=SEVERO S9) | 30 min log / 4-6h DSL |
+
+**5 MINORI**: M1 anti-pattern `_=SYMBOL`, M2 dualità multi_giornata v1/v2,
+M3 zero test e2e piano α (=SEVERO S7), M4 accumulo scripts diagnostici,
+M5 zero test frontend route critici.
+
+### Stato
+
+- ✅ Review scritta: `docs/CODE-REVIEW-2026-04-30.md`
+- ✅ TN-UPDATE aggiornato
+- ⏳ NESSUNA modifica codice (vincolo utente). Fix da schedulare Sprint 8.3.
+- ⏳ C1 BLOCCANTE già aperto da SEVERO entry 285: da chiudere prima di
+  marcare Sprint 8.2 ufficialmente chiuso.
+
+### Prossimo step
+
+Decidere (utente) quali finding di questa review portare in Sprint 8.3
+come PR separate, in ordine di priorità suggerito nella tabella riepilogo.
+
+---
+
 ## 2026-05-10 (285) — SEVERO post-Sprint piano α: voto 5/10* fallback NINO, 10 finding (1 HIGH-CRITICAL S1 regresso facade BLOCCANTE)
 
 ### Contesto
