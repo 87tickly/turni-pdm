@@ -39,7 +39,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, time, timedelta
 
-from colazione.domain.builder_pdc.builder import _GiornataPdcDraft
+from colazione.domain.builder_pdc.giornata_base import GiornataPdcDraft
 from colazione.domain.giornate_concrete import enumera_date_giornata
 
 logger = logging.getLogger(__name__)
@@ -108,7 +108,7 @@ def _giorni_solari_interi_in_finestra(
 
 
 def valida_riposo_settimanale(
-    drafts: list[_GiornataPdcDraft],
+    drafts: list[GiornataPdcDraft],
     *,
     ciclo_giorni: int | None = None,
     data_inizio_programma: date | None = None,
@@ -213,8 +213,8 @@ def valida_riposo_settimanale(
 
 
 def _conta_giorni_solari_per_riposo(
-    draft_pre: _GiornataPdcDraft,
-    draft_post: _GiornataPdcDraft,
+    draft_pre: GiornataPdcDraft,
+    draft_post: GiornataPdcDraft,
     gap_min: int,
     *,
     use_date_concrete: bool,

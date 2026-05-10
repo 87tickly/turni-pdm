@@ -10,6 +10,89 @@
 
 ---
 
+## 2026-05-10 (286) — Sprint 8.2 fix S1 facade restoration + S2(b) cautelativo (chiude finding HIGH SEVERO post-Sprint, CHIUDE UFFICIALMENTE Sprint 8.2)
+
+### Contesto
+
+Esito SEVERO post-Sprint entry 285: 10 finding, 1 HIGH-CRITICAL (S1
+regresso facade strangler) + 1 HIGH (S2 costante 14h decorativa). Decisione
+utente: "fai il fix S1 e poi il b cautelativo". Chiude i 2 finding
+HIGH per chiusura ufficiale Sprint 8.2 (regola §9 CLAUDE.md).
+
+### Modifiche
+
+**S1 — Facade restoration**:
+
+- `backend/src/colazione/domain/builder_pdc/riposo_intraturno.py:30`:
+  ```python
+  # PRIMA (bypass facade):
+  from colazione.domain.builder_pdc.builder import _GiornataPdcDraft
+  # DOPO (usa facade pubblico entry 273):
+  from colazione.domain.builder_pdc.giornata_base import GiornataPdcDraft
+  ```
+  + replace_all 4 occorrenze `_GiornataPdcDraft → GiornataPdcDraft`.
+- Idem `backend/src/colazione/domain/builder_pdc/riposo_settimanale.py:42`.
+
+`giornata_base.py:62` mantiene `GiornataPdcDraft = _GiornataPdcDraft`
+come alias (re-export), zero impatto su semantica. Strangler pattern
+ora rispettato dai 2 nuovi moduli del piano α.
+
+**S2(b) — Costante decorativa rimossa**:
+
+- `backend/src/colazione/domain/builder_pdc/riposo_intraturno.py:43`:
+  rimossa definizione `RIPOSO_INTRATURNO_FINE_TARDA_MIN: int = 14 * 60`
+  (era esportata in `__all__` ma mai usata = false signaling).
+- `__all__` aggiornato (4 entry vs 5).
+- Docstring `riposo_richiesto_min` riscritta:
+  - **Decisione cautelativa adottata documentata esplicitamente**:
+    16h sempre per fascia [00:01-05:00] (vs versione letterale §11.5
+    che distingueva 14h per [00:01-01:00] e 16h per il resto).
+  - Razionale: 16 > 14 → cautelativo per il PdC, sovra-strict per il
+    builder. Vale per Trenord finché non vengano sollevate richieste
+    operative di applicare la versione letterale.
+  - Riferimento entry 285 SEVERO S2 + entry 286 (questa) decisione
+    utente.
+- Docstring costante `RIPOSO_INTRATURNO_NOTTURNO_MIN` aggiornata con
+  motivazione cautelativa + storico SEVERO S2.
+
+### Verifiche
+
+- ✅ pytest suite PdC completa (8 file): **103 passed**, 3 xfailed
+  (intenzionali). Zero regressioni.
+- ✅ mypy --strict 13 source files: clean
+- ✅ ruff: clean
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway: solo refactor import + cleanup costante,
+  no schema change, backward-compatible.
+
+### Stato Sprint 8.2 — UFFICIALMENTE CHIUSO
+
+- ✅ Piano α chiuso in produzione (entry 283)
+- ✅ Regola §9 CLAUDE.md "SEVERO obbligatorio a fine Sprint" rispettata (entry 285)
+- ✅ S1 HIGH-CRITICAL chiuso (questa entry)
+- ✅ S2 HIGH chiuso con decisione utente cautelativa (questa entry)
+- ⏳ S3-S10 = debito tecnico documentato in critica entry 285,
+  rinviato Sprint 8.3 con motivazione esplicita (S3 hook anti-ricorsione
+  migration + S4 from_db programma_id + S5-S10 cleanup minori)
+
+### Sprint 8.2 chiusura ufficiale
+
+| Asse | Stato |
+|---|---|
+| Piano α (5 MR + hotfix) | ✅ in prod |
+| Migration 0046 in DB prod | ✅ applicata |
+| Suite test PdC (103 passed) | ✅ verde |
+| mypy --strict + ruff | ✅ clean |
+| SEVERO post-Sprint (regola §9) | ✅ critica retrospettiva fatta |
+| Finding HIGH risolti | ✅ S1 + S2 chiusi entry 286 |
+| Debito tecnico documentato | ✅ S3-S10 in docs/critiche/SPRINT-8.2-PIANO-ALPHA-RETROSPETTIVA.md |
+
+**Sprint 8.2 ufficialmente chiuso 2026-05-10.**
+
+---
+
 ## 2026-05-10 (285) — SEVERO post-Sprint piano α: voto 5/10* fallback NINO, 10 finding (1 HIGH-CRITICAL S1 regresso facade BLOCCANTE)
 
 ### Contesto

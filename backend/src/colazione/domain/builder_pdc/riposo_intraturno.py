@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 from datetime import time
 
-from colazione.domain.builder_pdc.builder import _GiornataPdcDraft
+from colazione.domain.builder_pdc.giornata_base import GiornataPdcDraft
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +39,16 @@ logger = logging.getLogger(__name__)
 #: Riposo intraturno minimo standard fra giornate consecutive (NORMATIVA §11.5).
 RIPOSO_INTRATURNO_STD_MIN: int = 11 * 60  # 11h
 
-#: Riposo aumentato a 14h se la giornata precedente finisce tra 00:01 e 01:00.
-RIPOSO_INTRATURNO_FINE_TARDA_MIN: int = 14 * 60  # 14h
-
 #: Riposo aumentato a 16h dopo giornata notturna (fine tra 00:01 e 05:00).
+#:
+#: NB Sprint 8.2 SEVERO post-Sprint S2 (entry 285 → decisione utente
+#: cautelativa entry 286): NORMATIVA-PDC §11.5 letterale distinguerebbe
+#: fascia [00:01-01:00] = 14h dalla [00:01-05:00] notturna = 16h. La
+#: scelta cautelativa adottata è **applicare 16h sempre nell'intera
+#: fascia [00:01-05:00]** (la 14h è un caso degenere coperto dal 16h
+#: più rigoroso). Costante ``RIPOSO_INTRATURNO_FINE_TARDA_MIN=14*60``
+#: rimossa per evitare false signaling (era esportata in __all__ ma
+#: mai usata).
 RIPOSO_INTRATURNO_NOTTURNO_MIN: int = 16 * 60  # 16h
 
 
@@ -54,37 +60,31 @@ RIPOSO_INTRATURNO_NOTTURNO_MIN: int = 16 * 60  # 16h
 def riposo_richiesto_min(fine_prestazione: time) -> int:
     """Cap di riposo richiesto in funzione dell'ora di fine prestazione.
 
-    NORMATIVA-PDC §11.5:
-    - fine ∈ [00:01-01:00]: 14h (riposo allungato per fine "tardi").
-    - fine ∈ [00:01-05:00]: 16h (riposo aumentato per giornata notturna).
-    - altrimenti: 11h standard.
+    NORMATIVA-PDC §11.5 (interpretazione cautelativa adottata, decisione
+    utente 2026-05-10 entry 286 post-SEVERO S2):
 
-    NB: la fascia notturna 00:01-05:00 INCLUDE 00:01-01:00. Per la
-    classificazione precedente (entry 269 SEVERO S1 fix `is_cap_notturno`),
-    la "notturna" ha la priorità (più lunga), quindi:
-    - fine ∈ [00:01-01:00]: 14h
-    - fine ∈ (01:00-05:00]: 16h
-    - altrimenti: 11h
-    Decisione interpretativa NINO: la regola §11.5 letterale dice
-    "dopo una giornata che finisce tra 00:01 e 01:00 → 14h, dopo una
-    notturna (00:01-05:00) → 16h". Letteralmente le due categorie si
-    sovrappongono nell'intervallo [00:01-01:00]. Adottiamo la **più
-    cautelativa = 16h** quando entrambe si applicherebbero (= fine in
-    [00:01-01:00]). Conservativo per il PdC, sovra-strict per il builder.
+    - fine ∈ [00:01-05:00]: **16h** (riposo notturno).
+    - altrimenti (incluso 00:00 esatto): **11h** standard.
+
+    Versione **letterale §11.5** (NON adottata): distingueva fascia
+    [00:01-01:00] = 14h e (01:00-05:00] = 16h. La cautelativa applica
+    16h in tutta la fascia [00:01-05:00] perché 16 > 14 (= sovra-strict
+    per il builder, conservativo per il PdC). Vale per Trenord finché
+    non vengano sollevate richieste operative di applicare la versione
+    letterale.
 
     Args:
         fine_prestazione: ora di fine prestazione della giornata
             precedente (``time(h, m)``).
 
     Returns:
-        Cap richiesto in minuti.
+        Cap richiesto in minuti (660 standard, 960 notturno).
     """
     h = fine_prestazione.hour
     m = fine_prestazione.minute
     minuto_assoluto = h * 60 + m
 
-    # Notturno [00:01-05:00] (1..299 minuti) → 16h.
-    # Decisione conservativa: include anche [00:01-01:00] perché 16 > 14.
+    # Notturno [00:01-05:00] (1..299 minuti) → 16h cautelativo.
     if 1 <= minuto_assoluto < 300:
         return RIPOSO_INTRATURNO_NOTTURNO_MIN
 
@@ -131,7 +131,7 @@ def riposo_effettivo_min(
 
 
 def calcola_e_valida_riposi_intraturno(
-    drafts: list[_GiornataPdcDraft],
+    drafts: list[GiornataPdcDraft],
 ) -> list[str]:
     """Calcola ``riposo_min_post`` per ogni giornata + valida §11.5.
 
@@ -198,7 +198,6 @@ def calcola_e_valida_riposi_intraturno(
 
 
 __all__ = [
-    "RIPOSO_INTRATURNO_FINE_TARDA_MIN",
     "RIPOSO_INTRATURNO_NOTTURNO_MIN",
     "RIPOSO_INTRATURNO_STD_MIN",
     "calcola_e_valida_riposi_intraturno",
