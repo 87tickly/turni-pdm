@@ -10,6 +10,128 @@
 
 ---
 
+## 2026-05-10 (290) — Sprint 8.3 S9: parser DSL etichette parlanti Trenord (LV 1:5, F escluso FpF, Si eff., Solo, Circola Sabato Festivo)
+
+### Contesto
+
+Ultimo task Sprint 8.3 backlog. S9 SEVERO post-Sprint entry 285:
+`enumera_date_giornata` (entry 280) parser DSL fallback sovra-include
+sulla maggioranza catalogo PdE Trenord 2026 (varianti parlanti
+complesse non riconosciute → tutte le candidate = sovra-strict per
+§11.4). Decisione utente: chiudere.
+
+### Modifiche
+
+**Nuovo modulo `backend/src/colazione/domain/dsl_varianti_calendariali.py`** (~245 righe):
+
+Sintassi supportate (esempi reali da MR-1110-DESIGN.md):
+
+| Sintassi | Semantica |
+|---|---|
+| `LV 1:5` | Lavorativo lun-ven NON festivi |
+| `LV 6` | Sabato NON festivo |
+| `LV` | Lavorativi default (1:5) |
+| `F` | Festivi (domeniche + festività) |
+| `F escluso FpF` | Festivi esclusi i Festivi precedenti Festivo (Pasqua, 25/4 sabato) |
+| `F escluso FpF ed escl. 22/3, 12/4, 1/5 e 2/6` | F escluso FpF + 4 date elencate |
+| `LV 1:5 escl. 22/3` | Lavorativi 1:5 esclusa data |
+| `LV esclusi 21/3, 28/3, 11/4` | Lavorativi default esclusi 3 date |
+| `Si eff. 22/3, 12/4` | Si effettua SOLO date elencate |
+| `Si eff. 1/5 e 2/6` | idem (separatore `e` oltre a `,`) |
+| `Circola Sabato Festivo` | Sabati che cadono su festività ufficiali |
+| `Solo 4/5/26` | Una sola data (anno 2-cifre) |
+| `GG` o `Giornaliero` | Tutte le candidate |
+
+API:
+- `parse_variante_dsl(variante: str | None, *, anno_default: int)
+  -> FiltroVariante | None`. Ritorna predicato `(d, festivita) -> bool`
+  o `None` se sintassi non riconosciuta (chiamante decide fallback).
+- `_parse_date_list(text, anno_default) -> list[date]`: helper estrae
+  date da stringa con separatori `,`, `e`, spazi.
+- `_extract_date_escluse(testo, anno_default) -> frozenset[date]`:
+  helper per clausole `escl./esclusi`.
+
+**Calcolo FpF inline** (decisione tecnica): non uso
+`festivi_precedenti_festivo` da `calendario.py` perché richiede
+`festivita` includere domeniche (non garantito dal chiamante).
+Nel filtro F → escluso FpF: `next_day = d + 1; next_is_festivo =
+next_day in festivita or next_day.weekday() == 6`. Self-contained.
+
+**`backend/src/colazione/domain/giornate_concrete.py`** modificato
+(~10 righe): `_filtra_per_variante` ora chiama `parse_variante_dsl`
+prima del fallback sovra-include. Sintassi MVP base (`LMXGV`, `S`, `D`,
+`PF`) mantenuta come fast-path per casi comuni. `LV`, `F`, etc passano
+al parser DSL.
+
+### Test
+
+**Nuovo `backend/tests/test_dsl_varianti_calendariali.py`** (~310 righe),
+28 test in 7 classi:
+
+- `TestParseDateList` (7): formati DD/M, DD/MM, separatore `,`/`e`/misto,
+  anno 2-cifre, data malformata.
+- `TestSintassiBase` (3): GG, "giornaliero" alias, vuoto/None.
+- `TestSoloData` (2): "Solo D/M/YY", anno 4-cifre.
+- `TestSiEff` (2): "Si eff. 22/3, 12/4" + separatore "e".
+- `TestLV` (5): LV 1:5 con esclusione Pasquetta, LV 6 sabati non festivi,
+  LV generico, LV 1:5 con esclusioni esplicite, LV esclusi multipli.
+- `TestF` (3): F solo festivi, F escluso FpF (Pasqua + 25/4 sabato),
+  F escluso FpF ed escl. date (esempio reale Trenord MR-1110).
+- `TestCircolaSabatoFestivo` (1): sabati festivi.
+- `TestNonRiconosciuta` (3 parametrizzati): pattern non riconosciuti
+  ritornano None.
+- 2 integration con `enumera_date_giornata` (LV 1:5 + F escluso FpF).
+
+### Verifiche
+
+- ✅ pytest test_dsl_varianti_calendariali: **28 passed**
+- ✅ pytest suite PdC + nuovi (11 file): **149 passed**, 3 xfailed
+  (intenzionali). Zero regressioni.
+- ✅ mypy --strict: clean
+- ✅ ruff: clean
+
+### Limitazioni dichiarate
+
+1. **Pattern non coperti**: "Dal 22/3 al 12/4" (range continuo),
+   "Misto: Lv+F (N date)" (etichette generate da
+   `calcola_etichetta_variante` legacy ma non parsabili come DSL),
+   etichette PDF Trenord con typo o spazi anomali. Fallback
+   sovra-include per questi casi.
+2. **Anno default**: usa primo data candidata o `date.today().year`.
+   Per programmi multi-anno (gen-dic 2026 + 2027) le clausole `escl.
+   22/3` senza anno potrebbero confondersi se il programma copre
+   marzo di 2 anni. Edge case che non si presenta per il PdE Trenord
+   tipico (programma annuale).
+3. **`Circola Sabato Festivo`** semantica: matcha sabati che sono
+   nel set `festivita`. Se il chiamante non passa le festività
+   ufficiali o il sabato è festa locale non in set, no match.
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway: nuovo modulo + integration. Backward-compatible:
+  varianti riconosciute dalla MVP (LMXGV, S, D, PF, GG) continuano a
+  funzionare via fast-path. Solo i fallback "tutte le candidate" sui
+  pattern parlanti ora vengono raffinati.
+
+### Stato Sprint 8.3 backlog cleanup
+
+✅ S3 anti-ricorsione hook revision ID (entry 287)
+✅ S4 from_db programma_id JOIN (entry 288)
+✅ S7 test integration end-to-end piano α + bug fix JSONB (entry 289)
+✅ S9 parser DSL etichette parlanti Trenord (questa entry)
+
+**TUTTI I TASK SPRINT 8.3 BACKLOG RICHIESTI COMPLETATI**.
+
+### Coverage Sprint 8.3 chiusura parziale
+
+I 4 task chiusi sono tra quelli del backlog post Sprint 8.2 (entry 285
+SEVERO post-Sprint). Restano S5/S6/S8/S10 (cleanup minori, totale ~1h)
++ smoke prod end-to-end opzionale + MR-PD6 parte 3 snapshot Vitest +
+aggiornamento CLAUDE.md. Decidere con utente se chiudere Sprint 8.3
+qui o proseguire.
+
+---
+
 ## 2026-05-10 (289) — Sprint 8.3 S7: test integration end-to-end PIANO α + bug fix JSONB query S4
 
 ### Contesto

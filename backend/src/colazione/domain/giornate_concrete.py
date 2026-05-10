@@ -32,6 +32,7 @@ import logging
 from datetime import date, timedelta
 
 from colazione.domain.calendario import tipo_giorno_categoria
+from colazione.domain.dsl_varianti_calendariali import parse_variante_dsl
 
 logger = logging.getLogger(__name__)
 
@@ -122,31 +123,43 @@ def _filtra_per_variante(
 ) -> list[date]:
     """Applica il filtro categoria/weekday in base alla variante.
 
-    Sintassi MVP: vedi module docstring. Fallback per testi non
-    riconosciuti = tutte le candidate (sovra-include conservativo).
+    Sintassi MVP base + Sprint 8.3 S9 parser DSL etichette parlanti
+    Trenord (LV 1:5, F escluso FpF, Si eff. 22/3 e 12/4, Solo D/M/YY,
+    Circola Sabato Festivo, ecc.). Vedi module docstring + entry 290.
+
+    Per testi non riconosciuti: fallback sovra-include conservativo
+    (= tutte le candidate, log info).
     """
     if variante is None:
         return candidate
-    v = variante.strip().upper()
+    v_strip = variante.strip()
+    v = v_strip.upper()
     if v in ("", "GG"):
         return candidate
 
-    # Match esplicito su sintassi MVP
-    if v in ("LMXGV", "LV", "LAVORATIVO"):
+    # Sintassi MVP "categoria semplice" (entry 280): match diretto
+    # senza parser DSL (più veloce per casi comuni).
+    if v in ("LMXGV", "LAVORATIVO"):
         return [d for d in candidate if tipo_giorno_categoria(d, festivita) == "lavorativo"]
     if v in ("S", "SABATO"):
         return [d for d in candidate if d.weekday() == 5]
     if v in ("D", "DOMENICA"):
         return [d for d in candidate if d.weekday() == 6]
-    if v in ("F", "FESTIVO"):
-        return [d for d in candidate if tipo_giorno_categoria(d, festivita) == "festivo"]
-    if v in ("PF", "PREFESTIVO"):
+    if v == "PF" or v == "PREFESTIVO":
         return [d for d in candidate if tipo_giorno_categoria(d, festivita) == "prefestivo"]
+
+    # Sprint 8.3 S9: parser DSL per sintassi parlanti Trenord.
+    # Anno default = anno della prima data candidata (se presente),
+    # altrimenti l'anno corrente.
+    anno_default = candidate[0].year if candidate else date.today().year
+    predicato = parse_variante_dsl(v_strip, anno_default=anno_default)
+    if predicato is not None:
+        return [d for d in candidate if predicato(d, festivita)]
 
     # Fallback: testo non riconosciuto, sovra-include
     logger.info(
         "enumera_date_giornata: variante '%s' non riconosciuta dal "
-        "parser MVP, fallback sovra-include (tutte le %d candidate)",
+        "parser DSL, fallback sovra-include (tutte le %d candidate)",
         variante,
         len(candidate),
     )
