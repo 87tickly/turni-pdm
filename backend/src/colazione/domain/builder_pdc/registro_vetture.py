@@ -27,10 +27,11 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import Integer, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from colazione.models.turni_pdc import TurnoPdcBlocco
+from colazione.models.giri import GiroMateriale
+from colazione.models.turni_pdc import TurnoPdc, TurnoPdcBlocco, TurnoPdcGiornata
 
 logger = logging.getLogger(__name__)
 
@@ -165,27 +166,55 @@ class RegistroVettureAssegnate:
         ``from_db`` userà la data concreta invece di ``None``, allenando
         il match.
 
+        **Sprint 8.3 S4** (post-SEVERO post-Sprint entry 285): la query
+        ora **filtra effettivamente per programma_id** via JOIN
+        multi-tabella. La catena è: ``turno_pdc_blocco → turno_pdc_giornata
+        → turno_pdc → generation_metadata_json.giro_materiale_id →
+        giro_materiale.programma_id``. ``giro_materiale_id`` è in
+        ``generation_metadata_json`` JSONB (cast a Integer per il filtro
+        IN sui giri del programma).
+
         Args:
             db: Sessione AsyncSession per la query.
             programma_id: ID del programma del quale caricare i turni.
 
         Returns:
-            Registro popolato (può essere vuoto se nessun turno
-            esistente).
+            Registro popolato con SOLO le vetture dei turni del
+            programma indicato (può essere vuoto se nessun turno
+            esistente per quel programma).
         """
-        # NB: il filtro per programma è transitive: turno_pdc_blocco →
-        # turno_pdc_giornata → turno_pdc → programma_id. Per ora una
-        # query SELECT semplice senza JOIN espliciti che restituisce
-        # *tutti* i blocchi VETTURA con campo non null. Il programma_id
-        # è ricevuto come hint (il filtro fine resta TODO S4: serve
-        # JOIN multi-tabella + filtro programma_id).
-        # Per MVP wild-card su scope-programma, tradiamo precisione per
-        # semplicità e siamo conservativi (sovra-include).
         registro = cls()
 
-        stmt = select(
-            TurnoPdcBlocco.numero_treno_vettura,
-        ).where(
+        # Subquery 1: ID dei giri del programma indicato.
+        giri_ids_subq = (
+            select(GiroMateriale.id)
+            .where(GiroMateriale.programma_id == programma_id)
+            .scalar_subquery()
+        )
+
+        # Subquery 2: ID dei turni PdC che riferiscono uno di quei giri
+        # via generation_metadata_json.giro_materiale_id (JSONB cast).
+        turni_ids_subq = (
+            select(TurnoPdc.id)
+            .where(
+                cast(
+                    TurnoPdc.generation_metadata_json["giro_materiale_id"].astext,
+                    Integer,
+                ).in_(giri_ids_subq)
+            )
+            .scalar_subquery()
+        )
+
+        # Subquery 3: ID delle giornate dei turni filtrati.
+        giornate_ids_subq = (
+            select(TurnoPdcGiornata.id)
+            .where(TurnoPdcGiornata.turno_pdc_id.in_(turni_ids_subq))
+            .scalar_subquery()
+        )
+
+        # Final: blocchi VETTURA dei turni del programma con campo non null.
+        stmt = select(TurnoPdcBlocco.numero_treno_vettura).where(
+            TurnoPdcBlocco.turno_pdc_giornata_id.in_(giornate_ids_subq),
             TurnoPdcBlocco.tipo_evento == "VETTURA",
             TurnoPdcBlocco.numero_treno_vettura.is_not(None),
         )
@@ -203,11 +232,9 @@ class RegistroVettureAssegnate:
                 operatore=None,
                 data_operativa=None,  # wild card S4 TODO
             )
-        # programma_id ignorato per ora (sovra-include) ma loggato per
-        # tracciabilità del scope intenzionale.
         logger.info(
             "RegistroVettureAssegnate.from_db: %d vetture caricate "
-            "(scope wild-card, programma_id=%d ignorato MVP)",
+            "per programma_id=%d (scope wild-card data, S4 chiuso)",
             registro.n_assegnate,
             programma_id,
         )

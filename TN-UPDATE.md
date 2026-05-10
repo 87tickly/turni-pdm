@@ -10,6 +10,70 @@
 
 ---
 
+## 2026-05-10 (288) — Sprint 8.3 S4: RegistroVettureAssegnate.from_db filtra programma_id via JOIN multi-tabella
+
+### Contesto
+
+S4 SEVERO post-Sprint entry 285: il `from_db` MVP ignorava `programma_id`
+e caricava TUTTE le vetture del DB → sovra-include conservativo MA
+pigrizia §7 (1 JOIN scrivibile <1h). Decisione utente: chiudere S4.
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_pdc/registro_vetture.py`**:
+
+- Import esteso: `Integer, cast` da SQLAlchemy + `GiroMateriale` da
+  models.giri + `TurnoPdc, TurnoPdcGiornata` da models.turni_pdc.
+- `from_db` ora costruisce 3 subquery a cascata:
+  1. `giri_ids_subq = SELECT id FROM giro_materiale WHERE programma_id = X`
+  2. `turni_ids_subq = SELECT id FROM turno_pdc WHERE
+     CAST(generation_metadata_json->>'giro_materiale_id' AS Integer) IN giri_ids_subq`
+     (chain via JSONB cast: `TurnoPdc.generation_metadata_json["giro_materiale_id"].astext`)
+  3. `giornate_ids_subq = SELECT id FROM turno_pdc_giornata WHERE
+     turno_pdc_id IN turni_ids_subq`
+- Final query: `SELECT numero_treno_vettura FROM turno_pdc_blocco WHERE
+  turno_pdc_giornata_id IN giornate_ids_subq AND tipo_evento='VETTURA'
+  AND numero_treno_vettura IS NOT NULL`.
+- Docstring aggiornata: scope ora "SOLO vetture dei turni del programma
+  indicato" (vs "tutte le vetture DB" pre-S4).
+- Log aggiornato: `S4 chiuso` invece di `programma_id ignorato MVP`.
+
+### Verifiche
+
+- ✅ pytest test_registro_vetture: 15 passed (i test esistenti usano
+  fake_session con `execute=AsyncMock(return_value=fake_result)` →
+  non rompono la signature della query, solo verificano comportamento
+  post-result).
+- ✅ mypy --strict registro_vetture.py: clean
+- ✅ ruff: clean
+
+### Limitazioni dichiarate
+
+1. **Test integration end-to-end vero per `from_db`**: gli unit test
+   esistenti mockano `db.execute` quindi non verificano la SQL query
+   reale (3-livello subquery + JSONB cast). Test integration con DB
+   reale è scope **S7** (prossimo MR Sprint 8.3).
+2. **Wild card per data_operativa** rimane: il filtro programma chiude
+   S4, ma `data_operativa=None` (= wild card) rimane MVP finché
+   l'helper `enumera_date_giornata` non viene integrato per turni
+   storici (= match data esatta). Scope MR-PD7+ con validazione
+   cross-turno completa §15.4.
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway: nuovo SQL query path ma logica risultato
+  invariata (registro popolato con stessi semantica). Backward-compatible
+  dato che oggi 0 turni `deposito_first` esistono in prod (registro
+  vuoto sia con vecchio sia con nuovo from_db).
+
+### Stato
+
+- ✅ S4 chiuso. Pigrizia §7 risolta.
+- ⏳ S7 test integration end-to-end piano α.
+- ⏳ S9 parser DSL etichette parlanti Trenord.
+
+---
+
 ## 2026-05-10 (287) — Sprint 8.3 S3: pre-commit hook revision ID alembic univoco (anti-ricorsione lezione meta entry 283)
 
 ### Contesto
