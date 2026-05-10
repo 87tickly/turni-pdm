@@ -172,34 +172,57 @@ def _build_handler_with_treno(
     partenza_iso: str,
     arrivo_iso: str,
 ):
-    """Costruisce un handler MockTransport che ritorna 1 treno
-    matching (stazione_partenza, stazione_arrivo) negli orari dati."""
+    """Costruisce un handler MockTransport che simula i due endpoint
+    live.arturo.travel:
+    - ``/api/partenze/{stazione}`` ritorna lista 1 treno con SOLO la
+      fermata corrente (semantica reale dell'API)
+    - ``/api/treno/{numero}`` ritorna l'oggetto treno con percorso
+      completo (le 2 fermate partenza+arrivo)
+    Sprint 8.4 G3 fix: aggiornato dopo aver scoperto che /partenze/
+    non ritorna le fermate intermedie/finali del percorso."""
+
+    fermate_complete = [
+        {
+            "stazione_id": stazione_partenza,
+            "programmato_partenza": partenza_iso,
+            "programmato_arrivo": None,
+        },
+        {
+            "stazione_id": stazione_arrivo,
+            "programmato_partenza": None,
+            "programmato_arrivo": arrivo_iso,
+        },
+    ]
+    treno_completo = {
+        "numero": "9999",
+        "categoria": "REG",
+        "operatore": "TRENORD",
+        "fermate": fermate_complete,
+    }
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if f"/api/partenze/{stazione_partenza}" not in request.url.path:
-            return httpx.Response(200, json=[])
-        return httpx.Response(
-            200,
-            json=[
-                {
-                    "numero": "9999",
-                    "categoria": "REG",
-                    "operatore": "TRENORD",
-                    "fermate": [
-                        {
-                            "stazione_id": stazione_partenza,
-                            "programmato_partenza": partenza_iso,
-                            "programmato_arrivo": None,
-                        },
-                        {
-                            "stazione_id": stazione_arrivo,
-                            "programmato_partenza": None,
-                            "programmato_arrivo": arrivo_iso,
-                        },
-                    ],
-                },
-            ],
-        )
+        path = request.url.path
+        if path.startswith("/api/partenze/"):
+            stazione_request = path.removeprefix("/api/partenze/")
+            if stazione_request != stazione_partenza:
+                return httpx.Response(200, json=[])
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "numero": "9999",
+                        "categoria": "REG",
+                        "operatore": "TRENORD",
+                        "fermate": [fermate_complete[0]],
+                    },
+                ],
+            )
+        if path.startswith("/api/treno/"):
+            numero = path.removeprefix("/api/treno/")
+            if numero == "9999":
+                return httpx.Response(200, json=treno_completo)
+            return httpx.Response(404, json={"detail": "Not Found"})
+        return httpx.Response(404)
 
     return handler
 

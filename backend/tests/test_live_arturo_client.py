@@ -12,6 +12,7 @@ Niente DB, niente network esterno.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -70,6 +71,57 @@ def _make_treno(
         "operatore": operatore,
         "fermate": fermate,
     }
+
+
+def _make_dual_handler(
+    treni: list[dict[str, Any]],
+) -> Callable[[httpx.Request], httpx.Response]:
+    """Sprint 8.4 G3 — handler MockTransport che simula i due endpoint
+    live.arturo.travel: ``/api/partenze/{stazione}`` ritorna lista treni
+    con SOLO la fermata corrente (1 elemento) come fa l'API reale, e
+    ``/api/treno/{numero}`` ritorna il singolo treno con percorso
+    completo.
+
+    Necessario dopo aver scoperto che la response live di ``/partenze/``
+    contiene solo la fermata corrente del treno (non l'intero
+    percorso). Da Sprint 8.4 G3 il client fa fetch a ``/treno/{numero}``
+    per il dettaglio.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.startswith("/api/partenze/"):
+            stazione = path.removeprefix("/api/partenze/")
+            risposta_partenze = []
+            for t in treni:
+                fermate = t.get("fermate", [])
+                f_partenza: dict[str, Any] | None = None
+                for f in fermate:
+                    if isinstance(f, dict) and f.get("stazione_id") == stazione:
+                        f_partenza = f
+                        break
+                if f_partenza is None and fermate:
+                    f_partenza = fermate[0]
+                if f_partenza is None:
+                    continue
+                risposta_partenze.append(
+                    {
+                        "numero": t["numero"],
+                        "categoria": t.get("categoria", ""),
+                        "operatore": t.get("operatore"),
+                        "fermate": [f_partenza],
+                    }
+                )
+            return httpx.Response(200, json=risposta_partenze)
+        if path.startswith("/api/treno/"):
+            numero = path.removeprefix("/api/treno/")
+            for t in treni:
+                if str(t.get("numero")) == numero:
+                    return httpx.Response(200, json=t)
+            return httpx.Response(404, json={"detail": "Not Found"})
+        return httpx.Response(404)
+
+    return handler
 
 
 def test_estrai_candidato_trovato_partenza_arrivo_in_finestra() -> None:
@@ -199,7 +251,7 @@ def test_estrai_candidato_fermate_vuote() -> None:
 @pytest.mark.asyncio
 async def test_trova_treno_vettura_sceglie_partenza_piu_imminente() -> None:
     """Più candidati → vince quello con partenza_min minore."""
-    response_data = [
+    treni = [
         _make_treno(
             numero="LATE",
             fermate=[
@@ -216,11 +268,7 @@ async def test_trova_treno_vettura_sceglie_partenza_piu_imminente() -> None:
         ),
     ]
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/partenze/S01700"
-        return httpx.Response(200, json=response_data)
-
-    transport = httpx.MockTransport(handler)
+    transport = httpx.MockTransport(_make_dual_handler(treni))
     async with httpx.AsyncClient(transport=transport) as client:
         treno = await trova_treno_vettura(
             stazione_partenza_codice="S01700",
@@ -279,7 +327,7 @@ async def test_trova_treno_vettura_json_malformato() -> None:
 @pytest.mark.asyncio
 async def test_trova_treno_vettura_arrivo_non_servito() -> None:
     """Treno c'è ma non passa per la stazione_arrivo_codice → None."""
-    response_data = [
+    treni = [
         _make_treno(
             fermate=[
                 {"stazione_id": "S01700", "programmato_partenza": "2026-05-05T12:00:00Z", "programmato_arrivo": None},
@@ -287,7 +335,7 @@ async def test_trova_treno_vettura_arrivo_non_servito() -> None:
             ],
         ),
     ]
-    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=response_data))
+    transport = httpx.MockTransport(_make_dual_handler(treni))
     async with httpx.AsyncClient(transport=transport) as client:
         treno = await trova_treno_vettura(
             stazione_partenza_codice="S01700",
@@ -337,7 +385,7 @@ def _make_treno_passante() -> dict[str, Any]:
 async def test_esclusi_strict_match_numero_operatore_uguali_esclude() -> None:
     """Match strict: `esclusi={(numero, operatore_esatto)}` esclude
     candidato con quel numero E quell'operatore."""
-    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=[_make_treno_passante()]))
+    transport = httpx.MockTransport(_make_dual_handler([_make_treno_passante()]))
     async with httpx.AsyncClient(transport=transport) as client:
         treno = await trova_treno_vettura(
             stazione_partenza_codice="S01700",
@@ -354,7 +402,7 @@ async def test_esclusi_strict_match_operatore_diverso_non_esclude() -> None:
     """Match strict: `esclusi={(numero, "TILO")}` NON esclude candidato
     con stesso numero ma operatore="TN" (semantica strict per
     operatore valorizzato)."""
-    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=[_make_treno_passante()]))
+    transport = httpx.MockTransport(_make_dual_handler([_make_treno_passante()]))
     async with httpx.AsyncClient(transport=transport) as client:
         treno = await trova_treno_vettura(
             stazione_partenza_codice="S01700",
@@ -380,7 +428,7 @@ async def test_esclusi_wildcard_operatore_none_esclude_qualsiasi_operatore() -> 
     docstring ma non rispettato dal filtro). `from_db` dichiarava
     "sovra-strict ma sicuro" mentre era in realtà SOTTO-strict.
     """
-    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=[_make_treno_passante()]))
+    transport = httpx.MockTransport(_make_dual_handler([_make_treno_passante()]))
     async with httpx.AsyncClient(transport=transport) as client:
         treno = await trova_treno_vettura(
             stazione_partenza_codice="S01700",
@@ -419,7 +467,7 @@ async def test_esclusi_wildcard_e_strict_combinati() -> None:
             {"stazione_id": "S01520", "programmato_partenza": None, "programmato_arrivo": "2026-05-05T13:30:00Z"},
         ],
     )
-    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=[treno_a, treno_b]))
+    transport = httpx.MockTransport(_make_dual_handler([treno_a, treno_b]))
     async with httpx.AsyncClient(transport=transport) as client:
         treno = await trova_treno_vettura(
             stazione_partenza_codice="S01700",

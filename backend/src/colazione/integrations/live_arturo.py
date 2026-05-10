@@ -64,9 +64,18 @@ class PartenzeCache:
     se l'API ha definitivamente fallito (429 dopo retry, 500, ecc.)
     e non vogliamo riprovare nello stesso giro."""
 
+    by_treno: dict[str, dict[str, Any] | None] = field(default_factory=dict)
+    """Sprint 8.4 G3 — cache per dettaglio percorso treno via
+    ``/api/treno/{numero}``. Indispensabile dopo aver scoperto che
+    ``/api/partenze/{stazione}`` ritorna SOLO la fermata corrente
+    (non l'intero percorso): per verificare che un treno passi per
+    ``stazione_arrivo_codice`` serve il dettaglio del treno."""
+
     hits: int = 0
     misses: int = 0
     errori: int = 0
+    treno_hits: int = 0
+    treno_misses: int = 0
 
 
 _RETRY_429_DELAYS_SEC: tuple[float, ...] = (0.2, 0.5, 1.0)
@@ -223,6 +232,78 @@ async def _fetch_partenze(
     return data
 
 
+async def _fetch_treno_dettaglio(
+    numero: str,
+    *,
+    client: httpx.AsyncClient,
+    cache: PartenzeCache | None,
+) -> dict[str, Any] | None:
+    """Sprint 8.4 G3 — fetch ``/api/treno/{numero}`` con cache + retry 429.
+
+    Ritorna il **percorso completo** del treno (origine → destinazione,
+    fermate intermedie con ``stazione_id``, ``programmato_partenza``,
+    ``programmato_arrivo``). Indispensabile per verificare che un
+    treno candidato dalla lista ``/partenze/{stazione}`` passi
+    effettivamente per ``stazione_arrivo_codice``: la response di
+    ``/partenze/`` contiene SOLO la fermata corrente del treno (1
+    elemento in ``fermate``), non il resto del percorso.
+
+    Pattern identico a ``_fetch_partenze`` (cache opzionale, retry
+    429 con backoff). ``data`` è un dict (singolo treno) invece di
+    una list.
+    """
+    if cache is not None and numero in cache.by_treno:
+        cache.treno_hits += 1
+        return cache.by_treno[numero]
+
+    settings = get_settings()
+    url = f"{settings.live_arturo_api_url}/api/treno/{numero}"
+
+    last_exc: Exception | None = None
+    data: dict[str, Any] | None = None
+
+    for tentativo, delay_pre in enumerate([0.0, *_RETRY_429_DELAYS_SEC]):
+        if delay_pre > 0:
+            await asyncio.sleep(delay_pre)
+        try:
+            resp = await client.get(url)
+            if resp.status_code == 429:
+                logger.info(
+                    "live_arturo: 429 su /treno/%s (tentativo %d), retry",
+                    numero,
+                    tentativo + 1,
+                )
+                continue
+            resp.raise_for_status()
+            payload = resp.json()
+            if isinstance(payload, dict):
+                data = payload
+            else:
+                data = None
+            break
+        except httpx.HTTPError as e:
+            last_exc = e
+            break
+        except ValueError as e:
+            last_exc = e
+            data = None
+            break
+
+    if last_exc is not None:
+        logger.warning(
+            "live_arturo._fetch_treno_dettaglio GET %s fallita: %s", url, last_exc
+        )
+        if cache is not None:
+            cache.errori += 1
+            cache.by_treno[numero] = None
+        return None
+
+    if cache is not None:
+        cache.treno_misses += 1
+        cache.by_treno[numero] = data
+    return data
+
+
 async def trova_treno_vettura(
     *,
     stazione_partenza_codice: str,
@@ -278,131 +359,205 @@ async def trova_treno_vettura(
     finestra, API down dopo retry, stazione errata, esclusi tutti, ecc.).
     """
     own_client = client is None
+    if client is None:
+        settings = get_settings()
+        client = httpx.AsyncClient(timeout=settings.live_arturo_timeout_sec)
     try:
-        if client is None:
-            settings = get_settings()
-            client = httpx.AsyncClient(timeout=settings.live_arturo_timeout_sec)
         try:
             data = await _fetch_partenze(
                 stazione_partenza_codice, client=client, cache=cache
             )
-        finally:
-            if own_client:
-                await client.aclose()
-    except httpx.HTTPError as e:
-        logger.warning(
-            "live_arturo.trova_treno_vettura wrapper failure for %s: %s",
-            stazione_partenza_codice,
-            e,
-        )
-        return None
-
-    if data is None:
-        return None
-
-    # Sprint 8.4 G2 — diagnostica: conta esiti dei filtri per logging
-    # operativo. Quando l'utente vede "dormita_rientro" senza VETTURA, vuole
-    # sapere PERCHÉ l'API live.arturo.travel non ha dato risultati. Il log
-    # info qui sotto risponde discriminando: API down vs nessun treno
-    # passa per la coppia (origine, destinazione) vs treni esistono ma fuori
-    # finestra temporale vs tutti esclusi dal registro cross-PdC.
-    n_totale = len(data)
-    n_no_fermate = 0
-    n_arrivo_no_match = 0
-    n_fuori_finestra = 0
-    n_esclusi = 0
-    candidati: list[TrenoVettura] = []
-    for treno in data:
-        if not isinstance(treno, dict):
-            n_no_fermate += 1
-            continue
-        try:
-            cand, esito = _estrai_candidato_with_reason(
-                treno,
-                stazione_partenza_codice=stazione_partenza_codice,
-                stazione_arrivo_codice=stazione_arrivo_codice,
-                ora_min_partenza=ora_min_partenza,
-                max_attesa_min=max_attesa_min,
+        except httpx.HTTPError as e:
+            logger.warning(
+                "live_arturo.trova_treno_vettura wrapper failure for %s: %s",
+                stazione_partenza_codice,
+                e,
             )
-            if esito == "no_fermate":
-                n_no_fermate += 1
+            return None
+
+        if data is None:
+            return None
+
+        # Sprint 8.4 G3 — fix critico bug API: ``/partenze/{stazione}``
+        # ritorna SOLO la fermata corrente (1 elemento in ``fermate``),
+        # NON il percorso completo del treno. Per verificare che il treno
+        # passi per ``stazione_arrivo_codice`` serve il dettaglio via
+        # ``/api/treno/{numero}``.
+        #
+        # Strategia 2-step:
+        # 1. Filter rapido in finestra temporale dalla response
+        #    ``/partenze/`` (ora_partenza dalla fermata 0 = quella corrente).
+        # 2. Per ogni candidato in finestra: fetch ``/treno/{numero}`` →
+        #    cerca ``stazione_arrivo_codice`` nelle fermate successive a
+        #    quella di partenza.
+        n_totale = len(data)
+        n_malformato = 0
+        n_fuori_finestra = 0
+        n_arrivo_no_match = 0
+        n_dettaglio_api_failed = 0
+        n_esclusi = 0
+        candidati: list[TrenoVettura] = []
+        for treno in data:
+            if not isinstance(treno, dict):
+                n_malformato += 1
                 continue
-            if esito == "fuori_finestra":
+            # Step 1: filter rapido per orario di partenza (dalla fermata 0
+            # del payload /partenze/{stazione} = la stazione corrente).
+            fermate_partenze = treno.get("fermate")
+            if not isinstance(fermate_partenze, list) or not fermate_partenze:
+                n_malformato += 1
+                continue
+            f0 = fermate_partenze[0]
+            if not isinstance(f0, dict):
+                n_malformato += 1
+                continue
+            partenza_min = _hhmm_to_min(f0.get("programmato_partenza"))
+            if partenza_min is None:
+                n_malformato += 1
+                continue
+            attesa = (partenza_min - ora_min_partenza) % (24 * 60)
+            if attesa > max_attesa_min:
                 n_fuori_finestra += 1
                 continue
-            if esito == "arrivo_no_match":
-                n_arrivo_no_match += 1
+
+            numero = str(treno.get("numero", ""))
+            if numero == "":
+                n_malformato += 1
                 continue
-            if cand is None:
-                n_no_fermate += 1
-                continue
-            # Sprint 8.2 MR-PD-FIX-SEVERO 3b A1: filtro esclusi pre-ordinamento.
-            # Sprint 8.4 S1 FIX (chiude HIGH-CRITICAL critica entry 295):
-            # match wild-card su operatore. Una entry `(numero, None)` in
-            # `esclusi` esclude qualsiasi candidato con quel numero,
-            # indipendentemente da `cand.operatore` reale ("TN"/"TILO"/...).
-            # Pre-fix il match era solo strict tupla → 0 esclusioni effettive
-            # quando `from_db` popolava sempre `operatore=None` (wild-card
-            # dichiarato in docstring ma non rispettato dal filtro).
+            operatore = treno.get("operatore")
+
+            # Sprint 8.4 S1 FIX (entry 297): match wild-card su operatore.
             if esclusi is not None and (
-                (cand.numero, cand.operatore) in esclusi
-                or (cand.numero, None) in esclusi
+                (numero, operatore) in esclusi
+                or (numero, None) in esclusi
             ):
                 logger.debug(
                     "Treno %s (%s) escluso da registro vetture",
-                    cand.numero,
-                    cand.operatore,
+                    numero,
+                    operatore,
                 )
                 n_esclusi += 1
                 continue
-            candidati.append(cand)
-        except (KeyError, TypeError, ValueError) as e:
-            logger.debug("Treno scartato (parsing): %s", e)
-            n_no_fermate += 1
-            continue
 
-    if not candidati:
-        # Sprint 8.4 G2 — log INFO con breakdown filtri quando 0 candidati.
-        # Aiuta l'operatore a capire se l'API ha dato dati ma non utili,
-        # vs API che non risponde (caso gestito sopra con data is None).
+            # Step 2: fetch dettaglio treno per cercare stazione_arrivo
+            # nelle fermate successive (l'API /partenze/ NON le ritorna).
+            dettaglio = await _fetch_treno_dettaglio(
+                numero, client=client, cache=cache
+            )
+            if dettaglio is None:
+                n_dettaglio_api_failed += 1
+                continue
+            fermate_full = dettaglio.get("fermate")
+            if not isinstance(fermate_full, list) or len(fermate_full) < 2:
+                n_arrivo_no_match += 1
+                continue
+
+            # Trova indice fermata di partenza nel percorso completo.
+            fp_idx_full: int | None = None
+            for i, f in enumerate(fermate_full):
+                if (
+                    isinstance(f, dict)
+                    and f.get("stazione_id") == stazione_partenza_codice
+                ):
+                    fp_idx_full = i
+                    break
+            if fp_idx_full is None:
+                # Stazione partenza non compare (anomalia API): skip
+                # candidato.
+                n_arrivo_no_match += 1
+                continue
+
+            # Cerca stazione di arrivo nelle fermate SUCCESSIVE alla
+            # partenza (evitiamo direzioni opposte / ritorno).
+            fermata_arrivo: dict[str, Any] | None = None
+            for f in fermate_full[fp_idx_full + 1 :]:
+                if (
+                    isinstance(f, dict)
+                    and f.get("stazione_id") == stazione_arrivo_codice
+                ):
+                    fermata_arrivo = f
+                    break
+            if fermata_arrivo is None:
+                n_arrivo_no_match += 1
+                continue
+
+            arrivo_min = _hhmm_to_min(fermata_arrivo.get("programmato_arrivo"))
+            if arrivo_min is None:
+                arrivo_min = _hhmm_to_min(
+                    fermata_arrivo.get("programmato_partenza")
+                )
+            if arrivo_min is None:
+                n_malformato += 1
+                continue
+
+            durata = (arrivo_min - partenza_min) % (24 * 60)
+            if durata <= 0:
+                n_malformato += 1
+                continue
+
+            candidati.append(
+                TrenoVettura(
+                    numero=numero,
+                    categoria=str(treno.get("categoria", "")),
+                    operatore=operatore,
+                    stazione_partenza_codice=stazione_partenza_codice,
+                    stazione_arrivo_codice=stazione_arrivo_codice,
+                    partenza_min=partenza_min,
+                    arrivo_min=arrivo_min,
+                    durata_min=durata,
+                )
+            )
+
+        if not candidati:
+            # Sprint 8.4 G3 — log INFO con breakdown filtri (con il nuovo
+            # 2-step API: malformato / fuori_finestra / dettaglio_api_failed
+            # / arrivo_no_match / esclusi_registro).
+            logger.info(
+                "live_arturo.trova_treno_vettura: %s→%s ora>=%dmin "
+                "window=%dmin → 0 candidati (totali=%d, malformato=%d, "
+                "fuori_finestra=%d, dettaglio_api_failed=%d, "
+                "arrivo_no_match=%d, esclusi_registro=%d)",
+                stazione_partenza_codice,
+                stazione_arrivo_codice,
+                ora_min_partenza,
+                max_attesa_min,
+                n_totale,
+                n_malformato,
+                n_fuori_finestra,
+                n_dettaglio_api_failed,
+                n_arrivo_no_match,
+                n_esclusi,
+            )
+            return None
+
+        # Sceglie il treno con partenza più imminente (= minor attesa).
+        candidati.sort(key=lambda t: t.partenza_min)
+        scelto = candidati[0]
         logger.info(
             "live_arturo.trova_treno_vettura: %s→%s ora>=%dmin window=%dmin "
-            "→ 0 candidati (totali=%d, no_fermate=%d, "
-            "arrivo_no_match=%d, fuori_finestra=%d, esclusi_registro=%d)",
+            "→ scelto %s (cat=%s op=%s) part=%dmin arr=%dmin (totali=%d, "
+            "scartati: malformato=%d/fuori_finestra=%d/"
+            "dettaglio_api_failed=%d/arrivo_no_match=%d/esclusi=%d)",
             stazione_partenza_codice,
             stazione_arrivo_codice,
             ora_min_partenza,
             max_attesa_min,
+            scelto.numero,
+            scelto.categoria,
+            scelto.operatore,
+            scelto.partenza_min,
+            scelto.arrivo_min,
             n_totale,
-            n_no_fermate,
-            n_arrivo_no_match,
+            n_malformato,
             n_fuori_finestra,
+            n_dettaglio_api_failed,
+            n_arrivo_no_match,
             n_esclusi,
         )
-        return None
-
-    # Sceglie il treno con partenza più imminente (= minor attesa).
-    candidati.sort(key=lambda t: t.partenza_min)
-    scelto = candidati[0]
-    logger.info(
-        "live_arturo.trova_treno_vettura: %s→%s ora>=%dmin window=%dmin "
-        "→ scelto %s (cat=%s op=%s) part=%dmin arr=%dmin (candidati totali=%d, "
-        "scartati=arrivo_no_match=%d/fuori_finestra=%d/esclusi=%d)",
-        stazione_partenza_codice,
-        stazione_arrivo_codice,
-        ora_min_partenza,
-        max_attesa_min,
-        scelto.numero,
-        scelto.categoria,
-        scelto.operatore,
-        scelto.partenza_min,
-        scelto.arrivo_min,
-        n_totale,
-        n_arrivo_no_match,
-        n_fuori_finestra,
-        n_esclusi,
-    )
-    return scelto
+        return scelto
+    finally:
+        if own_client:
+            await client.aclose()
 
 
 def _estrai_candidato_with_reason(

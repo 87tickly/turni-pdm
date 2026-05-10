@@ -10,6 +10,115 @@
 
 ---
 
+## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
+
+### Contesto
+
+L'utente dopo il deploy entry 300 conferma: *"mancano tutte le
+vetture. non vengono inserite."* La diagnostica entry 300 era andata
+nella direzione giusta (logging breakdown filtri) ma non aveva
+identificato il bug **API contract** che azzerava ogni candidato.
+
+### Root cause
+
+Smoke diretto su `https://live.arturo.travel/api/partenze/S01520`:
+
+```
+N treni: 27
+Distribuzione N fermate per treno:
+  1 fermate: 27 treni
+```
+
+L'endpoint `/api/partenze/{stazione}` ritorna ogni treno con **una
+sola fermata** (= la stazione corrente di partenza, con
+`stazione_id=""` per il treno in origine), NON l'intero percorso.
+
+Il codice `_estrai_candidato` cercava la fermata di ARRIVO nelle
+fermate `fermate[fp_idx + 1 :]` → sempre lista vuota → 100% candidati
+scartati come `arrivo_no_match` → 0 vetture trovate per ogni
+chiamata, qualunque coppia (origine, destinazione).
+
+Il percorso completo è disponibile via
+`https://live.arturo.travel/api/treno/{numero}` (verificato manualmente
+con treno 96007 COLICO → MILANO CENTRALE: 7 fermate con `stazione_id`,
+`programmato_partenza`, `programmato_arrivo` ognuna).
+
+### Modifiche
+
+**`backend/src/colazione/integrations/live_arturo.py`** —
+**fix critico contract API**:
+
+- `PartenzeCache` esteso con `by_treno: dict[str, dict | None]` +
+  contatori `treno_hits/misses` per cache delle response
+  `/api/treno/{numero}`.
+- Nuova funzione `_fetch_treno_dettaglio(numero, *, client, cache)`:
+  fetch a `/api/treno/{numero}` con cache + retry 429 (pattern
+  identico a `_fetch_partenze`).
+- `trova_treno_vettura` ora 2-step:
+  1. `/api/partenze/{stazione_part}` per la lista dei numeri treno
+     in partenza con orari (filter rapido temporale dalla `fermate[0]`).
+  2. Per ogni candidato in finestra: `_fetch_treno_dettaglio(numero)`
+     → ricerca `stazione_arrivo_codice` nelle fermate successive a
+     quella di partenza nel **percorso completo**.
+- Restruttura `try/finally` per garantire chiusura `client` in
+  `own_client=True` anche con N fetch dettaglio.
+- Logging breakdown aggiornato con il nuovo motivo `dettaglio_api_failed`.
+- Esclusi-registro check eseguito **prima** del fetch dettaglio (saltiamo
+  chiamate API per treni già esclusi).
+
+**`backend/tests/test_live_arturo_client.py`**:
+
+- Nuovo helper `_make_dual_handler(treni)` che simula i 2 endpoint:
+  `/api/partenze/{stazione}` ritorna lista treni con SOLO `fermate[0]`,
+  `/api/treno/{numero}` ritorna l'oggetto treno completo.
+- 3 test aggiornati (sceglie partenza imminente, esclusi
+  strict-operatore-diverso, esclusi wildcard+strict combinati) con
+  `_make_dual_handler` invece di `lambda r: ...`.
+- Test `arrivo_non_servito` aggiornato analogamente.
+
+**`backend/tests/test_multi_turno_dp.py`**:
+
+- `_build_handler_with_treno` aggiornato: ora distingue
+  `/api/partenze/{...}` (ritorna fermata corrente) vs
+  `/api/treno/{numero}` (ritorna percorso completo). Helper agnostico
+  rispetto alla geometria del segmento.
+
+### Verifiche
+
+- ✅ ruff clean su `live_arturo.py`.
+- ✅ mypy --strict clean su `live_arturo.py`.
+- ✅ pytest `test_live_arturo_client.py`: **21 passed** (vs 18 prima
+  del fix con 3 regressioni dal cambio API).
+- ✅ pytest `test_multi_turno_dp.py + test_deposito_first.py +
+  test_piano_alpha_integration.py`: **31 passed**, zero regressioni.
+- ⚠️ pytest full backend: 50 fallimenti pre-esistenti su `master`
+  (verificato via `git stash` → stessi fail). Non sono regressioni di
+  questo fix. Backlog.
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway (cambia `live_arturo.py` runtime,
+  `test_*.py` solo test).
+
+### Stato
+
+- ✅ Bug root-cause vetture identificato e fixato.
+- ⏳ Smoke prod post-deploy: GeneraPdC su un giro che chiude lontano
+  dal deposito → blocco VETTURA atteso ora popolato con `numero_treno`
+  reale risolto via API live.arturo.travel.
+
+### Prossimo step
+
+Dopo deploy backend Railway, smoke prod:
+1. Apri un turno PdC esistente — se ha `vettura_rientro=null` con
+   motivo "dormita_rientro: nessun treno passante in finestra",
+   rigenera il PdC.
+2. Verifica nei log Railway backend: ora vedrai
+   `live_arturo.trova_treno_vettura: ... → scelto NUMERO ...`
+   invece di `→ 0 candidati ... arrivo_no_match=27`.
+
+---
+
 ## 2026-05-10 (300) — Sprint 8.4 G1+G2: Gantt unificato modificabile + diagnostica vetture API live.arturo.travel
 
 ### Contesto
