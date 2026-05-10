@@ -10,6 +10,94 @@
 
 ---
 
+## 2026-05-10 (291) — Sprint 8.3 quick wins LOW: S5 ruff silence + S6 import top-level + S10 path morto signature
+
+### Contesto
+
+Sprint 8.3 backlog cleanup post-Sprint 8.2: 3 finding LOW SEVERO chiusi
+in batch unico su `deposito_first.py`. Tutti riconducibili a anti-pattern
+junior segnalati dalla critica entry 285 (voto 5/10 fallback NINO ⇒
+voto 4/10 AMILCARE):
+
+- **S5**: `_ = ACCESSORI_MIN_STANDARD  # silence unused-import warning
+  per ruff` → re-export pseudo-fittizio. Verificato che NESSUN
+  consumatore esterno lo importa da `deposito_first` (solo `builder.py`,
+  `multi_turno.py`, `giornata_base.py` lo usano direttamente).
+- **S6**: 4 import locali dentro `genera_turni_pdc_deposito_first`
+  (`calcola_e_valida_riposi_intraturno`, `valida_riposo_settimanale`,
+  `festivita_italiane`, `ProgrammaMateriale`) → top-level. Anti-pattern
+  perché nasconde dipendenze cross-module e ne rende meno trasparente
+  l'analisi statica.
+- **S10**: signature di `costruisci_giornata_deposito_first` aveva
+  `cache: PartenzeCache | None = None` come parametro standalone +
+  `context: BuilderProgrammaContext | None = None`, con la logica:
+  `cache_eff = context.cache if context is not None else cache`.
+  Verificato che NESSUN chiamante (test unit, endpoint API, builder
+  interno) passa `cache=` esplicitamente: i test usano i default
+  (cache=None, context=None → MVP path), l'orchestrator interno passa
+  solo `context=ctx`. Path morto.
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_pdc/deposito_first.py`** (-12
+righe nette, 17 inserzioni 29 cancellazioni):
+
+- **S5**: rimosso `ACCESSORI_MIN_STANDARD` dall'import block +
+  rimossa intera sezione "Re-export per consistenza" in fondo
+  (commento + linea `_ = ACCESSORI_MIN_STANDARD`).
+- **S6**: aggiunti 4 import top-level dopo gli import esistenti del
+  pacchetto `colazione.domain.builder_pdc` (ordine alfabetico tra
+  `programma_context` e `vettura_resolver` per coerenza); rimossi
+  i 4 blocchi `from ... import ...` dalla funzione orchestrator.
+- **S10**: rimosso parametro `cache: PartenzeCache | None = None`
+  dalla signature + import `from colazione.integrations.live_arturo
+  import PartenzeCache` (non più necessario nel modulo); aggiornata
+  docstring (rimosso paragrafo `cache:` legacy, raffinato paragrafo
+  `context:` per chiarire fallback MVP); semplificata logica:
+  `cache_eff = context.cache if context is not None else None`.
+
+### Verifiche
+
+- ✅ ruff `deposito_first.py`: All checks passed
+- ✅ mypy --strict `deposito_first.py`: Success: no issues found
+- ✅ pytest suite PdC (8 file pertinenti — `test_deposito_first`,
+  `test_piano_alpha_integration`, `test_riposo_intraturno`,
+  `test_riposo_settimanale`, `test_registro_vetture`,
+  `test_giornate_concrete`, `test_dsl_varianti_calendariali`):
+  **111 passed**, 0 failed
+- ✅ pytest full backend: 1358 passed, **50 failed pre-esistenti su
+  master (verificato con git stash)** → zero regressioni introdotte.
+  I 50 fail sono noti (test integration DB-dependent + 4 stub
+  `_DraftStub` non aggiornati dopo fix S1 SEVERO entry 286 che ha
+  rinominato `is_notturno` → `is_cap_notturno`; out-of-scope di questo
+  cleanup).
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway: nuovo file `deposito_first.py`. Modifiche
+  puramente refactor interno (signature pubblica perde un parametro
+  non usato, semantica invariata). Backward-compatible per tutti i
+  chiamanti reali verificati.
+
+### Stato Sprint 8.3 backlog cleanup
+
+✅ S3 anti-ricorsione hook revision ID (entry 287)
+✅ S4 from_db programma_id JOIN (entry 288)
+✅ S7 test integration end-to-end piano α + bug fix JSONB (entry 289)
+✅ S9 parser DSL etichette parlanti Trenord (entry 290)
+✅ S5+S6+S10 quick wins LOW (questa entry)
+⏳ S8 MED reset contatore §11.4 in `riposo_settimanale.py`
+⏳ Smoke prod end-to-end deposito_first via API opt-in
+⏳ CLAUDE.md update tabella stato Sprint
+⏳ SEVERO post-Sprint 8.3 retrospettivo
+
+### Prossimo step
+
+S8 refactor `riposo_settimanale.py:200` per contare TUTTE le settimane
+violate (oggi reset interno perde info su violazioni multiple).
+
+---
+
 ## 2026-05-10 (290) — Sprint 8.3 S9: parser DSL etichette parlanti Trenord (LV 1:5, F escluso FpF, Si eff., Solo, Circola Sabato Festivo)
 
 ### Contesto

@@ -48,7 +48,6 @@ from colazione.config import get_settings
 # `giornata_base.py` invece dei simboli privati `_xxx` di `builder.py`.
 # Eliminata dipendenza da API privata cross-modulo (anti-pattern S2).
 from colazione.domain.builder_pdc.giornata_base import (
-    ACCESSORI_MIN_STANDARD,
     CONDOTTA_MAX_MIN,
     FINE_SERVIZIO_MIN,
     BloccoPdcDraft,
@@ -69,6 +68,12 @@ from colazione.domain.builder_pdc.giornata_base import (
 from colazione.domain.builder_pdc.programma_context import (
     BuilderProgrammaContext,
 )
+from colazione.domain.builder_pdc.riposo_intraturno import (
+    calcola_e_valida_riposi_intraturno,
+)
+from colazione.domain.builder_pdc.riposo_settimanale import (
+    valida_riposo_settimanale,
+)
 from colazione.domain.builder_pdc.vettura_resolver import (
     PRESTAZIONE_MAX_NOTTURNO_MIN,
     PRESTAZIONE_MAX_STANDARD_MIN,
@@ -78,7 +83,7 @@ from colazione.domain.builder_pdc.vettura_resolver import (
     SceltaVOCTAXI,
     risolvi_rientro,
 )
-from colazione.integrations.live_arturo import PartenzeCache
+from colazione.domain.calendario import festivita_italiane
 from colazione.models.anagrafica import Depot
 from colazione.models.giri import (
     GiroBlocco,
@@ -86,6 +91,7 @@ from colazione.models.giri import (
     GiroMateriale,
     GiroVariante,
 )
+from colazione.models.programmi import ProgrammaMateriale
 from colazione.models.turni_pdc import TurnoPdc
 
 logger = logging.getLogger(__name__)
@@ -220,7 +226,6 @@ async def costruisci_giornata_deposito_first(
     variante_calendario: str,
     blocchi_giro: list[GiroBlocco],
     live_client: httpx.AsyncClient,
-    cache: PartenzeCache | None = None,
     context: BuilderProgrammaContext | None = None,
     data_operativa: date | None = None,
 ) -> tuple[GiornataPdcDraft | None, list[str]]:
@@ -247,15 +252,12 @@ async def costruisci_giornata_deposito_first(
         blocchi_giro: blocchi del giro materiale per quella giornata.
         live_client: client httpx aperto, condiviso col builder
             principale per riusare connessione TLS.
-        cache: ``PartenzeCache`` opzionale per riusare le response
-            ``/api/partenze/{stazione}`` fra giornate. Se ``context``
-            è valorizzato, ``cache`` viene **sovrascritta** da
-            ``context.cache`` (S2 SEVERO: dependency injection).
         context: Sprint 8.2 MR-PD-FIX-SEVERO 3b A2.
             ``BuilderProgrammaContext`` opzionale per condividere cache
-            + registro vetture cross-PdC fra le invocazioni della stessa
-            request endpoint. Se valorizzato: ``cache`` e ``registro``
-            vengono presi da ``context``.
+            partenze + registro vetture cross-PdC fra le invocazioni
+            della stessa request endpoint. Se ``None`` (path "MVP
+            legacy" usato dai test unit), cache e registro non sono
+            propagati al resolver.
         data_operativa: Sprint 8.2 MR-PD-FIX-SEVERO 3b A1. Data del
             turno PdC corrente, propagata al resolver per chiave
             registro. Richiesta SE ``context`` è valorizzato.
@@ -264,12 +266,11 @@ async def costruisci_giornata_deposito_first(
         ``(draft, [])`` se la giornata è valida e chiusa al deposito.
         ``(None, [violazione_str])`` se SCARTATA per cap o invarianti.
     """
-    # Sprint 8.2 MR-PD-FIX-SEVERO 3b: se context valorizzato, le sue
-    # dependency injection sovrascrivono i parametri legacy (cache,
-    # data_operativa). Permette di chiamare la funzione sia in modalità
-    # "vecchio MVP" (cache opzionale, no registro) sia in modalità
-    # "endpoint MR-PD5" (context obbligatorio).
-    cache_eff = context.cache if context is not None else cache
+    # Sprint 8.3 S10 SEVERO post-Sprint: signature semplificata.
+    # Path morto rimosso (parametro `cache` standalone non usato da
+    # nessun chiamante). Cache e registro arrivano sempre via
+    # `context`; se `context is None` (test MVP), entrambi a `None`.
+    cache_eff = context.cache if context is not None else None
     registro_eff = context.registro if context is not None else None
     deposito_stazione = depot.stazione_principale_codice
     if deposito_stazione is None:
@@ -592,21 +593,12 @@ async def genera_turni_pdc_deposito_first(
     # 7.ter. Sprint 8.2 MR-PD7b-2 §11.5: calcola riposo intraturno
     # (popola riposo_min_post di ogni draft + valida 11/14/16h).
     # Side-effect: aggiorna draft.riposo_min_post per persistenza.
-    from colazione.domain.builder_pdc.riposo_intraturno import (
-        calcola_e_valida_riposi_intraturno,
-    )
     riposo_intraturno_violazioni = calcola_e_valida_riposi_intraturno(drafts)
 
     # 7.quater. Sprint 8.2 MR-PD7b-3 §11.4: riposo settimanale ≥ 62h con
     # ≥ 2 giorni solari interi. Algoritmo "≥1 ogni 7 giornate consecutive"
     # (raffinamento S4 SEVERO PIANO PD7b). Carica calendario programma
     # per conteggio giorni solari concreto.
-    from colazione.domain.builder_pdc.riposo_settimanale import (
-        valida_riposo_settimanale,
-    )
-    from colazione.domain.calendario import festivita_italiane
-    from colazione.models.programmi import ProgrammaMateriale
-
     programma = (
         await session.execute(
             select(ProgrammaMateriale).where(
@@ -722,7 +714,3 @@ __all__ = [
     "costruisci_giornata_deposito_first",
     "genera_turni_pdc_deposito_first",
 ]
-
-
-# Re-export per consistenza (consumatori non devono cercare in builder.py).
-_ = ACCESSORI_MIN_STANDARD  # silence unused-import warning per ruff
