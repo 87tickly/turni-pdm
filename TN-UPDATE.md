@@ -10,6 +10,76 @@
 
 ---
 
+## 2026-05-10 (287) — Sprint 8.3 S3: pre-commit hook revision ID alembic univoco (anti-ricorsione lezione meta entry 283)
+
+### Contesto
+
+Apertura Sprint 8.3 (cleanup backlog post Sprint 8.2). Decisione utente:
+procedere con S3+S4+S7+S9. S3 prima per blindare il workflow contro la
+ricorrenza dell'incidente migration ID duplicato di entry 283 (revision
+b7c8d9e0f1a2 collideva con 0029 → cycle → deploy crashed).
+
+### Modifiche
+
+**Nuovo script `backend/scripts/check_alembic_revisions.py`** (~160 righe):
+- Itera tutti i file in `backend/alembic/versions/*.py`
+- 4 check su grafo migration:
+  1. Nessuna ``revision = "..."`` duplicata fra file (= bug entry 283)
+  2. Ogni ``down_revision`` punta a una ``revision`` esistente
+  3. Esattamente 1 head (no branch parallelo non-mergiato)
+  4. Nessun ciclo (DFS standard)
+- Regex flessibili: matcha sia `revision: str = "..."` (formato MR-PD)
+  che `revision = "..."` (formato Plan-D senza type hint)
+- CLI standalone: `uv run python backend/scripts/check_alembic_revisions.py`
+  Exit 0 se OK, exit 1 se issue rilevati.
+- Output user-friendly con prefix ❌ + descrizione del problema +
+  conteggio file totali.
+
+**Nuovo `backend/tests/test_check_alembic_revisions.py`** (~170 righe),
+13 test in 5 classi:
+- `TestParseMigration` (4): formato typed/untyped/base/missing
+- `TestCheckNoDuplicateRevisions` (2): incluso scenario reale entry 283
+  (b7c8d9e0f1a2 in 0029 + 0046)
+- `TestCheckNoDanglingDownRevisions` (2): down_revision fantasma
+- `TestCheckSingleHead` (2): branch parallelo
+- `TestCheckNoCycles` (2): ciclo a→b→c→a
+- `test_real_alembic_versions_passes`: smoke su 45 migration reali
+  → ✅ pass
+
+### Verifiche
+
+- ✅ pytest test_check_alembic_revisions: 13 passed
+- ✅ `uv run python backend/scripts/check_alembic_revisions.py` su 45
+  migration reali: ✅ "alembic migrations check passed (45 files)"
+- ✅ Bug regex inizialmente identificato (formato `revision = "..."`
+  senza `: str` non matchato) e fixato in iterazione: regex
+  `r'^revision\s*(?::\s*str)?\s*=\s*"([^"]+)"'`
+
+### Limitazioni dichiarate
+
+1. **Non integrato in pre-commit framework**: non esiste `.pre-commit-config.yaml`
+   nel repo. Lo script è standalone, sviluppatore lo lancia manualmente.
+   Quando si introdurrà `pre-commit` (PR futura), aggiungere come hook.
+2. **Non integrato in CI**: nessun GitHub Actions workflow per backend
+   (verificato `ls .github/workflows/`). Quando ci sarà, aggiungere
+   step `uv run python backend/scripts/check_alembic_revisions.py`.
+3. **Rilevati 0 problemi nel grafo attuale**: 45 migration tutte coerenti,
+   1 head `c8d9e0f1a2b3` (= MR-PD-FIX-SEVERO 3b post-hotfix).
+
+### Stato deploy
+
+- ⏭️ Nessun deploy: script dev tooling, no impatto runtime.
+
+### Stato
+
+- ✅ S3 chiuso. Lezione meta entry 283 ora codificata in test
+  riproducibile.
+- ⏳ S4 RegistroVettureAssegnate.from_db filtra programma_id JOIN.
+- ⏳ S7 test integration end-to-end piano α.
+- ⏳ S9 parser DSL etichette parlanti Trenord.
+
+---
+
 ## 2026-05-10 (286) — Sprint 8.2 fix S1 facade restoration + S2(b) cautelativo (chiude finding HIGH SEVERO post-Sprint, CHIUDE UFFICIALMENTE Sprint 8.2)
 
 ### Contesto
