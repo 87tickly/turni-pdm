@@ -217,3 +217,92 @@ def test_riposo_min_costante_3720() -> None:
 
 def test_giornate_consecutive_max_7() -> None:
     assert GIORNATE_CONSECUTIVE_MAX_SENZA_RIPOSO == 7
+
+
+# =====================================================================
+# Sprint 8.3 S8 SEVERO post-Sprint: tracciamento strisce continue
+# =====================================================================
+
+
+class TestStrisceContinue:
+    """Sprint 8.3 S8: il refactor traccia STRISCE CONTINUE invece di
+    multipli di 7. Una striscia di 21gg consecutivi senza riposo emette
+    1 sola violazione con lunghezza completa, non 3 generiche."""
+
+    def test_ciclo_21gg_zero_riposi_una_violazione_striscia_21(self) -> None:
+        """21 giornate consecutive senza riposo settimanale → 1 sola
+        violazione 'striscia_consecutiva_da_G1_a_G21:21_giornate' (più
+        informativa del vecchio output che emetteva 3 violazioni
+        generiche 'contatore_raggiunto_7' a G7, G14, G21)."""
+        drafts = [
+            _draft(i, 6, 18, riposo_post_min=12 * 60) for i in range(1, 22)
+        ]
+        viol = valida_riposo_settimanale(drafts, ciclo_giorni=21)
+        # Conta violazioni "no_in_7gg" (= strisce). Solo 1, non 3.
+        viol_strisce = [v for v in viol if "no_in_7gg" in v]
+        assert len(viol_strisce) == 1, (
+            f"atteso 1 violazione striscia, ottenute {len(viol_strisce)}: "
+            f"{viol_strisce}"
+        )
+        # Messaggio deve indicare lunghezza 21 + range G1-G21.
+        assert "G1" in viol_strisce[0]
+        assert "G21" in viol_strisce[0]
+        assert "21_giornate" in viol_strisce[0]
+        # Atteso anche numero_insufficiente: 0 riposi vs ceil(21/7)=3.
+        assert any("numero_insufficiente" in v for v in viol)
+
+    def test_ciclo_14gg_zero_riposi_una_violazione_striscia_14(self) -> None:
+        """14 giornate consecutive senza riposo → 1 violazione striscia
+        14gg (vecchio algoritmo: 2 violazioni separate G7+G14)."""
+        drafts = [
+            _draft(i, 6, 18, riposo_post_min=12 * 60) for i in range(1, 15)
+        ]
+        viol = valida_riposo_settimanale(drafts, ciclo_giorni=14)
+        viol_strisce = [v for v in viol if "no_in_7gg" in v]
+        assert len(viol_strisce) == 1
+        assert "14_giornate" in viol_strisce[0]
+        assert "G1" in viol_strisce[0]
+        assert "G14" in viol_strisce[0]
+
+    def test_ciclo_8gg_zero_riposi_una_violazione_striscia_8(self) -> None:
+        """8 giornate consecutive (1 oltre soglia) → 1 violazione 8gg."""
+        drafts = [
+            _draft(i, 6, 18, riposo_post_min=12 * 60) for i in range(1, 9)
+        ]
+        viol = valida_riposo_settimanale(drafts, ciclo_giorni=8)
+        viol_strisce = [v for v in viol if "no_in_7gg" in v]
+        assert len(viol_strisce) == 1
+        assert "8_giornate" in viol_strisce[0]
+
+    def test_due_strisce_separate_da_riposo_due_violazioni(self) -> None:
+        """G1-G7 senza riposo, G8 riposo, G9-G15 senza riposo →
+        2 violazioni striscia distinte (G1-G7 e G9-G15)."""
+        drafts = (
+            [_draft(i, 6, 18, riposo_post_min=12 * 60) for i in range(1, 8)]  # G1-7
+            + [_draft(8, 6, 18, riposo_post_min=64 * 60)]  # G8 riposo
+            + [_draft(i, 6, 18, riposo_post_min=12 * 60) for i in range(9, 16)]  # G9-15
+        )
+        viol = valida_riposo_settimanale(drafts, ciclo_giorni=15)
+        viol_strisce = [v for v in viol if "no_in_7gg" in v]
+        assert len(viol_strisce) == 2
+        # Striscia 1: G1-G7 (7 giornate). G8 ha riposo → striscia chiusa
+        # all'idx=7 cioè drafts[6].numero_giornata = G7.
+        assert any(
+            "G1" in v and "G7" in v and "7_giornate" in v
+            for v in viol_strisce
+        )
+        # Striscia 2: G9-G15 (7 giornate).
+        assert any(
+            "G9" in v and "G15" in v and "7_giornate" in v
+            for v in viol_strisce
+        )
+
+    def test_striscia_6gg_sotto_soglia_no_violazione(self) -> None:
+        """6 giornate consecutive senza riposo: SOTTO soglia 7gg → no
+        violazione striscia (solo numero_insufficiente per ciclo 6gg)."""
+        drafts = [
+            _draft(i, 6, 18, riposo_post_min=12 * 60) for i in range(1, 7)
+        ]
+        viol = valida_riposo_settimanale(drafts, ciclo_giorni=6)
+        viol_strisce = [v for v in viol if "no_in_7gg" in v]
+        assert viol_strisce == []

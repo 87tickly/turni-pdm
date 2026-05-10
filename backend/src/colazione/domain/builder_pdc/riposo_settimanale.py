@@ -142,9 +142,15 @@ def valida_riposo_settimanale(
     Returns:
         Lista violazioni testuali. Vuota se §11.4 rispettata.
         Formati:
-        - ``"riposo_settimanale_no_in_7gg:contatore_raggiunto_7"``
+        - ``"riposo_settimanale_no_in_7gg:striscia_consecutiva_da_G{i}_a_G{j}:{L}_giornate"``
+          (Sprint 8.3 S8 SEVERO post-Sprint: una violazione per striscia
+          continua di L giornate ≥ 7 senza riposo settimanale, con
+          inizio/fine. Sostituisce il vecchio messaggio
+          ``contatore_raggiunto_7`` ripetuto ogni 7 giornate consecutive,
+          che rumorizzava l'output e perdeva la lunghezza totale della
+          striscia continua.)
         - ``"riposo_settimanale_giorni_solari_insufficienti:G{i}_post:richiesti_2:effettivi_{n}"``
-        - ``"riposo_settimanale_durata_insufficiente:G{i}_post:richiesti_3720min:effettivi_{n}min"``
+        - ``"riposo_settimanale_numero_insufficiente:trovati_{n}:attesi_min_{m}_per_ciclo_{c}gg"``
     """
     violazioni: list[str] = []
     n = len(drafts)
@@ -159,8 +165,32 @@ def valida_riposo_settimanale(
         and festivita is not None
     )
 
+    # Sprint 8.3 S8 SEVERO post-Sprint: tracciamento strisce continue di
+    # giornate senza riposo settimanale. Vecchio algoritmo emetteva
+    # "contatore_raggiunto_7" ad ogni multiplo di 7 in striscia + reset
+    # locale → output rumoroso e info "lunghezza totale striscia"
+    # persa. Nuovo: una sola violazione per striscia continua, con
+    # G_inizio + G_fine + lunghezza effettiva.
+    inizio_striscia_idx: int | None = None  # idx in drafts (0-based)
     contatore = 0
     riposi_settimanali_trovati = 0
+
+    def _emit_violazione_striscia(idx_chiusura_striscia: int) -> None:
+        """Emette violazione se la striscia corrente è ≥ 7 giornate.
+        ``idx_chiusura_striscia`` = idx (0-based) dell'ultima giornata
+        della striscia (= idx-1 al chiudersi via riposo, = n-1 a fine
+        loop)."""
+        if (
+            contatore >= GIORNATE_CONSECUTIVE_MAX_SENZA_RIPOSO
+            and inizio_striscia_idx is not None
+        ):
+            g_inizio = drafts[inizio_striscia_idx].numero_giornata
+            g_fine = drafts[idx_chiusura_striscia].numero_giornata
+            violazioni.append(
+                f"riposo_settimanale_no_in_7gg:"
+                f"striscia_consecutiva_da_G{g_inizio}_a_G{g_fine}:"
+                f"{contatore}_giornate"
+            )
 
     for idx in range(n):
         d = drafts[idx]
@@ -189,16 +219,19 @@ def valida_riposo_settimanale(
                     f"effettivi_{n_giorni_interi}"
                 )
 
+            # Chiudi striscia (se aperta e ≥ 7 emetti violazione).
+            # Striscia termina ALLA giornata immediatamente precedente
+            # questa (idx-1), perché su `idx` c'è un riposo valido.
+            _emit_violazione_striscia(idx_chiusura_striscia=idx - 1)
             contatore = 0
+            inizio_striscia_idx = None
         else:
+            if inizio_striscia_idx is None:
+                inizio_striscia_idx = idx
             contatore += 1
-            if contatore >= GIORNATE_CONSECUTIVE_MAX_SENZA_RIPOSO:
-                violazioni.append(
-                    f"riposo_settimanale_no_in_7gg:"
-                    f"contatore_raggiunto_{contatore}_a_G{d.numero_giornata}"
-                )
-                # Reset per evitare violazioni ripetute consecutive
-                contatore = 0
+
+    # Striscia ancora aperta a fine ciclo: emetti se ≥ 7.
+    _emit_violazione_striscia(idx_chiusura_striscia=n - 1)
 
     # Verifica numero minimo riposi settimanali per ciclo
     riposi_attesi_min = max(1, -(-ciclo // 7))  # ceil(ciclo / 7)

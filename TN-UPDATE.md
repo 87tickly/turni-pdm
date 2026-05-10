@@ -10,6 +10,131 @@
 
 ---
 
+## 2026-05-10 (292) — Sprint 8.3 S8: refactor §11.4 strisce continue (1 violazione per striscia, non N ogni 7gg)
+
+### Contesto
+
+S8 SEVERO post-Sprint entry 285 (MED): l'algoritmo §11.4 in
+`riposo_settimanale.py:194-201` resettava il contatore "giornate
+consecutive senza riposo" a 0 dopo aver emesso una violazione
+"contatore_raggiunto_7". Effetto: una striscia di 21 giornate
+consecutive senza riposo emetteva 3 violazioni distinte
+(`contatore_raggiunto_7_a_G7`, `..._a_G14`, `..._a_G21`) generiche +
+indistinguibili dal punto di vista informativo da una vera "3 strisce
+da 7gg ciascuna". La lunghezza totale della striscia continua andava
+persa.
+
+Decisione: refactor a tracciamento strisce continue. Una sola
+violazione per striscia con G_inizio + G_fine + lunghezza effettiva.
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_pdc/riposo_settimanale.py`**:
+
+- Variabili nuove: `inizio_striscia_idx: int | None = None` (idx in
+  drafts dell'inizio striscia corrente), `contatore` (= lunghezza
+  striscia corrente, sostituisce contatore "giornate senza riposo
+  rolling").
+- Closure `_emit_violazione_striscia(idx_chiusura)`: emette violazione
+  solo se striscia ≥ 7 + reset locale alle variabili. Gestisce sia
+  chiusura via riposo trovato (`idx_chiusura = idx - 1`) sia chiusura
+  a fine ciclo (`idx_chiusura = n - 1`).
+- Loop principale: branch riposo settimanale → chiama
+  `_emit_violazione_striscia(idx-1)` + reset; branch no-riposo →
+  inizia striscia se `inizio_striscia_idx is None`, incrementa
+  contatore (NON emette più al raggiungimento di 7).
+- A fine loop: `_emit_violazione_striscia(n-1)` per chiudere eventuale
+  striscia ancora aperta.
+
+**Formato messaggio nuovo** (mantenuto prefisso `no_in_7gg` per
+backward-compat dei test):
+
+```
+riposo_settimanale_no_in_7gg:striscia_consecutiva_da_G{i}_a_G{j}:{L}_giornate
+```
+
+vs vecchio:
+
+```
+riposo_settimanale_no_in_7gg:contatore_raggiunto_7_a_G{n}
+```
+
+Esempio scenario 21gg consecutivi senza riposo:
+- Vecchio: 3 violazioni `contatore_raggiunto_7_a_G7`, `..._a_G14`,
+  `..._a_G21`.
+- Nuovo: 1 sola violazione
+  `striscia_consecutiva_da_G1_a_G21:21_giornate`. Più informativa
+  (lunghezza effettiva visibile), meno rumorosa nel JSON metadata.
+
+### Test
+
+**`backend/tests/test_riposo_settimanale.py`** — nuova classe
+`TestStrisceContinue` (5 test):
+
+1. `test_ciclo_21gg_zero_riposi_una_violazione_striscia_21`: scenario
+   chiave del refactor — 1 sola violazione 21gg invece di 3 generiche.
+2. `test_ciclo_14gg_zero_riposi_una_violazione_striscia_14`: 14gg
+   continui = 1 violazione (vs 2 vecchie).
+3. `test_ciclo_8gg_zero_riposi_una_violazione_striscia_8`: 8gg continui
+   = 1 violazione di lunghezza 8 (sopra soglia 7 ma non multiplo).
+4. `test_due_strisce_separate_da_riposo_due_violazioni`: G1-G7 + G8
+   riposo + G9-G15 = 2 strisce distinte = 2 violazioni distinte.
+5. `test_striscia_6gg_sotto_soglia_no_violazione`: 6gg < 7 → no
+   violazione striscia (solo numero_insufficiente).
+
+Test esistenti (15 in 4 classi) tutti compatibili: `assert any("no_in_7gg"
+in v for v in viol)` continua a matchare il nuovo formato.
+
+### Verifiche
+
+- ✅ pytest test_riposo_settimanale: **20 passed** (15 esistenti + 5
+  nuovi)
+- ✅ pytest combined (test_riposo_settimanale + test_deposito_first +
+  test_piano_alpha_integration): 38 passed
+- ✅ mypy --strict riposo_settimanale.py: clean
+- ✅ ruff: clean
+
+### Limitazioni dichiarate
+
+1. **Wrap continuo cross-ciclo non gestito**: se le ultime giornate del
+   ciclo + le prime del ciclo successivo formano una striscia continua
+   (perché il riposo del wrap è < 62h), il refactor le considera 2
+   strisce distinte (chiude a fine ciclo, riapre a inizio ciclo
+   successivo). Limitazione coerente col vecchio algoritmo (= il
+   wrap N→1 viene già gestito come "fine giro" implicitamente). Per il
+   ciclo PdC standard 5+2 il caso è raro perché il wrap è di solito
+   ≥ 62h. Refinement scope MR-PD7+ se emerge un bisogno reale.
+2. **Riposi multipli ravvicinati**: se due riposi settimanali sono
+   consecutivi (es. ciclo 5+2+5+2 con 2 riposi a G5 e G7), il
+   refactor azzera correttamente la striscia ad ogni riposo.
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway: refactor di logica validazione, output
+  JSON metadata cambia formato (campo
+  `riposo_settimanale_violazioni`). Backward-compat per consumer che
+  cercano substring `"no_in_7gg"`. Frontend Sprint 8.3 MR-PD6 parte 3
+  dovrà adeguarsi se mostra il dettaglio violazione (oggi non lo fa).
+
+### Stato Sprint 8.3 backlog cleanup
+
+✅ S3 anti-ricorsione hook revision ID (entry 287)
+✅ S4 from_db programma_id JOIN (entry 288)
+✅ S7 test integration end-to-end piano α + bug fix JSONB (entry 289)
+✅ S9 parser DSL etichette parlanti Trenord (entry 290)
+✅ S5+S6+S10 quick wins LOW (entry 291)
+✅ S8 MED refactor §11.4 strisce continue (questa entry)
+⏳ Smoke prod end-to-end deposito_first via API opt-in
+⏳ CLAUDE.md update tabella stato Sprint
+⏳ SEVERO post-Sprint 8.3 retrospettivo
+
+### Prossimo step
+
+CLAUDE.md aggiornamento "Stato attuale del progetto" + smoke prod
+end-to-end deposito_first.
+
+---
+
 ## 2026-05-10 (291) — Sprint 8.3 quick wins LOW: S5 ruff silence + S6 import top-level + S10 path morto signature
 
 ### Contesto
