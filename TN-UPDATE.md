@@ -10,6 +10,169 @@
 
 ---
 
+## 2026-05-10 (295) — Sprint 8.3 SEVERO post-Sprint retrospettivo (voto 3/10 AMILCARE V4 Pro, 1 HIGH-CRITICAL emerso, CHIUDE Sprint 8.3 backlog cleanup)
+
+### Contesto
+
+Chiusura ufficiale Sprint 8.3 backlog cleanup post-Sprint 8.2.
+Invocazione SEVERO obbligatoria per regola §9 CLAUDE.md a fine Sprint.
+
+NB: questa entry copre SOLO il filone backlog cleanup Sprint 8.3
+(entries 287-293). Il filone parallelo Plan-D MR-S2 (entry 294) è
+gestito separatamente dall'altro thread.
+
+### Modalità invocazione
+
+Subagent custom `severo` non bootato in sessione corrente (limite
+operativo entry 248: caricamento al boot). **Modalità fallback NINO**:
+
+- Orchestratore SEVERO eseguito manualmente da NINO (lettura system
+  prompt `.claude/agents/severo.md` + format canonico).
+- Motore di giudizio sostanziale = **AMILCARE V4 Pro via
+  `mcp__amilcare__reason`** (no bias auto-compiacenza verso codice
+  NINO).
+- Pattern entry 248: 2 timeout MCP `-32001` su brief 3KB → 1.5KB →
+  success al 3° tentativo con brief ~600 byte. **AMILCARE confermato**
+  (NON pure-NINO fallback).
+
+### Esito
+
+**Voto Sprint 8.3 = 3/10** (peggio di Sprint 8.2 = 4/10 AMILCARE).
+**Traiettoria preoccupante**: ogni Sprint cleanup introduce nuovi
+finding (di cui 1 HIGH-CRITICAL) mentre chiude i precedenti =
+trasferimento del debito, non riduzione.
+
+**9 finding totali** (1 HIGH-CRITICAL + 1 HIGH + 4 MED + 3 LOW).
+
+**Output canonico**:
+- `docs/critiche/SPRINT-8.3-BACKLOG-CLEANUP-RETROSPETTIVA.md` (488 righe)
+- `docs/critiche/README.md` aggiornato (indice in cima)
+
+### Finding chiave: S1 HIGH-CRITICAL — bug semantico cross-modulo
+
+**Smascherato confrontando codice cross-modulo PRIMA di delegare** ad
+AMILCARE (NINO ha cross-letto `registro_vetture.py` + `live_arturo.py`
+durante la preparazione del brief snello, intercettando il vero
+problema strutturale che il brief originale non evidenziava):
+
+- `registro_vetture.py:230-241` (S4 entry 288) popola SEMPRE
+  `assegna(operatore=None)` con commento "wild-card su operatore".
+- `live_arturo.py:301` filtra
+  `if (cand.numero, cand.operatore) in esclusi: continue` = match
+  TUPLA STRETTA.
+- `cand.operatore` reale è `"TN"` o `"TILO"` ma `esclusi` contiene
+  `(n, None)` → **0 esclusioni effettive**.
+- Docstring `registro_vetture.py:158-163` dichiara "sovra-strict ma
+  sicuro" → **è invece SOTTO-strict, falso signaling**.
+- Smoke prod entry 293 NON l'ha esercitato (Caso A short-circuit,
+  registro vuoto pre-smoke).
+- AMILCARE conferma HIGH-CRITICAL su brief snello.
+
+**Fix opzione (a)**: match wild-card in `live_arturo.py:301` (`if
+qualsiasi (n, _) in esclusi`) <1h.
+
+### Finding S2 HIGH — test integration S7 #4 passa vacuamente
+
+`test_piano_alpha_integration.py:226-285` — loop su 0 righe (test #4
+`test_piano_alpha_blocco_vettura_numero_treno_persistito`). Self-aware
+(commento esplicito 226-234) ma non risolto = pigrizia mascherata da
+"scope MR-PD7+". **R-PROC-1 SEVERO violata**: il bug S1 sopra sarebbe
+sopravvissuto a questo test.
+
+Fix: fixture giro `_crea_giro_completo_per_deposito_first` con
+chiusura ≠ deposito (es. tratta lunga Mi.CLE↔Tirano), 2-3h.
+
+### Finding MED (4)
+
+- **MED-1**: S3 `check_alembic_revisions.py` standalone, no pre-commit
+  hook installato + no CI integration. Lezione meta entry 283 non
+  pienamente operativa.
+- **MED-2**: Smoke prod (entry 293) ha esercitato solo Caso A
+  (R-PROC-1 SEVERO 8.2 cap voto MAX 6/10 finché Caso B non validato
+  in prod).
+- **MED-3**: Numerazione TN-UPDATE entry "implicit" 1bb200d (entry 293
+  CLAUDE.md update segnata come "implicit" nel msg commit) rompe
+  convenzione. Doveva essere entry 293 propria.
+- **MED-4**: Smoke prod bypass JWT auth non risolto (admin password DB
+  prod cambiata). Risolverlo lascerebbe esercitare anche dispatch
+  FastAPI + middleware auth in prod, non solo TestClient.
+
+### Finding LOW (3)
+
+- **LOW-1**: S9 parser DSL non gestisce `Dal X al Y` (range continuo)
+  e `Misto: Lv+F (N date)` (etichette generate da
+  `calcola_etichetta_variante` legacy ma non parsabili).
+- **LOW-2**: S8 nuovo formato `striscia_consecutiva` mai persistito
+  in DB prod (smoke su giro 1gg, no striscia ≥7).
+- **LOW-3**: S10 ha rimosso parametro pubblico `cache=` dalla
+  signature di `costruisci_giornata_deposito_first` senza nota
+  breaking-change esplicita nel commit `f1fa057`.
+
+### Pattern positivi consolidabili
+
+- ✅ **S7 ha trovato bug `ProgrammingError` JSONB (S4) PRIMA del prod**
+  = exact value SEVERO 8.2 previsto entry 285.
+- ✅ **S3 `check_alembic_revisions.py`** = prototipo "lezione meta
+  diventa script eseguibile" (anti-pattern entry 283 chiuso, anche se
+  non ancora pre-commit hook).
+- ✅ **S8 refactor strisce esemplare** (5 test scenari coprono casi
+  21gg, 14gg, 8gg, 2-strisce-separate, 6gg-sotto-soglia).
+
+### METODO 7 regole — aderenza
+
+- ✅ R1 diagnosi prima di azione: rispettata (verifica baseline pre-S5+S6+S10)
+- ✅ R2 numeri non ipotesi: 1358 passed pre/post-confronto su test full
+- ✅ R3 un passo alla volta: 4 commit Sprint 8.3 backlog ben separati
+- ✅ R4 ammettere errore: confronto Sprint 8.2 4/10 ⇒ 8.3 3/10 dichiarato
+- ⚠️ R5 verifica pre-commit: PARZIALE (S1 cross-modulo non verificato,
+  smoke prod incompleto Caso B)
+- ✅ R6 preservare: turno 119 lasciato in prod come marker storico
+- ✅ R7 costanza nel tempo: workflow NINO+FAUSTO+AMILCARE+SEVERO seguito
+
+### R-PROC SEVERO (post-Sprint 8.2 entry 270)
+
+- ⚠️ R-PROC-1 (E2E empirica su prog reale prima del voto): violata
+  parzialmente — smoke Caso A solo, Caso B mock-only.
+- ✅ R-PROC-2 (HIGH con assunzioni esplicite): rispettata.
+- ⚠️ R-PROC-3 (MED non bloccante diventa HIGH BLOCKING al 1° prod):
+  applicabile a S2 della critica per Sprint 8.4.
+
+### Decisione utente per Sprint 8.4
+
+SEVERO suggerisce: chiudere PRIMA S1 + S2 (totale 3-4h) prima di
+nuovi MR builder_pdc. Rationale: il bug S1 HIGH-CRITICAL diventerà
+attivo non appena un giro reale chiude in stazione ≠ deposito (path
+Caso B), e il test S2 vacuo non lo intercetterebbe.
+
+NB: la critica SEVERO **non è una direttiva**. Decisione finale di
+NINO + utente.
+
+### Stato deploy
+
+N/A (questa entry è solo doc + critica markdown, no codice toccato).
+
+### Stato Sprint 8.3 backlog cleanup — CHIUSO UFFICIALMENTE
+
+✅ S3 anti-ricorsione hook revision ID (entry 287)
+✅ S4 from_db programma_id JOIN (entry 288)
+✅ S7 test integration end-to-end piano α + bug fix JSONB (entry 289)
+✅ S9 parser DSL etichette parlanti Trenord (entry 290)
+✅ S5+S6+S10 quick wins LOW (entry 291)
+✅ S8 MED refactor §11.4 strisce continue (entry 292)
+✅ Smoke prod end-to-end deposito_first (entry 293)
+✅ SEVERO post-Sprint 8.3 retrospettivo (questa entry)
+
+**Sprint 8.3 backlog cleanup ✅ CHIUSO 2026-05-10** (8 entries 287-293
++ critica SEVERO 295, voto 3/10 AMILCARE).
+
+### Prossimo step
+
+Sprint 8.4 da pianificare con utente. SEVERO consiglia priorità S1
+HIGH-CRITICAL (`live_arturo.py:301` wild-card match) + S2 HIGH (S7
+test #4 fixture chiusura ≠ deposito) prima di nuovi MR builder_pdc.
+
+---
+
 ## 2026-05-10 (294) — Sprint 8.3 MR-S2: durata vuoto rientro data-driven (chiude S2 HIGH critica entry 284 + S1 MED side-fix gratis + S1 HIGH piano entry 295 fallback geometrico)
 
 ### Contesto
