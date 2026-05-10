@@ -238,9 +238,9 @@ correzioni in-place del MR criticato).
 | Fase | Stato | Output |
 |------|-------|--------|
 | **A — Greenfield reset** | ✅ chiusa (2026-04-25) | Repo pulito, solo dominio + 1 seed |
-| **B — CLAUDE.md** | ✅ chiusa (aggiornato 2026-05-01) | Questo file |
+| **B — CLAUDE.md** | ✅ chiusa (aggiornato 2026-05-10) | Questo file |
 | **C — Documentazione architetturale** | ✅ chiusa | 7 documenti scritti, vedi sotto |
-| **D — Costruzione codice** | 🔄 in corso | Sprint 7 in pieno sviluppo |
+| **D — Costruzione codice** | 🔄 in corso | Sprint 8.3 backlog cleanup (Sprint 7 e 8.0/8.1/8.2 chiusi) |
 
 ### Documenti FASE C (tutti presenti in `docs/`)
 
@@ -252,27 +252,39 @@ correzioni in-place del MR criticato).
 6. `docs/IMPORT-PDE.md` — parser PdE Trenord (testo Periodicità = verità)
 7. `docs/PIANO-MVP.md` — primo MVP girabile, ordine costruzione
 
-### Stato Sprint 7 (FASE D)
+### Stato sviluppo (FASE D)
 
-| Sotto-sprint | Scope | Stato |
+| Sprint | Scope | Stato |
 |---|---|---|
-| 7.0 | Lettura `NORMATIVA-PDC.md` + decisioni dominio | ✅ chiuso |
-| 7.2 | Builder turno PdC MVP (entry 42) | ✅ chiuso |
-| 7.3 | Dashboard Pianificatore Turno PdC (2° ruolo) | ⏸️ **prossimo** |
-| 7.4 | Split CV intermedio (4 MR, entry 56-59) | ✅ chiuso 2026-04-30 |
-| 7.5 | Refactor bug 5 + clustering A1 (intercalato) | ✅ chiuso |
+| 7.0-7.5 | Builder turno PdC MVP + split CV + dashboard pianificatore giro (1° ruolo) | ✅ chiuso |
+| 7.6-7.9 | Refactor bug 5 + clustering A1 + km_cap per regola + varianti per giornata + festività ufficiali | ✅ chiuso |
+| 8.0 | Concatenazione fra ruoli (6 MR Fase A+B+C + dashboard admin pipeline trasversale, entry 164-175) | ✅ chiuso 2026-05-05 |
+| 8.1 | Backtracking esplorativo giri lunghi + cross-rule contamination fix (MR-B1/B2/B3) | ✅ chiuso 2026-05-09 |
+| 8.2 | **Piano α Pianificatore Turno PdC** (deposito-first, vettura_resolver, registro vetture cross-PdC, §11.4/§11.5/§15) + **Plan-D builder giro linea-centrica** (parallelo, MR-D5e→MR-D6) | ✅ chiuso 2026-05-10 |
+| 8.3 | Backlog cleanup post Sprint 8.2 (S3 hook alembic + S4 from_db JOIN + S5/S6/S10 cleanup + S7 integration test + S8 §11.4 strisce + S9 parser DSL etichette parlanti) | 🔄 **in corso** |
 
 Il 1° ruolo (Pianificatore Giro Materiale) è operativo e testato su
-PdE reale Trenord 2025-2026 (6.536 corse importate, run 644). Lo
-Sprint 7.3 apre il 2° ruolo (Pianificatore Turno PdC) con dashboard
-dedicata. Restano poi i ruoli Manutenzione, Personale, PdC finale.
+PdE reale Trenord 2025-2026 (6.536 corse importate). Sprint 8.2 ha
+chiuso il **piano α del 2° ruolo** (Pianificatore Turno PdC con builder
+deposito-first opt-in, validatori §11.4/§11.5/§15) — il MVP è
+generabile via API `POST /api/giri/{id}/genera-turno-pdc?builder_strategy=deposito_first`.
+Restano poi i ruoli Manutenzione, Gestione Personale, PdC finale.
 
 ### Code review post Sprint 7.4
 
 `docs/CODE-REVIEW-2026-05-01.md` — 6 critici, 11 importanti, 7 minori
 con `file:riga`/motivo/impatto/fix/costo. Review separata dallo
-sviluppo: niente fix obbligatori prima dello Sprint 7.3, decidi tu
-se intercalare cleanup veloci (C3, I1, I2) o procedere dritto.
+sviluppo (riferimento storico, parte dei finding già coperti negli
+Sprint 7.6+ e 8.0).
+
+### Critiche SEVERO (post-Sprint)
+
+`docs/critiche/` — output canonico delle critiche di SEVERO post-MR
+significativi e fine-Sprint. Vedi `docs/critiche/README.md` per
+l'indice. Critica chiave Sprint 8.2:
+`SPRINT-8.2-PIANO-ALPHA-RETROSPETTIVA.md` — voto 5/10 fallback NINO,
+10 finding (HIGH S1+S2 chiusi entry 286, MED+LOW chiusi nello
+Sprint 8.3 corrente).
 
 ---
 
