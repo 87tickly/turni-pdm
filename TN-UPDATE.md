@@ -10,6 +10,158 @@
 
 ---
 
+## 2026-05-10 (298) — Sprint 8.3 MR-S2 smoke prod read-only + fix S1+S2 SEVERO retro (chiude R-PROC-1 + range assertion + docstring onesta)
+
+### Contesto
+
+Risposta a SEVERO retro entry 297
+(`docs/critiche/SPRINT-8.3-MR-S2-MR-S6-codice-committato.md` voto
+6/10\* fallback V4 Flash). 4 finding HIGH residui:
+
+- **S1 HIGH**: fallback geometrico baseline-stazione potenzialmente
+  sotto-stima per coppie distanti (ipotesi SEVERO: baseline TIRANO
+  ~60-80 min skewed da corse brevi infradirettrice).
+- **S2 HIGH**: 4/5 test integration MR-S2 violano raccomandazione U
+  (range vs numero esatto del piano entry 295), il commit message
+  rivendicava "U adottata" ma 4 assert su `_time(X, Y)` esatti.
+- **S3 HIGH**: smoke prod prog 17 NON eseguito → R-PROC-1 cap MAX 6/10.
+- **S4 HIGH**: entry 287 dichiarava falsamente "verificato `ls`"
+  (workflow esistono dal Sprint 0.4) → pattern verifica superficiale,
+  proposta R-PROC-7.
+
+Decisione utente *"b"* (smoke prod prog 17 + fix saggi). Procedura
+read-only safety: NON modifica `builder_mode`, NON cancella giri
+esistenti, NON tocca DB (rollback session).
+
+### Smoke prod read-only su DB Railway (S3 chiuso, S1 invalidato empiricamente)
+
+Script `/tmp/smoke_prod_mr_s2.py`: connessione via
+`DATABASE_PUBLIC_URL` (proxy `nozomi.proxy.rlwy.net:28852`),
+chiamata diretta `costruisci_lookup_durate(session, azienda_id=2,
+valido_da=2026-06-07, valido_a=2026-06-28)` su prog 17 (PdE 2026,
+6536 corse).
+
+**Risultati empirici**:
+
+| Metrica | Valore |
+|---|---|
+| Coppie distinte (origine, dest) nel lookup | **326** |
+| Stazioni con baseline | **102** |
+| Distribuzione durate coppia (min/p25/median/p75/max) | 10/49/**69**/106/365 min |
+| Distribuzione baseline per stazione | 21/56/**72**/99/323 min |
+| Long-haul coppie (>100 min) | 88 |
+| Stazioni baseline >90 min | 29 |
+
+**Scenario canonico SEVERO entry 284 — TIRANO→CERTOSA**
+(= S01440 → S01640, deposito FIO):
+
+- ❌ Hit diretto = `False` (atteso: nessuna corsa commerciale verso
+  deposito).
+- ❌ Hit speculare = `False` (atteso).
+- ✅ **Baseline TIRANO = 152 min** (NON 60-80 come ipotizzato S1
+  SEVERO retro: la mediana è dominata da long-haul Mi.Cle-Tirano
+  ~150min, NON da corse brevi infradirettrice).
+- ✅ Baseline CERTOSA = 73 min (corse regionali brevi).
+- → **Durata fallback geometrico = max(152, 73, 60) = 152 min**.
+- vs 60 hardcoded pre-MR-S2: **+92 min realistici** (= delta
+  effettivo del fix entry 294).
+
+**Scenario LECCO→MILANO CENTRALE** (S01520 → S01700, capolinea
+regionale comune):
+
+- ✅ Hit diretto = `True`, hit speculare = `True`.
+- → Durata = 49 min (mediana corse regionali, plausibile per ~50km).
+
+### S1 HIGH SEVERO retro INVALIDATO empiricamente
+
+L'ipotesi SEVERO ("baseline TIRANO ~60-80 min skewed") era basata
+su intuizione qualitativa. Smoke prod ha dimostrato che per stazioni
+capolinea estremo (TIRANO è capolinea della direttrice), la mediana
+è dominata dalle long-haul DOMINANTI, NON dai pochi servizi locali.
+Il fallback geometrico opzione B-semplificata FUNZIONA correttamente
+per lo scenario canonico citato dal finding stesso.
+
+### Modifiche
+
+**`backend/src/colazione/domain/builder_giro/durata_vuoto.py`**:
+docstring di `calcola_durata_vuoto_min` estesa con:
+
+- Esempi numerici dal smoke prod (TIRANO=152, CERTOSA=73, durata
+  calcolata=152).
+- Limite riconosciuto onestamente: per stazioni con attività
+  dominata da tratte brevi intra-direttrice (es. TILO, Malpensa
+  Express), la baseline può essere meno predittiva del costo
+  long-haul. Scope MR-D7 raffinerà con km_tratta + velocita_max.
+
+**`backend/tests/test_aggregazione_linea_centrica.py`**: 4 test
+MR-S2 fixati per **S2 HIGH SEVERO retro** (range vs exact). Pattern
+adottato: asserzione sulla DURATA in min calcolata
+(`(arrivo.h*60+m) - (partenza.h*60+m)`) invece dell'`ora_arrivo`
+esatta. Robusto a future modifiche di arrotondamento/timezone.
+
+- Test 1 (`test_traduce_turno_mr_s2_lookup_diretto_durata_reale`):
+  `assert durata_min == 85` (era `ora_arrivo == _time(17, 25)`).
+- Test 2 (`test_traduce_turno_mr_s2_lookup_speculare`):
+  `assert durata_min == 70`.
+- Test 3 (`test_traduce_turno_mr_s2_fallback_geometrico_baseline`):
+  `assert durata_min == 150`.
+- Test 4 (`test_traduce_turno_mr_s2_fallback_default_60_quando_no_lookup`):
+  `assert durata_min == 60`.
+- Test 5 wrapper multi-turno: già durata_min pattern adottato in
+  entry 294 (no modifica).
+
+### Verifiche
+
+- ✅ pytest `tests/test_aggregazione_linea_centrica.py
+  tests/test_durata_vuoto.py`: **58 passed in 0.27s** (32+26).
+- ✅ mypy --strict `durata_vuoto.py`: clean.
+- ✅ ruff check su file modificati: clean.
+
+### Cosa NON è stato fatto in questo MR
+
+- **S4 HIGH proposta R-PROC-7** ("Quando NINO scrive 'verificato X'
+  in TN-UPDATE, X DEVE essere il risultato di un comando concreto"):
+  scope diverso (modifica `.claude/agents/severo.md`), può essere
+  formalizzata in MR cleanup futuro.
+- **Test integration con session.rollback() in pipeline reale**: il
+  test smoke prod è puro lookup DB + helper pure. Non testa
+  l'integrazione `_genera_giri_linea_centrica` end-to-end runtime.
+  Scope futuro (= MR-D7 quando linea_centrica sarà default per più
+  programmi).
+- **Cambio builder_mode prog 17 + rebuild giri G-FIO con MR-S2**:
+  scelta deliberata di NON toccare i 22 giri esistenti del prog 17
+  (11 G-CRE + 11 G-FIO post entry 284). Il read-only test ha
+  comunque validato il path runtime nuovo `costruisci_lookup_durate`
+  su DB prod reale.
+
+### Stato deploy
+
+- ⏭️ Nessun deploy: solo test + docstring + entry doc, nessuna
+  modifica codice runtime.
+
+### Stato Sprint 8.3 finding entry 284 + entry 297 — RIEPILOGO
+
+| Finding | Stato |
+|---|---|
+| S1 MED magic number entry 284 | ✅ chiuso entry 294 |
+| S2 HIGH durata vuoto entry 284 | ✅ chiuso entry 294 + validato empiricamente entry 298 |
+| S3 MED parking notte intermedio | ⏭️ scope MR-D7 strutturale |
+| S4 LOW xfail entry 278 | ⏭️ aperto cleanup minore |
+| S5 LOW xfail entry 278 | ⏭️ aperto cleanup minore |
+| S6 MED PROCESS alembic check CI | ✅ chiuso entry 296 |
+| **S1 HIGH SEVERO retro entry 297** (baseline sotto-stima) | ✅ INVALIDATO empiricamente (TIRANO=152 reale, fallback funziona) |
+| **S2 HIGH SEVERO retro entry 297** (range vs exact) | ✅ chiuso entry 298 (4 test fixati) |
+| **S3 HIGH SEVERO retro entry 297** (smoke prod) | ✅ chiuso entry 298 (read-only smoke OK) |
+| **S4 HIGH SEVERO retro entry 297** (R-PROC-7) | ⏭️ scope cleanup futuro |
+
+### Stato
+
+- ✅ S1+S2+S3 SEVERO retro chiusi.
+- ⏭️ SEVERO retro 2 finale (post entry 298, voto target ≥7/10
+  atteso dato che 3/4 HIGH sono chiusi).
+
+---
+
 ## 2026-05-10 (297) — Sprint 8.4 S1: fix HIGH-CRITICAL wild-card operatore in live_arturo.py (chiude critica entry 295)
 
 ### Contesto

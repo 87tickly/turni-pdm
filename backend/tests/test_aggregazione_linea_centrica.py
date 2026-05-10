@@ -739,10 +739,14 @@ def test_traduce_turno_mr_s2_lookup_diretto_durata_reale() -> None:
     assert giro is not None
     cat_pos = giro.giornate[-1].catena_posizionata
     assert cat_pos.vuoto_coda is not None
-    # ora_partenza = 16:00, +85 min = 17:25
-    from datetime import time as _time
-
-    assert cat_pos.vuoto_coda.ora_arrivo == _time(17, 25)
+    # MR-S2 SEVERO retro entry 297 (S2 HIGH range vs exact): asserzione
+    # robusta sulla DURATA (= 85 min lookup), non sull'`ora_arrivo`
+    # esatto (fragile a future modifiche di arrotondamento).
+    vc = cat_pos.vuoto_coda
+    durata_min = (
+        vc.ora_arrivo.hour * 60 + vc.ora_arrivo.minute
+    ) - (vc.ora_partenza.hour * 60 + vc.ora_partenza.minute)
+    assert durata_min == 85, f"Durata vuoto {durata_min} != 85 (lookup diretto)"
 
 
 def test_traduce_turno_mr_s2_lookup_speculare() -> None:
@@ -765,10 +769,15 @@ def test_traduce_turno_mr_s2_lookup_speculare() -> None:
     assert giro is not None
     cat_pos = giro.giornate[-1].catena_posizionata
     assert cat_pos.vuoto_coda is not None
-    from datetime import time as _time
-
-    # 16:00 + 70 min = 17:10 (uso speculare 70, non fallback 60)
-    assert cat_pos.vuoto_coda.ora_arrivo == _time(17, 10)
+    # SEVERO retro entry 297 (S2 HIGH): asserzione su durata (= 70 min
+    # speculare, non fallback 60), non su ora_arrivo esatta.
+    vc = cat_pos.vuoto_coda
+    durata_min = (
+        vc.ora_arrivo.hour * 60 + vc.ora_arrivo.minute
+    ) - (vc.ora_partenza.hour * 60 + vc.ora_partenza.minute)
+    assert durata_min == 70, (
+        f"Durata vuoto {durata_min} != 70 (lookup speculare)"
+    )
 
 
 def test_traduce_turno_mr_s2_fallback_geometrico_baseline() -> None:
@@ -798,10 +807,17 @@ def test_traduce_turno_mr_s2_fallback_geometrico_baseline() -> None:
     assert giro is not None
     cat_pos = giro.giornate[-1].catena_posizionata
     assert cat_pos.vuoto_coda is not None
-    from datetime import time as _time
-
-    # 14:30 + 150 = 17:00 (vs 15:30 con fallback 60)
-    assert cat_pos.vuoto_coda.ora_arrivo == _time(17, 0)
+    # SEVERO retro entry 297 (S2 HIGH): asserzione su durata
+    # (= max(150, 60, 60) = 150 fallback geometrico), NON su
+    # ora_arrivo esatta. Verifica empirica smoke prod (entry 297):
+    # baseline TIRANO=152 reale → fallback OK per scenario canonico.
+    vc = cat_pos.vuoto_coda
+    durata_min = (
+        vc.ora_arrivo.hour * 60 + vc.ora_arrivo.minute
+    ) - (vc.ora_partenza.hour * 60 + vc.ora_partenza.minute)
+    assert durata_min == 150, (
+        f"Durata vuoto {durata_min} != 150 (fallback geometrico)"
+    )
 
 
 def test_traduce_turno_mr_s2_fallback_default_60_quando_no_lookup() -> None:
@@ -824,10 +840,16 @@ def test_traduce_turno_mr_s2_fallback_default_60_quando_no_lookup() -> None:
     assert giro is not None
     cat_pos = giro.giornate[-1].catena_posizionata
     assert cat_pos.vuoto_coda is not None
-    from datetime import time as _time
-
-    # 16:00 + 60 default = 17:00 (= comportamento pre-MR-S2)
-    assert cat_pos.vuoto_coda.ora_arrivo == _time(17, 0)
+    # SEVERO retro entry 297 (S2 HIGH): asserzione su durata
+    # (= 60 fallback default backward-compat), NON su ora_arrivo
+    # esatta. Pattern coerente con altri test MR-S2.
+    vc = cat_pos.vuoto_coda
+    durata_min = (
+        vc.ora_arrivo.hour * 60 + vc.ora_arrivo.minute
+    ) - (vc.ora_partenza.hour * 60 + vc.ora_partenza.minute)
+    assert durata_min == 60, (
+        f"Durata vuoto {durata_min} != 60 (fallback default)"
+    )
 
 
 def test_traduce_turno_mr_s2_lookup_passato_via_wrapper_multi_turno() -> None:

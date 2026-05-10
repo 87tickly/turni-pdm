@@ -153,12 +153,35 @@ def calcola_durata_vuoto_min(
     Strategia ordinata (primo che matcha vince):
 
     1. **Hit diretto** ``durata_lookup[(origine, destinazione)]``.
-    2. **Hit speculare** ``durata_lookup[(destinazione, origine)]``.
-    3. **Fallback geometrico**:
-       ``max(baseline[origine], baseline[destinazione],
+    2. **Hit speculare** ``durata_lookup[(destinazione, origine)]``
+       (= stessa infrastruttura percorsa al contrario, errore tipico
+       <15-20% accettabile per stima vuoto).
+    3. **Fallback geometrico** (opzione B-semplificata SEVERO PIANO
+       entry 295): ``max(baseline[origine], baseline[destinazione],
        fallback_default)``. Se solo una delle due è presente, usa
        quella vs ``fallback_default``.
     4. **Fallback hardcoded** ``fallback_default`` (= 60 min).
+
+    # Note sul livello 3 (fallback geometrico)
+
+    SEVERO retro entry 297 (S1 HIGH) ha ipotizzato che ``baseline``
+    per stazioni capolinea estremo (es. TIRANO sulla direttrice
+    Tirano-Sondrio-Lecco-Milano) potesse essere skewed da corse brevi
+    intra-direttrice → sotto-stima. **Verifica empirica smoke prod
+    prog 17** (entry 297) ha invece mostrato che:
+
+    - ``baseline[S01440=TIRANO] = 152 min`` (mediana realistica delle
+      long-haul TIRANO-MI.Cle dominanti, NON 60-80 sotto-stimato).
+    - ``baseline[S01640=CERTOSA] = 73 min`` (corse regionali brevi).
+    - Coppia (TIRANO, CERTOSA) miss diretto+speculare → fallback
+      ritorna ``max(152, 73, 60) = 152`` = stima realistica vs 60
+      hardcoded pre-MR-S2 (delta +92 min).
+
+    **Limite riconosciuto**: per stazioni dove l'attività commerciale
+    è dominata da tratte brevi intra-direttrice (es. TILO, Malpensa
+    Express), la baseline può essere meno predittiva del costo
+    long-haul vuoto. Per quei casi il sub-ottimale è dichiarato qui
+    (= scope MR-D7 raffinerà con km_tratta + velocita_max materiale).
 
     Args:
         codice_origine: capolinea operativo dove parte il vuoto.
