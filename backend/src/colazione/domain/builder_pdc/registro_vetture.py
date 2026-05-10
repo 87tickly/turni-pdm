@@ -27,7 +27,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date
 
-from sqlalchemy import Integer, cast, select
+from sqlalchemy import Integer, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from colazione.models.giri import GiroMateriale
@@ -194,11 +194,18 @@ class RegistroVettureAssegnate:
 
         # Subquery 2: ID dei turni PdC che riferiscono uno di quei giri
         # via generation_metadata_json.giro_materiale_id (JSONB cast).
+        # NB: usa ``jsonb_extract_path_text`` invece di ``[key].astext``
+        # perché quest'ultimo parametrizza il nome chiave come bind
+        # variable (``->> %(param)s::TEXT``), causando ProgrammingError
+        # Postgres su subquery. ``jsonb_extract_path_text`` accetta
+        # literal stringa.
         turni_ids_subq = (
             select(TurnoPdc.id)
             .where(
                 cast(
-                    TurnoPdc.generation_metadata_json["giro_materiale_id"].astext,
+                    func.jsonb_extract_path_text(
+                        TurnoPdc.generation_metadata_json, "giro_materiale_id"
+                    ),
                     Integer,
                 ).in_(giri_ids_subq)
             )

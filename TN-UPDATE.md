@@ -10,6 +10,107 @@
 
 ---
 
+## 2026-05-10 (289) — Sprint 8.3 S7: test integration end-to-end PIANO α + bug fix JSONB query S4
+
+### Contesto
+
+S7 SEVERO post-Sprint entry 285: 0 test integration end-to-end del
+piano α, tutti unit con mock. Verifica che §11.4/§11.5 + persistenza
+numero_treno_vettura + metadata siano effettivamente collegati
+all'endpoint `POST /api/giri/{id}/genera-turno-pdc?builder_strategy=deposito_first`.
+
+### Modifiche
+
+**Nuovo `backend/tests/test_piano_alpha_integration.py`** (~270 righe),
+5 test integration end-to-end:
+
+1. `test_piano_alpha_metadata_riposo_intraturno_presente`: verifica
+   `generation_metadata_json.riposo_intraturno_violazioni` valorizzato
+   (= validatore §11.5 entry 281 collegato).
+2. `test_piano_alpha_metadata_riposo_settimanale_presente`: idem per
+   `riposo_settimanale_violazioni` (= validatore §11.4 entry 282).
+3. `test_piano_alpha_giornata_riposo_min_persistito_non_zero`:
+   `turno_pdc_giornata.riposo_min ≥ 24*60` (= popolato da
+   `riposo_min_post`, no placeholder 0).
+4. `test_piano_alpha_blocco_vettura_numero_treno_persistito`: con mock
+   vettura ritorna treno reale, il blocco persistito ha
+   `numero_treno_vettura == treno.numero` (= migration 0046 + builder
+   entry 279 effettivi). Test "vacuo" se chiusura coincide deposito
+   (no rientro), comunque check di non-regressione.
+5. `test_piano_alpha_builder_strategy_in_metadata`: sanity ridondante
+   con smoke MR-PD5 entry 271.
+
+Re-uso fixture `_crea_programma_in_stato`, `_crea_giro_completo_per_deposito_first`,
+`_admin_token`, `_h`, `_wipe_programmi` da test_api_programmi_conferma.
+Aggiunto `_clean_programmi` autouse per evitare unique constraint
+violation cross-test.
+
+**Bug fix S4 SQL JSONB query** (`registro_vetture.py`):
+
+Durante l'esecuzione dei test S7, scoperto che la query S4 entry 288
+generava `ProgrammingError` Postgres:
+```
+column turno_pdc_blocco.numero_treno_vettura does not exist
+```
+in realtà DB locale non aveva applicato migration 0046 (DB locale
+era a `alembic_version=a6b7c8d9e0f1`). `alembic upgrade head` →
+`c8d9e0f1a2b3` applicato.
+
+Più importante: la sintassi JSONB era FRAGILE.
+`TurnoPdc.generation_metadata_json["giro_materiale_id"].astext`
+generava `(col ->> %(param)s::TEXT)` che parametrizzava il nome
+chiave invece di literal. Sostituito con
+`func.jsonb_extract_path_text(TurnoPdc.generation_metadata_json,
+"giro_materiale_id")` che accetta literal stringa correttamente.
+
+Mai esposto come bug in prod perché DB prod ha 26 turni
+`multi_turno_dp_alpha8` (= path legacy che non chiama `from_db`),
+0 turni `deposito_first` (= path opt-in che lo chiama). Il primo
+run reale di `genera_turni_pdc_deposito_first` in prod avrebbe
+fallito con lo stesso ProgrammingError. **S7 ha trovato il bug
+prima dell'uso reale** = exact value SEVERO previsto entry 285.
+
+### Verifiche
+
+- ✅ pytest test_piano_alpha_integration: 5 passed
+- ✅ pytest test_piano_alpha + test_api_programmi_conferma combined:
+  64 passed (no interferenze cleanup)
+- ✅ mypy --strict: clean (errore preesistente in
+  `test_api_programmi_conferma.py:125` non mio)
+- ✅ ruff: clean (auto-fix 2 issue su test_piano_alpha)
+
+### Limitazioni dichiarate
+
+1. **Test #4 vacuo se chiusura == deposito**: il giro fixture
+   `_crea_giro_completo_per_deposito_first` chiude in `staz_a` (=
+   prima stazione del seed = deposito di default). In quel caso
+   `risolvi_rientro` short-circuit a SceltaVOCTAXI durata 0 (no-op),
+   nessun blocco VETTURA persistito. Il test passa "vacuamente"
+   (loop su 0 righe). Per validare davvero il path VETTURA serve
+   fixture con chiusura ≠ deposito. Scope MR-PD7+ per fixture più
+   complete (es. giro Mi.Centrale↔Tirano realistico).
+2. **No test cross-PdC scenario doppione**: A1 §15 cross-PdC NON
+   ha un test integration (= 2 PdC stesso treno-vettura → secondo
+   esclude). Richiede setup 2 giri concorrenti che chiudono nella
+   stessa stazione/finestra + mock vettura specifico. Scope MR-PD7+
+   con fixture programma reale Trenord 2026.
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway: bug fix S4 JSONB query è critico per
+  funzionalità path opt-in deposito_first. Senza fix il primo run
+  reale in prod fallirebbe con ProgrammingError.
+
+### Stato
+
+- ✅ S3 chiuso (entry 287)
+- ✅ S4 chiuso (entry 288 + bug fix questa entry)
+- ✅ S7 chiuso. **Validatori §11.4/§11.5 + persistenza
+  numero_treno_vettura verificati end-to-end**.
+- ⏳ S9 parser DSL etichette parlanti Trenord.
+
+---
+
 ## 2026-05-10 (288) — Sprint 8.3 S4: RegistroVettureAssegnate.from_db filtra programma_id via JOIN multi-tabella
 
 ### Contesto
