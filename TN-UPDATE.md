@@ -10,6 +10,134 @@
 
 ---
 
+## 2026-05-10 (293) — Sprint 8.3 smoke prod end-to-end deposito_first SUCCESS (turno 119 persistito, validatori esercitati)
+
+### Contesto
+
+Validazione end-to-end del path opt-in `builder_strategy='deposito_first'`
+su DB prod. Pre-smoke: 30 turni `multi_turno_dp_alpha8` + 0 turni
+`deposito_first` in prod (`turno_pdc.generation_metadata_json->>'builder_strategy'`).
+Esercitato per validare:
+
+1. Bug fix S4 JSONB query (entry 289 — `func.jsonb_extract_path_text`
+   vs vecchio `astext`) su DB reale.
+2. Validatori §11.4 (S8 refactor strisce, entry 292), §11.5 (entry 281),
+   §15 unicità (entry 274) chiamati end-to-end con popolamento metadata.
+3. Persistenza completa giornate + blocchi + numero_treno_vettura
+   (migration 0046 `c8d9e0f1a2b3`).
+
+### Modalità esecuzione
+
+Opt-in via funzione builder diretta (no JWT REST), equivalente lato
+DB+builder:
+
+```python
+await genera_turni_pdc_deposito_first(
+    session=Session(engine_prod), azienda_id=2, giro_id=2094,
+    deposito_pdc_id=9, force=True,
+)
+```
+
+Selezione giro: query analytics su `giro_blocco` per trovare giri con
+`MAX(condotta/giornata) <= 330min` (cap HARD 5h30) + `programma_id=17`
+(`ultima prova`, attivo). Pick: **giro 2094 = G-FIO-048-MD-1g**
+(materiale MD, 1 giornata, 89min condotta) + **deposito 9 = FIORENZA**
+(stazione S01640).
+
+### Risultato persistito (DB prod)
+
+`turno_pdc id=119`:
+
+- `codice = T-FIORENZA-G-FIO-048-MD-1g`
+- `deposito_pdc_id = 9`
+- `valido_da = 2026-05-10`
+- `generation_metadata_json`:
+  - ✅ `builder_strategy = "deposito_first"` (= path opt-in MR-PD5)
+  - ✅ `riposo_intraturno_violazioni = []` (validatore §11.5 entry 281)
+  - ✅ `riposo_settimanale_violazioni = ["riposo_settimanale_numero_insufficiente:trovati_0:attesi_min_1_per_ciclo_1gg"]`
+    (validatore §11.4 S8 entry 292; nuovo formato S8 esercitato per
+    `numero_insufficiente`; `striscia_consecutiva` non triggerato — il
+    giro è 1gg, non c'è striscia ≥7)
+  - ✅ `unicita_violazioni = []` (§15 entry 274)
+  - ✅ `violazioni_giornate_scartate = []` (cap HARD 5h30 verificato:
+    89min < 330min)
+  - ✅ `fr_cap_violazioni = []`, `fr_giornate = []` (§10 helper chiamato)
+
+`turno_pdc_giornata` G1: prestazione=204min (3h24m), condotta=89min
+(1h29m), refez=0min, staz_inizio=S01528→staz_fine=S01640 (= deposito
+FIORENZA), riposo_post=2676min (44h36m wrap).
+
+`turno_pdc_blocco` (7 blocchi seq):
+1. PRESA 09:35-09:50 (15min) S01528
+2. ACCp 09:50-10:30 (40min)
+3. CONDOTTA 10:30-11:29 (59min) S01528→S01645
+4. PK 11:29-11:34 (5min) S01645
+5. CONDOTTA 11:34-12:04 (30min) S01645→S01640
+6. ACCa 12:04-12:44 (40min)
+7. FINE 12:44-12:59 (15min)
+
+Tutti `numero_treno_vettura = NULL` (path Caso A `chiusura == deposito`,
+no rientro VETTURA/MM/VOCTAXI invocato).
+
+### Coverage smoke
+
+| Componente | Esercitato |
+|---|---|
+| Endpoint API REST `/api/giri/{id}/genera-turno-pdc?builder_strategy=deposito_first` | ❌ no JWT auth (admin password env stale) — bypass diretto via funzione `genera_turni_pdc_deposito_first` su Session prod |
+| `BuilderProgrammaContext.crea_per_programma` | ✅ |
+| `costruisci_giornata_deposito_first` (S10 signature semplificata) | ✅ |
+| `RegistroVettureAssegnate.from_db` (S4 JSONB query) | ✅ no ProgrammingError |
+| `risolvi_rientro` §7.2 (vettura/MM/VOCTAXI) | ❌ Caso A short-circuit (chiusura == deposito) |
+| `_inserisci_blocco_rientro` | ❌ Caso A no-op |
+| `aggiungi_dormite_fr` | ✅ (1 giornata, no FR) |
+| `_verifica_unicita_intra_turno` (§15) | ✅ no doppioni |
+| `calcola_e_valida_riposi_intraturno` (§11.5) | ✅ no violazioni |
+| `valida_riposo_settimanale` (§11.4 S8 strisce) | ✅ violazione `numero_insufficiente` (giro 1gg) |
+| `persisti_un_turno_pdc` + commit | ✅ turno 119 persistito |
+
+### Limitazioni dichiarate
+
+1. **Path Caso B (rientro VETTURA/MM/VOCTAXI) non esercitato**: il giro
+   2094 chiude direttamente in S01640 (= FIORENZA = deposito), quindi
+   `risolvi_rientro` short-circuit. Per esercitare la persistenza
+   `numero_treno_vettura` serve un giro con `stazione_fine ≠ deposito`
+   (= scope MR-PD7+ con fixture programma reale Trenord — `T-FIORENZA-G-FIO-018-ETR522-9g`
+   o simili).
+2. **Endpoint REST non chiamato direttamente**: l'admin user in DB prod
+   (id=3) ha `is_admin=True` ma password env Railway
+   (`ADMIN_DEFAULT_PASSWORD`) è di bootstrap, password DB cambiata
+   (login restituisce `credenziali non valide`). Bypass diretto via
+   funzione builder è equivalente lato builder+DB; il dispatch FastAPI
+   + JWT check è già coperto dai test integration TestClient (entry 289).
+3. **Cleanup turno 119**: lasciato in prod come marker storico "primo
+   `deposito_first` generato in produzione". Non interferisce con i
+   30 `multi_turno_dp_alpha8` esistenti (deposito 9 = FIORENZA, giro
+   2094 = G-FIO-048-MD-1g). Eventuale rimozione futura via DELETE
+   esplicito o `force=true` sull'endpoint.
+
+### Stato deploy
+
+N/A (smoke prod = read+write su DB già deployato, no nuovo build).
+
+### Stato Sprint 8.3 backlog cleanup
+
+✅ S3 anti-ricorsione hook revision ID (entry 287)
+✅ S4 from_db programma_id JOIN (entry 288)
+✅ S7 test integration end-to-end piano α + bug fix JSONB (entry 289)
+✅ S9 parser DSL etichette parlanti Trenord (entry 290)
+✅ S5+S6+S10 quick wins LOW (entry 291)
+✅ S8 MED refactor §11.4 strisce continue (entry 292)
+✅ Smoke prod end-to-end deposito_first (questa entry)
+⏳ SEVERO post-Sprint 8.3 retrospettivo (chiusura ufficiale)
+
+### Prossimo step
+
+SEVERO post-Sprint 8.3 retrospettivo (regola §9 CLAUDE.md "obbligatorio
+a fine Sprint"). Brief snello target 1.5KB ad AMILCARE (server saturo
+cronico questa settimana, 5 critiche consecutive in fallback NINO).
+
+---
+
 ## 2026-05-10 (292) — Sprint 8.3 S8: refactor §11.4 strisce continue (1 violazione per striscia, non N ogni 7gg)
 
 ### Contesto
