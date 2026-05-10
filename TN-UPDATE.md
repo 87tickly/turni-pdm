@@ -10,6 +10,106 @@
 
 ---
 
+## 2026-05-10 (299) — Sprint 8.4 S2: fixture chiusura ≠ deposito + test #4 NON più vacuo (chiude HIGH critica entry 295)
+
+### Contesto
+
+Chiusura del finding **S2 HIGH** della critica SEVERO entry 295:
+`test_piano_alpha_blocco_vettura_numero_treno_persistito` (entry 289)
+era **vacuo** perché usava `_crea_giro_completo_per_deposito_first`
+che produce un giro con chiusura == deposito (= staz_a) → builder
+short-circuit Caso A → loop su 0 righe sempre passing. Il bug
+HIGH-CRITICAL S1 (entry 295) sarebbe sopravvissuto a questo test.
+
+R-PROC-1 SEVERO violata: validazione end-to-end con dati reali
+mancante per la persistenza `numero_treno_vettura` cross-PdC §15.
+
+### Modifiche
+
+**`backend/tests/test_api_programmi_conferma.py`** — nuova helper
+`_crea_giro_chiusura_diversa_dal_deposito`:
+
+- Pipeline: legge `depot.stazione_principale_codice` reale di
+  `TEST_DEPOT_PD5` PRIMA di costruire il giro. Sceglie deterministicamente
+  la stazione di chiusura (`ORDER BY codice LIMIT 1` con clausola
+  `<> depot_principale`).
+- Crea giro 1 giornata con UN solo blocco condotta
+  `depot_principale → staz_chiusura` 08:00-10:00 (2h, condotta < cap
+  HARD 5h30).
+- `staz_chiusura ≠ depot.stazione_principale` GARANTITO →
+  builder attiva path Caso B § 7.2 (rientro VETTURA/MM/VOCTAXI).
+- Returns `(giro_id, depot_id, depot_codice, depot_stazione_principale,
+  staz_chiusura)`.
+
+**`backend/tests/test_piano_alpha_integration.py`** —
+`test_piano_alpha_blocco_vettura_numero_treno_persistito` riscritto:
+
+- Import e uso della nuova helper.
+- Treno mock con orari coerenti per rientro post-ACCa: parte 12:30
+  (gap 110min < cap 120min), arriva 13:30 (60min vettura). Prestazione
+  totale 6h40 < 510min cap standard ✓.
+- Mock con `stazione_partenza_codice=staz_chiusura`,
+  `stazione_arrivo_codice=depot_stazione_principale` (rientra al
+  deposito dal punto di chiusura giornata).
+- **Assertion NON-VACUA**: `len(rows) >= 1` (almeno 1 blocco VETTURA
+  persistito) con messaggio esplicito di regressione che cita la
+  critica entry 295.
+- Per ogni blocco VETTURA persistito: assert `numero_treno_vettura
+  == "9999"` + `stazione_da == staz_chiusura` + `stazione_a ==
+  depot_stazione_principale`.
+
+### Verifiche
+
+- ✅ pytest test_piano_alpha_integration: **5 passed** (test #4 ora
+  ESERCITA realmente blocco VETTURA, non più vacuo).
+- ✅ pytest combined (test_piano_alpha_integration +
+  test_api_programmi_conferma): **64 passed**, zero regressioni.
+- ✅ ruff: clean.
+
+### Limitazioni dichiarate
+
+1. **Helper duplica codice di `_crea_giro_completo_per_deposito_first`**:
+   ~70 righe di INSERT giro/giornata/variante quasi identiche. Refactor
+   per estrarre comune (es. `_crea_giro_minimo` + customizzazione blocchi)
+   sarebbe più DRY ma cambia pattern già consolidato. Scope MR-PD7+ se
+   emergono altre fixture varianti.
+2. **Test cross-PdC §15 cross-turno reale ancora mancante**: il fix S1
+   wild-card cross-modulo è coperto da unit test in
+   `test_live_arturo_client.py` (4 nuovi entry 297) + da questo test
+   integration #4 che esercita 1 turno con vettura. Lo scenario "2 turni
+   concorrenti che cercano la stessa vettura, secondo escluso da
+   registro" richiede setup pesante (2 giri/2 turni + verifica mock
+   chiamato con `esclusi`) — scope MR-PD7+ con fixture programma reale
+   Trenord.
+3. **R-PROC-1 SEVERO ora chiusa per scope test**: il path Caso B
+   VETTURA è esercitato end-to-end con DB reale + builder + persister.
+   Smoke prod entry 293 resta limitato a Caso A (giro 2094 chiude in
+   FIORENZA = deposito). Per esercitare Caso B in prod servirebbe un
+   giro reale che chiude in stazione ≠ deposito (es. Tirano), scope
+   utente/business decision.
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway: cambio puramente test (no production
+  code). Backward-compat verificata 64 test downstream. Triggero
+  comunque il deploy per coerenza pipeline.
+
+### Stato
+
+- ✅ S1 HIGH-CRITICAL critica entry 295 chiuso (entry 297).
+- ✅ S2 HIGH critica entry 295 CHIUSO (questa entry).
+- 🎯 Entrambi i finding chiave critica entry 295 chiusi senza
+  passare da nuova SEVERO retrospettiva (decisione utente).
+
+### Prossimo step
+
+Backlog post-S1+S2: 4 MED + 3 LOW residui critica entry 295 (S3 hook
+pre-commit, S4 smoke prod Caso B, S5/S6 process, S7 parser DSL range,
+S8 striscia in prod, S9 breaking change cache=). Decisione utente su
+quali priorizzare per Sprint 8.4.
+
+---
+
 ## 2026-05-10 (298) — Sprint 8.3 MR-S2 smoke prod read-only + fix S1+S2 SEVERO retro (chiude R-PROC-1 + range assertion + docstring onesta)
 
 ### Contesto

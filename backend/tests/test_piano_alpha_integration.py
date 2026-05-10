@@ -31,6 +31,7 @@ from colazione.main import app
 # Re-uso helper esistenti per non duplicare fixture
 from tests.test_api_programmi_conferma import (
     _admin_token,
+    _crea_giro_chiusura_diversa_dal_deposito,
     _crea_giro_completo_per_deposito_first,
     _crea_programma_in_stato,
     _h,
@@ -208,37 +209,45 @@ async def test_piano_alpha_giornata_riposo_min_persistito_non_zero(
 async def test_piano_alpha_blocco_vettura_numero_treno_persistito(
     client: TestClient,
 ) -> None:
-    """Quando ``trova_treno_vettura`` ritorna un treno reale, il blocco
-    VETTURA persistito deve avere ``numero_treno_vettura`` valorizzato
-    (= migration 0046 + builder MVP entry 279 effettivi).
+    """Sprint 8.4 S2 (chiude HIGH critica entry 295): il blocco VETTURA
+    persistito deve avere ``numero_treno_vettura`` valorizzato quando
+    ``trova_treno_vettura`` ritorna un treno reale.
 
-    Setup: il giro chiude in ``staz_a`` (= partenza giornata 1, dopo
-    blocco 2 che torna a staz_a). Il chiamante mock simula vettura
-    disponibile per rientro.
+    **Pre-fix entry 295** (S7 entry 289): il test era *vacuo* perché
+    usava ``_crea_giro_completo_per_deposito_first`` (chiusura == deposito
+    = staz_a) → builder short-circuit Caso A → NESSUN blocco VETTURA
+    creato → loop su 0 righe sempre passing. Il bug HIGH-CRITICAL S1
+    sarebbe sopravvissuto a questo test.
+
+    **Post-fix S2**: usa la nuova fixture ``_crea_giro_chiusura_diversa_dal_deposito``
+    che produce un giro con chiusura in ``staz_b`` ≠ depot.staz_principale
+    (= staz_a) → builder attiva Caso B → ``risolvi_rientro`` § 7.2 →
+    blocco VETTURA persistito → assertion **NON-VACUA** su
+    ``numero_treno_vettura == "9999"``.
+
+    Verifica end-to-end:
+    - migration 0046 (campo `numero_treno_vettura` esiste, c8d9e0f1a2b3)
+    - builder `_inserisci_blocco_rientro` (entry 279) popola il campo
+    - persister `persisti_un_turno_pdc` salva il campo (entry 281)
     """
     pid = await _crea_programma_in_stato(
         "alpha_vett_numero", "MATERIALE_CONFERMATO"
     )
-    giro_id, depot_id, _ = await _crea_giro_completo_per_deposito_first(
-        pid, "G-ALPHA-VETT"
+    giro_id, depot_id, _, depot_stazione, staz_chiusura = (
+        await _crea_giro_chiusura_diversa_dal_deposito(
+            pid, "G-ALPHA-VETT-CASO-B"
+        )
     )
 
-    # Treno mock arriva al deposito (depot_pd5 ha stazione_principale_codice
-    # = prima stazione del seed, = staz_a). Il blocco 2 chiude in staz_a.
-    # Quindi rientro vettura non serve (chiusura == deposito = no-op).
-    # Per forzare path VETTURA, devo mockare con stazione_chiusura ≠ depot.
-    # Soluzione: uso il giro così com'è, vediamo se trigger VETTURA.
-    # Se chiusura == deposito → SceltaVOCTAXI durata 0 (no-op), no blocco.
-    # In quel caso il test verifica solo il path NORMAL: nessun blocco
-    # VETTURA dovrebbe essere stato creato (no rientro necessario).
-    # Però possiamo asserire che SE c'è un VETTURA persistito, ha numero.
-
+    # Treno mock con orari coerenti per rientro post-ACCa (10:40):
+    # parte 12:30 (gap 110min < 120 cap), arriva 13:30 (60min vettura).
+    # Prestazione totale = 13:45 - 07:05 = 6h40 < 510min cap standard ✓
     treno_mock = TrenoVettura(
         numero="9999",
         categoria="RV",
         operatore="TN",
-        stazione_partenza_codice="X",
-        stazione_arrivo_codice="Y",
+        stazione_partenza_codice=staz_chiusura,
+        stazione_arrivo_codice=depot_stazione,
         partenza_min=12 * 60 + 30,
         arrivo_min=13 * 60 + 30,
         durata_min=60,
@@ -258,12 +267,12 @@ async def test_piano_alpha_blocco_vettura_numero_treno_persistito(
     turno_id = res.json()[0]["turno_pdc_id"]
 
     async with session_scope() as session:
-        # Cerca eventuali blocchi VETTURA persistiti
         rows = list(
             (
                 await session.execute(
                     text(
-                        "SELECT b.tipo_evento, b.numero_treno_vettura "
+                        "SELECT b.tipo_evento, b.numero_treno_vettura, "
+                        "b.stazione_da_codice, b.stazione_a_codice "
                         "FROM turno_pdc_blocco b "
                         "JOIN turno_pdc_giornata g ON b.turno_pdc_giornata_id = g.id "
                         "WHERE g.turno_pdc_id = :tid AND b.tipo_evento = 'VETTURA'"
@@ -273,14 +282,28 @@ async def test_piano_alpha_blocco_vettura_numero_treno_persistito(
             ).all()
         )
 
-    # Se c'è un blocco VETTURA, deve avere numero_treno_vettura valorizzato.
-    # Se non c'è (chiusura == deposito), il test passa "vacuamente" — è
-    # comunque un check di non-regressione (no NULL constraint violation).
-    for tipo, numero in rows:
+    # Sprint 8.4 S2: assertion NON-VACUA. Almeno 1 blocco VETTURA deve
+    # esistere (la fixture chiude ≠ deposito, mock vettura disponibile).
+    assert len(rows) >= 1, (
+        f"Atteso ≥1 blocco VETTURA persistito (giro chiude in "
+        f"{staz_chiusura} ≠ depot {depot_stazione}, mock vettura "
+        f"ritorna treno reale). Trovati: {len(rows)}. Test vacuo "
+        f"come pre-S2 critica entry 295."
+    )
+
+    for tipo, numero, da, a in rows:
         assert tipo == "VETTURA"
         assert numero == "9999", (
-            "Blocco VETTURA persistito senza numero_treno_vettura: "
-            "campo non popolato (entry 279/281 broken)"
+            "Blocco VETTURA persistito senza numero_treno_vettura "
+            "atteso 9999 (= treno mock). Campo non popolato "
+            "(entry 279/281 regression)"
+        )
+        # Il blocco rientra dal punto di chiusura giro al deposito.
+        assert da == staz_chiusura, (
+            f"VETTURA stazione_da={da} != staz_chiusura={staz_chiusura}"
+        )
+        assert a == depot_stazione, (
+            f"VETTURA stazione_a={a} != depot_stazione={depot_stazione}"
         )
 
 

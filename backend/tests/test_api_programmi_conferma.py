@@ -830,6 +830,140 @@ async def _crea_giro_completo_per_deposito_first(
     return giro_id, depot_id, "TEST_DEPOT_PD5"
 
 
+async def _crea_giro_chiusura_diversa_dal_deposito(
+    programma_id: int, codice: str
+) -> tuple[int, int, str, str, str]:
+    """Sprint 8.4 S2: variante della fixture base con chiusura ≠ deposito.
+
+    Pipeline:
+
+    1. Risolve `depot.stazione_principale_codice` reale di
+       `TEST_DEPOT_PD5` dal DB (= "casa" del PdC, dove parte e dove
+       deve rientrare).
+    2. Sceglie `staz_chiusura` = una qualsiasi stazione dell'azienda
+       con codice ≠ `depot_stazione_principale` (deterministica,
+       ordinata per codice, prima diversa).
+    3. Crea giro a 1 giornata con UN solo blocco condotta
+       `depot_stazione_principale → staz_chiusura` 08:00-10:00 (2h).
+
+    La giornata chiude in `staz_chiusura ≠ depot.staz_principale` →
+    builder deposito-first attiva il path **Caso B** (rientro VETTURA /
+    MM / VOCTAXI §7.2), evitando lo short-circuit Caso A.
+
+    Usato dal test integration `test_piano_alpha_blocco_vettura_*` per
+    esercitare effettivamente la persistenza `numero_treno_vettura`
+    sul blocco VETTURA (chiude finding S2 HIGH critica entry 295).
+
+    Returns `(giro_id, depot_id, depot_codice, depot_stazione_principale,
+    staz_chiusura)`. Il chiamante può asserire VETTURA va da
+    `staz_chiusura → depot_stazione_principale`.
+    """
+    async with session_scope() as session:
+        az_row = (
+            await session.execute(
+                text("SELECT id FROM azienda WHERE codice = 'trenord'")
+            )
+        ).first()
+        assert az_row is not None
+        az_id = int(az_row[0])
+
+    # Crea/get depot PRIMA, per leggere la sua stazione_principale.
+    depot_id = await _ensure_depot_test_pd5(az_id)
+
+    async with session_scope() as session:
+        depot_row = (
+            await session.execute(
+                text(
+                    "SELECT stazione_principale_codice FROM depot "
+                    "WHERE id = :did"
+                ),
+                {"did": depot_id},
+            )
+        ).first()
+        assert depot_row is not None
+        depot_stazione_principale = str(depot_row[0])
+
+        # Stazione di chiusura: deterministica, prima ≠ depot_principale.
+        staz_chiusura_row = (
+            await session.execute(
+                text(
+                    "SELECT codice FROM stazione "
+                    "WHERE azienda_id = :az AND codice <> :dep "
+                    "ORDER BY codice LIMIT 1"
+                ),
+                {"az": az_id, "dep": depot_stazione_principale},
+            )
+        ).first()
+        assert staz_chiusura_row is not None
+        staz_chiusura = str(staz_chiusura_row[0])
+
+        giro_row = (
+            await session.execute(
+                text(
+                    "INSERT INTO giro_materiale "
+                    "(azienda_id, programma_id, numero_turno, tipo_materiale, "
+                    "materiale_tipo_codice, numero_giornate, stato, "
+                    "localita_manutenzione_partenza_id, "
+                    "localita_manutenzione_arrivo_id, generation_metadata_json) "
+                    "SELECT :az, :pid, :codice, 'TEST', NULL, 1, 'bozza', "
+                    "(SELECT id FROM localita_manutenzione WHERE azienda_id = :az LIMIT 1), "
+                    "(SELECT id FROM localita_manutenzione WHERE azienda_id = :az LIMIT 1), "
+                    "'{}'::jsonb "
+                    "RETURNING id"
+                ),
+                {"az": az_id, "pid": programma_id, "codice": codice},
+            )
+        ).first()
+        assert giro_row is not None
+        giro_id = int(giro_row[0])
+
+        giornata_row = (
+            await session.execute(
+                text(
+                    "INSERT INTO giro_giornata "
+                    "(giro_materiale_id, numero_giornata) "
+                    "VALUES (:gid, 1) RETURNING id"
+                ),
+                {"gid": giro_id},
+            )
+        ).first()
+        assert giornata_row is not None
+        gg_id = int(giornata_row[0])
+
+        variante_row = (
+            await session.execute(
+                text(
+                    "INSERT INTO giro_variante "
+                    "(giro_giornata_id, variant_index, validita_testo) "
+                    "VALUES (:ggid, 0, 'GG') RETURNING id"
+                ),
+                {"ggid": gg_id},
+            )
+        ).first()
+        assert variante_row is not None
+        var_id = int(variante_row[0])
+
+        # 1 SOLO blocco condotta `depot_principale → staz_chiusura`
+        # 08:00-10:00 (2h). Stazione fine = staz_chiusura ≠ depot_principale.
+        # → chiusura ≠ deposito → path Caso B nel builder.
+        await session.execute(
+            text(
+                "INSERT INTO giro_blocco "
+                "(giro_variante_id, seq, tipo_blocco, ora_inizio, "
+                "ora_fine, stazione_da_codice, stazione_a_codice, "
+                "is_validato_utente, metadata_json) "
+                "VALUES (:vid, 1, 'sosta_disponibile', '08:00', '10:00', "
+                ":da, :a, FALSE, '{}'::jsonb)"
+            ),
+            {"vid": var_id, "da": depot_stazione_principale, "a": staz_chiusura},
+        )
+
+    return (
+        giro_id, depot_id, "TEST_DEPOT_PD5",
+        depot_stazione_principale, staz_chiusura,
+    )
+
+
 async def test_genera_turno_pdc_deposito_first_smoke_ok(
     client: TestClient,
 ) -> None:
