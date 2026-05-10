@@ -65,6 +65,16 @@ jobs:
       - name: Mypy strict
         run: uv run mypy src/colazione
 
+      - name: Check Alembic graph (Sprint 8.3 S6 entry 284)
+        # Anti-ricorsione lezione meta entry 283: revision ID duplicato
+        # 0046↔0029 ha bloccato deploy. Lo script verifica:
+        # 1) nessun revision ID duplicato fra file
+        # 2) nessun down_revision dangling
+        # 3) esattamente 1 head (no branch parallelo non-mergiato)
+        # 4) nessun ciclo
+        # Vedi backend/scripts/check_alembic_revisions.py (entry 287).
+        run: uv run python scripts/check_alembic_revisions.py
+
       - name: Apply Alembic migrations
         run: uv run alembic upgrade head
 

@@ -10,6 +10,85 @@
 
 ---
 
+## 2026-05-10 (296) — Sprint 8.3 MR-S6-completion: integrazione check_alembic_revisions.py in backend-ci.yml (chiude S6 MED PROCESS critica entry 284)
+
+### Contesto
+
+Chiusura ufficiale del finding **S6 MED PROCESS** critica entry 284
+(`docs/critiche/SPRINT-8.2-MR-D5h-bis+MR-D6-codice-committato.md`):
+"Mancanza alembic check pre-commit ha permesso il bug migration 0046
+in produzione" (revision ID duplicato `b7c8d9e0f1a2`/0029 ha bloccato
+deploy per ore con HTTP 502).
+
+Entry 287 (Sprint 8.3 S3) aveva creato lo script standalone
+`backend/scripts/check_alembic_revisions.py` (160 righe + 13 test in
+`test_check_alembic_revisions.py`) ma con limitazione dichiarata:
+"Non integrato in pre-commit framework, non integrato in CI". Quella
+limitazione veniva citata erroneamente in entry 287 come "nessun
+GitHub Actions workflow per backend (verificato `ls
+.github/workflows/`)" — in realtà i workflow esistono dal Sprint 0.4
+(commit `27b5914`). L'integrazione era quindi 1 step yaml + 5 minuti
+di lavoro. Pigrizia §7 chiusa qui.
+
+### Modifiche
+
+**`.github/workflows/backend-ci.yml`**: nuovo step `Check Alembic
+graph` inserito fra `Mypy strict` (step esistente) e `Apply Alembic
+migrations` (step esistente). Esegue `uv run python
+scripts/check_alembic_revisions.py`. Se lo script fallisce (revision
+ID duplicato, dangling down_revision, multi-head, ciclo), il workflow
+si ferma PRIMA del `alembic upgrade head` → impossibile fare merge
+di migration con grafo rotto.
+
+Commento in linea spiega l'origine (lezione meta entry 283/287) e i
+4 check del grafo. Pattern coerente con stile step esistenti (Ruff
+lint, Ruff format, Mypy strict).
+
+### Verifiche pre-deploy
+
+- ✅ `uv run python scripts/check_alembic_revisions.py` localmente:
+  "alembic migrations check passed (45 files)".
+- ✅ YAML valido (struttura indentata coerente con step esistenti).
+- ⏭️ Verifica empirica: il prossimo PR (o push su master) attiverà
+  il workflow GitHub Actions con il nuovo step.
+- ⏭️ Test del workflow su grafo rotto: scope futuro (= simulazione
+  branch con duplicato volutamente, verificare che CI fallisca).
+  Per ora basta che il check sia attivo in CI.
+
+### Pre-commit framework non introdotto
+
+Decisione esplicita: NON aggiunto `.pre-commit-config.yaml` in questo
+MR. Introduzione del framework pre-commit è scope architetturale
+separato (richiede decisione su pre-commit-hooks vs custom Python,
+quali hook ammettere, gestione lockfile, ecc.). Lo step CI è
+sufficiente per chiudere S6 MED PROCESS: pre-merge gate, niente
+migration broken in master.
+
+### Stato deploy
+
+- ⏭️ Deploy backend Railway: nessuna modifica codice runtime,
+  solo workflow CI. Niente da deployare.
+
+### Stato Sprint 8.3 finding entry 284 — RIEPILOGO
+
+| Finding entry 284 | Stato |
+|---|---|
+| S1 MED magic number `2**31-1` | ✅ chiuso entry 294 (`SPECIFICITY_WILDCARD: Final[int]`) |
+| **S2 HIGH** durata vuoto 60 hardcoded | ✅ chiuso entry 294 (data-driven + fallback geometrico) |
+| S3 MED parking notte intermedio (4/11 residui) | ⏭️ scope MR-D7 strutturale (logica ortogonale rientro coda vs sosta) |
+| S4 LOW xfail S6 entry 278 reason | ⏭️ aperto (5 min cleanup raggruppabile) |
+| S5 LOW xfail S5 entry 278 reason | ⏭️ aperto (5 min cleanup raggruppabile) |
+| **S6 MED PROCESS** alembic check CI | ✅ chiuso entry 296 (questa) |
+
+### Stato
+
+- ✅ S6 MED PROCESS chiuso. Pigrizia §7 risolta (5 minuti
+  scrivibili immediatamente, lezione meta entry 283 ora attiva
+  in CI).
+- ⏳ SEVERO retrospettivo sui 2 MR (S2 entry 294 + S6 entry 296).
+
+---
+
 ## 2026-05-10 (295) — Sprint 8.3 SEVERO post-Sprint retrospettivo (voto 3/10 AMILCARE V4 Pro, 1 HIGH-CRITICAL emerso, CHIUDE Sprint 8.3 backlog cleanup)
 
 ### Contesto
