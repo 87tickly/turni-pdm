@@ -52,6 +52,10 @@ from colazione.domain.builder_giro.costruisci_turno_linea import (
     GiornataServizio,
     TurnoConvoglio,
 )
+from colazione.domain.builder_giro.durata_vuoto import (
+    DURATA_VUOTO_DEFAULT_MIN,
+    calcola_durata_vuoto_min,
+)
 from colazione.domain.builder_giro.multi_giornata import (
     GiornataGiro,
     Giro,
@@ -93,11 +97,11 @@ def _costruisci_vuoto_rientro_target(
     giornata: GiornataServizio,
     stazione_target: str,
     *,
-    durata_min_default: int = 60,
+    durata_min: int,
 ) -> BloccoMaterialeVuoto | None:
-    """Sprint 8.2 MR-D6: costruisce un blocco vuoto di rientro
-    dall'ultima stazione operativa della giornata alla stazione
-    target (= sede regola, dato utente).
+    """Sprint 8.2 MR-D6 + Sprint 8.3 MR-S2: costruisce un blocco vuoto
+    di rientro dall'ultima stazione operativa della giornata alla
+    stazione target (= sede regola, dato utente).
 
     Necessario per chiudere i giri quando ``sede_target !=
     sede_operativa`` (= MR-D2 ottimizzazione geometrica ha scelto
@@ -105,11 +109,16 @@ def _costruisci_vuoto_rientro_target(
     ``project_rientro_sede_9XXXX``: numerazione vuoti =
     ``9{numero_treno_commerciale_di_confine}``.
 
+    **Sprint 8.3 MR-S2 (chiude S2 HIGH critica entry 284 + S1 HIGH
+    critica piano entry 285)**: la durata del vuoto NON è più hardcoded
+    a 60 min — il chiamante la calcola via
+    ``durata_vuoto.calcola_durata_vuoto_min`` con strategia 4-livelli
+    (hit diretto → speculare → baseline geometrico → 60 fallback) e
+    la passa via parametro ``durata_min``.
+
     Heuristic:
     - ``ora_partenza`` = ora_arrivo dell'ultima corsa.
-    - ``ora_arrivo`` = ora_partenza + ``durata_min_default`` (= 60).
-      Stima conservativa per percorsi <100km. MR-D7 può raffinare
-      con dati km/velocità reali.
+    - ``ora_arrivo`` = ora_partenza + ``durata_min``.
     - ``motivo='coda'`` per tracciabilità nei metadata.
     - ``cross_notte_giorno_precedente=False`` (= rientro nello
       stesso giorno operativo, non valido per "uscita serale K-1").
@@ -117,8 +126,9 @@ def _costruisci_vuoto_rientro_target(
     Args:
         giornata: ultima giornata del turno.
         stazione_target: codice stazione collegata alla sede target.
-        durata_min_default: durata fissa stima vuoto rientro (default
-            60 min).
+        durata_min: durata stimata del vuoto rientro in minuti
+            (calcolata dal chiamante con dati reali del programma o
+            fallback geometrico/default).
 
     Returns:
         ``BloccoMaterialeVuoto`` se serve rientro
@@ -131,7 +141,7 @@ def _costruisci_vuoto_rientro_target(
         return None
     ultima = giornata.corse[-1]
     arrivo_min = ultima.ora_arrivo.hour * 60 + ultima.ora_arrivo.minute
-    fine_rientro_min = arrivo_min + durata_min_default
+    fine_rientro_min = arrivo_min + durata_min
     # Cross-mezzanotte: cap a 23:59 per non finire oltre il giorno
     # solare. Il "giro" potrebbe quindi non chiudere se il rientro
     # finisce dopo mezzanotte. Lasciamo `chiusa_a_localita` decisa
@@ -155,6 +165,7 @@ def _costruisci_catena_posizionata(
     stazione_collegata: str,
     regola_id: int | None,
     aggiungi_vuoto_rientro_a: str | None = None,
+    durata_min_vuoto_rientro: int = DURATA_VUOTO_DEFAULT_MIN,
 ) -> CatenaPosizionata:
     """Sintetizza una `CatenaPosizionata` da una `GiornataServizio`.
 
@@ -170,12 +181,20 @@ def _costruisci_catena_posizionata(
     ``giornata.stazione_fine`` a ``aggiungi_vuoto_rientro_a`` e
     setta ``chiusa_a_localita=True`` (giro chiude a target via
     vuoto coda).
+
+    **Sprint 8.3 MR-S2**: la durata del vuoto rientro è ora calcolata
+    dal chiamante via ``calcola_durata_vuoto_min`` (data-driven con
+    fallback geometrico) e passata via ``durata_min_vuoto_rientro``.
+    Default ``DURATA_VUOTO_DEFAULT_MIN`` (= 60) preserva backward-compat
+    quando il chiamante non passa nulla.
     """
     catena = Catena(corse=giornata.corse)
     vuoto_coda: BloccoMaterialeVuoto | None = None
     if aggiungi_vuoto_rientro_a is not None:
         vuoto_coda = _costruisci_vuoto_rientro_target(
-            giornata, aggiungi_vuoto_rientro_a
+            giornata,
+            aggiungi_vuoto_rientro_a,
+            durata_min=durata_min_vuoto_rientro,
         )
         # Se serve rientro E il vuoto è stato costruito, il giro
         # chiude a target via vuoto coda.
@@ -230,6 +249,8 @@ def traduci_turno_in_giro(
     stazione_collegata_per_sede: dict[str, str],
     regola_per_segmento: dict[str, int] | None = None,
     sede_target_per_regola: dict[int, str] | None = None,
+    durata_vuoto_per_coppia: dict[tuple[str, str], int] | None = None,
+    baseline_durata_per_stazione: dict[str, int] | None = None,
 ) -> Giro | None:
     """Traduce un `TurnoConvoglio` in un `Giro` compatibile persister.
 
@@ -258,6 +279,14 @@ def traduci_turno_in_giro(
             non in mapping, mantiene comportamento legacy
             (``localita_codice = turno.sede_codice``,
             ``sede_operativa_codice = None``).
+        durata_vuoto_per_coppia: Sprint 8.3 MR-S2 — opzionale, mapping
+            ``(origine, destinazione) → mediana_durata_min`` calcolato
+            sui dati reali del programma. Usato per stimare durata
+            vuoto rientro target invece del 60 hardcoded.
+        baseline_durata_per_stazione: Sprint 8.3 MR-S2 — opzionale,
+            mapping ``stazione → mediana_durata_min`` per fallback
+            geometrico quando la coppia non è in
+            ``durata_vuoto_per_coppia``.
 
     Returns:
         `Giro` compatibile, oppure `None` se il turno è vuoto
@@ -327,12 +356,26 @@ def traduci_turno_in_giro(
         aggiungi_vuoto = (
             stazione_target_codice if is_ultima else None
         )
+        # MR-S2: calcola durata vuoto data-driven via lookup
+        # (hit diretto → speculare → baseline geometrico → 60).
+        # Se aggiungi_vuoto è None, il param non viene usato dal
+        # sub-helper ma lo passiamo comunque per signature-compat.
+        if aggiungi_vuoto is not None:
+            durata_min_vuoto = calcola_durata_vuoto_min(
+                giornata_canonica.stazione_fine,
+                aggiungi_vuoto,
+                durata_lookup=durata_vuoto_per_coppia,
+                baseline_per_stazione=baseline_durata_per_stazione,
+            )
+        else:
+            durata_min_vuoto = DURATA_VUOTO_DEFAULT_MIN
         cat_pos = _costruisci_catena_posizionata(
             giornata_canonica,
             sede_codice=sede_operativa,
             stazione_collegata=stazione_collegata,
             regola_id=regola_id,
             aggiungi_vuoto_rientro_a=aggiungi_vuoto,
+            durata_min_vuoto_rientro=durata_min_vuoto,
         )
         dates_apply = tuple(g.data for g in giornate_gruppo)
         giornate_giro.append(
@@ -364,6 +407,8 @@ def traduci_turni_in_giri(
     stazione_collegata_per_sede: dict[str, str],
     regola_per_segmento: dict[str, int] | None = None,
     sede_target_per_regola: dict[int, str] | None = None,
+    durata_vuoto_per_coppia: dict[tuple[str, str], int] | None = None,
+    baseline_durata_per_stazione: dict[str, int] | None = None,
 ) -> list[Giro]:
     """Wrapper multi-turno: traduce tutti i `TurnoConvoglio` validi
     in `Giro`. Skippa turni vuoti o con sede non mappata.
@@ -372,6 +417,10 @@ def traduci_turni_in_giri(
     determinismo nei consumer downstream. ``localita_codice`` post
     MR-D5h-DUAL può essere la sede TARGET (da regola) invece della
     sede operativa: il sort cambia coerentemente.
+
+    Sprint 8.3 MR-S2: i 2 nuovi parametri ``durata_vuoto_per_coppia``
+    e ``baseline_durata_per_stazione`` propagano i lookup data-driven
+    a ``traduci_turno_in_giro`` per stima vuoto rientro target reale.
     """
     giri: list[Giro] = []
     for turno in turni:
@@ -380,6 +429,8 @@ def traduci_turni_in_giri(
             stazione_collegata_per_sede=stazione_collegata_per_sede,
             regola_per_segmento=regola_per_segmento,
             sede_target_per_regola=sede_target_per_regola,
+            durata_vuoto_per_coppia=durata_vuoto_per_coppia,
+            baseline_durata_per_stazione=baseline_durata_per_stazione,
         )
         if giro is not None:
             giri.append(giro)

@@ -80,6 +80,9 @@ from colazione.domain.builder_giro.composizione import (
     GiroAssegnato,
     assegna_e_rileva_eventi,
 )
+from colazione.domain.builder_giro.durata_vuoto import (
+    costruisci_lookup_durate,
+)
 from colazione.domain.builder_giro.etichetta import calcola_etichetta_giro
 from colazione.domain.builder_giro.fusione_cluster_a1 import fonde_cluster_simili
 from colazione.domain.builder_giro.giornata_tipo import CatenaIstanza
@@ -135,11 +138,11 @@ from colazione.models.programmi import (
 #: `km_max_ciclo` configurato. 850 = midpoint.
 DEFAULT_KM_MEDIO_GIORNALIERO: int = 850
 
-#: Sprint 8.3 (chiude S1 MED critica entry 284): score di "specificity
-#: wildcard" usato da ``_conta_linee_regola`` per ordinare in fondo le
-#: regole prive di filtro linea/direttrice (= regola "ampia"). Estratto
-#: come costante simbolica per evitare il magic number ``2**31 - 1``
-#: ripetuto inline.
+#: Sprint 8.3 MR-S2 (chiude S1 MED critica entry 284): score
+#: di "specificity wildcard" usato da ``_conta_linee_regola`` per
+#: ordinare in fondo le regole prive di filtro linea/direttrice
+#: (= regola "ampia"). Estratto come costante simbolica per evitare
+#: il magic number ``2**31 - 1`` ripetuto inline.
 SPECIFICITY_WILDCARD: Final[int] = 2**31 - 1
 
 
@@ -1669,6 +1672,29 @@ async def _genera_giri_linea_centrica(
         session, azienda_id, programma.valido_da, programma.valido_a
     )
 
+    # Sprint 8.3 MR-S2 (chiude S2 HIGH critica entry 284 + S1 HIGH
+    # critica piano entry 285): pre-calcola lookup durate vuoto rientro
+    # data-driven dalle CorsaCommerciale del programma. Sostituisce
+    # l'hardcoded 60 min in `_costruisci_vuoto_rientro_target`.
+    # Defensive: se la query fallisce, fallback a dict vuoti (=
+    # comportamento pre-MR-S2, fallback hardcoded 60 nel calcolo).
+    try:
+        durata_vuoto_per_coppia, baseline_durata_per_stazione = (
+            await costruisci_lookup_durate(
+                session,
+                azienda_id=azienda_id,
+                valido_da=programma.valido_da,
+                valido_a=programma.valido_a,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(
+            f"Costruzione lookup durate vuoto fallita ({exc}); "
+            "uso fallback default 60 min."
+        )
+        durata_vuoto_per_coppia = {}
+        baseline_durata_per_stazione = {}
+
     # Esegue la pipeline pure-domain D0..D4
     params_pipeline = ParamPipelineLineaCentrica(
         sedi_disponibili=sedi_disponibili,
@@ -1680,6 +1706,8 @@ async def _genera_giri_linea_centrica(
         festivita_set=frozenset(festivita) if festivita else None,
         regola_per_segmento=regola_per_segmento,
         sede_target_per_regola=sede_target_per_regola,
+        durata_vuoto_per_coppia=durata_vuoto_per_coppia,
+        baseline_durata_per_stazione=baseline_durata_per_stazione,
     )
     # cast: CorsaCommerciale soddisfa strutturalmente _CorsaTurnoLike
     # (tutti i campi richiesti sono mappati nell'ORM). Mypy strict

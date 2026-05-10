@@ -158,6 +158,17 @@ class ParamPipelineLineaCentrica:
             ``Giro.sede_operativa_codice`` = sede operativa MR-D2 (se
             differisce da target). Senza questo mapping, il bridge
             mantiene il comportamento legacy (target=operativa).
+        durata_vuoto_per_coppia: Sprint 8.3 MR-S2 — opzionale, mapping
+            ``(origine, destinazione) → mediana_durata_min`` calcolato
+            sui dati reali del programma da
+            ``durata_vuoto.costruisci_lookup_durate``. Sostituisce
+            l'hardcoded 60 min in ``_costruisci_vuoto_rientro_target``.
+            Vuoto = fallback 60 (= comportamento pre-MR-S2).
+        baseline_durata_per_stazione: Sprint 8.3 MR-S2 — opzionale,
+            mapping ``stazione → mediana_durata_min`` per fallback
+            geometrico opzione B-semplificata SEVERO. Usato quando la
+            coppia non è in ``durata_vuoto_per_coppia`` (né diretta
+            né speculare). Vuoto = fallback diretto a 60.
     """
 
     sedi_disponibili: dict[str, str]
@@ -172,6 +183,10 @@ class ParamPipelineLineaCentrica:
     ore_servizio_die: float = 18.0
     regola_per_segmento: dict[str, int] = field(default_factory=dict)
     sede_target_per_regola: dict[int, str] = field(default_factory=dict)
+    durata_vuoto_per_coppia: dict[tuple[str, str], int] = field(
+        default_factory=dict
+    )
+    baseline_durata_per_stazione: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.periodo_da > self.periodo_a:
@@ -315,11 +330,15 @@ def esegui_pipeline_linea_centrica(
     # Step 6 (MR-D4): bridge turni → Giri
     # MR-D5h-DUAL: passa anche sede_target_per_regola per scissione
     # sede target (regola, dato utente) vs sede operativa (MR-D2 ottima).
+    # Sprint 8.3 MR-S2: passa lookup durate data-driven per stima
+    # vuoto rientro target reale (sostituisce 60 min hardcoded).
     giri = traduci_turni_in_giri(
         turni,
         stazione_collegata_per_sede=params.sedi_disponibili,
         regola_per_segmento=params.regola_per_segmento,
         sede_target_per_regola=params.sede_target_per_regola,
+        durata_vuoto_per_coppia=params.durata_vuoto_per_coppia,
+        baseline_durata_per_stazione=params.baseline_durata_per_stazione,
     )
 
     return RisultatoPipelineLineaCentrica(

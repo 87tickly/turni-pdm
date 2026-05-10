@@ -710,3 +710,158 @@ def test_integrazione_chain_d2_d3_d4() -> None:
     assert giro.localita_codice == "FIO"
     assert giro.chiuso is True
     assert giro.km_cumulati == 100.0
+
+
+# =====================================================================
+# Sprint 8.3 MR-S2 — durata vuoto rientro data-driven (non più 60 fisso)
+# =====================================================================
+
+
+def test_traduce_turno_mr_s2_lookup_diretto_durata_reale() -> None:
+    """MR-S2: coppia (stazione_fine_giornata, stazione_target) presente
+    in `durata_vuoto_per_coppia` → durata vuoto = lookup, NON 60.
+
+    Scenario: vuoto rientro LECCO→S_FIO, lookup ha (S_LEC, S_FIO)=85
+    (= mediana di una corsa LECCO-FIO ipotetica). Il vuoto coda
+    ora_arrivo = 16:00 + 85 = 17:25 (vs 17:00 con fallback 60)."""
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("TIRANO", "S_LEC", 14, 30, 16, 0, treno="R5-1")],
+    )
+    turno = _turno("R5_C0", "R5_completo", "LEC", [g])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"LEC": "S_LEC", "FIO": "S_FIO"},
+        regola_per_segmento={"R5_completo": 47},
+        sede_target_per_regola={47: "FIO"},
+        durata_vuoto_per_coppia={("S_LEC", "S_FIO"): 85},
+    )
+    assert giro is not None
+    cat_pos = giro.giornate[-1].catena_posizionata
+    assert cat_pos.vuoto_coda is not None
+    # ora_partenza = 16:00, +85 min = 17:25
+    from datetime import time as _time
+
+    assert cat_pos.vuoto_coda.ora_arrivo == _time(17, 25)
+
+
+def test_traduce_turno_mr_s2_lookup_speculare() -> None:
+    """MR-S2: coppia diretta miss, ma speculare presente → usa
+    quella durata. Test che la simmetria del lookup funziona
+    (= il vuoto X→Y può usare durata di una corsa Y→X)."""
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("TIRANO", "S_LEC", 14, 0, 16, 0, treno="R5-1")],
+    )
+    turno = _turno("R5_C0", "R5_completo", "LEC", [g])
+    # Lookup ha SOLO la direzione speculare (S_FIO, S_LEC)=70
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"LEC": "S_LEC", "FIO": "S_FIO"},
+        regola_per_segmento={"R5_completo": 47},
+        sede_target_per_regola={47: "FIO"},
+        durata_vuoto_per_coppia={("S_FIO", "S_LEC"): 70},
+    )
+    assert giro is not None
+    cat_pos = giro.giornate[-1].catena_posizionata
+    assert cat_pos.vuoto_coda is not None
+    from datetime import time as _time
+
+    # 16:00 + 70 min = 17:10 (uso speculare 70, non fallback 60)
+    assert cat_pos.vuoto_coda.ora_arrivo == _time(17, 10)
+
+
+def test_traduce_turno_mr_s2_fallback_geometrico_baseline() -> None:
+    """MR-S2 (chiude S1 HIGH critica piano entry 285): coppia miss
+    diretto e speculare ma baseline disponibile per le 2 stazioni.
+
+    Scenario canonico TIRANO→FIO: nessuna corsa commerciale verso
+    deposito, ma TIRANO ha baseline 150 (corsa più tipica TIRANO-MI).
+    Il vuoto rientro usa max(baseline)=150 invece di 60 → impatto
+    operativo realistico per scenari distanti."""
+    g = _giornata(
+        date(2026, 6, 8),
+        # Capolinea S_TIRANO, target S_FIO → coppia non in lookup
+        [_corsa("S_LEC", "S_TIRANO", 12, 0, 14, 30, treno="R5-1")],
+    )
+    turno = _turno("R5_C0", "R5_completo", "TIR", [g])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"TIR": "S_TIRANO", "FIO": "S_FIO"},
+        regola_per_segmento={"R5_completo": 47},
+        sede_target_per_regola={47: "FIO"},
+        # Nessuna coppia (S_TIRANO, S_FIO) né (S_FIO, S_TIRANO) in lookup
+        durata_vuoto_per_coppia={},
+        # Ma baseline disponibili: max(150, 60) = 150
+        baseline_durata_per_stazione={"S_TIRANO": 150, "S_FIO": 60},
+    )
+    assert giro is not None
+    cat_pos = giro.giornate[-1].catena_posizionata
+    assert cat_pos.vuoto_coda is not None
+    from datetime import time as _time
+
+    # 14:30 + 150 = 17:00 (vs 15:30 con fallback 60)
+    assert cat_pos.vuoto_coda.ora_arrivo == _time(17, 0)
+
+
+def test_traduce_turno_mr_s2_fallback_default_60_quando_no_lookup() -> None:
+    """MR-S2 backward-compat: senza lookup né baseline, fallback 60
+    invariato. Verifica esplicita che il default ricade sul
+    comportamento pre-MR-S2 (= test MR-D6 esistenti continuano a
+    passare senza modifiche)."""
+    g = _giornata(
+        date(2026, 6, 8),
+        [_corsa("TIRANO", "S_LEC", 14, 0, 16, 0, treno="R5-1")],
+    )
+    turno = _turno("R5_C0", "R5_completo", "LEC", [g])
+    giro = traduci_turno_in_giro(
+        turno,
+        stazione_collegata_per_sede={"LEC": "S_LEC", "FIO": "S_FIO"},
+        regola_per_segmento={"R5_completo": 47},
+        sede_target_per_regola={47: "FIO"},
+        # Nessun lookup né baseline passato (= chiamante legacy)
+    )
+    assert giro is not None
+    cat_pos = giro.giornate[-1].catena_posizionata
+    assert cat_pos.vuoto_coda is not None
+    from datetime import time as _time
+
+    # 16:00 + 60 default = 17:00 (= comportamento pre-MR-S2)
+    assert cat_pos.vuoto_coda.ora_arrivo == _time(17, 0)
+
+
+def test_traduce_turno_mr_s2_lookup_passato_via_wrapper_multi_turno() -> None:
+    """MR-S2: il wrapper `traduci_turni_in_giri` propaga
+    correttamente i 2 dict ai sub-traduttori per ogni turno."""
+    g1 = _giornata(
+        date(2026, 6, 8),
+        [_corsa("TIRANO", "S_LEC", 14, 0, 16, 0, treno="R5-1")],
+    )
+    g2 = _giornata(
+        date(2026, 6, 8),
+        [_corsa("CREMONA", "S_LEC", 13, 0, 15, 30, treno="R6-1")],
+    )
+    turno1 = _turno("R5_C0", "R5_completo", "LEC", [g1])
+    turno2 = _turno("R6_C0", "R6_completo", "LEC", [g2])
+
+    giri = traduci_turni_in_giri(
+        [turno1, turno2],
+        stazione_collegata_per_sede={"LEC": "S_LEC", "FIO": "S_FIO"},
+        regola_per_segmento={"R5_completo": 47, "R6_completo": 47},
+        sede_target_per_regola={47: "FIO"},
+        durata_vuoto_per_coppia={("S_LEC", "S_FIO"): 90},
+    )
+    assert len(giri) == 2
+    # Entrambi i giri devono usare la durata 90 min dal lookup (NON 60).
+    # Asserzione robusta: durata = (ora_arrivo - ora_partenza) == 90 min.
+    for giro in giri:
+        cat_pos = giro.giornate[-1].catena_posizionata
+        assert cat_pos.vuoto_coda is not None
+        assert cat_pos.vuoto_coda.codice_destinazione == "S_FIO"
+        vc = cat_pos.vuoto_coda
+        durata_min = (
+            vc.ora_arrivo.hour * 60 + vc.ora_arrivo.minute
+        ) - (vc.ora_partenza.hour * 60 + vc.ora_partenza.minute)
+        assert durata_min == 90, (
+            f"Durata vuoto {durata_min} != 90 (lookup applicato)"
+        )

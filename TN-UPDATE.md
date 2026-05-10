@@ -10,6 +10,146 @@
 
 ---
 
+## 2026-05-10 (294) — Sprint 8.3 MR-S2: durata vuoto rientro data-driven (chiude S2 HIGH critica entry 284 + S1 MED side-fix gratis + S1 HIGH piano entry 295 fallback geometrico)
+
+### Contesto
+
+Chiusura ufficiale del finding **S2 HIGH** critica SEVERO entry 284
+(`docs/critiche/SPRINT-8.2-MR-D5h-bis+MR-D6-codice-committato.md`):
+``_costruisci_vuoto_rientro_target`` aveva ``durata_min_default: int = 60``
+mai overridato. Per scenari distanti (TIRANO→FIO ~190km) il vuoto era
+drasticamente sottostimato (60min vs realtà ~150min) → impatto operativo
+realistico su prestazione PdC futura sotto-vincolata.
+
+**Pre-piano critica SEVERO sul PIANO** (regola memoria
+`feedback_severo_sempre_su_piani`): file
+`docs/critiche/SPRINT-8.3-PIANO-S2-durata-vuoto.md`. Voto piano
+provvisorio: **6/10\*** (fallback V4 Flash, V4 Pro 3 timeout `-32001`).
+3 modifiche P0 BLOCCANTI raccomandate: X (fallback geometrico per miss
+completo), Y (modulo dedicato), Z (iniezione via
+`ParamPipelineLineaCentrica`). Tutte adottate in questo MR.
+
+### Modifiche
+
+**Nuovo modulo `backend/src/colazione/domain/builder_giro/durata_vuoto.py`**
+(~280 righe):
+
+- 2 helper async DB-bound:
+  - `_carica_durate_corse_programma`: 1 query bulk
+    `CorsaCommerciale` filtrata `is_cancellata=False` per `azienda_id`
+    + periodo. Ritorna triple `(origine, destinazione, durata_min)`
+    usando `min_tratta` se popolato, altrimenti
+    `_durata_min_da_orari` con gestione cross-mezzanotte.
+  - `costruisci_lookup_durate`: wrapper che chiama bulk +
+    aggrega → `(durata_per_coppia, baseline_per_stazione)`.
+- 4 helper pure (no DB):
+  - `_durata_min_da_orari`: `(time, time) -> int min`, gestisce
+    cross-mezzanotte (chiude S4 LOW SEVERO entry 285).
+  - `aggrega_durate_per_coppia`: mediana per coppia
+    `(origine, destinazione)`, mediana NON minimo
+    (raccomandazione W SEVERO).
+  - `aggrega_baseline_per_stazione`: mediana per stazione (touch
+    origine OR destinazione) — fallback geometrico opzione
+    B-semplificata SEVERO.
+  - `calcola_durata_vuoto_min`: strategia 4-livelli (hit diretto →
+    speculare → max baseline-2-stazioni → 60 default).
+- Costante `DURATA_VUOTO_DEFAULT_MIN: Final[int] = 60`.
+
+**`pipeline_linea_centrica.py`**: aggiunti 2 campi a
+`ParamPipelineLineaCentrica`:
+- `durata_vuoto_per_coppia: dict[tuple[str, str], int]`
+- `baseline_durata_per_stazione: dict[str, int]`
+
+`esegui_pipeline_linea_centrica` propaga entrambi a
+`traduci_turni_in_giri` (raccomandazione Z SEVERO: 1 punto di
+iniezione, simmetrico a `sede_target_per_regola`).
+
+**`aggregazione_linea_centrica.py`**:
+- `_costruisci_vuoto_rientro_target`: `durata_min: int` ora
+  parametro **obbligatorio** (no più default 60 hardcoded). Il
+  chiamante calcola via `calcola_durata_vuoto_min`.
+- `_costruisci_catena_posizionata`: nuovo param keyword
+  `durata_min_vuoto_rientro: int = DURATA_VUOTO_DEFAULT_MIN`
+  (default preserva backward-compat).
+- `traduci_turno_in_giro` + `traduci_turni_in_giri`: 2 nuovi
+  param `durata_vuoto_per_coppia` + `baseline_durata_per_stazione`
+  (entrambi `dict | None = None`). La durata reale è calcolata
+  per ogni giornata che richiede vuoto rientro.
+
+**`builder.py`**:
+- Nuova costante `SPECIFICITY_WILDCARD: Final[int] = 2**31 - 1`
+  (chiude **S1 MED side-fix gratis** critica entry 284: estrazione
+  magic number — **commit separato** dentro il MR per granularità
+  review, raccomandazione SEVERO Q7).
+- Sostituite 2 occorrenze (return + commento) + aggiornata
+  docstring.
+- In `_genera_giri_linea_centrica`: nuova chiamata async
+  `costruisci_lookup_durate(session, azienda_id, valido_da,
+  valido_a)` dopo caricamento festività, prima di costruire
+  `params_pipeline`. Defensive `try/except` con fallback dict
+  vuoti (= comportamento pre-MR-S2 = fallback hardcoded 60 nel
+  calcolo).
+
+**Test**:
+- Nuovo `tests/test_durata_vuoto.py` (26 test): 3 per
+  `_durata_min_da_orari` (normale + cross-mezzanotte + zero), 5
+  per `aggrega_durate_per_coppia` (singola, mediana N dispari/pari,
+  raggruppamento, vuoto), 3 per `aggrega_baseline_per_stazione`,
+  10 per `calcola_durata_vuoto_min` (hit diretto/speculare/
+  diretto-prevale, fallback geometrico max-2-stazioni/solo-origine/
+  solo-destinazione/baseline-sotto-default-alza-a-60, default
+  custom, None invece di dict), 5 async mocked per
+  `costruisci_lookup_durate` (min_tratta popolato/null/zero/no-corse/
+  Decimal).
+- Aggiornato `tests/test_aggregazione_linea_centrica.py` (+5 test):
+  hit diretto durata reale, hit speculare, fallback geometrico
+  baseline (TIRANO→FIO scenario canonico), fallback default 60
+  (backward-compat), wrapper multi-turno propaga lookup.
+
+### Verifiche pre-deploy
+
+- ✅ `pytest tests/test_durata_vuoto.py tests/test_aggregazione_linea_centrica.py
+  tests/test_builder_linea_centrica_loader.py tests/test_pipeline_linea_centrica.py`:
+  88 passed, 2 xfailed (intenzionali). Zero regressioni.
+- ✅ `pytest tests/` suite completa esclusa
+  `test_anagrafiche_api.py` (regressione 403 pre-esistente non
+  legata a MR-S2): **1388 passed**, 14 skipped, 5 xfailed,
+  42 failed (= **identici a master pre-MR**, verificati con
+  `git stash` + rerun: 0 regressioni introdotte).
+- ✅ `mypy --strict` su `src/colazione/domain/builder_giro/`:
+  Success, no issues found in 30 source files.
+- ✅ `ruff check` su `src/colazione/domain/builder_giro/` +
+  test_durata_vuoto.py + test_aggregazione_linea_centrica.py:
+  All checks passed.
+
+### Voto target post-modifiche (SEVERO PIANO entry 295)
+
+Da **6/10\*** (piano provvisorio) → atteso **7-8/10** post-codice
+implementato. Verifica con SEVERO retro post-commit.
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway: nuovo modulo + signature ottimizzate
+  + 1 query SQL aggiuntiva al boot di `genera_giri` linea-centrica
+  (~200ms su PdE 2026 ~6500 corse, leggera). Backward-compat
+  preservata: chiamanti legacy senza lookup ricadono su 60min
+  fallback (= comportamento pre-MR-S2).
+
+### Stato
+
+- ✅ S2 HIGH critica entry 284: chiuso davvero (data-driven +
+  fallback geometrico, niente più 60 hardcoded).
+- ✅ S1 MED critica entry 284: chiuso (`SPECIFICITY_WILDCARD`
+  estratta).
+- ✅ S4 LOW critica piano entry 295: chiuso (cross-mezzanotte
+  gestito in `_durata_min_da_orari`).
+- ⏳ S6 MED PROCESS critica entry 284: prossimo (integrare
+  check_alembic_revisions in `backend-ci.yml` come step CI).
+- ⏳ SEVERO retrospettivo sul codice (regola §9 CLAUDE.md "MR
+  significativo").
+
+---
+
 ## 2026-05-10 (293) — Sprint 8.3 smoke prod end-to-end deposito_first SUCCESS (turno 119 persistito, validatori esercitati)
 
 ### Contesto
