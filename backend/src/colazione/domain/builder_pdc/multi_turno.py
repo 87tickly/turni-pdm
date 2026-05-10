@@ -877,6 +877,28 @@ async def _aggiungi_vettura_rientro(
             client=client,
             cache=cache,
         )
+        # Sprint 8.4 G2 — fallback finestra estesa (4h) quando 2h non
+        # bastano. Costo: 1 chiamata API extra solo quando la finestra
+        # standard 120 min non basta. Se la API live restituisce treni
+        # nella finestra 121-240 min, meglio assegnare una vettura con
+        # attesa di 3h che lasciare il PdC in dormita_rientro.
+        if treno is None:
+            logger.info(
+                "multi_turno: prima ricerca vettura rientro %s→%s a %dmin "
+                "window=%dmin senza match. Fallback con window=240min.",
+                draft.stazione_fine,
+                depot.stazione_principale_codice,
+                ora_fine_min + VETTURA_GAP_PRE_MIN,
+                VETTURA_ATTESA_MAX_MIN,
+            )
+            treno = await trova_treno_vettura(
+                stazione_partenza_codice=draft.stazione_fine,
+                stazione_arrivo_codice=depot.stazione_principale_codice,
+                ora_min_partenza=ora_fine_min + VETTURA_GAP_PRE_MIN,
+                max_attesa_min=240,
+                client=client,
+                cache=cache,
+            )
     if treno is None:
         return draft, None
 

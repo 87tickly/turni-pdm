@@ -10,6 +10,154 @@
 
 ---
 
+## 2026-05-10 (300) — Sprint 8.4 G1+G2: Gantt unificato modificabile + diagnostica vetture API live.arturo.travel
+
+### Contesto
+
+Richiesta esplicita utente (frustrato dopo 24h di refactoring senza
+sblocco operativo):
+
+1. *"32 corse non coperte mettimele insieme nel gantt e dammi la
+   possibilità di aprire i gantt insieme a quelli creati. sia chiusi
+   che aperti in modo tale da poter modificarli manualmente."*
+2. *"nella sezione pdc mancano le vetture di rientro. DEVI USARE API
+   live.arturo.travel per trovare le vetture lo capisci o no?"*
+
+Lo screenshot allegato mostrava `programmi/17/giri` con 78 giri
+generati (Tirano-FIO ETR204) + banner amber con 32 corse non coperte
+("sosta condivisa") senza azione possibile oltre a "Riempi gap" e
+"Genera nuovi giri" (entrambi non risolvevano queste 32).
+
+### Modifiche
+
+#### MR-G1 — Gantt unificato con manual gap fill
+
+**Backend** (`backend/src/colazione/api/giri.py`):
+
+- Nuovo endpoint `POST /api/giri/{giro_id}/inserisci-corsa-manuale`
+  - Payload: `{corsa_commerciale_id, giornata_numero, variante_index,
+    seq_target?}`
+  - Inserisce una `CorsaCommerciale` come blocco condotta nel giro
+    target, calcolando `seq_target` cronologico se non specificato
+  - Shifta `seq` dei blocchi successivi (UPDATE +1) e crea nuovo
+    `GiroBlocco` con `metadata_json={"origine":
+    "manuale_gantt_unificato"}` + `is_validato_utente=True`
+  - Differenza vs `riempi-gap`: niente vincolo match-esatto stazioni
+    o date-subset → l'operatore conferma manualmente, accetta i
+    warning informativi
+  - Warnings ritornati per ogni adiacenza incompatibile:
+    `sosta_non_match_prec/succ`, `tempo_sovrapposto_prec/succ`
+  - Auth: `PIANIFICATORE_GIRO`. Pipeline freeze check. 404 se giro
+    o corsa non in azienda.
+
+**Frontend**:
+
+- `frontend/src/lib/api/giri.ts` — client `inserisciCorsaManuale` +
+  tipi (`InserisciCorsaManualePayload`, `InserisciCorsaManualeResponse`,
+  `InserisciCorsaManualeWarning`).
+- `frontend/src/hooks/useGiri.ts` — `useInserisciCorsaManuale` mutation
+  con invalidate `GIRI_KEY` (lista + corse non coperte).
+- `frontend/src/routes/pianificatore-giro/GanttUnificatoRoute.tsx`
+  (NUOVO, ~470 righe):
+  - Header con info programma + conteggi giri/non coperte
+  - Gantt 04→04 con AxisHeader, layered rows che evitano
+    sovrapposizione delle 32 corse posizionate per `ora_partenza`
+  - Blocchi colorati per `motivo_presunto`: rosa
+    (linea_disgiunta) vs amber (sovrapposizione_stazioni)
+  - Click su blocco corsa → `InserisciCorsaDialog` con dropdown
+    giro target + giornata + variante → POST → mostra warnings
+  - Lista compatta giri esistenti (Link al Gantt singolo per
+    modifica fine)
+- `frontend/src/routes/AppRoutes.tsx` — registra route
+  `/pianificatore-giro/programmi/:programmaId/gantt-unificato`.
+- `frontend/src/routes/pianificatore-giro/ProgrammaGiriRoute.tsx`
+  — bottone "Gantt unificato" nel banner amber (icon
+  `LayoutDashboard`).
+
+#### MR-V1 — Diagnostica vetture API live.arturo.travel
+
+**Backend** (`backend/src/colazione/integrations/live_arturo.py`):
+
+- Refactor `_estrai_candidato` → `_estrai_candidato_with_reason` che
+  ritorna anche la **ragione** dello scarto (`no_fermate`,
+  `fuori_finestra`, `arrivo_no_match`, `match`).
+- `trova_treno_vettura` ora emette **log INFO breakdown** sempre:
+  - Quando 0 candidati → log con conteggi totali per filtro
+    (`n_no_fermate`, `n_arrivo_no_match`, `n_fuori_finestra`,
+    `n_esclusi_registro`).
+  - Quando 1+ candidati → log con scelta finale (numero, categoria,
+    operatore, partenza/arrivo) + conteggi scartati.
+- Lint pulito (Literal import). Mypy strict OK.
+
+**Backend** (`backend/src/colazione/domain/builder_pdc/multi_turno.py`):
+
+- Fallback finestra estesa (4h = 240min) in
+  `_aggiungi_vettura_rientro` quando la prima ricerca a 120min ritorna
+  None. Costo: 1 chiamata API extra solo nel caso peggiore. Beneficio:
+  PdC con vettura reale invece di dormita_rientro nelle situazioni
+  borderline.
+
+**Frontend** (`TurnoPdcDettaglioRoute.tsx`):
+
+- Banner `DecisioneBuilderBanner` ora marca i blocchi VETTURA reali
+  con badge sky `API live.arturo.travel` (tooltip esplicito) →
+  l'utente capisce che il treno è risolto via API.
+- Scenario "nessuna vettura, motivo dormita": riga aggiuntiva con
+  istruzione di controllare i log Railway per il breakdown filtri.
+
+### Verifiche
+
+- ✅ ruff `api/giri.py`, `live_arturo.py`, `multi_turno.py`: clean.
+- ✅ mypy --strict sui 3 file: clean.
+- ✅ pytest `test_live_arturo_client.py + test_multi_turno_dp.py +
+  test_deposito_first.py + test_piano_alpha_integration.py`: **52
+  passed**, zero regressioni.
+- ✅ frontend `tsc --noEmit`: clean.
+- ✅ frontend `pnpm build` (prod): bundle 908 kB minified, OK.
+- ✅ smoke preview locale: pagina login renderizza, zero errori console.
+
+### Limitazioni dichiarate
+
+1. **GanttUnificatoRoute MVP**: la lista giri esistenti è renderizzata
+   come righe sintetiche (numero, materiale, giornate, motivo
+   chiusura) senza barre Gantt visualizzate. Mostrare i blocchi di
+   tutti i 78 giri richiederebbe un nuovo endpoint backend di
+   batch-fetch dettagli (scope iterazione successiva). Il click sul
+   giro porta al Gantt singolo esistente per modifica fine.
+2. **Variante dropdown 0..3**: il dialog inserimento corsa offre solo
+   i primi 4 indici di variante (0=canonica + 3 successive). Per giri
+   con varianti calendariali multiple, l'utente potrebbe doverne
+   selezionare una specifica → fetch dettaglio giro per popolare
+   dinamicamente la lista varianti reali (scope iterazione).
+3. **Logging vetture livello INFO**: in produzione Railway il livello
+   default è INFO, quindi i log breakdown saranno visibili. Se il
+   livello fosse alzato a WARNING, il breakdown sparisce.
+4. **Fallback 240min può violare cap prestazione 510min**: già
+   gestito dal codice esistente (aggiunge violazione hard ma popola
+   comunque la vettura per visibilità del problema).
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway (cambia `live_arturo.py`,
+  `multi_turno.py`, `api/giri.py`).
+- ⏳ Deploy frontend Railway (nuova route, hook, banner update).
+
+### Prossimo step
+
+L'utente verifica in produzione:
+1. Click "Gantt unificato" da `programmi/17/giri` → vede 32 corse
+   come blocchi cliccabili.
+2. Click su una corsa → seleziona giro+giornata → conferma
+   inserimento → corsa scompare dal banner.
+3. Apre un turno PdC esistente → vede badge
+   "API live.arturo.travel" sui blocchi VETTURA o motivo
+   diagnostico esplicito quando dormita_rientro.
+4. Verifica nei log Railway backend il breakdown
+   `live_arturo.trova_treno_vettura` per capire perché alcune
+   vetture non vengono trovate.
+
+---
+
 ## 2026-05-10 (299) — Sprint 8.4 S2: fixture chiusura ≠ deposito + test #4 NON più vacuo (chiude HIGH critica entry 295)
 
 ### Contesto

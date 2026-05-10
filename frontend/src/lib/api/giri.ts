@@ -690,3 +690,51 @@ export async function aggiungiVuoto(
     { method: "POST", body: payload },
   );
 }
+
+// =====================================================================
+// Sprint 8.4 G1 — inserisci corsa manuale (Gantt unificato)
+// =====================================================================
+
+export interface InserisciCorsaManualePayload {
+  corsa_commerciale_id: number;
+  giornata_numero: number;
+  variante_index: number;
+  /** Posizione 1-based; null = backend la calcola in ordine cronologico. */
+  seq_target?: number | null;
+}
+
+export interface InserisciCorsaManualeWarning {
+  code:
+    | "sosta_non_match_prec"
+    | "sosta_non_match_succ"
+    | "tempo_sovrapposto_prec"
+    | "tempo_sovrapposto_succ"
+    | "stazione_disgiunta";
+  descrizione: string;
+}
+
+export interface InserisciCorsaManualeResponse {
+  blocco_id: number;
+  giro_id: number;
+  giornata_numero: number;
+  variante_index: number;
+  seq: number;
+  warnings: InserisciCorsaManualeWarning[];
+}
+
+/**
+ * Inserisce manualmente una corsa commerciale come blocco condotta del
+ * giro target. Pensato per il Gantt unificato (modifica manuale).
+ *
+ * Differenza vs `riempi-gap`: niente vincolo match-esatto stazioni; le
+ * incompatibilità vengono ritornate come warning, non bloccano.
+ */
+export async function inserisciCorsaManuale(
+  giroId: number,
+  payload: InserisciCorsaManualePayload,
+): Promise<InserisciCorsaManualeResponse> {
+  return apiJson<InserisciCorsaManualeResponse>(
+    `/api/giri/${giroId}/inserisci-corsa-manuale`,
+    { method: "POST", body: payload },
+  );
+}

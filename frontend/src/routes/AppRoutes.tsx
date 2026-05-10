@@ -6,6 +6,7 @@ import { LoginRoute } from "@/routes/LoginRoute";
 import { NotFoundRoute } from "@/routes/NotFoundRoute";
 import { ProtectedRoute } from "@/routes/ProtectedRoute";
 import { DashboardRoute } from "@/routes/pianificatore-giro/DashboardRoute";
+import { GanttUnificatoRoute } from "@/routes/pianificatore-giro/GanttUnificatoRoute";
 import { GiroDettaglioRoute } from "@/routes/pianificatore-giro/GiroDettaglioRoute";
 import { MaterialeThreadRoute } from "@/routes/pianificatore-giro/MaterialeThreadRoute";
 import { PdEAnnualeRoute } from "@/routes/pianificatore-giro/PdEAnnualeRoute";
@@ -77,6 +78,13 @@ export function AppRoutes() {
             <Route path="programmi" element={<ProgrammiRoute />} />
             <Route path="programmi/:programmaId" element={<ProgrammaDettaglioRoute />} />
             <Route path="programmi/:programmaId/giri" element={<ProgrammaGiriRoute />} />
+            {/* Sprint 8.4 G1 — Gantt unificato modificabile: vista
+                d'insieme di tutti i giri del programma + corse non
+                coperte come blocchi cliccabili (manual gap fill). */}
+            <Route
+              path="programmi/:programmaId/gantt-unificato"
+              element={<GanttUnificatoRoute />}
+            />
             {/* Sprint 8.0 MR-A (entry 231) — vista aggregata per
                 (materiale, sede): combina N giri in 1 Gantt unico per
                 drag&drop cross-turno. */}

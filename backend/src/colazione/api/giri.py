@@ -3752,6 +3752,312 @@ async def duplica_giro(
     )
 
 
+# =====================================================================
+# Sprint 8.4 G1 — inserisci corsa manuale (Gantt unificato)
+# =====================================================================
+
+
+class InserisciCorsaManualePayload(BaseModel):
+    """Sprint 8.4 G1 — payload ``POST /api/giri/{giro_id}/inserisci-corsa-manuale``.
+
+    Forza l'inserimento di una ``CorsaCommerciale`` come blocco condotta
+    nel giro, senza il vincolo "match esatto stazioni" di ``riempi-gap``.
+    Pensato per la modifica manuale dal Gantt unificato: l'operatore
+    sa cosa fa, accetta eventuali warning di sosta/stazione e procede.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    corsa_commerciale_id: int = Field(
+        description="ID della corsa commerciale (perimetro azienda)."
+    )
+    giornata_numero: int = Field(
+        ge=1,
+        description="Numero giornata-tipo (1-based) del giro target.",
+    )
+    variante_index: int = Field(
+        ge=0,
+        description="Indice variante calendariale (0 = canonica).",
+    )
+    seq_target: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Posizione 1-based del blocco. Se None: il backend "
+            "inserisce in ordine cronologico (prima del primo blocco "
+            "con ``ora_inizio > corsa.ora_partenza``)."
+        ),
+    )
+
+
+class InserisciCorsaManualeWarning(BaseModel):
+    code: Literal[
+        "sosta_non_match_prec",
+        "sosta_non_match_succ",
+        "tempo_sovrapposto_prec",
+        "tempo_sovrapposto_succ",
+        "stazione_disgiunta",
+    ]
+    descrizione: str
+
+
+class InserisciCorsaManualeResponse(BaseModel):
+    blocco_id: int
+    giro_id: int
+    giornata_numero: int
+    variante_index: int
+    seq: int
+    warnings: list[InserisciCorsaManualeWarning]
+
+
+@giri_dettaglio_router.post(
+    "/{giro_id}/inserisci-corsa-manuale",
+    response_model=InserisciCorsaManualeResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary=(
+        "Inserisce manualmente una corsa commerciale come blocco "
+        "condotta del giro. Ammette sosta non-match con warning."
+    ),
+)
+async def inserisci_corsa_manuale(
+    giro_id: int,
+    payload: InserisciCorsaManualePayload,
+    user: CurrentUser = _authz,
+    session: AsyncSession = Depends(get_session),
+) -> InserisciCorsaManualeResponse:
+    """Sprint 8.4 G1 — endpoint manual gap fill dal Gantt unificato.
+
+    Logica:
+
+    1. Carica giro (404 se non azienda) e verifica programma non freezato.
+    2. Carica corsa commerciale (404 se non azienda).
+    3. Trova ``GiroGiornata`` (numero) → ``GiroVariante`` (variant_index).
+    4. Calcola ``seq_target`` se None: posizione cronologica corretta.
+    5. Calcola warnings su match stazione+tempo coi blocchi adiacenti.
+    6. Shifta ``seq`` dei blocchi successivi (UPDATE +1).
+    7. INSERT nuovo ``GiroBlocco`` con
+       ``metadata_json={"origine":"manuale_gantt_unificato"}``.
+    8. Ritorna blocco creato + warnings.
+
+    Differenza vs ``riempi-gap``: niente vincolo match-esatto stazioni
+    né date-subset variante. La validazione di compatibilità è solo
+    informativa (warning, non errore). L'operatore conferma dal Gantt.
+    """
+    # 1. Carica giro
+    g = (
+        await session.execute(
+            select(GiroMateriale).where(
+                GiroMateriale.id == giro_id,
+                GiroMateriale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if g is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Giro non trovato"
+        )
+    # Pipeline freeze check (coerente con duplica_giro).
+    stato_pipeline = (
+        await session.execute(
+            select(ProgrammaMateriale.stato_pipeline_pdc).where(
+                ProgrammaMateriale.id == g.programma_id
+            )
+        )
+    ).scalar_one_or_none()
+    if stato_pipeline is not None and materiale_freezato(stato_pipeline):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"programma freezato (pipeline {stato_pipeline!r}): "
+                "modifiche al giro non ammesse."
+            ),
+        )
+
+    # 2. Carica corsa
+    corsa = (
+        await session.execute(
+            select(CorsaCommerciale).where(
+                CorsaCommerciale.id == payload.corsa_commerciale_id,
+                CorsaCommerciale.azienda_id == user.azienda_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if corsa is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Corsa commerciale non trovata nell'azienda",
+        )
+
+    # 3. Trova giornata + variante
+    gg = (
+        await session.execute(
+            select(GiroGiornata).where(
+                GiroGiornata.giro_materiale_id == giro_id,
+                GiroGiornata.numero_giornata == payload.giornata_numero,
+            )
+        )
+    ).scalar_one_or_none()
+    if gg is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Giornata {payload.giornata_numero} non trovata nel giro "
+                f"{giro_id}"
+            ),
+        )
+    gv = (
+        await session.execute(
+            select(GiroVariante).where(
+                GiroVariante.giro_giornata_id == gg.id,
+                GiroVariante.variant_index == payload.variante_index,
+            )
+        )
+    ).scalar_one_or_none()
+    if gv is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Variante index={payload.variante_index} non trovata per "
+                f"giornata {payload.giornata_numero}"
+            ),
+        )
+
+    # 4. Carica blocchi esistenti della variante (ordinati per seq).
+    blocchi_esistenti = list(
+        (
+            await session.execute(
+                select(GiroBlocco)
+                .where(GiroBlocco.giro_variante_id == gv.id)
+                .order_by(GiroBlocco.seq)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    # Calcola seq_target se None.
+    if payload.seq_target is None:
+        seq_target = 1
+        for b in blocchi_esistenti:
+            if b.ora_inizio is None:
+                # Blocchi senza orario stanno in coda relativa: skip nel
+                # confronto; la corsa nuova si posiziona dopo l'ultimo
+                # con orario più piccolo. Manteniamo seq incrementale.
+                seq_target = b.seq + 1
+                continue
+            if _minuti(b.ora_inizio) < _minuti(corsa.ora_partenza):
+                seq_target = b.seq + 1
+            else:
+                break
+    else:
+        seq_target = payload.seq_target
+
+    # 5. Calcola warnings su adiacenti (info, non errore).
+    warnings: list[InserisciCorsaManualeWarning] = []
+    blocchi_per_seq = {b.seq: b for b in blocchi_esistenti}
+    prev_b = blocchi_per_seq.get(seq_target - 1)
+    succ_b = blocchi_per_seq.get(seq_target)
+
+    if prev_b is not None and prev_b.stazione_a_codice is not None:
+        if prev_b.stazione_a_codice != corsa.codice_origine:
+            warnings.append(
+                InserisciCorsaManualeWarning(
+                    code="sosta_non_match_prec",
+                    descrizione=(
+                        f"Blocco precedente arriva a "
+                        f"{prev_b.stazione_a_codice} ma la corsa "
+                        f"{corsa.numero_treno} parte da "
+                        f"{corsa.codice_origine}: gap stazioni"
+                    ),
+                )
+            )
+        if (
+            prev_b.ora_fine is not None
+            and _minuti(prev_b.ora_fine) > _minuti(corsa.ora_partenza)
+        ):
+            warnings.append(
+                InserisciCorsaManualeWarning(
+                    code="tempo_sovrapposto_prec",
+                    descrizione=(
+                        f"Blocco precedente termina "
+                        f"{prev_b.ora_fine.strftime('%H:%M')} ma la corsa "
+                        f"{corsa.numero_treno} parte alle "
+                        f"{corsa.ora_partenza.strftime('%H:%M')}: "
+                        f"sovrapposizione temporale"
+                    ),
+                )
+            )
+    if succ_b is not None and succ_b.stazione_da_codice is not None:
+        if succ_b.stazione_da_codice != corsa.codice_destinazione:
+            warnings.append(
+                InserisciCorsaManualeWarning(
+                    code="sosta_non_match_succ",
+                    descrizione=(
+                        f"Blocco successivo parte da "
+                        f"{succ_b.stazione_da_codice} ma la corsa "
+                        f"{corsa.numero_treno} arriva a "
+                        f"{corsa.codice_destinazione}: gap stazioni"
+                    ),
+                )
+            )
+        if (
+            succ_b.ora_inizio is not None
+            and _minuti(succ_b.ora_inizio) < _minuti(corsa.ora_arrivo)
+        ):
+            warnings.append(
+                InserisciCorsaManualeWarning(
+                    code="tempo_sovrapposto_succ",
+                    descrizione=(
+                        f"Corsa {corsa.numero_treno} arriva alle "
+                        f"{corsa.ora_arrivo.strftime('%H:%M')} ma il "
+                        f"blocco successivo parte alle "
+                        f"{succ_b.ora_inizio.strftime('%H:%M')}: "
+                        f"sovrapposizione temporale"
+                    ),
+                )
+            )
+
+    # 6. Shift seq successivi (>=seq_target → +1).
+    await session.execute(
+        update(GiroBlocco)
+        .where(GiroBlocco.giro_variante_id == gv.id)
+        .where(GiroBlocco.seq >= seq_target)
+        .values(seq=GiroBlocco.seq + 1)
+    )
+
+    # 7. INSERT nuovo blocco condotta.
+    nuovo = GiroBlocco(
+        giro_variante_id=gv.id,
+        seq=seq_target,
+        tipo_blocco="corsa_commerciale",
+        corsa_commerciale_id=corsa.id,
+        stazione_da_codice=corsa.codice_origine,
+        stazione_a_codice=corsa.codice_destinazione,
+        ora_inizio=corsa.ora_partenza,
+        ora_fine=corsa.ora_arrivo,
+        is_validato_utente=True,  # inserimento manuale = validato
+        metadata_json={
+            "origine": "manuale_gantt_unificato",
+            "inserito_da_user_id": user.user_id,
+            "inserito_at": datetime.now(UTC).isoformat(),
+            "warnings_n": len(warnings),
+        },
+    )
+    session.add(nuovo)
+    await session.flush()
+    await session.commit()
+    await session.refresh(nuovo)
+
+    return InserisciCorsaManualeResponse(
+        blocco_id=nuovo.id,
+        giro_id=giro_id,
+        giornata_numero=payload.giornata_numero,
+        variante_index=payload.variante_index,
+        seq=nuovo.seq,
+        warnings=warnings,
+    )
+
+
 @giri_dettaglio_router.get(
     "/{giro_id}",
     response_model=GiroMaterialeDettaglioRead,

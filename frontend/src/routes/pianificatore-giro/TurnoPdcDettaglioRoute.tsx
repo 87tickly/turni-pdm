@@ -319,6 +319,12 @@ function DecisioneRiga({
               {orario}
             </span>
           )}
+          <span
+            className="ml-1.5 inline-flex items-center rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-sky-700"
+            title="Treno reale risolto via API live.arturo.travel (fonte ufficiale orari ferroviari ARTURO)"
+          >
+            API live.arturo.travel
+          </span>
           {isDormita && (
             <span className="ml-1 italic text-muted-foreground">
               · dormita la sera prima
@@ -330,13 +336,20 @@ function DecisioneRiga({
   }
   // Scenario 3: nessuna vettura ma motivo (= dormita o tratta scoperta).
   return (
-    <div className="flex items-baseline gap-2 text-xs">
-      <span className="w-16 shrink-0 font-mono uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
-      <span className="text-foreground">
-        🛏 {vettura.motivo ?? `${tipoFallback} (dettagli mancanti)`}
-      </span>
+    <div className="flex flex-col gap-0.5 text-xs">
+      <div className="flex items-baseline gap-2">
+        <span className="w-16 shrink-0 font-mono uppercase tracking-wider text-muted-foreground">
+          {label}
+        </span>
+        <span className="text-foreground">
+          🛏 {vettura.motivo ?? `${tipoFallback} (dettagli mancanti)`}
+        </span>
+      </div>
+      <div className="ml-[4.5rem] text-[10px] italic text-muted-foreground">
+        Nessun treno trovato via API live.arturo.travel nelle finestre 120
+        e 240 min. Verificare nei log del backend (Railway) il breakdown
+        dei filtri (no_fermate / arrivo_no_match / fuori_finestra).
+      </div>
     </div>
   );
 }

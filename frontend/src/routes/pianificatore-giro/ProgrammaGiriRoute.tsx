@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  LayoutDashboard,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -1675,6 +1676,19 @@ function CorseNonCoperteSection({ programmaId }: { programmaId: number }) {
             )}
           </div>
           <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                window.location.assign(
+                  `/pianificatore-giro/programmi/${programmaId}/gantt-unificato`,
+                )
+              }
+              title="Apre il Gantt unificato: vede insieme tutti i giri (chiusi e aperti) + le corse non coperte come blocchi cliccabili. Click su una corsa scoperta → inserimento manuale in un giro esistente, anche se le stazioni non matchano (con warning informativi)."
+            >
+              <LayoutDashboard className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              Gantt unificato
+            </Button>
             <Button
               variant="outline"
               size="sm"

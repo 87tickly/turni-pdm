@@ -15,6 +15,7 @@ import {
   generaGiri,
   getGiroDettaglio,
   getThreadDettaglio,
+  inserisciCorsaManuale,
   listCorseNonCoperte,
   listGiriAzienda,
   listGiriProgramma,
@@ -41,6 +42,8 @@ import {
   type GiroBlocco,
   type GiroDettaglio,
   type GiroListItem,
+  type InserisciCorsaManualePayload,
+  type InserisciCorsaManualeResponse,
   type LineaDistinct,
   type ListGiriAziendaParams,
   type MaterialeThreadDettaglio,
@@ -454,6 +457,31 @@ export function useCorseNonCoperte(
  * (es. ~250ms) sulla query — questo hook non lo fa, perché vive
  * dentro React Query (cache + stale time bastano).
  */
+/**
+ * Sprint 8.4 G1 — inserimento manuale corsa scoperta in un giro
+ * (Gantt unificato). Mutation: l'UI conferma → invia → invalida lista
+ * giri + corse non coperte.
+ */
+interface InserisciCorsaManualeArgs {
+  giroId: number;
+  payload: InserisciCorsaManualePayload;
+}
+
+export function useInserisciCorsaManuale(): UseMutationResult<
+  InserisciCorsaManualeResponse,
+  Error,
+  InserisciCorsaManualeArgs
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ giroId, payload }) =>
+      inserisciCorsaManuale(giroId, payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: GIRI_KEY });
+    },
+  });
+}
+
 export function useCercaTreno(
   programmaId: number | undefined,
   q: string,
