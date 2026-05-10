@@ -10,6 +10,113 @@
 
 ---
 
+## 2026-05-10 (297) — Sprint 8.4 S1: fix HIGH-CRITICAL wild-card operatore in live_arturo.py (chiude critica entry 295)
+
+### Contesto
+
+Chiusura del finding **S1 HIGH-CRITICAL** della critica SEVERO entry
+295 (`docs/critiche/SPRINT-8.3-BACKLOG-CLEANUP-RETROSPETTIVA.md`):
+bug semantico cross-modulo nel registro vetture cross-PdC.
+
+**Diagnostica del bug**:
+- `registro_vetture.py:230-241` (S4 entry 288) popola SEMPRE
+  `assegna(operatore=None)` come "wild-card su operatore" (così
+  dichiarato in docstring `numeri_da_escludere`).
+- `numeri_da_escludere(data_operativa=...)` ritorna le chiavi del
+  registro così come sono = `frozenset({(numero, None), ...})`.
+- `live_arturo.py:301` filtrava
+  `if (cand.numero, cand.operatore) in esclusi: continue` = match
+  TUPLA STRETTA.
+- `cand.operatore` reale è `"TN"` (Trenord) o `"TILO"` ma `esclusi`
+  contiene `(n, None)` → **0 esclusioni effettive**.
+- Docstring `from_db:158-163` dichiarava "sovra-strict ma sicuro" →
+  era invece **SOTTO-strict**, falso signaling. Smoke prod entry 293
+  NON l'aveva esercitato (Caso A short-circuit, registro vuoto).
+
+### Modifiche
+
+**`backend/src/colazione/integrations/live_arturo.py`**:
+
+- Filtro `esclusi` esteso con clausola wild-card:
+
+  ```python
+  if esclusi is not None and (
+      (cand.numero, cand.operatore) in esclusi
+      or (cand.numero, None) in esclusi
+  ):
+      continue
+  ```
+
+- Docstring `trova_treno_vettura` aggiornata con sezione **"Sprint 8.4
+  S1 FIX"** che documenta la semantica:
+  - `(numero, "TN")` = match strict (esclude solo numero+operatore esatti).
+  - `(numero, None)` = match wild-card (esclude qualsiasi operatore reale).
+
+- Commento inline al filtro che spiega bug pre-fix + impatto +
+  intent semantico.
+
+### Test
+
+**`backend/tests/test_live_arturo_client.py`** — 4 nuovi test:
+
+1. `test_esclusi_strict_match_numero_operatore_uguali_esclude`: match
+   strict con `(2814, "TN")` = candidato escluso (regressione legacy
+   protetta).
+2. `test_esclusi_strict_match_operatore_diverso_non_esclude`: match
+   strict con `(2814, "TILO")` ≠ candidato `operatore="TN"` = NON
+   escluso (semantica strict per operatore valorizzato preservata).
+3. `test_esclusi_wildcard_operatore_none_esclude_qualsiasi_operatore`:
+   **test chiave del fix** — `(2814, None)` esclude candidato con
+   `operatore="TN"`. Pre-fix: bug = candidato NON escluso. Post-fix:
+   ESCLUSO. Assertion con messaggio esplicito di regressione.
+4. `test_esclusi_wildcard_e_strict_combinati`: scenario misto con
+   `esclusi={("2814", "TN"), ("2900", None)}` su 2 candidati 2814 TN +
+   2815 TILO → solo 2815 sopravvive.
+
+### Verifiche
+
+- ✅ pytest test_live_arturo_client: **21 passed** (17 esistenti + 4
+  nuovi S1).
+- ✅ pytest downstream (test_vettura_resolver + test_registro_vetture +
+  test_piano_alpha_integration + test_deposito_first): **46 passed**,
+  zero regressioni.
+- ✅ mypy --strict live_arturo.py: clean.
+- ✅ ruff: clean.
+
+### Limitazioni dichiarate
+
+1. **Fix è in `live_arturo.py`** (consumer side), non in
+   `RegistroVettureAssegnate.numeri_da_escludere` (producer side).
+   Il producer continua a esporre l'astrazione interna senza
+   incapsulare la semantica wild-card. Refactor strutturale (es.
+   metodo `is_escluso(numero, operatore)`) sarebbe più pulito ma
+   richiederebbe cambiare API `live_arturo.trova_treno_vettura`.
+   Scope MR-PD7+: per ora il fix consumer-side rispetta intent
+   semantico documentato + minimal blast radius.
+2. **Wild-card su data_operativa**: la chiave registro per le date
+   assegnate è `set[date | None]` con `None` = wild-card data. La
+   semantica wild-card data è già incapsulata in `is_assegnata`
+   e `numeri_da_escludere` correttamente. Niente da fare lì.
+
+### Stato deploy
+
+- ⏳ Deploy backend Railway: cambio chirurgico in path opt-in
+  `deposito_first` (consumer side filtro vetture). Nessuna migration,
+  nessuna nuova entità. Backward-compat verificata 46 test downstream.
+
+### Stato
+
+- ✅ S1 HIGH-CRITICAL critica entry 295 CHIUSO.
+- ⏳ S2 HIGH critica entry 295 (test integration S7 #4 vacuo, fixture
+  chiusura ≠ deposito): prossimo step.
+
+### Prossimo step
+
+S2 fix: fixture giro con chiusura ≠ deposito per esercitare path
+VETTURA + persistenza `numero_treno_vettura`.
+
+---
+
 ## 2026-05-10 (296) — Sprint 8.3 MR-S6-completion: integrazione check_alembic_revisions.py in backend-ci.yml (chiude S6 MED PROCESS critica entry 284)
 
 ### Contesto

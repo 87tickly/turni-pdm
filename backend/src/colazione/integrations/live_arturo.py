@@ -246,6 +246,22 @@ async def trova_treno_vettura(
     ``(numero_treno, operatore)`` da escludere PRIMA dell'ordinamento.
     Default ``None`` non rompe il contratto legacy.
 
+    **Sprint 8.4 S1 FIX (chiude HIGH-CRITICAL critica entry 295)** —
+    semantica match wild-card su ``operatore``:
+
+    - ``(numero, "TN")`` in ``esclusi`` esclude SOLO candidati con
+      esattamente quel numero AND quell'operatore (match strict).
+    - ``(numero, None)`` in ``esclusi`` esclude QUALSIASI candidato
+      con quel numero, indipendentemente dall'operatore reale (match
+      wild-card su operatore). Coerente con
+      :meth:`RegistroVettureAssegnate.assegna(operatore=None)` che
+      dichiara intent "wild card" nella docstring.
+
+    Pre-fix (entry 295): match era `tupla stretta` solo, quindi
+    `esclusi={(n, None)}` NON matchava `cand.operatore="TN"`/`"TILO"`
+    reale → 0 esclusioni effettive. Bug latente non visto da smoke
+    prod entry 293 (Caso A short-circuit, registro vuoto).
+
     Strategia:
     1. Recupera (o cacha) la lista treni passanti per
        ``stazione_partenza_codice`` da ``/api/partenze/{stazione}``.
@@ -253,8 +269,9 @@ async def trova_treno_vettura(
        - hanno una fermata con ``stazione_id == stazione_arrivo_codice``
        - partono da ``stazione_partenza_codice`` dopo
          ``ora_min_partenza`` (con attesa ≤ ``max_attesa_min``).
-       - **se ``esclusi`` valorizzato**: NON sono in ``esclusi`` per
-         chiave ``(numero, operatore)``.
+       - **se ``esclusi`` valorizzato**: NON sono in ``esclusi`` né
+         con chiave strict ``(numero, operatore)`` né con chiave
+         wild-card ``(numero, None)`` (vedi semantica sopra).
     3. Tra i candidati, sceglie quello con ``partenza_min`` minimo.
 
     Returns ``None`` se nessun treno trovato (nessun passante in
@@ -298,7 +315,17 @@ async def trova_treno_vettura(
             if cand is None:
                 continue
             # Sprint 8.2 MR-PD-FIX-SEVERO 3b A1: filtro esclusi pre-ordinamento.
-            if esclusi is not None and (cand.numero, cand.operatore) in esclusi:
+            # Sprint 8.4 S1 FIX (chiude HIGH-CRITICAL critica entry 295):
+            # match wild-card su operatore. Una entry `(numero, None)` in
+            # `esclusi` esclude qualsiasi candidato con quel numero,
+            # indipendentemente da `cand.operatore` reale ("TN"/"TILO"/...).
+            # Pre-fix il match era solo strict tupla → 0 esclusioni effettive
+            # quando `from_db` popolava sempre `operatore=None` (wild-card
+            # dichiarato in docstring ma non rispettato dal filtro).
+            if esclusi is not None and (
+                (cand.numero, cand.operatore) in esclusi
+                or (cand.numero, None) in esclusi
+            ):
                 logger.debug(
                     "Treno %s (%s) escluso da registro vetture",
                     cand.numero,

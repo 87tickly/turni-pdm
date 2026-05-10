@@ -312,3 +312,121 @@ def test_treno_vettura_dataclass_immutabile() -> None:
     )
     with pytest.raises(AttributeError):
         t.numero = "2"  # type: ignore[misc]
+
+
+# =====================================================================
+# Sprint 8.4 S1 — esclusioni `(numero, operatore)` con semantica
+# wild-card su operatore (chiude HIGH-CRITICAL critica entry 295).
+# =====================================================================
+
+
+def _make_treno_passante() -> dict[str, Any]:
+    """Helper: response API minima per un treno 2814 TN passante per
+    S01700 → S01520 nella finestra 12:00 → 13:00."""
+    return _make_treno(
+        numero="2814",
+        operatore="TN",
+        fermate=[
+            {"stazione_id": "S01700", "programmato_partenza": "2026-05-05T12:00:00Z", "programmato_arrivo": None},
+            {"stazione_id": "S01520", "programmato_partenza": None, "programmato_arrivo": "2026-05-05T13:00:00Z"},
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_esclusi_strict_match_numero_operatore_uguali_esclude() -> None:
+    """Match strict: `esclusi={(numero, operatore_esatto)}` esclude
+    candidato con quel numero E quell'operatore."""
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=[_make_treno_passante()]))
+    async with httpx.AsyncClient(transport=transport) as client:
+        treno = await trova_treno_vettura(
+            stazione_partenza_codice="S01700",
+            stazione_arrivo_codice="S01520",
+            ora_min_partenza=11 * 60 + 50,
+            client=client,
+            esclusi=frozenset({("2814", "TN")}),
+        )
+    assert treno is None
+
+
+@pytest.mark.asyncio
+async def test_esclusi_strict_match_operatore_diverso_non_esclude() -> None:
+    """Match strict: `esclusi={(numero, "TILO")}` NON esclude candidato
+    con stesso numero ma operatore="TN" (semantica strict per
+    operatore valorizzato)."""
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=[_make_treno_passante()]))
+    async with httpx.AsyncClient(transport=transport) as client:
+        treno = await trova_treno_vettura(
+            stazione_partenza_codice="S01700",
+            stazione_arrivo_codice="S01520",
+            ora_min_partenza=11 * 60 + 50,
+            client=client,
+            esclusi=frozenset({("2814", "TILO")}),
+        )
+    assert treno is not None
+    assert treno.numero == "2814"
+    assert treno.operatore == "TN"
+
+
+@pytest.mark.asyncio
+async def test_esclusi_wildcard_operatore_none_esclude_qualsiasi_operatore() -> None:
+    """Sprint 8.4 S1 FIX (chiude HIGH-CRITICAL critica entry 295):
+    `esclusi={(numero, None)}` esclude QUALSIASI candidato con quel
+    numero, indipendentemente dall'operatore reale.
+
+    Pre-fix il bug latente: `(2814, None) not in {(2814, "TN")}`
+    semantico match strict → 0 esclusioni effettive con `from_db`
+    che popolava sempre `operatore=None` (wild-card dichiarato in
+    docstring ma non rispettato dal filtro). `from_db` dichiarava
+    "sovra-strict ma sicuro" mentre era in realtà SOTTO-strict.
+    """
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=[_make_treno_passante()]))
+    async with httpx.AsyncClient(transport=transport) as client:
+        treno = await trova_treno_vettura(
+            stazione_partenza_codice="S01700",
+            stazione_arrivo_codice="S01520",
+            ora_min_partenza=11 * 60 + 50,
+            client=client,
+            esclusi=frozenset({("2814", None)}),
+        )
+    assert treno is None, (
+        "REGRESSIONE S1: esclusi=(numero, None) deve escludere candidato "
+        "con qualsiasi operatore reale (wild-card semantica)."
+    )
+
+
+@pytest.mark.asyncio
+async def test_esclusi_wildcard_e_strict_combinati() -> None:
+    """Test misto: `esclusi` contiene sia chiavi strict
+    `(numero, "TN")` sia wild-card `(altro_numero, None)`.
+
+    Setup: 2 candidati (2814 TN, 2815 TILO). Esclude 2814 strict
+    + 2900 wildcard. Risultato: solo 2815 sopravvive (2900 non
+    esiste nei candidati ma la wildcard non rompe nulla)."""
+    treno_a = _make_treno(
+        numero="2814",
+        operatore="TN",
+        fermate=[
+            {"stazione_id": "S01700", "programmato_partenza": "2026-05-05T12:00:00Z", "programmato_arrivo": None},
+            {"stazione_id": "S01520", "programmato_partenza": None, "programmato_arrivo": "2026-05-05T13:00:00Z"},
+        ],
+    )
+    treno_b = _make_treno(
+        numero="2815",
+        operatore="TILO",
+        fermate=[
+            {"stazione_id": "S01700", "programmato_partenza": "2026-05-05T12:30:00Z", "programmato_arrivo": None},
+            {"stazione_id": "S01520", "programmato_partenza": None, "programmato_arrivo": "2026-05-05T13:30:00Z"},
+        ],
+    )
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=[treno_a, treno_b]))
+    async with httpx.AsyncClient(transport=transport) as client:
+        treno = await trova_treno_vettura(
+            stazione_partenza_codice="S01700",
+            stazione_arrivo_codice="S01520",
+            ora_min_partenza=11 * 60 + 50,
+            client=client,
+            esclusi=frozenset({("2814", "TN"), ("2900", None)}),
+        )
+    assert treno is not None
+    assert treno.numero == "2815"
