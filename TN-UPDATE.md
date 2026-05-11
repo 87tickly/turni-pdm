@@ -10,6 +10,68 @@
 
 ---
 
+## 2026-05-11 (302) — Code review completa repo COLAZIONE (25 finding)
+
+### Contesto
+
+Review senior completa del repo richiesta dall'utente prima di qualsiasi
+fix. Scopo: mappare il debito tecnico accumulato negli Sprint 7.x–8.4,
+le violazioni normativa PdC, i buchi di test, la qualità architetturale.
+Output: `docs/CODE-REVIEW-2026-05-11.md` (solo documentazione, nessuna
+modifica al codice di produzione). PR aperta con il solo file review.
+
+Fonti lette prima della review:
+- `CLAUDE.md` (regole operative)
+- `TN-UPDATE.md` (prime 5 entry)
+- `docs/METODO-DI-LAVORO.md`
+- `docs/NORMATIVA-PDC.md` (fonte verità dominio)
+- `docs/MODELLO-DATI.md`
+
+Aree ispezionate: `backend/src/`, `backend/tests/`, `frontend/src/`,
+`data/`, `scripts/`.
+
+### Modifiche
+
+**`docs/CODE-REVIEW-2026-05-11.md`** — creato (solo doc, no codice).
+
+25 finding classificati:
+- **8 CRITICO** (C1–C8): access token 72h senza revoca (C1), nessun
+  validator startup segreto JWT debole (C2), xfail MR-PD3 non rimossi
+  causano 3 XPASS → fail suite (C3), wild-card `date_operativa=None`
+  in registro vetture ignora conflitti data-specifici (C4), PK gap
+  senza floor 20 min §4.4 (C5), gap ≥65 min non classifica ACC §6
+  (C6), messaggio errore §11.4 usa costante sbagliata 16h ≠ 62h (C7),
+  `updated_at` mai aggiornato su turno_pdc (C8).
+- **11 IMPORTANTE** (I1–I11): facade importa simboli privati (I1),
+  STAZIONI_CV_DEROGA hardcoded ignora capolinea dinamici §9.2 (I2),
+  `giro_blocco_id FK SET NULL` silenzioso (I3), `operatore_treno_vettura`
+  assente dal modello (I4), dead code builder_giro (I5), bare `except
+  Exception` in builder_giro e vettura_resolver (I6, I7), nessun indice
+  su `turno_pdc_giornata.turno_pdc_id` (I8), magic numbers in
+  multi_turno (I9), override 14h→16h non documentato in normativa (I10),
+  test xfail importa simboli privati (I11).
+- **6 MINORE** (M1–M6): inconsistenza naming `codice`/`impianto` in
+  TurnoPdc (M1), FK cascade misto (M2), mancano test frontend builder
+  API (M3), CORS wildcard in dev senza commento (M4), no rate limiting
+  su login (M5), docstring PRESTAZIONE_MAX_NOTTURNO errata (M6).
+
+### Stato
+
+- ✅ `docs/CODE-REVIEW-2026-05-11.md` scritto (25 finding, ogni finding
+  con file:riga + fix concreto + stima costo).
+- ✅ TN-UPDATE aggiornato (questa entry).
+- ✅ PR aperta con il solo file review (nessun fix al codice).
+- ⏳ Fix: decisi dall'utente dopo lettura review. Nessun fix automatico.
+
+### Prossimo step
+
+Utente legge `docs/CODE-REVIEW-2026-05-11.md` e decide priorità di fix.
+I CRITICO C3 (xfail da rimuovere) e C7 (costante sbagliata nel msg
+§11.4) sono i più rapidi da chiudere (<15 min ciascuno). C1 (access
+token 72h) è il più urgente sul piano sicurezza.
+
+---
+
 ## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
 
 ### Contesto
