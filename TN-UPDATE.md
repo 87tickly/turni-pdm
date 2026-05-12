@@ -10,6 +10,64 @@
 
 ---
 
+## 2026-05-12 (302) — Code review completa del repo COLAZIONE
+
+### Contesto
+
+Review senior sistematica dell'intero codebase richiesta dall'utente prima
+di procedere con Sprint 8.3/8.4. Obiettivo: mappare debiti tecnici,
+violazioni normativa PdC, bug latenti e gap test — con `file:riga` e fix
+concreto per ogni finding. Nessuna modifica al codice di produzione:
+la review è solo documentazione.
+
+Documenti letti prima della review:
+- `CLAUDE.md` (regole operative, profilo senior, manifesto greenfield)
+- `TN-UPDATE.md` prime 5 entry (entry 297-301)
+- `docs/METODO-DI-LAVORO.md` (7 regole comportamentali)
+- `docs/NORMATIVA-PDC.md` (fonte verità dominio, 1292 righe)
+- `docs/MODELLO-DATI.md` v0.5
+
+### Modifiche
+
+**`docs/CODE-REVIEW-2026-05-12.md`** — creato (solo file, nessuna modifica al codice).
+
+**24 finding totali** classificati per gravità:
+
+| Gravità | N | Temi principali |
+|---------|---|-----------------|
+| CRITICO | 8 | Violazioni normativa §4.4/§3.3, anti-regen N+1, bug deduplication vetture, `updated_at` no-onupdate, test suite broken, assert disabilitabili, pseudo-FK JSONB |
+| IMPORTANTE | 9 | VOCTAXI flat 30', facade mal invertita, stato/tipo_evento senza CHECK, mutable in-place `seq`, closure su mutable, query O(n) Python-side, import privati nei test |
+| MINORE | 7 | `__all__` mancante in builder, magia `"feriale"`, `linee_descrizione` ambigua, `TurnoPdcGiornata` no `updated_at`, `GiroMateriale.updated_at` no-onupdate, `is_accessori_maggiorati` tipo ambiguo, TODO S4 mai tracciati |
+
+**Due violazioni dirette normativa PdC trovate**:
+- **C-06** `builder.py:258-270` — PK creato per qualsiasi gap > 0; §4.4 richiede gap ≥ 40' (20' arrivo + 20' partenza). Fix: aggiungere guardia `gap > PK_MINIMO_MIN` con `PK_MINIMO_MIN = 40`.
+- **C-07** `builder.py:215` — ACCp sempre 40'; §3.3 richiede 80' per dicembre-febbraio su depositi non Fiorenza. Fix: nuovo metodo `_calcola_acc_min(ora_inizio, deposito)` con lookup mese.
+
+**Bug latente deduplication vetture** (C-05 nella review):
+- `registro_vetture.py:from_db` carica sempre `operatore=None`; `is_assegnata` match è strict su operatore → i record `from_db` non collidono mai con le lookup del resolver (che hanno operatore reale) → deduplication cross-PdC di fatto no-op.
+
+**Anti-pattern architetturale** (C-03 nella review):
+- `deposito_first.py:465-479`: carica tutti i `TurnoPdc` del deposito + filtra per `giro_materiale_id` in Python. Pattern corretto già esistente in `registro_vetture.py:200-212` (usa `jsonb_extract_path_text`).
+
+### Stato
+
+Review completa. File `docs/CODE-REVIEW-2026-05-12.md` scritto e committato
+sul branch `claude/zen-babbage-M3AKq`. PR draft aperta su GitHub.
+Il codice di produzione è **invariato** — i fix sono da schedulare in
+Sprint 8.3/8.4 in base alla priorità utente.
+
+### Prossimo step
+
+Utente decide quali finding affrontare e in quale ordine. Suggerimento
+priorità operativa:
+1. **C-06 + C-07** (violazioni normativa) — fix a bassa invasività, scrivibili in < 2h
+2. **C-03** (anti-regen N+1) — performance reale su dataset grandi
+3. **C-05** (deduplication vetture no-op) — correttezza funzionale §15
+4. **C-01** (`updated_at` no-onupdate) — migration 1 riga, basso rischio
+5. **C-02** (test suite broken) — sblocca la CI
+
+---
+
 ## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
 
 ### Contesto
