@@ -10,6 +10,84 @@
 
 ---
 
+## 2026-05-13 (302) — Code review completa repo COLAZIONE (senior-level, NINO)
+
+### Contesto
+
+Richiesta utente: code review completa del repo, classificata per
+gravità (CRITICO/IMPORTANTE/MINORE), con file:riga e fix concreto per
+ogni finding. Nessuna modifica al codice di produzione — solo documento
+di review + PR per lettura prima dell'intervento.
+
+Documenti preliminari letti: CLAUDE.md, TN-UPDATE.md (prime 5 entry),
+docs/METODO-DI-LAVORO.md, docs/NORMATIVA-PDC.md, docs/MODELLO-DATI.md.
+Ispezione sistematica di backend/, frontend/, tests/, data/, scripts/,
+migrations/ con grep mirati (TODO/FIXME, assert, updated_at, import
+builder.py, JSONB senza indice, JWT, ecc.).
+
+### Modifiche
+
+Creato `docs/CODE-REVIEW-2026-05-13.md` (6 CRITICI + 11 IMPORTANTI + 7
+MINORI = 24 finding totali):
+
+**CRITICI** (bug latente / violazione normativa / blocco tecnico):
+- **C1** `builder.py:257` — PK generato per gap > 0 senza minimo 40'
+  (§4.4 NORMATIVA). Turni con gap di 5' ricevono un PK di 5' → lettura
+  dei report sbagliata, possibile violazione su 15% dei giri.
+- **C2** `giornata_base.py:22-35` — facade incompleta: rialiasa i
+  simboli privati `_xxx` di builder.py invece di ospitare le
+  definizioni. S2-bis SEVERO mai chiuso.
+- **C3** `registro_vetture.py:from_db` — wildcard `data_operativa=None`
+  legge tutto lo storico §15; `enumera_date_giornata` non implementata.
+- **C4** `models/turni_pdc.py:59`, `models/giri.py` — `updated_at`
+  con `server_default` ma senza `onupdate`: rimane al valore di INSERT
+  per sempre.
+- **C5** `tests/` — 50 test falliscono su master (entry 301). Nessun
+  CI gate attivo. Suite non affidabile per definizione.
+- **C6** `split_cv.py` — split CV no-overhead pattern non implementato:
+  ogni ramo paga ACCp+ACCa pieno (+80'); gap < 65' non rispetta §5.
+
+**IMPORTANTI** (11 finding):
+- I1 `config.py:39` JWT access TTL 72h (→ max 15-30 min prod)
+- I2 `registro_vetture.py` enumera_date_giornata TODO silente
+- I3 `deposito_first.py:566` data_operativa uguale per tutte le
+  giornate (§15 invalida lookup cross-PdC reali)
+- I4 `api/turni_pdc.py:28` bypassa facade giornata_base.py
+- I5 `models/corse.py:115`, `models/giri.py` JSONB senza GIN index
+  (O(N) su 6.536 corse)
+- I6 `vincoli/inviolabili.py:assert` in codice produzione
+- I7 `builder.py:1193` FR inizio_prestazione non aggiornata ("per MVP")
+- I8 `split_cv.py:61` STAZIONI_CV_DEROGA hardcoded non configurabile
+- I9 `config.py` DEFAULT_AZIENDA hardcoded "trenord" anziché per-env
+- I10 `split_cv.py:120` out-of-cap silente senza flag violazione
+- I11 frontend: 12% coverage, zero test su builder TS/routing
+
+**MINORI** (7 finding):
+- M1 DEPOT_MILANO_MM hardcoded in vettura_resolver.py
+- M2 vincoli path lookup fragile (ascensione parent limitata a 8)
+- M3 commenti storici Sprint nei docstring (inquinano blame)
+- M4 VETTURA_GAP_PRE_MIN = 5 duplicato in multi_turno.py e
+  vettura_resolver.py
+- M5 stazione_id FK stringa senza indice su 6.536 corse_tratte
+- M6 tipo_evento String(20) senza CHECK constraint
+- M7 FR cap 3/28gg sbagliato per cicli corti sovrapposti
+
+Totale sforzo stimato: ~50-55h (breakdown per finding in tabella finale
+del documento).
+
+### Stato
+
+✅ Documento creato, branch `claude/zen-babbage-TlIdr`, PR aperta come
+draft. Nessuna modifica al codice di produzione.
+
+### Prossimo step
+
+Utente legge la review e decide quali finding affrontare in Sprint 8.3
+backlog cleanup. Candidati prioritari per sforzo/impatto: C4 (30'),
+M4 (15'), C1 (1h), I4 (30'), I5 (1h).
+
+---
+
 ## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
 
 ### Contesto
