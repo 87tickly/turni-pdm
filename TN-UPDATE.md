@@ -10,6 +10,67 @@
 
 ---
 
+## 2026-05-14 (302) — Code review completa post Sprint 8.4
+
+### Contesto
+
+Review architetturale completa del repo COLAZIONE su richiesta utente.
+Eseguita con 6 agenti Explore paralleli su tutti i layer:
+builder_pdc, builder_giro, API/auth, models/migrations, test suite, frontend.
+Output: `docs/CODE-REVIEW-2026-05-14.md`.
+
+### Modifiche
+
+Solo documentazione — nessuna modifica al codice di produzione.
+
+**`docs/CODE-REVIEW-2026-05-14.md`** (nuovo):
+- 33 finding totali: 6 CRITICI · 18 IMPORTANTI · 9 MINORI
+- Ogni finding cita `file:riga` verificato + fix concreto + stima costo
+
+### Finding chiave per priorità
+
+**CRITICI** (violazioni normativa o sicurezza attive):
+- CR-01: CV gap < 65 min non implementato (`split_cv.py:28`) — normativa §5 violata,
+  prestazioni calcolate con ~50 min eccesso per ogni CV in finestra ristretta
+- CR-02: API live_arturo senza failover in `multi_turno.py:428,478` — se
+  live.arturo.travel è down crasha l'intera generazione turni
+- CR-03: JWT secret default hardcoded senza validazione prod (`config.py:34`)
+- CR-04: CSP dichiarato ma non implementato — commento in `tokenStorage.ts:8`
+  falso; nessun header CSP in `main.py`
+- CR-05: `updated_at` senza `onupdate` in tutti i modelli — rimane sempre uguale
+  a `created_at` dopo ogni UPDATE ORM
+- CR-06: Refezione mancante non blocca persistenza turno (`builder.py:368`) —
+  turni fuori normativa §8.1 vengono salvati senza errore
+
+**IMPORTANTI** (architettura, manutenibilità, sicurezza secondaria):
+- IMP-01: Access token 72h (`config.py:39`) — best practice: 15-30 min
+- IMP-02: Nessun rate limiting su `/api/auth/login` — brute force possibile
+- IMP-03: Nessun `/api/auth/logout` — refresh token non revocabili
+- IMP-04: Liste API senza pagination — DoS indiretto su crescita dati
+- IMP-05/06/07: FK senza `ondelete`, enum columns senza CHECK, JSONB senza schema
+- IMP-08: FR cap non validato per dormite T-FT in `multi_turno.py:1080`
+- IMP-09/10: `except Exception` mascherano bug reali; antipattern `list[int]` mutabile
+- IMP-11: `api/giri.py` 4422 righe (God File)
+- IMP-12/13: `TurnoPdcDettaglioRoute.tsx` 1722 righe, `GiroDettaglioRoute.tsx` 4389 righe
+- IMP-14: `test_a1_cross_pdc.py` referenziato ma non esiste
+- IMP-15/16: Fixture duplicati, xfail senza reference a issue/MR
+- IMP-17: CORS wildcard `allow_methods=["*"]`
+- IMP-18: DB-bound helper in domain layer (`durata_vuoto.py:227`)
+
+### Stato
+
+- ✅ Review completata, file scritto
+- ⏳ Nessun fix applicato — PR aperta solo con il documento, per decisione utente
+- 🎯 CR-01 e CR-06 sono violazioni normative attive: i turni generati oggi
+  possono essere fuori §5 e §8.1. Priorità assoluta nella review utente.
+
+### Prossimo step
+
+Utente legge `docs/CODE-REVIEW-2026-05-14.md`, decide quali finding
+prioritizzare per Sprint 8.5. SEVERO NON invocato (review NINO, non post-MR).
+
+---
+
 ## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
 
 ### Contesto
