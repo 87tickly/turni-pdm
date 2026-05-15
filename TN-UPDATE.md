@@ -10,6 +10,64 @@
 
 ---
 
+## 2026-05-15 (302) — Code review completa repo COLAZIONE (branch claude/zen-babbage-eP7fi)
+
+### Contesto
+
+Review senior richiesta dall'utente. Copertura completa: backend
+Python (domain, api, models, migrations, tests) + frontend TypeScript.
+Ausilio: FAUSTO + AMILCARE (esplorazione parallela dei file critici).
+Nessuna modifica al codice di produzione — solo diagnosi, in PR separata.
+
+### Modifiche
+
+**`docs/CODE-REVIEW-2026-05-15.md`** — creato, 28 finding totali:
+
+- **9 CRITICI**:
+  - C-1: `assert` in produzione nel builder PdC (builder.py:210,253,256)
+  - C-2: Bug logica FR cap 28gg — cicli > 28gg sfuggono al controllo
+    (builder.py:1263 — condizione `<= 28` sbagliata: un ciclo di 30gg
+    può violare 3 FR/28gg senza che venga rilevato)
+  - C-3: Costanti normativa duplicate — PRESTAZIONE_MAX_* ridefinite in
+    vettura_resolver.py e builder.py con nomi diversi (`_MIN` vs no-suffix)
+  - C-4: PK non modella PKa/PKp distinti — soglia 20' per componente
+    non verificata (NORMATIVA-PDC §4.4)
+  - C-5: Violazioni FR/normativa non persistite nel DB — solo diagnostica
+    string non distinguibile nei turni prodotti
+  - C-6: RegistroVetture usa data_operativa=None wildcard — §15
+    unicità non applicata per data concreta (S4 TODO aperto)
+  - C-7: multi_turno aggiunge violazione invece di scartare quando
+    prestazione eccede cap post-vettura (inconsistente con deposito_first)
+  - C-8: 3 test xfail su violazioni normativa senza piano di sblocco
+  - C-9: Pipeline builder giro v2 non operativa ma accettata dall'API
+
+- **13 IMPORTANTI**: indici FK mancanti su personale.py, ondelete
+  inconsistente, scripts/ smoke non in CI, boundary test mancanti
+  (510/420/330 min esatti), JSONB metadata non tipato, programmi POST
+  senza range-check Pydantic, riposo settimanale §11.4 non validato
+  in multi_turno.py
+
+- **6 MINORI**: Literal su tipo_evento, doc dead-link, scripts senza
+  shebang, commento incompleto su cast JSONB, unicità vettura solo
+  applicativa, stazioni-acronimi.ts non sincronizzato con backend
+
+### Stato
+
+- ✅ Review eseguita e documentata.
+- ⏳ Nessun fix al codice — la PR contiene solo `docs/CODE-REVIEW-2026-05-15.md`.
+- ⏳ L'utente legge il documento e decide quali finding prioritizzare.
+
+### Prossimo step
+
+Sulla base della priorità raccomandata nel review:
+1. C-2 (FR cap bug — normativa violata silenziosamente) → fix immediato
+2. C-7 (multi_turno comportamento inconsistente post-vettura)
+3. C-1 (assert → crash produzione)
+4. C-3 + I-1 (refactor costanti normativa → unica fonte di verità)
+5. Resto in ordine priorità tabella riepilogo
+
+---
+
 ## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
 
 ### Contesto
