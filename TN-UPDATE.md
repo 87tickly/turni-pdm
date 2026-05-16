@@ -10,6 +10,65 @@
 
 ---
 
+## 2026-05-16 (302) — Code review completa Sprint 8.3/8.4 (20 finding)
+
+### Contesto
+
+Code review senior completa del repo COLAZIONE su richiesta utente.
+Metodo: lettura diretta file per file, confronto sistematico con
+NORMATIVA-PDC.md e MODELLO-DATI.md. Nessuna modifica al codice di
+produzione — solo documento di review da leggere prima di agire.
+
+### Modifiche
+
+**`docs/CODE-REVIEW-2026-05-16.md`** — creato (nuovo file, ~300 righe):
+
+Scope: backend/, alembic/, domain/, tests/, cenni frontend.
+
+Riepilogo finding:
+- **6 CRITICI**: C1 (ACCp preriscaldo §3.3 mai implementato —
+  `builder.py:57` ACCESSORI_MIN_STANDARD=40, `builder.py:1103`
+  is_accessori_maggiorati sempre False); C2 (PK generato per qualsiasi
+  gap>0 — viola §4.4 minimo 40' — `builder.py:258`); C3 (REFEZ border
+  puede sforare finestra §4.1 — `builder.py:541` boundary off-by-one);
+  C4 (REFEZ mancante non è hard rejection in `deposito_first.py:293`);
+  C5 (`updated_at` mai aggiornato dopo INSERT — manca `onupdate` su
+  `giri.py:79`, `turni_pdc.py:59`, `programmi.py:187`); C6 (50 test
+  falliti su master non tracciati, CI cieca).
+- **9 IMPORTANTI**: I1 (assert disabilitabili con `-O` —
+  `builder.py:210,253,254`); I2 (pseudo-refactor `giornata_base.py` —
+  importa simboli privati da builder.py invece di spostarli); I3
+  (indice mancante su `GiroVariante.giro_giornata_id`); I4 (riposo
+  intraturno assume giorni calendariali consecutivi —
+  `riposo_intraturno.py:100`); I5 (VOCTAXI durata fissa 30' per tutti
+  i depositi inclusi periferici — `vettura_resolver.py:103`); I6
+  (anti-regen carica tutti i TurnoPdc in memoria —
+  `deposito_first.py:466`); I7 (registro_vetture `from_db` senza
+  indice su JSONB — `registro_vetture.py:139`); I8 (`label_origine =
+  f"V{0}"` sempre "V0" — `giri.py:3015`); I9
+  (`revisioni_cascading_attive=0` placeholder fermo da Sprint 7.6 —
+  `pianificatore_pdc.py:76,226`).
+- **5 MINORI**: M1 (commento stale `# Sprint 2` in `config.py:33`);
+  M2 (`_ = Counter  # noqa: F841` dead import in
+  `varianti_calendariali.py:293`); M3 (gap migration 0027 non
+  documentato); M4 (data_operativa=None wild-card non documentato);
+  M5 (indice `deposito_pdc_id` su `turno_pdc` non copre query
+  deposito-isolato).
+
+### Stato
+
+Review completata. Documento scritto, nessun codice modificato.
+Utente deve leggere prima di decidere quali finding attivare.
+
+### Prossimo step
+
+Utente legge `docs/CODE-REVIEW-2026-05-16.md` e decide priorità
+d'intervento. Finding suggeriti come prima priorità: C2 (PK minimo
+40'), C5 (onupdate mancante), C1 (preriscaldo ACCp) — tutti con
+fix sotto 30 minuti ciascuno.
+
+---
+
 ## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
 
 ### Contesto
