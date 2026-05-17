@@ -10,6 +10,49 @@
 
 ---
 
+## 2026-05-17 (302) — Code Review completa repo post-Sprint 8.2/8.3/8.4
+
+### Contesto
+
+Su richiesta utente: code review sistematica dell'intero repository
+COLAZIONE. Scope: backend Python (domain, api, models, auth,
+integrations), frontend TypeScript (routing, hooks), test coverage.
+Metodo: lettura diretta + grep sistematico per pattern noti (assert,
+noqa, TODO, onupdate, STAZIONI\_CV). Zero fix automatici al codice.
+
+### Modifiche
+
+- Aggiunto `docs/CODE-REVIEW-2026-04-30.md` (18 finding:
+  4 CRITICO, 8 IMPORTANTE, 6 MINORE).
+- Nessuna modifica al codice di produzione (per scelta esplicita
+  dell'utente: "voglio leggere prima").
+
+### Finding principale (C1 — CRITICO)
+
+`STAZIONI_CV_DEROGA = frozenset({"MORTARA", "TIRANO"})` in
+`split_cv.py:61` usa nomi italiani invece di codici RFI. Il confronto
+`stazione_a not in stazioni_cv` confronta `"S01440"` (Tirano) con
+`{"...", "TIRANO"}` → ALWAYS False → nessun split CV al capolinea
+Tirano → violazioni normativa §9.2 silenti per tutta la linea
+Valtellina.
+
+### Stato
+
+Review completata. PR aperta con soli file doc (nessun codice).
+Finding C1 è il più urgente: va fixato prima di qualsiasi deploy
+di turni Valtellina in produzione.
+
+### Prossimo step
+
+Utente legge il documento. Decide quali finding affrontare e in che
+ordine. Fix suggeriti:
+1. C1 (TIRANO RFI code) — 30 min, basso rischio
+2. C3 (assert in API giri.py → HTTPException) — 10 min
+3. C4 (onupdate su 3 modelli) — migration + 1h
+4. C2 (JSONB filter in SQL) — 1h
+
+---
+
 ## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
 
 ### Contesto
