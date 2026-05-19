@@ -10,6 +10,48 @@
 
 ---
 
+## 2026-05-19 — Code review sistematica codebase COLAZIONE
+
+### Contesto
+
+Code review completa eseguita a freddo su tutta la codebase (backend Python,
+frontend TypeScript, migrazioni Alembic, script). Nessun fix automatico al
+codice di produzione: solo analisi e documentazione. Output: file
+`docs/CODE-REVIEW-2026-05-19.md`.
+
+Scope della lettura: `docs/NORMATIVA-PDC.md` (fonte verità dominio),
+`docs/MODELLO-DATI.md`, `TN-UPDATE.md` (prime 5 entry), tutti i file
+in `backend/src/colazione/` e `backend/tests/`.
+
+### Modifiche
+
+- **`docs/CODE-REVIEW-2026-05-19.md`** (NUOVO): 7 finding CRITICO, 8 IMPORTANTE,
+  6 MINORE. Ogni finding cita file:linea con fix concreto.
+  Finding chiave:
+  - C1: anti-rigenerazione TurnoPdc → full table scan O(N) + race condition.
+  - C2: `GiriEsistentiError` omonima in due namespace, gerarchia incompatibile.
+  - C3: ACCp Fiorenza §8.5 non implementata (7' U**** sommati invece che inclusi).
+  - C4: gap interni sempre PK, CV §6 non valutato.
+  - C5: `variante_calendario String(20)` → troncamento silenzioso dati Trenord.
+  - C6: `updated_at` senza `onupdate` su 5 modelli.
+  - C7: 50 test falliti pre-esistenti su master.
+
+### Stato
+
+- ✅ Review completata, file scritto.
+- ⏳ Fix: da pianificare in Sprint successivo (utente decide la priorità).
+- ⏳ C7 (50 test rotti): audit separato necessario.
+
+### Prossimo step
+
+1. Utente legge `docs/CODE-REVIEW-2026-05-19.md` e decide quali finding
+   portare in Sprint 8.4.
+2. Fix C1+C5+C6 sono meccanici e a basso rischio (migration + query filter):
+   candidati Sprint 8.4 G1.
+3. C7 (test audit): task separato, stimato 2-3h.
+
+---
+
 ## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
 
 ### Contesto
