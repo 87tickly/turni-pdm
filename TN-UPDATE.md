@@ -10,6 +10,59 @@
 
 ---
 
+## 2026-05-20 (302) — Code Review formale post-Sprint 8.3
+
+### Contesto
+
+Review completa del codebase COLAZIONE richiesta dall'utente come documento
+standalone. Perimetro: backend Python (domain, api, models, tests). Frontend
+non incluso in questa iterazione.
+
+### Modifiche
+
+- **`docs/CODE-REVIEW-2026-05-20.md`** (nuovo): documento review con 21 finding
+  classificati per gravità (CRITICO / IMPORTANTE / MINORE). Nessuna modifica al
+  codice di produzione.
+
+### Finding chiave
+
+**6 CRITICO**:
+- C1: Preriscaldo ACCp 80' (§3.3 dic-feb) mai implementato — `is_accessori_maggiorati`
+  sempre False, builder usa 40' sempre
+- C2: Scelta ACC vs PK vs CV basata su gap (§6) non implementata — tutti i gap
+  diventano PK indipendentemente dalla durata
+- C3: PK minimo 20' (§4.4) non validato — gap di 3' diventa PK valido
+- C4: Full-table scan su TurnoPdc nell'anti-rigenerazione del builder legacy
+  (`builder.py:734-738`) — carica tutti i turni dell'azienda in RAM
+- C5: §7.3 condotta come rientro produttivo non implementata — il builder invoca
+  immediatamente VETTURA/MM/VOCTAXI senza verificare condotta utile nel giro
+- C6: `data_operativa` statica per tutte le giornate del turno — il registro vetture
+  non discrimina i giorni reali del ciclo
+
+**9 IMPORTANTE**: giornata_base.py facade cosmetic, giri.py 4422 righe,
+updated_at non si aggiorna, mancante UniqueConstraint su TurnoPdc.codice,
+import deferred ciclico, km sempre 0, FK implicita JSONB fragile, euristica
+riposo ultima giornata, buchi test normativi.
+
+**6 MINORE**: sprint references nei commenti, dead code noqa:F841,
+except generico in test, S.COMP dead type, magic number 14, is_accessori_maggiorati
+dead finché C1 aperto.
+
+### Stato
+
+- ✅ Documento scritto in `docs/CODE-REVIEW-2026-05-20.md`
+- ✅ PR aperta (solo docs, nessun fix al codice produzione)
+- ⏳ Fix da pianificare: C1+C3+C4 sono a basso costo (<4h ciascuno),
+  da prioritizzare prossimo Sprint
+
+### Prossimo step
+
+Decidere con l'utente quali CRITICO attaccare per primi nel prossimo Sprint.
+Suggerimento d'ordine: C4 (fix SQL, 2h, nessun rischio normativa), C6 (1 riga,
+fix immediato), C3 (PK minimo, 2h), C1 (preriscaldo, 4h + test).
+
+---
+
 ## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
 
 ### Contesto
