@@ -10,6 +10,64 @@
 
 ---
 
+## 2026-05-21 (302) — Code Review autonoma intero repo (base commit 6571374)
+
+### Contesto
+
+Richiesta utente: code review completa del repo COLAZIONE, nessuna
+modifica al codice di produzione, output in `docs/CODE-REVIEW-2026-05-21.md`,
+poi PR con solo il file.
+
+Basi lette: CLAUDE.md, TN-UPDATE.md (prime 5 entry), METODO-DI-LAVORO.md,
+NORMATIVA-PDC.md, MODELLO-DATI.md. Codebase mappato interamente.
+Usati: lettura diretta file critici + agente Explore parallelo per
+frontend/test/TODOs.
+
+### Modifiche
+
+**`docs/CODE-REVIEW-2026-05-21.md`** — nuovo file, solo review:
+
+- 5 finding **CRITICO**:
+  - C1: Preriscaldo 80' (§3.3) assente da tutti i builder PdC
+  - C2: `assert` IDOR check bypassabile con `python -O` in `giri.py:2891`
+  - C3: `updated_at` non si aggiorna mai — `onupdate` mancante in tutti i modelli
+  - C4: 50 test falliscono su master, root cause non tracciata
+  - C5: Registro vetture §15 usa wildcard permanente (over-exclusion VOCTAXI)
+- 10 finding **IMPORTANTE**:
+  - I1: PK < 20' generati come normativi (viola §4.4)
+  - I2: `giornata_base.py` è alias layer, non facade reale (S2 incompleto)
+  - I3: `assert` come guard nel dominio critico (bypassabili `python -O`)
+  - I4: FIORENZA in `DEPOT_MILANO_MM` errato (§8.5.1 dice TAXI)
+  - I5: `builder_version` hardcoded stale "mvp-7.9-eta"
+  - I6: §11 ciclo settimanale validation-only, non hard constraint
+  - I7: 3 `eslint-disable exhaustive-deps` senza motivazione
+  - I8: 15+ `window.alert()` per errori API frontend
+  - I9: Gap migrazione `0027` mancante nella chain Alembic
+  - I10: `builder_pdc/builder.py` e `builder_giro/builder.py` senza test unitari diretti
+- 6 finding **MINORE** (M1-M6): commenti Sprint nel sorgente, dead code
+  noqa, tipo_evento senza CHECK, profilo senza CHECK, km=0 hardcoded,
+  token revocation non tracciata.
+
+### Stato
+
+- ✅ `docs/CODE-REVIEW-2026-05-21.md` scritto (21 finding, file:riga,
+  fix proposto, priorità).
+- ✅ `TN-UPDATE.md` aggiornato con questa entry.
+- ⏳ PR aperta con solo il file review (nessun fix al codice).
+- ⏳ Fix prioritari da decidere con l'utente: C2 (5 min), C3 (migration),
+  C4 (diagnostica 50 test), I4 (5 min).
+
+### Prossimo step
+
+L'utente legge `docs/CODE-REVIEW-2026-05-21.md` e decide quali finding
+affrontare per primi. I candidati immediati per sprint rapido:
+- C2 → HTTPException 403 al posto dell'assert IDOR
+- C3 → `onupdate=func.now()` + migration
+- I4 → rimuovere FIORENZA da DEPOT_MILANO_MM
+- C4 → diagnostica e tracciamento 50 test rotti
+
+---
+
 ## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
 
 ### Contesto
