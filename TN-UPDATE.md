@@ -10,6 +10,64 @@
 
 ---
 
+## 2026-05-23 (302) — Code Review senior completo post-Sprint 8.4
+
+### Contesto
+
+Richiesta esplicita utente: review completa del repo come senior software engineer.
+Nessuna modifica al codice di produzione — solo analisi e proposte documentate.
+
+Documenti letti a inizio sessione: `TN-UPDATE.md` (prime 5 entry),
+`docs/METODO-DI-LAVORO.md`, `docs/NORMATIVA-PDC.md`, `docs/MODELLO-DATI.md`.
+
+### Modifiche
+
+**`docs/CODE-REVIEW-2026-05-23.md`** — nuovo file (output della review):
+
+- 4 finding **CRITICI**:
+  - CR-1: `is_cap_notturno` non persistito in DB → le API usano `is_notturno`
+    (superinclusivo) per discriminare il cap 420/510 min → false positive di violazione
+    hard su turni pomeriggio-sera (es. presa 14:30 fine 23:00, prestazione 510 min).
+    Fix: migration + colonna + persister + aggiornamento lettura API.
+  - CR-2: `multi_turno.py:590` carica TUTTI i `TurnoPdc` dell'azienda in RAM per
+    trovare i legati a un giro. Query JSONB diretta risolutiva.
+  - CR-3: `inserisci_corsa_manuale` (Sprint 8.4 G1) non invalida i `TurnoPdc`
+    dipendenti → inconsistenza silente giro/turni PdC.
+  - CR-4: `RegistroVettureAssegnate.from_db` usa `data_operativa=None` (wild card) →
+    ogni vettura storica blocca tutte le date future → fallback sistematico a VOCTAXI.
+    `enumera_date_giornata` esiste già, collegamento mancante.
+
+- 6 finding **IMPORTANTI**:
+  - IMP-1: `assert` in builder_pdc (6 occorrenze) → crash silente con Python `-O`.
+  - IMP-2: `_inserisci_refezione_ai_bordi` inserisce REFEZ prima di PRESA servizio —
+    violazione struttura normativa §4.1.
+  - IMP-3: `Depot.tipi_personale_ammessi == "PdC"` — confronto esatto su String(20).
+  - IMP-4: `builder_version` hardcoded `"mvp-7.9-eta"` per tutti e tre i builder.
+  - IMP-5: §11.3 (ultimo giorno pre-riposo ≤15:00) non validato — vincolo normativo.
+  - IMP-6: Test read-side cap notturno mancante (CR-1 non rilevato dalla suite).
+
+- 6 finding **MINORI**:
+  - MIN-1: Dead import `Counter` con `noqa` in `varianti_calendariali.py:293`.
+  - MIN-2: Dead code `_ = festivita` con `noqa` in `builder_giro/builder.py:2757`.
+  - MIN-3: Naming `multi_giornata_v2.py` in produzione.
+  - MIN-4: Loop `seq_target` fragile con blocchi `ora_inizio=None` in `giri.py:3939`.
+  - MIN-5: `pass` silenzioso in parsing orari `live_arturo.py:124`.
+  - MIN-6: 50 test falliti pre-esistenti su `master` non tracciati come backlog formale.
+
+### Stato
+
+- ✅ Review eseguita, documenti letti, finding classificati con file:riga e fix concreto.
+- ✅ Nessuna modifica al codice di produzione.
+- ⏳ PR aperta con solo `docs/CODE-REVIEW-2026-05-23.md` — utente legge e decide.
+
+### Prossimo step
+
+Utente legge `docs/CODE-REVIEW-2026-05-23.md` e decide l'ordine di intervento.
+Suggerimento priorità: CR-1 (false positive normativi in dashboard) → CR-3 (inconsistenza
+dati inserimento manuale) → CR-4 (vetture sistematicamente blackout) → CR-2 (scalability).
+
+---
+
 ## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
 
 ### Contesto
