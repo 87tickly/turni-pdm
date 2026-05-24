@@ -10,6 +10,49 @@
 
 ---
 
+## 2026-05-24 (302) — Code Review completa repo COLAZIONE (Sprint 8.3/8.4)
+
+### Contesto
+
+Richiesta esplicita utente: code review senior dell'intero repo con output
+strutturato per gravità, senza fix automatici al codice. Scope: backend/,
+frontend/, modelli, builder PdC, normativa, test, scripts.
+
+### Modifiche
+
+Aggiunto **`docs/CODE-REVIEW-2026-05-24.md`** — 20 finding classificati:
+- **6 CRITICI**: violazione normativa preriscaldo (CR-1), assert in produzione
+  (CR-2), overflow VARCHAR(50) codice ramo split CV (CR-3), facade giornata_base
+  che importa simboli privati S2-bis non chiuso (CR-4), updated_at mai
+  aggiornato su UPDATE (CR-5), full table scan TurnoPdc in genera_turno_pdc
+  (CR-6).
+- **8 IMPORTANTI**: PK creato per gap 1' vs minimo normativo 20' (IMP-1),
+  §3.2 vettura apertura non implementata (IMP-2), §7.3 condotta rientro
+  produttivo non implementata (IMP-3), JWT senza jti/revoca (IMP-4),
+  operatore sempre None nel registro vetture (IMP-5), 3 subquery IN nidificate
+  in from_db (IMP-6), fallback sovra-include giornate_concrete non misurato
+  (IMP-7), get_session senza commit automatico (IMP-8).
+- **6 MINORI**: indici FK mancanti (MIN-1), multi_giornata_v2 relazione
+  non documentata (MIN-2), scripts senza guardie env (MIN-3), TODO non
+  tracciati in TN-UPDATE (MIN-4), __all__ mancante (MIN-5), health senza
+  DB check (MIN-6).
+
+Nessun fix applicato al codice. La review è solo documentazione.
+
+### Stato
+
+- ✅ Review scritta in `docs/CODE-REVIEW-2026-05-24.md`.
+- ✅ TN-UPDATE aggiornato.
+- ⏳ Nessun fix ancora — l'utente legge prima e decide la priorità.
+
+### Prossimo step
+
+Utente legge `docs/CODE-REVIEW-2026-05-24.md` e decide quali finding aprire
+come MR nel prossimo Sprint. Priorità suggerita nel riepilogo finale del doc:
+CR-3 (crash split CV), CR-6 (full table scan), CR-1 (preriscaldo).
+
+---
+
 ## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
 
 ### Contesto
