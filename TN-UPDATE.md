@@ -10,6 +10,72 @@
 
 ---
 
+## 2026-05-25 (302) — Code review completa del repo (per richiesta utente)
+
+### Contesto
+
+Richiesta esplicita utente: code review senior dell'intero repo COLAZIONE
+su HEAD commit `6571374` (Sprint 8.4 G3). Scope: backend, frontend, domain,
+tests, migrations. Nessun fix automatico al codice — solo analisi e documento.
+
+### Modifiche
+
+**`docs/CODE-REVIEW-2026-05-25.md`** — documento di review creato:
+
+- **6 finding CRITICI** (violazioni normativa §3.2/§4.4/§6 non implementate,
+  `assert` in produzione, anti-pattern re-export `giornata_base.py`)
+- **8 finding IMPORTANTI** (wild card S4 registro vetture, CV deroga hardcoded,
+  50 test falliti, §6 non testato, God object `giri.py` 4422 righe, auth senza
+  revoca token, S4 TODO `giornate_concrete`, prestazione vettura sotto-stimata)
+- **7 finding MINORI** (commento a file inesistente, dead imports, dropdown
+  hardcoded, bare exception catch, range check mancante)
+
+Ogni finding cita `file:riga`, fix concreto con costo stimato in ore, e
+impatto operativo.
+
+**Principali violazioni normativa trovate**:
+
+- `builder.py:258`: PK < 20' prodotto senza violazione (§4.4 NORMATIVA)
+- `split_cv.py:164`: CV inserito con gap > 65' ammissibile (§6 NORMATIVA)
+- `multi_turno.py:955`: 15' post-vettura rientro non aggiunti (§3.2 NORMATIVA)
+- `multi_turno.py:816`: vettura partenza non rimuove ACCp (§3.2 NORMATIVA)
+
+**Debito tecnico strutturale**:
+
+- `giornate_concrete.py:12`: S4 TODO `enumera_date_giornata` blocca registro
+  vetture (IM-1), riposo settimanale con date concrete (IM-8), varianti reali
+  per deposito_first (MI-4)
+- `api/giri.py`: 4422 righe, 20+ endpoint, single point of failure (IM-5)
+- Suite con 50 test pre-esistenti falliti dichiarati in entry 301 (IM-3)
+
+### Verifiche
+
+- ✅ Letti TN-UPDATE.md (prime 5 entry), METODO-DI-LAVORO.md, NORMATIVA-PDC.md
+  (completa), CLAUDE.md
+- ✅ Mappata struttura: backend/, frontend/, tests/ (94 file test)
+- ✅ Esaminati file critici: builder.py, multi_turno.py, split_cv.py,
+  deposito_first.py, giornata_base.py, riposo_intraturno.py, riposo_settimanale.py,
+  registro_vetture.py, vettura_resolver.py, vincoli/inviolabili.py, tokens.py,
+  models/turni_pdc.py, api/giri.py (header)
+- ✅ Nessuna modifica a codice di produzione
+
+### Stato
+
+- ✅ Review completata.
+- ⏳ Nessun fix eseguito — da discutere con l'utente l'ordine di risoluzione.
+- ⏳ PR aperta con solo `docs/CODE-REVIEW-2026-05-25.md`.
+
+### Prossimo step
+
+Leggere il documento. Decidere quali finding portare nel prossimo Sprint.
+L'ordine consigliato nella sezione finale del documento:
+1. CR-5 (assert → eccezioni, 1h)
+2. CR-3 (15' post-vettura rientro, 1-2h)
+3. CR-1 (PK minimo 20', 2-3h)
+4. IM-3 (diagnosi 50 test rossi, urgente per usabilità CI)
+
+---
+
 ## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
 
 ### Contesto
