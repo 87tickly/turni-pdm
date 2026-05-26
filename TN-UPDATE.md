@@ -10,6 +10,46 @@
 
 ---
 
+## 2026-05-26 (302) — Code review completa repository COLAZIONE
+
+### Contesto
+
+Code review sistematica richiesta dall'utente come fotografia dello stato del
+codebase dopo Sprint 8.4. Nessun fix al codice — solo analisi e classificazione
+dei finding. Review eseguita con 3 subagent paralleli specializzati (dominio/builder
+PdC, modelli ORM/infrastruttura, frontend TypeScript) + analisi diretta NINO.
+
+### Modifiche
+
+- Aggiunto `docs/CODE-REVIEW-2026-05-26.md` — 49 finding classificati
+
+### Conteggio finding
+
+| Area | 🔴 CRITICO | 🟠 IMPORTANTE | 🟡 MINORE | Totale |
+|------|-----------|--------------|---------|--------|
+| Backend dominio e builder PdC | 6 | 8 | 6 | 20 |
+| Backend modelli e infrastruttura | 2 | 9 | 5 | 16 |
+| Frontend React/TypeScript | 2 | 7 | 4 | 13 |
+| **TOTALE** | **10** | **24** | **15** | **49** |
+
+### Top 4 CRITICO da chiudere prima di deploy stabile
+
+- **I-01** (`config.py:34`) JWT secret default accettato in prod — token forgiabili
+- **I-02** (`config.py:39`) Access token 72h senza revoca
+- **D-01** (`api/turni_pdc.py:947`) Cap prestazione usa `is_notturno` invece di derivare dall'orario — falsi positivi normativi all'utente
+- **D-04** (`deposito_first.py:537`) `data_operativa` identica per tutte le giornate del ciclo — fix stimato 30 min, mai fatto
+
+### Stato
+
+Review consegnata, nessun fix applicato. PR aperta su branch `claude/zen-babbage-601hD`.
+
+### Prossimo step
+
+Leggere `docs/CODE-REVIEW-2026-05-26.md`, decidere quali finding chiudere nello
+Sprint 8.3 cleanup corrente e quali spostare nel backlog.
+
+---
+
 ## 2026-05-10 (301) — Sprint 8.4 G3: HOTFIX bug API /partenze (root cause vetture mancanti)
 
 ### Contesto
